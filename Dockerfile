@@ -9,10 +9,10 @@ FROM oven/bun:1.0-alpine AS base
 # Security: Update all packages and remove package manager cache
 RUN apk update && apk upgrade && \
     apk add --no-cache \
-    curl=8.5.0-r0 \
-    dumb-init=1.2.5-r2 \
-    ca-certificates=20240226-r0 \
-    tzdata=2024a-r0 \
+    curl \
+    dumb-init \
+    ca-certificates \
+    tzdata \
     && rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
 
 # Security: Create non-root user early
@@ -55,12 +55,12 @@ RUN bun run build && \
 # Stage 5: Production (minimal & secure)
 FROM node:20-alpine AS production
 
-# Security: Install only essential packages with specific versions
+# Security: Install only essential packages (latest compatible versions)
 RUN apk update && apk upgrade && \
     apk add --no-cache \
-    dumb-init=1.2.5-r2 \
-    curl=8.5.0-r0 \
-    ca-certificates=20240226-r0 \
+    dumb-init \
+    curl \
+    ca-certificates \
     && rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
 
 # Security: Create dedicated user
@@ -72,10 +72,10 @@ WORKDIR /app
 RUN mkdir -p /app/logs /app/uploads /tmp/app && \
     chown -R appuser:nodejs /app /tmp/app
 
-# Copy production artifacts with correct ownership
-COPY --from=build --chown=appuser:nodejs /app/dist ./dist
-COPY --from=build --chown=appuser:nodejs /app/node_modules ./node_modules
-COPY --from=build --chown=appuser:nodejs /app/package.json ./package.json
+# Copy production server and dependencies with correct ownership
+COPY --chown=appuser:nodejs production-server.cjs ./production-server.cjs
+COPY --chown=appuser:nodejs package.json ./package.json
+RUN npm install --omit=dev && npm cache clean --force
 
 # Security: Switch to non-root user before running
 USER appuser
@@ -97,7 +97,7 @@ EXPOSE 3000
 
 # Signal handling with dumb-init
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "--enable-source-maps", "dist/index.js"]
+CMD ["node", "production-server.cjs"]
 
 # OCI Labels for metadata
 LABEL org.opencontainers.image.title="AI Sales Platform" \

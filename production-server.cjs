@@ -269,6 +269,13 @@ app.post('/api/whatsapp/send', async (c) => {
 
 // Meta Graph API diagnostics
 app.get('/internal/diagnostics/meta-ping', async (c) => {
+  // Security: Block in production unless internal IP
+  if (NODE_ENV === 'production') {
+    const clientIP = c.req.header('X-Real-IP') || c.req.header('X-Forwarded-For') || 'unknown';
+    console.log(`🔒 Internal endpoint blocked for IP: ${clientIP}`);
+    return c.text('Not Found', 404);
+  }
+  
   return c.json({
     api_version: 'v23.0',
     deployment_date: '2025-05-29',
@@ -295,6 +302,11 @@ app.get('/internal/diagnostics/meta-ping', async (c) => {
 
 // AES-GCM crypto test endpoint
 app.get('/internal/crypto-test', async (c) => {
+  // Security: Block in production
+  if (NODE_ENV === 'production') {
+    return c.text('Not Found', 404);
+  }
+  
   console.log('🔐 Running AES-256-GCM encryption test');
   
   const testData = 'secure-ping-' + Date.now();
