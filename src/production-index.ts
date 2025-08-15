@@ -10,7 +10,7 @@ import { serve } from '@hono/node-server';
 import crypto from 'crypto';
 
 // Environment setup
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 10000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const IG_VERIFY_TOKEN = process.env.IG_VERIFY_TOKEN || 'test_token_123';
 const META_APP_SECRET = process.env.META_APP_SECRET || 'test_secret_123';
@@ -101,15 +101,16 @@ const encryptionService = new ProductionEncryptionService();
 // SIGNATURE VERIFICATION (HMAC-SHA256)
 // ===============================================
 function verifyInstagramSignature(body: string, signature: string): boolean {
-  if (!signature || !signature.startsWith('sha256=')) {
-    console.error('❌ Invalid signature format');
+  if (!signature) {
+    console.error('❌ Missing signature');
     return false;
   }
   
-  const providedSignature = signature.replace('sha256=', '');
+  // Handle both X-Hub-Signature-256 and X-Hub-Signature formats
+  const providedSignature = signature.startsWith('sha256=') ? signature.replace('sha256=', '') : signature;
   
-  // Generate expected signature using META_APP_SECRET
-  const expectedSignature = crypto
+  // Generate expected signature using META_APP_SECRET (RAW BYTES)
+  const expectedSignature = 'sha256=' + crypto
     .createHmac('sha256', META_APP_SECRET)
     .update(body, 'utf8')
     .digest('hex');
@@ -117,8 +118,8 @@ function verifyInstagramSignature(body: string, signature: string): boolean {
   // Timing-safe comparison (critical for security)
   try {
     return crypto.timingSafeEqual(
-      Buffer.from(providedSignature, 'hex'),
-      Buffer.from(expectedSignature, 'hex')
+      Buffer.from(signature),
+      Buffer.from(expectedSignature)
     );
   } catch (error) {
     console.error('❌ Signature comparison failed:', error);
@@ -273,13 +274,30 @@ app.get('/webhooks/instagram', async (c) => {
   return c.text(challenge || '');
 });
 
+// Raw body middleware for Instagram webhooks only
+app.use('/webhooks/instagram', async (c, next) => {
+  if (c.req.method === 'POST') {
+    const body = await c.req.arrayBuffer();
+    c.set('rawBody', Buffer.from(body));
+    // Re-create request with raw body stored
+    const newReq = new Request(c.req.url, {
+      method: c.req.method,
+      headers: c.req.headers,
+      body: Buffer.from(body)
+    });
+    c.req = newReq;
+  }
+  await next();
+});
+
 // Instagram webhook events (POST) - Full production pipeline
 app.post('/webhooks/instagram', async (c) => {
   console.log('📨 Instagram webhook event received');
   
   // Get raw body for signature verification (CRITICAL: before JSON parsing)
-  const body = await c.req.text();
-  const signature = c.req.header('X-Hub-Signature-256');
+  const body = c.get('rawBody') as Buffer;
+  let signature = c.req.header('X-Hub-Signature-256') || c.req.header('X-Hub-Signature') || '';
+  signature = signature.trim().replace(/^"+|"+$/g, '');
   
   console.log('Event pipeline:', {
     bodyLength: body.length,
@@ -293,7 +311,7 @@ app.post('/webhooks/instagram', async (c) => {
   }
   
   // Step 1: Verify signature BEFORE any processing (Meta requirement)
-  const isValidSignature = verifyInstagramSignature(body, signature);
+  const isValidSignature = verifyInstagramSignature(body.toString('utf8'), signature);
   console.log('🔐 Signature verification:', isValidSignature ? '✅ VALID' : '❌ INVALID');
   
   if (!isValidSignature) {
@@ -304,7 +322,7 @@ app.post('/webhooks/instagram', async (c) => {
   // Step 2: Parse JSON only after signature verification
   let event: any;
   try {
-    event = JSON.parse(body);
+    event = JSON.parse(body.toString('utf8'));
     console.log('📋 Valid Instagram event:', {
       object: event.object,
       entries: event.entry?.length || 0
@@ -563,7 +581,7 @@ serve({
   fetch: app.fetch,
   port: PORT
 }, (info) => {
-  console.log(`✅ Production runtime running on http://localhost:${info.port}`);
+  console.log(`✅ AI Instagram Platform running on https://ai-instgram.onrender.com (port ${info.port})`);
   console.log('🔒 Security stack active:');
   console.log('  • CSP: API-only (no unsafe-inline)');
   console.log('  • X-XSS-Protection: removed (deprecated)');

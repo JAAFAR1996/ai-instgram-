@@ -158,9 +158,11 @@ export class WebhookRouter {
     try {
       console.log('📨 Instagram webhook event received');
       
-      // Get request body and headers
-      const body = await c.req.text();
-      const signature = c.req.header('X-Hub-Signature-256');
+      // Get request body and headers (RAW BYTES)
+      const body = await c.req.arrayBuffer();
+      const rawBody = Buffer.from(body);
+      let signature = c.req.header('X-Hub-Signature-256') || c.req.header('X-Hub-Signature') || '';
+      signature = signature.trim().replace(/^"+|"+$/g, '');
       
       if (!signature) {
         console.error('❌ Missing Instagram webhook signature');
@@ -170,7 +172,7 @@ export class WebhookRouter {
       // Parse webhook payload
       let event: InstagramWebhookEvent;
       try {
-        event = JSON.parse(body) as InstagramWebhookEvent;
+        event = JSON.parse(rawBody.toString('utf8')) as InstagramWebhookEvent;
       } catch (parseError) {
         console.error('❌ Invalid Instagram webhook JSON:', parseError);
         return c.text('Invalid JSON payload', 400);
@@ -185,7 +187,7 @@ export class WebhookRouter {
 
       // Process each entry in the webhook
       for (const entry of event.entry) {
-        await this.processInstagramEntry(entry, body, signature);
+        await this.processInstagramEntry(entry, rawBody.toString('utf8'), signature);
       }
 
       return c.text('EVENT_RECEIVED', 200);
@@ -405,19 +407,16 @@ export class WebhookRouter {
         return false;
       }
 
-      // Remove 'sha256=' prefix from signature
-      const providedSignature = signature.replace('sha256=', '');
-      
-      // Generate expected signature using META_APP_SECRET
-      const expectedSignature = crypto
+      // Generate expected signature using META_APP_SECRET (RAW BYTES)
+      const expected = 'sha256=' + crypto
         .createHmac('sha256', metaAppSecret)
         .update(body, 'utf8')
         .digest('hex');
 
       // Compare signatures using timing-safe comparison
       const isValid = crypto.timingSafeEqual(
-        Buffer.from(providedSignature, 'hex'),
-        Buffer.from(expectedSignature, 'hex')
+        Buffer.from(signature),
+        Buffer.from(expected)
       );
 
       if (isValid) {
@@ -447,19 +446,16 @@ export class WebhookRouter {
         return false;
       }
 
-      // Remove 'sha256=' prefix from signature
-      const providedSignature = signature.replace('sha256=', '');
-      
-      // Generate expected signature using META_APP_SECRET
-      const expectedSignature = crypto
+      // Generate expected signature using META_APP_SECRET (RAW BYTES)
+      const expected = 'sha256=' + crypto
         .createHmac('sha256', metaAppSecret)
         .update(body, 'utf8')
         .digest('hex');
 
       // Compare signatures using timing-safe comparison
       const isValid = crypto.timingSafeEqual(
-        Buffer.from(providedSignature, 'hex'),
-        Buffer.from(expectedSignature, 'hex')
+        Buffer.from(signature),
+        Buffer.from(expected)
       );
 
       if (isValid) {
