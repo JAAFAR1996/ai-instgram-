@@ -386,7 +386,7 @@ export function webhookSignatureMiddleware(secretKey: string) {
 export function corsSecurityMiddleware() {
   return async (c: Context, next: Next) => {
     const origin = c.req.header('origin');
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['https://ai-instgram.onrender.com'];
     
     if (origin && allowedOrigins.includes(origin)) {
       c.header('Access-Control-Allow-Origin', origin);

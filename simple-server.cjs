@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const url = require('url');
 
 // Environment variables
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 const IG_VERIFY_TOKEN = process.env.IG_VERIFY_TOKEN || 'test_token_123';
 const META_APP_SECRET = process.env.META_APP_SECRET || 'test_secret_123';
 
@@ -188,7 +188,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🚀 Test server running on http://localhost:${PORT}`);
+  console.log(`🚀 AI Instagram Platform running on https://ai-instgram.onrender.com (port ${PORT})`);
   console.log('📋 Available endpoints:');
   console.log('  GET  /health');
   console.log('  GET  /webhooks/instagram (verification)');

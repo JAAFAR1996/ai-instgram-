@@ -176,7 +176,7 @@ export function loadAndValidateEnvironment(): AppConfig {
   // Parse and return configuration
   const config: AppConfig = {
     environment: (env.NODE_ENV as any) || 'development',
-    port: parseInt(env.PORT || '3000'),
+    port: parseInt(env.PORT || '10000'),
     
     database: parseDatabaseConfig(env.DATABASE_URL!),
     

@@ -54,11 +54,11 @@ docker-compose -f docker-compose.prod.yml up -d
 # Check health
 echo "🔍 فحص حالة الخدمات..."
 sleep 10
-curl -f http://localhost:3000/health > /dev/null 2>&1
+curl -f https://ai-instgram.onrender.com/health > /dev/null 2>&1
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✅ النظام يعمل بنجاح!${NC}"
-    echo "📊 يمكنك زيارة: http://localhost:3000"
+    echo "📊 يمكنك زيارة: https://ai-instgram.onrender.com"
     echo "📋 للمراقبة: docker-compose -f docker-compose.prod.yml logs -f"
 else
     echo -e "${RED}❌ فشل في تشغيل النظام${NC}"

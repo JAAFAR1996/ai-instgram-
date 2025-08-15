@@ -181,7 +181,7 @@ IG_APP_ID=your_instagram_app_id_here
 IG_APP_SECRET=your_instagram_app_secret_here
 META_APP_SECRET=your_meta_app_secret_here
 IG_VERIFY_TOKEN=your_webhook_verify_token_here
-REDIRECT_URI=https://yourdomain.com/auth/instagram/callback
+REDIRECT_URI=https://ai-instgram.onrender.com/auth/instagram/callback
 
 # OpenAI Configuration (مطلوب)
 OPENAI_API_KEY=sk-your_openai_api_key_here
@@ -194,7 +194,7 @@ ENCRYPTION_KEY=your_32_character_encryption_key_here123456
 JWT_SECRET=your_jwt_secret_here
 
 # CORS Configuration (فصل بفاصلة)
-CORS_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
+CORS_ORIGINS=https://ai-instgram.onrender.com,https://graph.facebook.com,https://api.whatsapp.com
 
 # Rate Limiting
 RATE_LIMIT_WINDOW=900000

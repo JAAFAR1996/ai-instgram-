@@ -10,7 +10,7 @@ const { serve } = require('@hono/node-server');
 const crypto = require('crypto');
 
 // Environment variables
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 10000;
 const IG_VERIFY_TOKEN = process.env.IG_VERIFY_TOKEN || 'test_token_123';
 const META_APP_SECRET = process.env.META_APP_SECRET || 'test_secret_123';
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -382,7 +382,8 @@ serve({
   fetch: app.fetch,
   port: PORT
 }, (info) => {
-  console.log(`✅ Production server running on http://localhost:${info.port}`);
+  console.log(`✅ AI Instagram Platform running on https://ai-instgram.onrender.com`);
+  console.log(`   Local port: ${info.port}`);
   console.log('🔒 Security features active:');
   console.log('  • CSP: API-only (no unsafe-inline)');
   console.log('  • X-XSS-Protection: removed (deprecated)');
@@ -390,6 +391,9 @@ serve({
   console.log('  • AES-256-GCM: 12-byte IV encryption');
   console.log('  • WhatsApp 24h: policy enforcement');
   console.log('  • Graph API: v23.0 with rate limit headers');
+  console.log('🌐 Webhooks ready for:');
+  console.log('  • Instagram: https://ai-instgram.onrender.com/webhooks/instagram');
+  console.log('  • WhatsApp: https://ai-instgram.onrender.com/webhooks/whatsapp');
 });
 
 module.exports = app;

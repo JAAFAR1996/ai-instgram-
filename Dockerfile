@@ -33,9 +33,9 @@ COPY --chown=appuser:nodejs package.json bun.lockb* ./
 USER appuser
 RUN bun install --frozen-lockfile
 COPY --chown=appuser:nodejs . .
-EXPOSE 3000
+EXPOSE 10000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=2s --retries=2 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD curl -f http://localhost:10000/health || exit 1
 CMD ["bun", "run", "dev"]
 
 # Stage 4: Build (production artifacts)
@@ -85,12 +85,12 @@ ENV NODE_ENV=production \
     NODE_OPTIONS="--enable-source-maps --max-old-space-size=512" \
     TZ=UTC
 
-# Enhanced health check for production
+# Enhanced health check for production (Render port)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f -H "Accept: application/json" http://localhost:3000/health || exit 1
+    CMD curl -f -H "Accept: application/json" http://localhost:10000/health || exit 1
 
-# Expose port (non-privileged)
-EXPOSE 3000
+# Expose port (Render standard)
+EXPOSE 10000
 
 # Security: Read-only root filesystem (uncomment when ready)
 # USER appuser:nodejs

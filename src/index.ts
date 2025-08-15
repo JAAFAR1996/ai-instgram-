@@ -58,7 +58,7 @@ app.use('*', securityHeaders);
 app.use('/api/*', cors({
   origin: appConfig.environment === 'production' 
     ? appConfig.security.corsOrigins
-    : ['http://localhost:3000', 'http://localhost:5173'],
+    : ['https://ai-instgram.onrender.com'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Hub-Signature-256'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
@@ -309,7 +309,7 @@ export default {
 // For development with Bun - run startup validation
 if (import.meta.main) {
   initializeApplication().then((result) => {
-    console.log(`🔥 AI Sales Platform running on http://localhost:${port}`);
+    console.log(`🔥 AI Sales Platform running on https://ai-instgram.onrender.com (port ${port})`);
     console.log(`✅ Startup validation completed in ${result.validationReport.totalDuration}ms`);
     console.log(`✅ Queue system initialized with ${result.queueManager ? '6 processors' : 'error'}`);
     console.log(`🎯 Ready to process webhooks and AI responses asynchronously`);

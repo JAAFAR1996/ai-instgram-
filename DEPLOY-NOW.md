@@ -24,10 +24,10 @@ docker-compose -f docker-compose.prod.yml up -d
 docker-compose -f docker-compose.prod.yml ps
 
 # اختبار API
-curl http://localhost:3000/health
+curl https://ai-instgram.onrender.com/health
 
 # مراقبة Grafana
-open http://localhost:3001
+open https://ai-instgram.onrender.com:3001
 # username: admin
 # password: secure_grafana_password_2025
 ```
@@ -46,13 +46,13 @@ open http://localhost:3001
 
 ```bash
 # 1. فحص الصحة العامة
-curl -X GET http://localhost:3000/health
+curl -X GET https://ai-instgram.onrender.com/health
 
 # 2. اختبار Instagram webhook
-curl -X GET "http://localhost:3000/webhooks/instagram?hub.mode=subscribe&hub.verify_token=webhook_verify_ai_sales_2025&hub.challenge=test123"
+curl -X GET "https://ai-instgram.onrender.com/webhooks/instagram?hub.mode=subscribe&hub.verify_token=iHNDoPLa9sH8v59z5Twq+V5sVl1fzVyRzg6G9NpvjXAnF4kadaKlJKki0nmtNZpd&hub.challenge=test123"
 
 # 3. اختبار WhatsApp 24h policy
-curl -X POST http://localhost:3000/api/whatsapp/send \
+curl -X POST https://ai-instgram.onrender.com/api/whatsapp/send \
   -H "Content-Type: application/json" \
   -d '{"to": "+1234567890", "text": "test message"}'
 ```
