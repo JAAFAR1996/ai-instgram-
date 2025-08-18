@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: ai-sales-platform
+    runtime: node
+    repo: https://github.com/YOUR_USERNAME/YOUR_REPO
+    branch: main
+    buildCommand: echo "No build needed"
+    startCommand: node production.cjs
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: IG_VERIFY_TOKEN
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: IG_APP_ID
+        sync: false
+      - key: IG_APP_SECRET
+        sync: false
+      - key: REDIRECT_URI
+        value: https://ai-instgram.onrender.com/auth/instagram/callback
+      - key: CORS_ORIGINS
+        value: https://ai-instgram.onrender.com
+    healthCheckPath: /health
+    autoDeploy: true
