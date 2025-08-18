@@ -166,10 +166,10 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       host: baseConfig.host,
       port: baseConfig.port,
       password: baseConfig.password,
-      connectTimeout: 3000, // سريع للفحص الصحي
+      connectTimeout: 5000, // وقت أطول للاستقرار
       lazyConnect: true,
-      maxRetriesPerRequest: 1, // محاولة واحدة فقط للفحص
-      enableOfflineQueue: false,
+      maxRetriesPerRequest: 3, // محاولات أكثر للاستقرار
+      enableOfflineQueue: true, // السماح بالطابور للاستقرار
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}health:`,
       ...(baseConfig.tls && { tls: baseConfig.tls })

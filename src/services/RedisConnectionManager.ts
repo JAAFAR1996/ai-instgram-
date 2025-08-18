@@ -135,8 +135,13 @@ export class RedisConnectionManager {
 
       const connection = new Redis(config);
 
-      // إعداد مراقبة الأحداث
+      // إعداد مراقبة الأحداث أولاً
       this.setupConnectionMonitoring(connection, usageType, info);
+
+      // انتظار الاتصال إذا لم يكن جاهزاً
+      if (connection.status !== 'ready') {
+        await this.waitForConnection(connection, 15000);
+      }
 
       // التحقق من صحة الاتصال
       await this.healthMonitor.validateConnection(connection);
@@ -458,6 +463,52 @@ export class RedisConnectionManager {
     return this.connections.get(usageType);
   }
 
+  private async waitForConnection(connection: Redis, timeoutMs: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new RedisConnectionError(
+          'Connection timeout waiting for ready state',
+          { 
+            status: connection.status,
+            timeout: timeoutMs,
+            options: {
+              host: connection.options.host,
+              port: connection.options.port
+            }
+          }
+        ));
+      }, timeoutMs);
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        connection.removeListener('ready', onReady);
+        connection.removeListener('error', onError);
+      };
+
+      const onReady = () => {
+        cleanup();
+        resolve();
+      };
+
+      const onError = (error: Error) => {
+        cleanup();
+        reject(new RedisConnectionError(
+          'Connection error while waiting for ready state',
+          { error: error.message }
+        ));
+      };
+
+      if (connection.status === 'ready') {
+        cleanup();
+        resolve();
+        return;
+      }
+
+      connection.once('ready', onReady);
+      connection.once('error', onError);
+    });
+  }
+
   // إنشاء اتصال مؤقت للعمليات الخاصة
   async createTemporaryConnection(
     usageType: RedisUsageType,
@@ -470,6 +521,9 @@ export class RedisConnectionManager {
     );
 
     const connection = new Redis(config);
+    
+    // انتظار الاستعداد
+    await this.waitForConnection(connection, 10000);
     
     // إعداد إغلاق تلقائي
     setTimeout(async () => {

@@ -100,35 +100,121 @@ export class RedisHealthMonitor {
 
   async validateConnection(connection: Redis): Promise<void> {
     try {
+      // 1. انتظار ready state قبل validation
+      await this.waitForConnectionReady(connection, 10000);
+
+      // 2. اختبار العمليات الأساسية
       const testKey = `health:check:${Date.now()}`;
       const testValue = `test-${Math.random()}`;
       
-      // اختبار العمليات الأساسية
-      await connection.ping();
-      await connection.set(testKey, testValue, 'EX', 10); // انتهاء خلال 10 ثوان
-      const retrieved = await connection.get(testKey);
-      await connection.del(testKey);
+      // Ping test
+      const pingResult = await connection.ping();
+      if (pingResult !== 'PONG') {
+        throw new RedisValidationError('Ping test failed', { pingResult });
+      }
+
+      // Write test
+      await connection.set(testKey, testValue, 'EX', 30); // انتهاء خلال 30 ثانية
       
+      // Read test
+      const retrieved = await connection.get(testKey);
       if (retrieved !== testValue) {
         throw new RedisValidationError(
           'Data integrity check failed',
           { expected: testValue, received: retrieved }
         );
       }
+
+      // Delete test
+      const deleteResult = await connection.del(testKey);
+      if (deleteResult !== 1) {
+        this.logger?.warn('Delete test warning', { deleteResult });
+      }
       
-      this.logger?.debug('Redis connection validation successful');
+      this.logger?.debug('Redis connection validation successful', {
+        testKey: testKey.substring(0, 20) + '...',
+        operations: ['ping', 'set', 'get', 'del']
+      });
       
     } catch (error) {
       const redisError = this.errorHandler.handleError(error, {
-        operation: 'validateConnection'
+        operation: 'validateConnection',
+        connectionStatus: connection.status
       });
       
       throw new RedisValidationError(
         'Redis connection validation failed',
-        { originalError: redisError.message },
+        { 
+          originalError: redisError.message,
+          connectionStatus: connection.status,
+          connectionState: this.getConnectionState(connection)
+        },
         redisError
       );
     }
+  }
+
+  private async waitForConnectionReady(connection: Redis, timeoutMs: number = 10000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new RedisValidationError(
+          'Connection ready timeout',
+          { 
+            status: connection.status,
+            timeout: timeoutMs 
+          }
+        ));
+      }, timeoutMs);
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        connection.removeListener('ready', onReady);
+        connection.removeListener('error', onError);
+        connection.removeListener('close', onClose);
+      };
+
+      const onReady = () => {
+        cleanup();
+        resolve();
+      };
+
+      const onError = (error: Error) => {
+        cleanup();
+        reject(new RedisValidationError(
+          'Connection error during ready wait',
+          { error: error.message }
+        ));
+      };
+
+      const onClose = () => {
+        cleanup();
+        reject(new RedisValidationError('Connection closed during ready wait'));
+      };
+
+      // التحقق من الحالة الحالية
+      if (connection.status === 'ready') {
+        cleanup();
+        resolve();
+        return;
+      }
+
+      // انتظار ready state
+      connection.once('ready', onReady);
+      connection.once('error', onError);
+      connection.once('close', onClose);
+    });
+  }
+
+  private getConnectionState(connection: Redis): any {
+    return {
+      status: connection.status,
+      options: {
+        host: connection.options.host,
+        port: connection.options.port,
+        connectTimeout: connection.options.connectTimeout,
+        lazyConnect: connection.options.lazyConnect
+      }
+    };
   }
 
   async performComprehensiveHealthCheck(connection: Redis): Promise<RedisHealthResult> {
