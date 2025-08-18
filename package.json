@@ -16,7 +16,7 @@
   },
   "keywords": [
     "ai",
-    "sales",
+    "sales", 
     "platform",
     "instagram",
     "automation",
@@ -30,9 +30,10 @@
     "arabic"
   ],
   "scripts": {
+    "preinstall": "npx only-allow npm",
     "dev": "bun run --hot src/index.ts",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js",
+    "start": "node dist/index.js", 
     "start:prod": "NODE_ENV=production node dist/production-index.js",
     "test": "bun test",
     "test:watch": "bun test --watch",
@@ -44,53 +45,64 @@
     "db:seed": "node dist/database/seed.js",
     "db:test": "node dist/database/test.js",
     "docker:build": "docker build -t ai-sales-platform .",
-    "docker:run": "docker run -p 3000:3000 ai-sales-platform"
+    "docker:run": "docker run -p 3000:3000 ai-sales-platform",
+    "audit": "npm audit --production",
+    "deps:check": "npm ls --depth=0",
+    "deps:outdated": "npm outdated",
+    "production:install": "npm ci --omit=dev --no-audit --no-fund --quiet"
   },
   "dependencies": {
-    "@hono/node-server": "^1.12.2",
-    "@sentry/integrations": "^7.119.1",
-    "@sentry/node": "^7.119.1",
-    "bcryptjs": "^2.4.3",
-    "bull": "^4.16.3",
-    "cors": "^2.8.5",
-    "crypto-js": "^4.2.0",
-    "dotenv": "^16.4.5",
-    "helmet": "^7.1.0",
-    "hono": "^4.6.3",
-    "ioredis": "^5.4.1",
-    "jsonwebtoken": "^9.0.2",
-    "node-fetch": "^3.3.2",
-    "openai": "^4.63.0",
-    "pg": "^8.12.0",
-    "postgres": "^3.4.4",
-    "rate-limiter-flexible": "^5.0.3",
-    "redis": "^4.7.0",
-    "uuid": "^10.0.0",
-    "winston": "^3.14.2"
+    "@hono/node-server": "1.18.2",
+    "@sentry/integrations": "7.120.4", 
+    "@sentry/node": "7.120.4",
+    "bcryptjs": "2.4.3",
+    "bull": "4.16.5",
+    "cors": "2.8.5",
+    "crypto-js": "4.2.0",
+    "dotenv": "16.6.1",
+    "helmet": "7.2.0", 
+    "hono": "4.9.2",
+    "ioredis": "5.7.0",
+    "jsonwebtoken": "9.0.2",
+    "node-fetch": "3.3.2",
+    "openai": "4.104.0",
+    "pg": "8.16.3",
+    "postgres": "3.4.7",
+    "rate-limiter-flexible": "5.0.5",
+    "redis": "4.7.1",
+    "uuid": "10.0.0",
+    "winston": "3.17.0"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
-    "@types/bull": "^4.10.0",
-    "@types/cors": "^2.8.17",
-    "@types/crypto-js": "^4.2.2",
-    "@types/jsonwebtoken": "^9.0.7",
-    "@types/node": "^22.5.4",
-    "@types/node-fetch": "^2.6.11",
-    "@types/pg": "^8.11.9",
-    "@types/uuid": "^10.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.5.0",
-    "@typescript-eslint/parser": "^8.5.0",
-    "bun-types": "latest",
-    "eslint": "^8.57.1",
-    "typescript": "^5.6.2"
+    "@types/bcryptjs": "2.4.6",
+    "@types/bull": "4.10.4", 
+    "@types/cors": "2.8.19",
+    "@types/crypto-js": "4.2.2",
+    "@types/jsonwebtoken": "9.0.10",
+    "@types/node": "22.17.2",
+    "@types/node-fetch": "2.6.13",
+    "@types/pg": "8.15.5",
+    "@types/uuid": "10.0.0",
+    "@typescript-eslint/eslint-plugin": "8.39.1",
+    "@typescript-eslint/parser": "8.39.1",
+    "bun-types": "1.2.20",
+    "eslint": "8.57.1",
+    "typescript": "5.9.2"
+  },
+  "peerDependencies": {
+    "redis": ">=4.0.0 <5.0.0"
   },
   "engines": {
-    "node": ">=20.0.0",
+    "node": "20.x",
     "npm": ">=10.0.0"
   },
   "os": [
     "linux",
-    "darwin",
+    "darwin", 
     "win32"
-  ]
+  ],
+  "volta": {
+    "node": "20.18.1",
+    "npm": "10.9.2"
+  }
 }

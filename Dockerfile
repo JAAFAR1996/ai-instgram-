@@ -1,64 +1,92 @@
-# =================================
-# AI Sales Platform - Production
-# Multi-stage Docker Build
-# =================================
+# ========================================
+# AI Sales Platform - Production Docker
+# Production-Grade Multi-stage Build
+# ========================================
 
 # Build Stage
-FROM node:20-alpine AS builder
+FROM node:20.18.1-alpine AS builder
 
-# Install system dependencies
+# Security: Install only required system dependencies
 RUN apk add --no-cache \
     python3 \
     make \
     g++ \
-    git
+    git \
+    ca-certificates \
+    && rm -rf /var/cache/apk/*
 
 WORKDIR /app
 
-# Copy package files
+# Lock npm version for reproducible builds
+RUN npm install -g npm@10.9.2
+
+# Copy dependency files first (Docker layer caching)
 COPY package*.json ./
 COPY tsconfig*.json ./
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+# Production dependencies installation with validation
+RUN npm ci --omit=dev --no-audit --no-fund --quiet \
+    && npm cache clean --force \
+    && npm audit --omit=dev
 
 # Copy source code
 COPY src/ ./src/
 
-# Build application
-RUN npm run build
+# Build application with type checking
+RUN npm run typecheck && npm run build
 
+# Remove dev dependencies from final image
+RUN rm -rf src/ tsconfig*.json
+
+# ========================================
 # Production Stage
-FROM node:20-alpine AS production
+FROM node:20.18.1-alpine AS production
 
-# Create non-root user
+# Security labels
+LABEL maintainer="jaafarhabash@yahoo.com"
+LABEL version="1.0.0"
+LABEL description="AI Sales Platform - Production"
+
+# Create non-root user with specific IDs
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S aiuser -u 1001
+    adduser -S aiuser -u 1001 -G nodejs
 
 # Install runtime dependencies
 RUN apk add --no-cache \
     curl \
-    dumb-init
+    dumb-init \
+    tini \
+    && rm -rf /var/cache/apk/*
 
 WORKDIR /app
 
-# Copy built application
+# Copy built application with proper ownership
 COPY --from=builder --chown=aiuser:nodejs /app/dist ./dist
 COPY --from=builder --chown=aiuser:nodejs /app/node_modules ./node_modules
 COPY --chown=aiuser:nodejs package*.json ./
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+# Create logs directory
+RUN mkdir -p /app/logs && chown aiuser:nodejs /app/logs
 
-# Security settings
+# Health check with proper timeout
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
+
+# Security: Drop root privileges
 USER aiuser
 
-# Environment
-EXPOSE 3000
+# Environment optimization
 ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=1024 --optimize-for-size"
 ENV PORT=3000
+ENV UV_THREADPOOL_SIZE=4
 
-# Start application
-ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "dist/production-index.js"]
+# Expose port
+EXPOSE 3000
+
+# Use tini as init system for proper signal handling
+ENTRYPOINT ["tini", "--", "dumb-init", "--"]
+CMD ["node", "--max-old-space-size=1024", "dist/production-index.js"]
+
+# Multi-architecture build support
+# docker buildx build --platform linux/amd64,linux/arm64 -t ai-sales-platform .
