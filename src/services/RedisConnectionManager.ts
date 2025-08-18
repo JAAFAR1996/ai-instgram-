@@ -138,12 +138,8 @@ export class RedisConnectionManager {
       // إعداد مراقبة الأحداث أولاً
       this.setupConnectionMonitoring(connection, usageType, info);
 
-      // انتظار الاتصال إذا لم يكن جاهزاً
-      if (connection.status !== 'ready') {
-        await this.waitForConnection(connection, 15000);
-      }
-
-      // التحقق من صحة الاتصال
+      // التحقق من صحة الاتصال مباشرة (بدون انتظار ready state)
+      // العمليات ستنجح إذا كان الاتصال يعمل، حتى لو status !== 'ready'
       await this.healthMonitor.validateConnection(connection);
 
       // تحديث معلومات الاتصال
@@ -522,13 +518,19 @@ export class RedisConnectionManager {
 
     const connection = new Redis(config);
     
-    // انتظار الاستعداد
-    await this.waitForConnection(connection, 10000);
+    // اختبار سريع للاتصال بدون انتظار ready state
+    try {
+      await connection.ping();
+      this.logger?.debug('Temporary connection established', { usageType });
+    } catch (error) {
+      this.logger?.warn('Temporary connection ping failed', { error, usageType });
+    }
     
     // إعداد إغلاق تلقائي
     setTimeout(async () => {
       try {
         await connection.disconnect();
+        this.logger?.debug('Temporary connection closed', { usageType });
       } catch (error) {
         this.logger?.warn('Error closing temporary connection', { error });
       }

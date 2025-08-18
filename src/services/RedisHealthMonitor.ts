@@ -100,21 +100,26 @@ export class RedisHealthMonitor {
 
   async validateConnection(connection: Redis): Promise<void> {
     try {
-      // 1. انتظار ready state قبل validation
-      await this.waitForConnectionReady(connection, 10000);
-
-      // 2. اختبار العمليات الأساسية
+      // اختبار مباشر بدون انتظار ready state
+      // إذا كان الاتصال يعمل، العمليات ستنجح حتى لو status !== 'ready'
+      
       const testKey = `health:check:${Date.now()}`;
       const testValue = `test-${Math.random()}`;
       
-      // Ping test
+      this.logger?.debug('Starting Redis validation', {
+        connectionStatus: connection.status,
+        host: connection.options.host,
+        port: connection.options.port
+      });
+
+      // Ping test - أهم اختبار
       const pingResult = await connection.ping();
       if (pingResult !== 'PONG') {
         throw new RedisValidationError('Ping test failed', { pingResult });
       }
 
       // Write test
-      await connection.set(testKey, testValue, 'EX', 30); // انتهاء خلال 30 ثانية
+      await connection.set(testKey, testValue, 'EX', 30);
       
       // Read test
       const retrieved = await connection.get(testKey);
@@ -125,18 +130,32 @@ export class RedisHealthMonitor {
         );
       }
 
-      // Delete test
-      const deleteResult = await connection.del(testKey);
-      if (deleteResult !== 1) {
-        this.logger?.warn('Delete test warning', { deleteResult });
+      // Delete test (optional warning only)
+      try {
+        const deleteResult = await connection.del(testKey);
+        if (deleteResult !== 1) {
+          this.logger?.warn('Delete test warning', { deleteResult });
+        }
+      } catch (delError) {
+        this.logger?.warn('Delete operation failed', { 
+          error: delError instanceof Error ? delError.message : String(delError)
+        });
       }
       
-      this.logger?.debug('Redis connection validation successful', {
+      this.logger?.info('✅ Redis connection validation successful', {
+        connectionStatus: connection.status,
         testKey: testKey.substring(0, 20) + '...',
         operations: ['ping', 'set', 'get', 'del']
       });
       
     } catch (error) {
+      this.logger?.error('❌ Redis validation failed', {
+        connectionStatus: connection.status,
+        host: connection.options.host,
+        port: connection.options.port,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
       const redisError = this.errorHandler.handleError(error, {
         operation: 'validateConnection',
         connectionStatus: connection.status
