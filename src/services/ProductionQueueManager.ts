@@ -321,7 +321,7 @@ export class ProductionQueueManager {
 
       // الحصول على موقع المهمة في الطابور
       const waiting = await this.queue.getWaiting();
-      const queuePosition = waiting.findIndex(j => j.id === job.id) + 1;
+      const queuePosition = waiting.findIndex(j => j.id?.toString() === job.id?.toString()) + 1;
 
       this.logger.info('تم إضافة مهمة ويب هوك للطابور', {
         jobId: job.id,
@@ -334,7 +334,7 @@ export class ProductionQueueManager {
 
       return { 
         success: true, 
-        jobId: job.id,
+        jobId: job.id?.toString(),
         queuePosition
       };
 
@@ -385,7 +385,7 @@ export class ProductionQueueManager {
         attempts: 2 // محاولتان فقط للذكاء الاصطناعي
       });
 
-      return { success: true, jobId: job.id };
+      return { success: true, jobId: job.id?.toString() };
 
     } catch (error) {
       return { 
@@ -401,17 +401,19 @@ export class ProductionQueueManager {
     }
 
     try {
-      const [waiting, active, completed, failed, delayed, paused] = await Promise.all([
+      const [waiting, active, completed, failed, delayed] = await Promise.all([
         this.queue.getWaiting(),
         this.queue.getActive(),
         this.queue.getCompleted(),
         this.queue.getFailed(),
-        this.queue.getDelayed(),
-        this.queue.getPaused()
+        this.queue.getDelayed()
       ]);
 
+      // Bull Queue لا يحتوي على getPaused() - نستخدم 0 كقيمة افتراضية
+      const paused = 0;
+
       const total = waiting.length + active.length + completed.length + 
-                   failed.length + delayed.length + paused.length;
+                   failed.length + delayed.length + paused;
 
       const errorRate = this.processedJobs + this.failedJobs > 0 
         ? (this.failedJobs / (this.processedJobs + this.failedJobs)) * 100 
@@ -423,7 +425,7 @@ export class ProductionQueueManager {
         completed: completed.length,
         failed: failed.length,
         delayed: delayed.length,
-        paused: paused.length,
+        paused: paused,
         total,
         processing: this.isProcessing,
         lastProcessedAt: this.lastProcessedAt,

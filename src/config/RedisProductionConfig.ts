@@ -20,14 +20,13 @@ export class RedisProductionConfig {
 
       // إعدادات إعادة المحاولة المتقدمة
       maxRetriesPerRequest: 5,         // أقصى محاولات لكل طلب
-      retryDelayOnFailover: 1000,      // تأخير عند الفشل (1 ثانية)
       
       // إعدادات الشبكة
       family: 4,                       // IPv4
-      keepAlive: true,                 // الحفاظ على الاتصال حياً
+      keepAlive: 10000,                // الحفاظ على الاتصال حياً (10 ثوان)
       
       // معالجة الأخطاء والاستعادة
-      reconnectOnError: (error) => {
+      reconnectOnError: (error: Error) => {
         // إعادة الاتصال في حالات معينة
         const targetErrors = [
           'READONLY',
@@ -59,14 +58,7 @@ export class RedisProductionConfig {
         }
       }),
 
-      // إعدادات متقدمة للأداء
-      maxmemoryPolicy: 'allkeys-lru',  // سياسة إدارة الذاكرة
-      
-      // معالجة الاتصالات في بيئة الإنتاج
-      retryStrategyOnClusterDown: (times) => {
-        // استراتيجية إعادة المحاولة المتدرجة
-        return Math.min(times * 100, 3000);
-      }
+      // إعدادات متقدمة للأداء - سياسة إدارة الذاكرة يتم تعيينها على خادم ريديس نفسه
     };
   }
 
@@ -76,18 +68,8 @@ export class RedisProductionConfig {
       
       // إعدادات خاصة بـ Redis Cluster
       enableReadyCheck: false,         // غير مطلوب في Cluster
-      redisOptions: {
-        connectTimeout: 10000,
-        commandTimeout: 5000,
-        lazyConnect: true
-      },
       
-      // إعدادات Cluster محددة
-      scaleReads: 'slave',            // قراءة من العبيد
-      maxRedirections: 16,            // أقصى إعادة توجيه
-      retryDelayOnClusterDown: 300,   // تأخير في حالة سقوط Cluster
-      retryDelayOnFailover: 100,      // تأخير عند التبديل
-      slotsRefreshTimeout: 10000      // تحديث slots كل 10 ثواني
+      // ملاحظة: إعدادات Cluster يتم تكوينها منفصلة في ioredis cluster mode
     };
   }
 
@@ -98,7 +80,6 @@ export class RedisProductionConfig {
       connectTimeout: 5000,
       lazyConnect: true,
       maxRetriesPerRequest: 3,
-      retryDelayOnFailover: 100,
       keyPrefix: 'ai-sales-dev:',
       enableOfflineQueue: true,        // مسموح في التطوير
       maxLoadingTimeout: 2000
@@ -112,7 +93,6 @@ export class RedisProductionConfig {
       connectTimeout: 5000,
       lazyConnect: true,
       maxRetriesPerRequest: 3,
-      retryDelayOnFailover: 100,
       keyPrefix: 'ai-sales-docker:',
       enableOfflineQueue: false
     };
@@ -131,7 +111,6 @@ export class RedisProductionConfig {
       // إعدادات خاصة بـ Render
       connectTimeout: 15000,           // Render قد يحتاج وقت أطول
       maxRetriesPerRequest: 6,         // محاولات إضافية
-      retryDelayOnFailover: 2000,      // تأخير أطول
       keyPrefix: 'ai-sales-render:',
       
       // مراقبة محسنة للاستضافة السحابية
@@ -153,7 +132,6 @@ export class RedisProductionConfig {
       // إعدادات خاصة بـ Heroku
       connectTimeout: 12000,
       maxRetriesPerRequest: 5,
-      retryDelayOnFailover: 1500,
       keyPrefix: 'ai-sales-heroku:',
       
       // تحسينات Heroku محددة

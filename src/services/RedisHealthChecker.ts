@@ -22,7 +22,6 @@ export class RedisHealthChecker {
       connectTimeout: this.timeout,
       lazyConnect: true,
       maxRetriesPerRequest: 1,
-      retryDelayOnFailover: 100,
       enableOfflineQueue: false,
       family: 4
     });
@@ -106,7 +105,8 @@ export class RedisHealthChecker {
     const redis = new Redis(redisUrl, {
       connectTimeout: this.timeout,
       lazyConnect: true,
-      maxRetriesPerRequest: 1
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false
     });
 
     let successfulOps = 0;
