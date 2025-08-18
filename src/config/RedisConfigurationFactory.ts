@@ -156,7 +156,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}queue:`,
       commandTimeout: 8000,
-      enableOfflineQueue: false,
+      enableOfflineQueue: true, // ✅ تغيير من false إلى true لحل مشكلة Stream isn't writeable
       ...(baseConfig.tls && { tls: baseConfig.tls })
     };
   }
@@ -186,7 +186,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       maxRetriesPerRequest: 3,
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}cache:`,
-      enableOfflineQueue: false, // تجنب تجميع العمليات للcache
+      enableOfflineQueue: true, // ✅ تغيير لضمان التوافق مع Upstash
       ...(baseConfig.tls && { tls: baseConfig.tls })
     };
   }
@@ -216,7 +216,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       lazyConnect: true,
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}pubsub:`,
-      enableOfflineQueue: false, // مهم للpubsub
+      enableOfflineQueue: true, // ✅ تغيير للتوافق مع Upstash (سيتم تجاهلها للpubsub)
       maxRetriesPerRequest: 0, // لا نريد إعادة محاولة للpubsub
       ...(baseConfig.tls && { tls: baseConfig.tls })
     };
