@@ -12,6 +12,7 @@ import Bull from 'bull';
 import { runStartupValidation } from './startup/validation';
 import { runMigrations } from './startup/runMigrations';
 import { ensurePageMapping } from './startup/ensurePageMapping';
+import { RedisProductionIntegration } from './services/RedisProductionIntegration';
 
 // ===== Debug helpers =====
 const sigEnvOn = () => process.env.DEBUG_SIG === '1';
@@ -71,46 +72,32 @@ const pool = DATABASE_URL ? new Pool({
 }) : null;
 
 // ===============================================
-// QUEUE SYSTEM SETUP (Bull + Redis)
+// REDIS PRODUCTION INTEGRATION SETUP
 // ===============================================
-let webhookQueue: Bull.Queue | null = null;
+let redisIntegration: RedisProductionIntegration | null = null;
 
-try {
-  if (REDIS_URL) {
-    webhookQueue = new Bull('instagram-webhooks', REDIS_URL, {
-      defaultJobOptions: {
-        removeOnComplete: 100,
-        removeOnFail: 50,
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 2000,
-        },
-      },
-    });
-    
-    // Process webhook jobs
-    webhookQueue.process('process-webhook', async (job) => {
-      const { eventId, payload, merchantId, timestamp, rawBodyBuffer } = job.data;
+async function initializeRedisIntegration() {
+  try {
+    if (REDIS_URL) {
+      redisIntegration = new RedisProductionIntegration(REDIS_URL, console);
+      const result = await redisIntegration.initialize();
       
-      console.log(`🔄 Processing webhook job: ${eventId}`);
-      
-      // يمكن إضافة معالجة إضافية هنا مثل:
-      // - إرسال إشعارات
-      // - تحديث الإحصائيات
-      // - معالجة AI للمحتوى
-      // - إرسال webhooks لأطراف ثالثة
-      
-      console.log(`✅ Webhook job completed: ${eventId}`);
-      return { processed: true, eventId };
-    });
-    
-    console.log('✅ Bull Queue initialized successfully');
-  } else {
-    console.warn('⚠️ REDIS_URL not configured - Queue system disabled');
+      if (result.success) {
+        console.log('✅ نظام ريديس المتكامل جاهز', {
+          responseTime: result.diagnostics?.redisHealth?.responseTime,
+          queueStats: result.diagnostics?.queueStats
+        });
+      } else {
+        console.error('❌ فشل تهيئة نظام ريديس:', result.error);
+        console.warn('⚠️ سيتم استخدام المعالجة البديلة');
+      }
+    } else {
+      console.warn('⚠️ REDIS_URL not configured - Redis integration disabled');
+    }
+  } catch (error) {
+    console.error('❌ خطأ في تهيئة النظام المتكامل:', error);
+    console.warn('⚠️ سيتم استخدام المعالجة البديلة');
   }
-} catch (error) {
-  console.error('❌ Failed to initialize Queue system:', error);
 }
 
 // Scheduled maintenance: cleanup old logs (daily) and webhook logs via function if available
@@ -796,24 +783,31 @@ app.post("/webhooks/instagram", async (c) => {
       await logInstagramEvent(rawBodyBuffer, payload);
     }
     
-    // إضافة إلى Real Queue System (مع merchantId الصحيح)
-    if (webhookQueue && merchantId) {
-      await webhookQueue.add('process-webhook', {
-        eventId,
-        payload,
-        merchantId, // ✅ من database lookup - multi-tenant safe
-        timestamp: Date.now(),
-        rawBodyBuffer: rawBodyBuffer.toString('base64'),
-      }, {
-        priority: 10,
-        delay: 100,
-      });
+    // معالجة الويب هوك عبر النظام المتكامل (مع merchantId الصحيح)
+    if (redisIntegration && merchantId) {
+      const result = await redisIntegration.processWebhookWithFallback(
+        eventId, payload, merchantId, 'INSTAGRAM', 'HIGH'
+      );
       
-      console.log("✅ IG webhook queued", { eventId, merchantId, len: rawBodyString.length });
+      if (result.success) {
+        console.log(`✅ IG webhook processed: ${result.processedBy}`, {
+          eventId, 
+          merchantId,
+          jobId: result.jobId,
+          processedBy: result.processedBy,
+          len: rawBodyString.length
+        });
+      } else {
+        console.error(`❌ IG webhook failed: ${result.error}`, {
+          eventId, 
+          merchantId
+        });
+      }
     } else if (!merchantId) {
-      console.warn("⚠️ MerchantId not found - webhook not queued", { eventId, pageId: payload.entry?.[0]?.id });
+      console.warn("⚠️ MerchantId not found - webhook not processed", { eventId, pageId: payload.entry?.[0]?.id });
     } else {
-      console.warn("⚠️ Queue not available", { eventId, merchantId });
+      console.warn("⚠️ Redis integration not available - using fallback", { eventId, merchantId });
+      // يمكن إضافة معالجة بديلة هنا إذا لزم الأمر
     }
     
   } catch (e) {
@@ -1154,6 +1148,68 @@ app.get('/internal/crypto-test', async (c) => {
   }
 });
 
+// ===============================================
+// MONITORING AND HEALTH ENDPOINTS
+// ===============================================
+
+// شامل للصحة
+app.get('/internal/system/health', async (c) => {
+  if (!redisIntegration) {
+    return c.json({ 
+      status: 'disabled',
+      message: 'Redis integration not initialized' 
+    }, 503);
+  }
+  
+  const health = await redisIntegration.performHealthCheck();
+  return c.json(health, health.healthy ? 200 : 503);
+});
+
+// تقرير مفصل
+app.get('/internal/system/report', async (c) => {
+  if (!redisIntegration) {
+    return c.json({ error: 'النظام غير مهيأ' }, 503);
+  }
+  
+  const report = await redisIntegration.getComprehensiveReport();
+  return c.json(report);
+});
+
+// إحصائيات ريديس والطوابير
+app.get('/internal/redis/stats', async (c) => {
+  if (!redisIntegration) {
+    return c.json({ error: 'غير متاح' }, 503);
+  }
+  
+  const queueManager = redisIntegration.getQueueManager();
+  const circuitBreaker = redisIntegration.getCircuitBreaker();
+  
+  return c.json({
+    queue: queueManager ? await queueManager.getQueueStats() : null,
+    circuitBreaker: circuitBreaker.getStats(),
+    healthChecker: await redisIntegration.getHealthChecker().checkConnection(REDIS_URL || ''),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// إحصائيات Circuit Breaker منفصلة
+app.get('/internal/circuit-breaker/stats', async (c) => {
+  if (!redisIntegration) {
+    return c.json({ error: 'غير متاح' }, 503);
+  }
+  
+  const circuitBreaker = redisIntegration.getCircuitBreaker();
+  const stats = circuitBreaker.getStats();
+  const diagnostics = circuitBreaker.getDiagnostics();
+  
+  return c.json({
+    stats,
+    diagnostics,
+    healthy: diagnostics.healthy,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Legal and compliance static pages (serve from ./legal)
 app.get('/', async (c) => {
   return c.redirect('/legal/', 302);
@@ -1232,20 +1288,56 @@ console.log('   - IG_APP_SECRET matches connected app');
 console.log('   - Single tool connected for webhook');
 console.log('   - Replica=1 for testing, scale later');
 console.log('   - Payload limit: 512KB');
-console.log('   - Redis Queue:', webhookQueue ? '✅ Active' : '❌ Disabled');
+console.log('   - Redis Integration:', redisIntegration ? '✅ Active' : '❌ Disabled');
 console.log('   - Multi-tenant merchantId lookup: ✅ Enabled');
 
-// Start server using @hono/node-server
-serve({
-  fetch: app.fetch,
-  port: PORT
-}, (info) => {
-  console.log(`✅ AI Instagram Platform running on https://ai-instgram.onrender.com (port ${info.port})`);
-  console.log('🔒 Security stack active:');
-  console.log('  • CSP: API-only (no unsafe-inline)');
-  console.log('  • HMAC-SHA256: webhook signature verification (before JSON parsing)');
-  console.log('  • AES-256-GCM: 12-byte IV encryption');
-  console.log('  • Graph API: v23.0 with rate limit headers');
+// Initialize and start server
+async function startServer() {
+  // Initialize Redis Integration
+  await initializeRedisIntegration();
+  
+  // Start server using @hono/node-server
+  serve({
+    fetch: app.fetch,
+    port: PORT
+  }, (info) => {
+    console.log(`✅ AI Instagram Platform running on https://ai-instgram.onrender.com (port ${info.port})`);
+    console.log('🔒 Security stack active:');
+    console.log('  • CSP: API-only (no unsafe-inline)');
+    console.log('  • HMAC-SHA256: webhook signature verification (before JSON parsing)');
+    console.log('  • AES-256-GCM: 12-byte IV encryption');
+    console.log('  • Graph API: v23.0 with rate limit headers');
+    console.log('  • Redis Integration:', redisIntegration ? '✅ Active' : '❌ Disabled');
+  });
+}
+
+// Start the server
+startServer().catch(console.error);
+
+// ===============================================
+// GRACEFUL SHUTDOWN HANDLING
+// ===============================================
+
+process.on('SIGINT', async () => {
+  console.log('🔄 بدء إغلاق النظام بأمان...');
+  
+  if (redisIntegration) {
+    await redisIntegration.gracefulShutdown();
+  }
+  
+  console.log('✅ تم إغلاق النظام بنجاح');
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('🔄 إغلاق النظام بناءً على طلب النظام...');
+  
+  if (redisIntegration) {
+    await redisIntegration.gracefulShutdown();
+  }
+  
+  console.log('✅ تم إغلاق النظام بنجاح');
+  process.exit(0);
 });
 
 export default app;
