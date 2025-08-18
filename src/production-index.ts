@@ -74,12 +74,29 @@ const pool = DATABASE_URL ? new Pool({
 // ===============================================
 // REDIS PRODUCTION INTEGRATION SETUP
 // ===============================================
+import { Environment } from './config/RedisConfigurationFactory';
+
 let redisIntegration: RedisProductionIntegration | null = null;
+
+// Detect environment
+function detectEnvironment(): Environment {
+  if (NODE_ENV === 'development') {
+    return Environment.DEVELOPMENT;
+  } else if (process.env.RENDER || process.env.RENDER_SERVICE_ID) {
+    return Environment.RENDER;
+  } else if (process.env.DYNO) {
+    return Environment.HEROKU;
+  } else if (process.env.DOCKER || process.env.IS_DOCKER) {
+    return Environment.DOCKER;
+  }
+  return Environment.PRODUCTION;
+}
 
 async function initializeRedisIntegration() {
   try {
     if (REDIS_URL) {
-      redisIntegration = new RedisProductionIntegration(REDIS_URL, console);
+      const environment = detectEnvironment();
+      redisIntegration = new RedisProductionIntegration(REDIS_URL, console, environment);
       const result = await redisIntegration.initialize();
       
       if (result.success) {
@@ -1187,7 +1204,7 @@ app.get('/internal/redis/stats', async (c) => {
   return c.json({
     queue: queueManager ? await queueManager.getQueueStats() : null,
     circuitBreaker: circuitBreaker.getStats(),
-    healthChecker: await redisIntegration.getHealthChecker().checkConnection(REDIS_URL || ''),
+    redisIntegration: await redisIntegration.performHealthCheck(),
     timestamp: new Date().toISOString()
   });
 });

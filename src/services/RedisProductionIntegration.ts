@@ -1,12 +1,18 @@
 import { ProductionQueueManager } from './ProductionQueueManager';
-import { RedisHealthChecker } from './RedisHealthChecker';
-import { RedisProductionConfig } from '../config/RedisProductionConfig';
+import { RedisUsageType, Environment } from '../config/RedisConfigurationFactory';
+import RedisConnectionManager from './RedisConnectionManager';
+import RedisHealthMonitor from './RedisHealthMonitor';
 import { CircuitBreaker } from './CircuitBreaker';
+import {
+  RedisConnectionError,
+  RedisErrorHandler,
+  isConnectionError,
+  isTimeoutError
+} from '../errors/RedisErrors';
 
 export interface RedisIntegrationResult {
   success: boolean;
   queueManager?: ProductionQueueManager;
-  healthChecker?: RedisHealthChecker;
   error?: string;
   diagnostics?: any;
 }
@@ -22,91 +28,144 @@ export interface RedisMonitoringReport {
 
 export class RedisProductionIntegration {
   private queueManager?: ProductionQueueManager;
-  private healthChecker: RedisHealthChecker;
+  private connectionManager: RedisConnectionManager;
+  private healthMonitor: RedisHealthMonitor;
   private circuitBreaker: CircuitBreaker;
-  private logger: any;
-  private redisUrl: string;
+  private errorHandler: RedisErrorHandler;
   private monitoringInterval?: NodeJS.Timeout;
+  private alertingInterval?: NodeJS.Timeout;
 
-  constructor(redisUrl: string, logger: any) {
-    this.redisUrl = redisUrl;
-    this.logger = logger;
-    this.healthChecker = new RedisHealthChecker();
+  constructor(
+    private redisUrl: string, 
+    private logger: any, 
+    private environment: Environment
+  ) {
+    this.connectionManager = new RedisConnectionManager(redisUrl, environment, logger);
+    this.healthMonitor = new RedisHealthMonitor(logger);
     this.circuitBreaker = new CircuitBreaker(5, 60000, {
-      timeout: 10000,
+      timeout: 15000,
       expectedErrorThreshold: 10
     });
+    this.errorHandler = new RedisErrorHandler(logger);
   }
 
   async initialize(): Promise<RedisIntegrationResult> {
     try {
-      this.logger.info('🔄 بدء تهيئة النظام المتكامل لريديس والطوابير...');
+      this.logger.info('🔄 بدء تهيئة النظام المتكامل الإنتاجي لريديس والطوابير...');
 
-      // 1. فحص صحة ريديس أولاً
-      const healthCheck = await this.circuitBreaker.execute(
-        () => this.healthChecker.checkConnection(this.redisUrl)
-      );
-
-      if (!healthCheck.success) {
-        this.logger.error('❌ فشل الاتصال بريديس', { 
-          error: healthCheck.error 
-        });
-        return { 
-          success: false, 
-          error: healthCheck.error,
-          diagnostics: { circuitBreakerStats: this.circuitBreaker.getStats() }
-        };
-      }
-
-      this.logger.info('✅ تم التحقق من صحة ريديس', {
-        responseTime: healthCheck.result?.responseTime,
-        version: healthCheck.result?.version
+      // 1. فحص صحة Redis باستخدام Health Check connection
+      const healthCheckResult = await this.circuitBreaker.execute(async () => {
+        const healthConnection = await this.connectionManager.getConnection(RedisUsageType.HEALTH_CHECK);
+        return await this.healthMonitor.performComprehensiveHealthCheck(healthConnection);
       });
 
-      // 2. تهيئة مدير الطوابير
-      this.queueManager = new ProductionQueueManager(
-        this.redisUrl,
-        this.logger,
-        'ai-sales-production'
-      );
-
-      const queueInit = await this.queueManager.initialize();
-      
-      if (!queueInit.success) {
-        this.logger.error('❌ فشل تهيئة مدير الطوابير', { 
-          error: queueInit.error 
+      if (!healthCheckResult.success) {
+        const error = this.errorHandler.handleError(healthCheckResult.error);
+        this.logger.error('❌ فشل فحص صحة ريديس', {
+          error: error.message,
+          code: error.code
         });
-        return { 
-          success: false, 
-          error: queueInit.error,
-          diagnostics: { 
-            redisHealth: healthCheck.result,
-            circuitBreakerStats: this.circuitBreaker.getStats()
+        
+        return {
+          success: false,
+          error: error.message,
+          diagnostics: {
+            circuitBreakerStats: this.circuitBreaker.getStats(),
+            connectionStats: this.connectionManager.getConnectionStats()
           }
         };
       }
 
-      this.logger.info('✅ تم تهيئة النظام المتكامل بنجاح');
+      const healthResult = healthCheckResult.result;
+      
+      this.logger.info('✅ تم التحقق من صحة ريديس بنجاح', {
+        responseTime: healthResult?.responseTime,
+        metrics: {
+          version: healthResult?.metrics?.version,
+          memory: healthResult?.metrics?.memoryUsage,
+          clients: healthResult?.metrics?.connectedClients,
+          hitRate: healthResult?.metrics?.hitRate
+        }
+      });
 
-      // 3. بدء مراقبة مستمرة
-      this.startMonitoring();
+      // 2. تهيئة مدير الطوابير الإنتاجي
+      this.queueManager = new ProductionQueueManager(
+        this.redisUrl,
+        this.logger,
+        this.environment,
+        'ai-sales-production-v2'
+      );
+
+      const queueInit = await this.queueManager.initialize();
+
+      if (!queueInit.success) {
+        const error = new RedisConnectionError(
+          'Failed to initialize production queue manager',
+          { queueError: queueInit.error }
+        );
+
+        this.logger.error('❌ فشل تهيئة مدير الطوابير الإنتاجي', {
+          error: error.message,
+          queueError: queueInit.error
+        });
+
+        return {
+          success: false,
+          error: error.message,
+          diagnostics: {
+            redisHealth: healthResult,
+            queueInit,
+            circuitBreakerStats: this.circuitBreaker.getStats(),
+            connectionStats: this.connectionManager.getConnectionStats()
+          }
+        };
+      }
+
+      // 3. بدء المراقبة الشاملة والتنبيهات
+      this.startComprehensiveMonitoring();
+      this.startSmartAlerting();
+
+      const finalDiagnostics = {
+        redisHealth: healthResult,
+        queueStats: await this.queueManager.getQueueStats(),
+        circuitBreakerStats: this.circuitBreaker.getStats(),
+        connectionStats: this.connectionManager.getConnectionStats()
+      };
+
+      this.logger.info('🎉 تم تهيئة النظام المتكامل الإنتاجي بنجاح', {
+        environment: this.environment,
+        totalConnections: finalDiagnostics.connectionStats.totalConnections,
+        queueHealth: queueInit.diagnostics?.queueHealth?.connected,
+        redisHealth: healthResult?.connected,
+        circuitBreakerState: finalDiagnostics.circuitBreakerStats.state
+      });
 
       return {
         success: true,
         queueManager: this.queueManager,
-        healthChecker: this.healthChecker,
-        diagnostics: {
-          redisHealth: healthCheck.result,
-          queueStats: await this.queueManager.getQueueStats(),
-          circuitBreakerStats: this.circuitBreaker.getStats()
-        }
+        diagnostics: finalDiagnostics
       };
 
     } catch (error) {
-      this.logger.error('💥 خطأ في تهيئة النظام المتكامل', { error });
+      const redisError = this.errorHandler.handleError(error, {
+        operation: 'RedisIntegration.initialize',
+        environment: this.environment
+      });
+
+      this.logger.error('💥 خطأ حرج في تهيئة النظام المتكامل', {
+        error: redisError.message,
+        code: redisError.code,
+        context: redisError.context
+      });
+
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error)
+        error: redisError.message,
+        diagnostics: {
+          circuitBreakerStats: this.circuitBreaker.getStats(),
+          connectionStats: this.connectionManager.getConnectionStats(),
+          errorDetails: redisError.toJSON()
+        }
       };
     }
   }
@@ -193,50 +252,107 @@ export class RedisProductionIntegration {
     let overallStatus: 'HEALTHY' | 'DEGRADED' | 'CRITICAL' = 'HEALTHY';
 
     try {
-      // 1. فحص صحة ريديس
-      const redisHealth = await this.healthChecker.checkConnection(this.redisUrl);
-      
-      if (!redisHealth.connected) {
+      // 1. فحص صحة Redis الشامل
+      let redisHealth = null;
+      try {
+        const healthConnection = await this.connectionManager.getConnection(RedisUsageType.HEALTH_CHECK);
+        redisHealth = await this.healthMonitor.performComprehensiveHealthCheck(healthConnection);
+        
+        if (!redisHealth.connected) {
+          overallStatus = 'CRITICAL';
+          recommendations.push('إصلاح اتصال Redis فوراً');
+        } else if (redisHealth.responseTime && redisHealth.responseTime > 1000) {
+          overallStatus = 'CRITICAL';
+          recommendations.push('أداء Redis بطيء جداً - تدخل فوري مطلوب');
+        } else if (redisHealth.responseTime && redisHealth.responseTime > 500) {
+          overallStatus = 'DEGRADED';
+          recommendations.push('تحسين أداء Redis - زمن الاستجابة مرتفع');
+        }
+      } catch (error) {
         overallStatus = 'CRITICAL';
-        recommendations.push('إصلاح اتصال ريديس فوراً');
-      } else if (redisHealth.responseTime && redisHealth.responseTime > 500) {
-        overallStatus = 'DEGRADED';
-        recommendations.push('تحسين أداء ريديس - زمن الاستجابة مرتفع');
+        recommendations.push('فشل في الاتصال بـ Redis للفحص الصحي');
+        redisHealth = { connected: false, error: 'Health check failed', timestamp };
       }
 
-      // 2. إحصائيات الطوابير
+      // 2. إحصائيات الطوابير المتقدمة
       const queueStats = this.queueManager 
         ? await this.queueManager.getQueueStats() 
         : null;
 
       if (queueStats) {
-        if (queueStats.failed > queueStats.completed) {
+        if (queueStats.failed > queueStats.completed * 0.5) {
           overallStatus = 'CRITICAL';
-          recommendations.push('معدل فشل مرتفع في الطوابير - فحص المعالجات');
-        } else if (queueStats.errorRate > 10) {
+          recommendations.push('معدل فشل خطير في الطوابير - فحص المعالجات فوراً');
+        } else if (queueStats.errorRate > 15) {
           overallStatus = 'DEGRADED';
-          recommendations.push('معدل خطأ مرتفع - مراجعة المعالجة');
+          recommendations.push('معدل خطأ مرتفع - مراجعة معالجة المهام');
         }
 
-        if (queueStats.waiting > 1000) {
-          recommendations.push('طابور طويل - فحص أداء المعالجة');
+        if (queueStats.waiting > 2000) {
+          overallStatus = 'DEGRADED';
+          recommendations.push('طابور مزدحم جداً - زيادة المعالجات أو تحسين الأداء');
+        } else if (queueStats.waiting > 500) {
+          recommendations.push('طابور طويل - مراقبة الأداء');
+        }
+
+        if (queueStats.active === 0 && queueStats.waiting > 0) {
+          overallStatus = 'CRITICAL';
+          recommendations.push('لا توجد مهام نشطة رغم وجود طابور - فحص المعالجات');
         }
       }
 
-      // 3. إحصائيات Circuit Breaker
+      // 3. إحصائيات Circuit Breaker المتقدمة
       const circuitBreakerStats = this.circuitBreaker.getStats();
       
       if (circuitBreakerStats.state === 'OPEN') {
         overallStatus = 'CRITICAL';
         recommendations.push('قاطع الدائرة مفتوح - الخدمة غير متاحة');
-      } else if (circuitBreakerStats.errorRate > 20) {
+      } else if (circuitBreakerStats.state === 'HALF_OPEN') {
+        if (overallStatus === 'HEALTHY') overallStatus = 'DEGRADED';
+        recommendations.push('قاطع الدائرة في وضع اختبار - مراقبة الأداء');
+      } else if (circuitBreakerStats.errorRate > 30) {
+        overallStatus = 'CRITICAL';
+        recommendations.push('معدل خطأ خطير في قاطع الدائرة');
+      } else if (circuitBreakerStats.errorRate > 15) {
         overallStatus = 'DEGRADED';
-        recommendations.push('معدل خطأ عالي في قاطع الدائرة');
+        recommendations.push('معدل خطأ مرتفع في قاطع الدائرة');
       }
 
-      // 4. تشخيص إضافي
-      if (redisHealth.connected && redisHealth.clients && redisHealth.clients > 100) {
-        recommendations.push('عدد كبير من اتصالات ريديس - فحص تجميع الاتصالات');
+      // 4. تحليل اتصالات Redis
+      const connectionStats = this.connectionManager.getConnectionStats();
+      
+      if (connectionStats.errorConnections > connectionStats.totalConnections * 0.3) {
+        overallStatus = 'CRITICAL';
+        recommendations.push('نسبة أخطاء اتصال خطيرة - فحص شبكة Redis');
+      } else if (connectionStats.errorConnections > 0) {
+        if (overallStatus === 'HEALTHY') overallStatus = 'DEGRADED';
+        recommendations.push('بعض اتصالات Redis تواجه مشاكل');
+      }
+
+      if (connectionStats.totalReconnects > 10) {
+        recommendations.push('عدد مرتفع من إعادة الاتصال - فحص استقرار الشبكة');
+      }
+
+      // 5. تحليل المقاييس المتقدمة
+      if (redisHealth?.metrics) {
+        const metrics = redisHealth.metrics;
+        
+        if (metrics.connectedClients > 500) {
+          recommendations.push('عدد كبير من الاتصالات - فحص connection pooling');
+        }
+
+        if (metrics.hitRate < 80 && (metrics.keyspaceHits + metrics.keyspaceMisses) > 1000) {
+          recommendations.push('معدل Hit Rate منخفض - مراجعة استراتيجية التخزين المؤقت');
+        }
+
+        if (metrics.evictedKeys > 100) {
+          recommendations.push('Keys متعددة تم طردها - زيادة الذاكرة أو تحسين TTL');
+        }
+      }
+
+      // 6. تحليل الصحة العامة
+      if (recommendations.length === 0) {
+        recommendations.push('🎉 النظام يعمل بأفضل أداء - لا توجد مشاكل مكتشفة');
       }
 
       return {
@@ -249,46 +365,109 @@ export class RedisProductionIntegration {
       };
 
     } catch (error) {
-      this.logger.error('خطأ في إنشاء التقرير الشامل', { error });
+      this.logger.error('خطأ حرج في إنشاء التقرير الشامل', { 
+        error: error instanceof Error ? error.message : String(error)
+      });
       
       return {
         timestamp,
-        redisHealth: { connected: false, error: 'فشل في الفحص' },
+        redisHealth: { connected: false, error: 'فشل في الفحص الشامل', timestamp },
         queueStats: null,
         circuitBreakerStats: this.circuitBreaker.getStats(),
-        recommendations: ['خطأ في النظام - فحص شامل مطلوب'],
+        recommendations: ['خطأ حرج في النظام - يتطلب فحص شامل فوري'],
         overallStatus: 'CRITICAL'
       };
     }
   }
 
-  private startMonitoring(): void {
-    // مراقبة كل دقيقة
+  private startComprehensiveMonitoring(): void {
+    // مراقبة شاملة كل 45 ثانية
     this.monitoringInterval = setInterval(async () => {
       try {
         const report = await this.getComprehensiveReport();
         
         if (report.overallStatus === 'CRITICAL') {
-          this.logger.error('🚨 حالة حرجة في النظام', {
+          this.logger.error('🚨 حالة حرجة في النظام المتكامل', {
             status: report.overallStatus,
-            recommendations: report.recommendations
+            recommendations: report.recommendations,
+            redisHealth: report.redisHealth?.connected,
+            queueHealth: report.queueStats?.processing,
+            connectionStats: this.connectionManager.getConnectionStats()
           });
         } else if (report.overallStatus === 'DEGRADED') {
-          this.logger.warn('⚠️ أداء منخفض في النظام', {
+          this.logger.warn('⚠️ أداء منخفض في النظام المتكامل', {
             status: report.overallStatus,
-            recommendations: report.recommendations
+            recommendations: report.recommendations,
+            performance: {
+              redisResponseTime: report.redisHealth?.responseTime,
+              queueWaiting: report.queueStats?.waiting,
+              errorRate: report.queueStats?.errorRate
+            }
           });
         } else {
-          this.logger.debug('✅ النظام يعمل بشكل صحي', {
+          this.logger.debug('✅ النظام المتكامل يعمل بشكل مثالي', {
             redisResponseTime: report.redisHealth?.responseTime,
-            queueWaiting: report.queueStats?.waiting,
-            circuitState: report.circuitBreakerStats?.state
+            queueStats: {
+              waiting: report.queueStats?.waiting,
+              active: report.queueStats?.active,
+              errorRate: report.queueStats?.errorRate
+            },
+            circuitState: report.circuitBreakerStats?.state,
+            totalConnections: this.connectionManager.getConnectionStats().totalConnections
           });
         }
       } catch (error) {
-        this.logger.error('خطأ في المراقبة الدورية', { error });
+        this.logger.error('خطأ في المراقبة الشاملة', { error });
       }
-    }, 60000); // كل دقيقة
+    }, 45000); // كل 45 ثانية
+  }
+
+  private startSmartAlerting(): void {
+    // تنبيهات ذكية كل 5 دقائق
+    this.alertingInterval = setInterval(async () => {
+      try {
+        await this.performSmartAlerting();
+      } catch (error) {
+        this.logger.error('خطأ في نظام التنبيهات الذكية', { error });
+      }
+    }, 300000); // كل 5 دقائق
+  }
+
+  private async performSmartAlerting(): Promise<void> {
+    const report = await this.getComprehensiveReport();
+    const connectionStats = this.connectionManager.getConnectionStats();
+    const alerts: string[] = [];
+
+    // تحليل ذكي للأنماط
+    if (report.overallStatus === 'CRITICAL') {
+      alerts.push('🚨 حالة حرجة: النظام يحتاج تدخل فوري');
+    }
+
+    if (connectionStats.errorConnections > connectionStats.activeConnections / 2) {
+      alerts.push('🔴 معدل أخطاء اتصال مرتفع: فحص شبكة Redis');
+    }
+
+    if (report.queueStats && report.queueStats.waiting > 2000) {
+      alerts.push('📊 طابور مزدحم: زيادة المعالجات أو تحسين الأداء');
+    }
+
+    if (report.circuitBreakerStats?.errorRate > 25) {
+      alerts.push('⚡ قاطع الدائرة: معدل خطأ عالي جداً');
+    }
+
+    // إرسال التنبيهات المهمة فقط
+    if (alerts.length > 0) {
+      this.logger.warn('🔔 تنبيهات النظام المتكامل', {
+        alerts,
+        timestamp: new Date().toISOString(),
+        systemHealth: {
+          overallStatus: report.overallStatus,
+          activeConnections: connectionStats.activeConnections,
+          queueWaiting: report.queueStats?.waiting,
+          circuitState: report.circuitBreakerStats?.state
+        }
+      });
+    }
   }
 
   async performHealthCheck(): Promise<{
@@ -310,23 +489,53 @@ export class RedisProductionIntegration {
     };
   }
 
-  async gracefulShutdown(): Promise<void> {
-    this.logger.info('🔄 بدء إغلاق النظام بأمان...');
+  async gracefulShutdown(timeoutMs: number = 60000): Promise<void> {
+    this.logger.info('🔄 بدء إغلاق النظام المتكامل بأمان...');
 
-    // إيقاف المراقبة
-    if (this.monitoringInterval) {
-      clearInterval(this.monitoringInterval);
+    try {
+      // 1. إيقاف المراقبة والتنبيهات
+      if (this.monitoringInterval) {
+        clearInterval(this.monitoringInterval);
+        this.monitoringInterval = undefined;
+      }
+
+      if (this.alertingInterval) {
+        clearInterval(this.alertingInterval);
+        this.alertingInterval = undefined;
+      }
+
+      // 2. إغلاق مدير الطوابير مع انتظار المهام
+      if (this.queueManager) {
+        this.logger.info('إغلاق مدير الطوابير...');
+        await this.queueManager.gracefulShutdown(timeoutMs / 2); // نصف الوقت للطوابير
+      }
+
+      // 3. إغلاق جميع اتصالات Redis
+      this.logger.info('إغلاق اتصالات Redis...');
+      await this.connectionManager.closeAllConnections();
+
+      // 4. إعادة تعيين Circuit Breaker
+      this.circuitBreaker.reset();
+
+      this.logger.info('✅ تم إغلاق النظام المتكامل بأمان بنجاح');
+
+    } catch (error) {
+      this.logger.error('⚠️ خطأ أثناء الإغلاق الآمن', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      // إغلاق قسري في حالة الفشل
+      try {
+        if (this.queueManager) {
+          await this.queueManager.close();
+        }
+        await this.connectionManager.closeAllConnections();
+      } catch (forceCloseError) {
+        this.logger.error('فشل في الإغلاق القسري', { forceCloseError });
+      }
+
+      throw error;
     }
-
-    // إغلاق مدير الطوابير
-    if (this.queueManager) {
-      await this.queueManager.close();
-    }
-
-    // إعادة تعيين Circuit Breaker
-    this.circuitBreaker.reset();
-
-    this.logger.info('✅ تم إغلاق النظام بأمان');
   }
 
   // الحصول على مدير الطوابير للاستخدام في أماكن أخرى
@@ -334,8 +543,8 @@ export class RedisProductionIntegration {
     return this.queueManager;
   }
 
-  getHealthChecker(): RedisHealthChecker {
-    return this.healthChecker;
+  getHealthMonitor(): RedisHealthMonitor {
+    return this.healthMonitor;
   }
 
   getCircuitBreaker(): CircuitBreaker {

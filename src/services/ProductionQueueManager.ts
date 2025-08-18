@@ -1,8 +1,15 @@
 import Bull from 'bull';
 import Redis from 'ioredis';
-import { RedisHealthChecker, RedisHealthResult } from './RedisHealthChecker';
-import { RedisProductionConfig, ProductionRedisConfig } from '../config/RedisProductionConfig';
+import { RedisUsageType, Environment } from '../config/RedisConfigurationFactory';
+import RedisConnectionManager from './RedisConnectionManager';
+import RedisHealthMonitor from './RedisHealthMonitor';
 import { CircuitBreaker } from './CircuitBreaker';
+import {
+  RedisQueueError,
+  RedisConnectionError,
+  RedisErrorHandler,
+  isConnectionError
+} from '../errors/RedisErrors';
 
 export interface QueueJob {
   eventId: string;
@@ -17,7 +24,12 @@ export interface QueueInitResult {
   success: boolean;
   queue: Bull.Queue | null;
   error?: string;
-  connectionInfo?: RedisHealthResult;
+  connectionInfo?: any;
+  diagnostics?: {
+    redisConnection?: any;
+    queueHealth?: any;
+    circuitBreaker?: any;
+  };
 }
 
 export interface QueueStats {
@@ -42,101 +54,152 @@ export interface JobResult {
 
 export class ProductionQueueManager {
   private queue: Bull.Queue | null = null;
-  private healthChecker: RedisHealthChecker;
+  private connectionManager: RedisConnectionManager;
+  private healthMonitor: RedisHealthMonitor;
   private circuitBreaker: CircuitBreaker;
-  private redisConfig: ProductionRedisConfig;
+  private errorHandler: RedisErrorHandler;
+  private queueConnection?: Redis;
   private isProcessing = false;
   private lastProcessedAt?: Date;
   private processedJobs = 0;
   private failedJobs = 0;
+  private monitoringInterval?: NodeJS.Timeout;
 
   constructor(
     private redisUrl: string,
     private logger: any,
-    private queueName: string = 'instagram-webhooks'
+    private environment: Environment,
+    private queueName: string = 'ai-sales-production'
   ) {
-    this.healthChecker = new RedisHealthChecker();
-    this.circuitBreaker = new CircuitBreaker(5, 60000); // 5 فشل، استعادة خلال دقيقة
-    this.redisConfig = RedisProductionConfig.getProductionConfig(redisUrl);
+    this.connectionManager = new RedisConnectionManager(
+      redisUrl,
+      environment,
+      logger
+    );
+    this.healthMonitor = new RedisHealthMonitor(logger);
+    this.circuitBreaker = new CircuitBreaker(5, 60000);
+    this.errorHandler = new RedisErrorHandler(logger);
   }
 
   async initialize(): Promise<QueueInitResult> {
     try {
-      // 1. فحص صحة اتصال ريديس
-      this.logger.info('فحص اتصال ريديس...', { url: this.redisUrl });
-      
-      const healthResult = await this.healthChecker.checkConnection(this.redisUrl);
-      
-      if (!healthResult.connected) {
-        this.logger.error('فشل الاتصال بريديس', { 
-          error: healthResult.error,
-          url: this.redisUrl
-        });
-        
-        return { 
-          success: false, 
-          queue: null, 
-          error: healthResult.error,
-          connectionInfo: healthResult
-        };
+      this.logger.info('🔄 بدء تهيئة مدير الطوابير الإنتاجي...');
+
+      // 1. الحصول على اتصال Redis مخصص للطوابير
+      const connectionResult = await this.circuitBreaker.execute(
+        async () => {
+          return await this.connectionManager.getConnection(RedisUsageType.QUEUE_SYSTEM);
+        }
+      );
+
+      if (!connectionResult.success) {
+        throw new RedisConnectionError(
+          'Failed to get queue Redis connection',
+          { error: connectionResult.error }
+        );
       }
 
-      this.logger.info('تم الاتصال بريديس بنجاح', {
-        responseTime: healthResult.responseTime,
-        version: healthResult.version,
-        memory: healthResult.memory,
-        clients: healthResult.clients
+      this.queueConnection = connectionResult.result;
+      
+      // 2. التحقق من صحة الاتصال
+      if (!this.queueConnection) {
+        throw new RedisConnectionError('Queue connection is undefined');
+      }
+      
+      const healthCheck = await this.healthMonitor.performComprehensiveHealthCheck(this.queueConnection);
+      
+      if (!healthCheck.connected) {
+        throw new RedisQueueError(
+          'Redis connection health check failed',
+          { healthCheck }
+        );
+      }
+
+      this.logger.info('✅ تم التحقق من اتصال Redis للطوابير', {
+        responseTime: healthCheck.responseTime,
+        metrics: healthCheck.metrics
       });
 
-      // 2. تهيئة الطابور مع إعدادات الإنتاج
-      this.queue = new Bull(this.queueName, this.redisUrl, {
-        redis: this.redisConfig,
+      // 3. إنشاء Bull Queue باستخدام خيارات الاتصال المحسنة
+      const connectionConfig = this.queueConnection!.options;
+      
+      this.queue = new Bull(this.queueName, {
+        redis: {
+          host: connectionConfig.host,
+          port: connectionConfig.port,
+          password: connectionConfig.password,
+          family: connectionConfig.family,
+          keyPrefix: connectionConfig.keyPrefix,
+          connectTimeout: connectionConfig.connectTimeout,
+          lazyConnect: connectionConfig.lazyConnect,
+          ...(connectionConfig.tls && { tls: connectionConfig.tls })
+        },
         defaultJobOptions: {
-          removeOnComplete: 100,     // الاحتفاظ بـ 100 مهمة مكتملة
-          removeOnFail: 50,          // الاحتفاظ بـ 50 مهمة فاشلة
-          attempts: 3,               // 3 محاولات لكل مهمة
+          removeOnComplete: 200,     // الاحتفاظ بمزيد من المهام المكتملة
+          removeOnFail: 100,         // الاحتفاظ بمزيد من المهام الفاشلة
+          attempts: 5,               // محاولات أكثر للمهام المهمة
           backoff: {
             type: 'exponential',
-            delay: 2000,             // تأخير متزايد
+            delay: 2000,
           },
-          timeout: 30000,            // مهلة 30 ثانية لكل مهمة
-          delay: 100                 // تأخير صغير قبل البدء
+          timeout: 45000,            // مهلة أطول للمعالجة المعقدة
+          delay: 100
         },
         settings: {
-          stalledInterval: 30 * 1000,    // فحص المهام المعلقة كل 30 ثانية
-          maxStalledCount: 1             // عدد أقصى للمهام المعلقة
+          stalledInterval: 30000,    // فحص المهام المعلقة
+          maxStalledCount: 2,        // السماح بمهام معلقة أكثر
+          retryProcessDelay: 5000    // تأخير إعادة المحاولة
         }
       });
 
-      // 3. إعداد معالجات الأحداث
+      // 4. إعداد معالجات الأحداث والمهام
       this.setupEventHandlers();
-
-      // 4. إعداد معالجات المهام
       this.setupJobProcessors();
 
-      // 5. تنظيف المهام القديمة عند البدء
+      // 5. تنظيف أولي وبدء المراقبة
       await this.performInitialCleanup();
+      this.startQueueMonitoring();
 
-      this.logger.info('تم تهيئة مدير الطوابير بنجاح', {
+      const diagnostics = {
+        redisConnection: this.connectionManager.getConnectionInfo(RedisUsageType.QUEUE_SYSTEM),
+        queueHealth: healthCheck,
+        circuitBreaker: this.circuitBreaker.getStats()
+      };
+
+      this.logger.info('✅ تم تهيئة مدير الطوابير الإنتاجي بنجاح', {
         queueName: this.queueName,
-        responseTime: healthResult.responseTime
+        responseTime: healthCheck.responseTime,
+        totalConnections: this.connectionManager.getConnectionStats().totalConnections
       });
 
-      return { 
-        success: true, 
+      return {
+        success: true,
         queue: this.queue,
-        connectionInfo: healthResult
+        connectionInfo: healthCheck,
+        diagnostics
       };
 
     } catch (error) {
-      this.logger.error('فشل في تهيئة مدير الطوابير', { 
-        error: error instanceof Error ? error.message : String(error)
+      const redisError = this.errorHandler.handleError(error, {
+        operation: 'QueueManager.initialize',
+        queueName: this.queueName
       });
-      
-      return { 
-        success: false, 
-        queue: null, 
-        error: error instanceof Error ? error.message : String(error)
+
+      this.logger.error('💥 فشل في تهيئة مدير الطوابير', {
+        error: redisError.message,
+        code: redisError.code,
+        context: redisError.context
+      });
+
+      return {
+        success: false,
+        queue: null,
+        error: redisError.message,
+        diagnostics: {
+          redisConnection: null,
+          queueHealth: null,
+          circuitBreaker: this.circuitBreaker.getStats()
+        }
       };
     }
   }
@@ -533,12 +596,163 @@ export class ProductionQueueManager {
     }
   }
 
-  async close(): Promise<void> {
-    if (this.queue) {
-      await this.queue.close();
-      this.queue = null;
-      this.logger.info('تم إغلاق مدير الطوابير');
+  private startQueueMonitoring(): void {
+    // مراقبة كل 30 ثانية
+    this.monitoringInterval = setInterval(async () => {
+      try {
+        await this.performQueueHealthCheck();
+      } catch (error) {
+        this.logger.error('Queue monitoring error', { error });
+      }
+    }, 30000);
+
+    this.logger.debug('Queue monitoring started');
+  }
+
+  private async performQueueHealthCheck(): Promise<void> {
+    if (!this.queue || !this.queueConnection) return;
+
+    try {
+      // فحص صحة الاتصال
+      const isHealthy = await this.healthMonitor.isConnectionHealthy(this.queueConnection, 2000);
+      
+      if (!isHealthy) {
+        this.logger.warn('Queue Redis connection unhealthy, attempting reconnection');
+        
+        // إعادة الاتصال
+        this.queueConnection = await this.connectionManager.getConnection(RedisUsageType.QUEUE_SYSTEM);
+      }
+
+      // فحص إحصائيات الطابور
+      const stats = await this.getQueueStats();
+      
+      if (stats.errorRate > 20) {
+        this.logger.warn('High error rate detected in queue', { 
+          errorRate: stats.errorRate,
+          failed: stats.failed,
+          completed: stats.completed 
+        });
+      }
+
+      if (stats.waiting > 1000) {
+        this.logger.warn('Queue backlog detected', { 
+          waiting: stats.waiting,
+          active: stats.active 
+        });
+      }
+
+    } catch (error) {
+      this.logger.error('Queue health check failed', { error });
     }
+  }
+
+  async getQueueHealth(): Promise<{
+    healthy: boolean;
+    stats: QueueStats;
+    redisHealth: any;
+    recommendations: string[];
+  }> {
+    const recommendations: string[] = [];
+    let healthy = true;
+
+    try {
+      const stats = await this.getQueueStats();
+      let redisHealth = null;
+
+      if (this.queueConnection) {
+        redisHealth = await this.healthMonitor.performComprehensiveHealthCheck(this.queueConnection);
+        
+        if (!redisHealth.connected) {
+          healthy = false;
+          recommendations.push('إصلاح اتصال Redis للطوابير');
+        }
+      }
+
+      if (stats.errorRate > 10) {
+        healthy = false;
+        recommendations.push('معدل خطأ مرتفع - فحص معالجات المهام');
+      }
+
+      if (stats.waiting > 500) {
+        recommendations.push('طابور طويل - زيادة المعالجات أو تحسين الأداء');
+      }
+
+      if (stats.failed > stats.completed) {
+        healthy = false;
+        recommendations.push('المهام الفاشلة أكثر من المكتملة - فحص المعالجة');
+      }
+
+      return {
+        healthy,
+        stats,
+        redisHealth,
+        recommendations: recommendations.length > 0 ? recommendations : ['النظام يعمل بشكل مثالي']
+      };
+
+    } catch (error) {
+      return {
+        healthy: false,
+        stats: {
+          waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0,
+          paused: 0, total: 0, processing: false, errorRate: 100
+        },
+        redisHealth: null,
+        recommendations: ['خطأ في فحص صحة الطابور']
+      };
+    }
+  }
+
+  async gracefulShutdown(timeoutMs: number = 30000): Promise<void> {
+    this.logger.info('🔄 بدء إغلاق مدير الطوابير بأمان...');
+
+    // إيقاف المراقبة
+    if (this.monitoringInterval) {
+      clearInterval(this.monitoringInterval);
+      this.monitoringInterval = undefined;
+    }
+
+    if (this.queue) {
+      try {
+        // انتظار إكمال المهام الجارية مع timeout
+        const waitPromise = this.waitForActiveJobs();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Shutdown timeout')), timeoutMs)
+        );
+
+        await Promise.race([waitPromise, timeoutPromise]);
+
+        await this.queue!.close();
+        this.queue = null;
+
+        this.logger.info('✅ تم إغلاق الطابور بأمان');
+
+      } catch (error) {
+        this.logger.warn('فشل في الانتظار لإكمال المهام، إغلاق قسري', { error });
+        await this.queue!.close();
+        this.queue = null;
+      }
+    }
+
+    // إغلاق اتصالات Redis
+    await this.connectionManager.closeAllConnections();
+
+    this.logger.info('✅ تم إغلاق مدير الطوابير بأمان');
+  }
+
+  private async waitForActiveJobs(): Promise<void> {
+    if (!this.queue) return;
+
+    let activeJobs = await this.queue!.getActive();
+    
+    while (activeJobs.length > 0) {
+      this.logger.info(`انتظار إكمال ${activeJobs.length} مهام جارية...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      activeJobs = await this.queue!.getActive();
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.gracefulShutdown();
   }
 }
 
