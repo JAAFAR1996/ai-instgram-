@@ -481,9 +481,74 @@ export class ProductionQueueManager {
     // فحص الطابور كل 5 ثوانٍ للبحث عن jobs منتظرة
     setInterval(async () => {
       try {
-        if (!this.queue) return;
+        this.logger.debug('🔍 [MANUAL-POLLING] فحص دوري...');
         
+        if (!this.queue) {
+          this.logger.warn('❌ [MANUAL-POLLING] Queue غير متاح');
+          return;
+        }
+        
+        this.logger.debug('🔍 [MANUAL-POLLING] جلب waiting jobs...');
         const waitingJobs = await this.queue.getWaiting();
+        
+        // 🔍 فحص delayed jobs أيضاً - هذا قد يكون السبب!
+        const delayedJobs = await this.queue.getDelayed();
+        
+        this.logger.debug('🔍 [MANUAL-POLLING] نتائج getWaiting:', { 
+          waitingCount: waitingJobs.length,
+          delayedCount: delayedJobs.length
+        });
+        
+        // إذا كان لديك delayed jobs، اطبع تفاصيلها
+        if (delayedJobs.length > 0) {
+          this.logger.warn('⏰ [MANUAL-POLLING] تم اكتشاف delayed jobs!', {
+            delayedCount: delayedJobs.length,
+            delayedJobIds: delayedJobs.slice(0, 3).map(j => j.id),
+            delayTimes: delayedJobs.slice(0, 3).map(j => ({
+              id: j.id,
+              delay: j.opts?.delay,
+              addedAt: new Date(j.timestamp).toISOString()
+            }))
+          });
+        }
+        
+        // 🚨 معالجة delayed jobs المتراكمة أولاً
+        if (delayedJobs.length > 0) {
+          this.logger.info('🔧 [MANUAL-POLLING] معالجة delayed jobs متراكمة', {
+            delayedCount: delayedJobs.length
+          });
+          
+          for (const delayedJob of delayedJobs.slice(0, 2)) { // معالجة أول 2 delayed jobs
+            try {
+              // فحص إذا كان الوقت المحدد للـ delay انتهى
+              const now = Date.now();
+              const jobDelay = delayedJob.opts?.delay || 0;
+              const addedAt = delayedJob.timestamp;
+              const shouldRun = (now - addedAt) >= jobDelay;
+              
+              this.logger.info('🔍 [DELAYED-JOB] فحص delayed job', {
+                jobId: delayedJob.id,
+                addedAt: new Date(addedAt).toISOString(),
+                delay: jobDelay,
+                shouldRun,
+                waitTime: now - addedAt
+              });
+              
+              if (shouldRun) {
+                // ترقية delayed job إلى waiting بإزالة delay
+                await delayedJob.promote();
+                this.logger.info('⬆️ [DELAYED-JOB] تمت ترقية delayed job إلى waiting', {
+                  jobId: delayedJob.id
+                });
+              }
+            } catch (promoteError) {
+              this.logger.error('❌ [DELAYED-JOB] فشل في ترقية delayed job', {
+                jobId: delayedJob.id,
+                error: promoteError instanceof Error ? promoteError.message : String(promoteError)
+              });
+            }
+          }
+        }
         
         if (waitingJobs.length > 0) {
           this.logger.info('🔍 [MANUAL-POLLING] تم اكتشاف jobs منتظرة', { 
@@ -497,24 +562,49 @@ export class ProductionQueueManager {
               this.logger.info('🔄 [MANUAL-PROCESSING] محاولة معالجة job يدوياً', {
                 jobId: job.id,
                 jobName: job.name,
-                data: job.data
+                dataKeys: Object.keys(job.data || {}),
+                jobState: job.opts?.delay ? 'delayed' : 'waiting'
               });
+              
+              // 🔍 فحص Job data integrity أولاً
+              if (!job.data) {
+                this.logger.error('❌ [MANUAL-PROCESSING] Job data مفقود!', { jobId: job.id });
+                await job.remove();
+                this.failedJobs++;
+                continue;
+              }
+              
+              // 🔍 فحص إذا كان Job delayed بدلاً من waiting
+              if (job.opts?.delay && job.opts.delay > 0) {
+                this.logger.warn('⏰ [MANUAL-PROCESSING] Job delayed - تخطي', { 
+                  jobId: job.id, 
+                  delay: job.opts.delay 
+                });
+                continue;
+              }
               
               // معالجة حسب نوع Job
               if (job.name === 'process-webhook') {
+                this.logger.debug('🔄 [MANUAL-PROCESSING] معالجة webhook job...');
                 const result = await this.processWebhookJob(job.data);
-                // استخدام remove بدلاً من moveToCompleted للتوافق مع Upstash
+                
+                this.logger.debug('🔄 [MANUAL-PROCESSING] إزالة job...');
                 await job.remove();
                 this.completedJobs++;
+                
                 this.logger.info('✅ [MANUAL-PROCESSING] تمت معالجة webhook job', { 
                   jobId: job.id, 
                   result,
                   completedCount: this.completedJobs 
                 });
               } else if (job.name === 'ai-response') {
+                this.logger.debug('🔄 [MANUAL-PROCESSING] معالجة AI job...');
                 const result = await this.processAIResponseJob(job.data);
+                
+                this.logger.debug('🔄 [MANUAL-PROCESSING] إزالة AI job...');
                 await job.remove();
                 this.completedJobs++;
+                
                 this.logger.info('✅ [MANUAL-PROCESSING] تمت معالجة AI job', { 
                   jobId: job.id,
                   result,
@@ -522,6 +612,7 @@ export class ProductionQueueManager {
                 });
               } else {
                 // Job غير معروف - إزالة
+                this.logger.debug('🔄 [MANUAL-PROCESSING] إزالة job غير معروف...');
                 await job.remove();
                 this.logger.warn('⚠️ [MANUAL-PROCESSING] تمت إزالة job غير معروف', { 
                   jobId: job.id, 
@@ -531,23 +622,33 @@ export class ProductionQueueManager {
             } catch (jobError) {
               this.logger.error('❌ [MANUAL-PROCESSING] فشل في معالجة job', {
                 jobId: job.id,
-                error: jobError instanceof Error ? jobError.message : String(jobError)
+                jobName: job.name,
+                error: jobError instanceof Error ? jobError.message : String(jobError),
+                stack: jobError instanceof Error ? jobError.stack?.substring(0, 500) : undefined
               });
               try {
                 // استخدام remove في حالة الفشل أيضاً
+                this.logger.debug('🔄 [MANUAL-PROCESSING] إزالة job فاشل...');
                 await job.remove();
                 this.failedJobs++;
+                this.logger.info('🗑️ [MANUAL-PROCESSING] تمت إزالة job فاشل', { jobId: job.id });
               } catch (removeError) {
                 this.logger.error('❌ [MANUAL-PROCESSING] فشل حتى في إزالة job', {
                   jobId: job.id,
-                  removeError: removeError instanceof Error ? removeError.message : String(removeError)
+                  removeError: removeError instanceof Error ? removeError.message : String(removeError),
+                  removeStack: removeError instanceof Error ? removeError.stack?.substring(0, 300) : undefined
                 });
               }
             }
           }
+        } else {
+          this.logger.debug('🔍 [MANUAL-POLLING] لا توجد waiting jobs');
         }
       } catch (error) {
-        this.logger.error('❌ [MANUAL-POLLING] خطأ في Manual Polling', { error });
+        this.logger.error('❌ [MANUAL-POLLING] خطأ في Manual Polling', { 
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack?.substring(0, 500) : undefined
+        });
       }
     }, 5000); // كل 5 ثوانٍ
   }
@@ -591,7 +692,7 @@ export class ProductionQueueManager {
 
       const job = await this.queue.add('process-webhook', jobData, {
         priority: priorityValue,
-        delay: priority === 'CRITICAL' ? 0 : 100, // ⚠️ هذا قد يكون السبب - jobs تبدأ delayed!
+        delay: 0, // 🚀 إزالة كل delay - Upstash لا يدعم delayed jobs بشكل صحيح
         removeOnComplete: priority === 'CRITICAL' ? 200 : 100,
         removeOnFail: priority === 'CRITICAL' ? 100 : 50,
         attempts: priority === 'CRITICAL' ? 5 : 3
@@ -665,7 +766,7 @@ export class ProductionQueueManager {
 
       const job = await this.queue.add('ai-response', jobData, {
         priority: this.getPriorityValue(priority),
-        delay: 50, // تأخير قصير لمعالجة الذكاء الاصطناعي
+        delay: 0, // 🚀 إزالة delay - Upstash لا يدعم delayed jobs
         attempts: 2 // محاولتان فقط للذكاء الاصطناعي
       });
 
