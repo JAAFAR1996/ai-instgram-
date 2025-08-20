@@ -3,6 +3,10 @@
  * Main entry point with full feature stack
  */
 
+// CRITICAL: Import error handlers FIRST
+import './boot/error-handlers.js';
+import { fireAndForget } from './boot/error-handlers.js';
+
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import { serve } from '@hono/node-server';
@@ -1370,12 +1374,12 @@ async function startServer() {
   });
 }
 
-// Start the server
-console.log('🔍 [DEBUG] استدعاء startServer() من النهاية...');
-startServer().catch((error) => {
-  console.error('💥 [CRITICAL] خطأ في startServer():', error);
-  console.error('🔍 [DEBUG] Stack trace:', error.stack);
-});
+// Start the server with proper error handling
+console.log('🚀 Starting production server...');
+fireAndForget(async () => {
+  console.log('🔍 [DEBUG] استدعاء startServer() من النهاية...');
+  await startServer();
+}, 'startServer');
 
 // ===============================================
 // GRACEFUL SHUTDOWN HANDLING
