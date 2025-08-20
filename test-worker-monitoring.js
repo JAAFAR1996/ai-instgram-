@@ -35,24 +35,43 @@ async function testWorkerMonitoring() {
 
     console.log('✅ تم تهيئة مدير الطوابير بنجاح\n');
 
-    console.log('2️⃣ إضافة مهام اختبار...');
+    console.log('2️⃣ إضافة مهام اختبار للتحقق من إصلاح Workers...');
     
-    // إضافة عدة مهام لاختبار Workers
+    // إضافة مهام webhook لاختبار المعالج المخصص
     const jobs = [];
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 3; i++) {
       const jobResult = await queueManager.addWebhookJob(
         `test-event-${i}`,
-        { test: true, jobNumber: i },
+        { test: true, jobNumber: i, fixTest: 'webhook-processor-fix' },
         'test-merchant',
         'INSTAGRAM',
-        i <= 2 ? 'HIGH' : 'MEDIUM'
+        'HIGH' // كلها high priority للاختبار السريع
       );
       
       if (jobResult.success) {
-        console.log(`✅ تم إضافة المهمة ${i}: ${jobResult.jobId}`);
+        console.log(`✅ تم إضافة webhook job ${i}: ${jobResult.jobId}`);
         jobs.push(jobResult.jobId);
       } else {
-        console.error(`❌ فشل في إضافة المهمة ${i}:`, jobResult.error);
+        console.error(`❌ فشل في إضافة webhook job ${i}:`, jobResult.error);
+      }
+    }
+
+    console.log('\n🤖 إضافة مهام AI للاختبار...');
+    // إضافة مهام AI أيضاً
+    for (let i = 1; i <= 2; i++) {
+      const aiJobResult = await queueManager.addAIResponseJob(
+        `test-conversation-${i}`,
+        'test-merchant',
+        'test-customer',
+        `رسالة اختبار رقم ${i}`,
+        'INSTAGRAM',
+        'HIGH'
+      );
+
+      if (aiJobResult.success) {
+        console.log(`✅ تم إضافة AI job ${i}: ${aiJobResult.jobId}`);
+      } else {
+        console.error(`❌ فشل في إضافة AI job ${i}:`, aiJobResult.error);
       }
     }
 
@@ -86,23 +105,10 @@ async function testWorkerMonitoring() {
     console.log(`- قيد المعالجة: ${healthResult.workerStatus.isProcessing ? 'نعم' : 'لا'}`);
     console.log(`- التوصيات:`, healthResult.recommendations);
 
-    console.log('\n5️⃣ اختبار مهام الذكاء الاصطناعي...');
+    console.log('\n5️⃣ التحقق النهائي من نجاح الإصلاح...');
     
-    const aiJobResult = await queueManager.addAIResponseJob(
-      'test-conversation-123',
-      'test-merchant',
-      'test-customer',
-      'مرحباً، كيف يمكنني مساعدتك؟',
-      'INSTAGRAM',
-      'HIGH'
-    );
-
-    if (aiJobResult.success) {
-      console.log(`✅ تم إضافة مهمة ذكاء اصطناعي: ${aiJobResult.jobId}`);
-    }
-
-    // انتظار قصير للمعالجة
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // انتظار إضافي للتأكد من إنجاز كل شيء
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     const finalStats = await queueManager.getQueueStats();
     console.log('\n📈 الإحصائيات النهائية:', {

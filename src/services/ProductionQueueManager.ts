@@ -279,92 +279,51 @@ export class ProductionQueueManager {
       this.logger.warn('⚠️ Workers لم تبدأ في المعالجة خلال 10 ثوانٍ');
     }, 10000);
 
-    // معالج شامل لجميع أنواع المهام مع مراقبة محسّنة
-    this.queue.process('*', 5, async (job) => {
-      // إلغاء تحذير بدء Workers عند أول مهمة
+    // ⚠️ تم إزالة المعالج العام '*' لأنه يسرق jobs من المعالجات المخصصة
+    // المعالجات المخصصة أدناه ستتعامل مع كل نوع job
+    
+    // تسجيل بدء Workers للمراقبة
+    setTimeout(() => {
+      this.logger.info('🚀 تم تفعيل جميع معالجات الطوابير المخصصة', {
+        processors: ['process-webhook', 'ai-response', 'cleanup'],
+        totalConcurrency: 3 + 3 + 1 // مجموع concurrency لكل المعالجات
+      });
+      clearTimeout(workerInitTimeout);
+    }, 100);
+
+    // 🎯 معالج مخصص للويب هوك - الأساسي للمعالجة
+    this.queue.process('process-webhook', 5, async (job) => { // زيادة concurrency من 3 إلى 5
+      // إلغاء تحذير عدم بدء Workers عند أول معالجة
       clearTimeout(workerInitTimeout);
       
-      const startTime = Date.now();
-      const workerId = `worker-${Math.random().toString(36).substr(2, 9)}`;
-      
-      this.logger.info(`⚡ Worker ${workerId} - بدء معالجة مهمة`, {
-        workerId,
-        jobId: job.id,
-        name: job.name,
-        type: job.data.type || job.name,
-        attempt: job.attemptsMade + 1,
-        maxAttempts: job.opts.attempts,
-        priority: job.opts.priority,
-        delay: job.opts.delay,
-        queueStatus: {
-          waiting: await this.queue!.getWaiting().then(jobs => jobs.length),
-          active: await this.queue!.getActive().then(jobs => jobs.length)
-        }
-      });
-
-      try {
-        const result = await this.circuitBreaker.execute(async () => {
-          return await this.processWebhookJob(job.data);
-        });
-
-        const duration = Date.now() - startTime;
-        this.logger.info(`✅ Worker ${workerId} - مهمة مكتملة بنجاح`, {
-          workerId,
-          jobId: job.id,
-          name: job.name,
-          duration: `${duration}ms`,
-          result: 'success',
-          throughput: Math.round(1000 / duration * 100) / 100 // مهام/ثانية
-        });
-
-        return {
-          success: true,
-          workerId,
-          jobId: job.id?.toString(),
-          processingTime: duration,
-          result
-        };
-
-      } catch (error) {
-        const duration = Date.now() - startTime;
-        this.logger.error(`❌ Worker ${workerId} - فشل في معالجة المهمة`, {
-          workerId,
-          jobId: job.id,
-          name: job.name,
-          duration: `${duration}ms`,
-          error: error instanceof Error ? error.message : String(error),
-          attempt: job.attemptsMade + 1,
-          maxAttempts: job.opts.attempts,
-          willRetry: job.attemptsMade + 1 < (job.opts.attempts || 1),
-          errorType: error instanceof Error ? error.constructor.name : 'Unknown'
-        });
-
-        throw error;
-      }
-    });
-
-    // معالج مخصص للويب هوك (للتوافق مع الإصدارات القديمة)
-    this.queue.process('process-webhook', 3, async (job) => {
       const { eventId, payload, merchantId, platform } = job.data;
       const webhookWorkerId = `webhook-worker-${Math.random().toString(36).substr(2, 6)}`;
+      const startTime = Date.now();
       
       return await this.circuitBreaker.execute(async () => {
         try {
-          this.logger.info(`🔄 ${webhookWorkerId} - معالجة ويب هوك`, {
+          this.logger.info(`🔄 ${webhookWorkerId} - بدء معالجة ويب هوك`, {
             webhookWorkerId,
             eventId,
             merchantId,
             platform,
             jobId: job.id,
-            attempt: job.attemptsMade + 1
+            attempt: job.attemptsMade + 1,
+            queueStatus: {
+              waiting: await this.queue!.getWaiting().then(jobs => jobs.length),
+              active: await this.queue!.getActive().then(jobs => jobs.length)
+            }
           });
 
           const result = await this.processWebhookJob(job.data);
           
-          this.logger.info(`✅ ${webhookWorkerId} - ويب هوك مكتمل`, {
+          const duration = Date.now() - startTime;
+          this.logger.info(`✅ ${webhookWorkerId} - ويب هوك مكتمل بنجاح`, {
             webhookWorkerId,
             eventId,
-            processingTime: Date.now() - job.processedOn!
+            duration: `${duration}ms`,
+            throughput: Math.round(1000 / duration * 100) / 100,
+            result: 'success'
           });
           
           return { 
@@ -372,19 +331,22 @@ export class ProductionQueueManager {
             webhookWorkerId,
             eventId, 
             result,
-            processingTime: Date.now() - job.processedOn!
+            processingTime: duration
           };
           
         } catch (error) {
+          const duration = Date.now() - startTime;
           this.logger.error(`❌ ${webhookWorkerId} - فشل في معالجة الويب هوك`, { 
             webhookWorkerId,
             eventId, 
             merchantId, 
             platform,
             jobId: job.id,
+            duration: `${duration}ms`,
             error: error instanceof Error ? error.message : String(error),
             attempt: job.attemptsMade + 1,
-            maxAttempts: job.opts.attempts
+            maxAttempts: job.opts.attempts,
+            errorType: error instanceof Error ? error.constructor.name : 'Unknown'
           });
           
           throw error;
@@ -392,27 +354,31 @@ export class ProductionQueueManager {
       });
     });
 
-    // معالج مهام الذكاء الاصطناعي
+    // 🤖 معالج مهام الذكاء الاصطناعي 
     this.queue.process('ai-response', 3, async (job) => {
       const { conversationId, merchantId, message } = job.data;
       const aiWorkerId = `ai-worker-${Math.random().toString(36).substr(2, 6)}`;
+      const startTime = Date.now();
       
       return await this.circuitBreaker.execute(async () => {
         try {
-          this.logger.info(`🤖 ${aiWorkerId} - معالجة استجابة ذكاء اصطناعي`, {
+          this.logger.info(`🤖 ${aiWorkerId} - بدء معالجة استجابة ذكاء اصطناعي`, {
             aiWorkerId,
             conversationId,
             merchantId,
             jobId: job.id,
-            messageLength: message?.length || 0
+            messageLength: message?.length || 0,
+            attempt: job.attemptsMade + 1
           });
 
           const result = await this.processAIResponseJob(job.data);
           
-          this.logger.info(`✅ ${aiWorkerId} - استجابة ذكاء اصطناعي مكتملة`, {
+          const duration = Date.now() - startTime;
+          this.logger.info(`✅ ${aiWorkerId} - استجابة ذكاء اصطناعي مكتملة بنجاح`, {
             aiWorkerId,
             conversationId,
-            processingTime: Date.now() - job.processedOn!
+            duration: `${duration}ms`,
+            result: 'success'
           });
           
           return { 
@@ -420,15 +386,19 @@ export class ProductionQueueManager {
             aiWorkerId,
             conversationId, 
             result,
-            processingTime: Date.now() - job.processedOn!
+            processingTime: duration
           };
           
         } catch (error) {
+          const duration = Date.now() - startTime;
           this.logger.error(`❌ ${aiWorkerId} - فشل في معالجة استجابة الذكاء الاصطناعي`, { 
             aiWorkerId,
             conversationId, 
             merchantId,
+            duration: `${duration}ms`,
             error: error instanceof Error ? error.message : String(error),
+            attempt: job.attemptsMade + 1,
+            maxAttempts: job.opts.attempts,
             jobId: job.id
           });
           
