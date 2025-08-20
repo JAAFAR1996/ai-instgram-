@@ -93,28 +93,51 @@ function detectEnvironment(): Environment {
 }
 
 async function initializeRedisIntegration() {
+  console.log('🔍 [DEBUG] initializeRedisIntegration() - بدء دالة تهيئة النظام المتكامل');
+  
   try {
     if (REDIS_URL) {
+      console.log('🔍 [DEBUG] REDIS_URL موجود:', REDIS_URL.substring(0, 20) + '...');
+      
       const environment = detectEnvironment();
+      console.log('🔍 [DEBUG] تم تحديد البيئة:', environment);
+      
+      console.log('🔍 [DEBUG] إنشاء RedisProductionIntegration...');
       redisIntegration = new RedisProductionIntegration(REDIS_URL, console, environment);
+      
+      console.log('🔍 [DEBUG] استدعاء redisIntegration.initialize()...');
       const result = await redisIntegration.initialize();
+      
+      console.log('🔍 [DEBUG] نتيجة initialize():', { 
+        success: result.success, 
+        error: result.error?.substring(0, 100) 
+      });
       
       if (result.success) {
         console.log('✅ نظام ريديس المتكامل جاهز', {
           responseTime: result.diagnostics?.redisHealth?.responseTime,
           queueStats: result.diagnostics?.queueStats
         });
+        console.log('🔍 [DEBUG] queueManager موجود؟', !!result.queueManager);
       } else {
         console.error('❌ فشل تهيئة نظام ريديس:', result.error);
         console.warn('⚠️ سيتم استخدام المعالجة البديلة');
+        console.log('🔍 [DEBUG] تفاصيل الفشل:', result.diagnostics);
       }
     } else {
       console.warn('⚠️ REDIS_URL not configured - Redis integration disabled');
+      console.log('🔍 [DEBUG] REDIS_URL غير موجود في متغيرات البيئة');
     }
   } catch (error) {
     console.error('❌ خطأ في تهيئة النظام المتكامل:', error);
+    console.error('🔍 [DEBUG] تفاصيل الخطأ:', {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     console.warn('⚠️ سيتم استخدام المعالجة البديلة');
   }
+  
+  console.log('🔍 [DEBUG] انتهاء initializeRedisIntegration()');
 }
 
 // Scheduled maintenance: cleanup old logs (daily) and webhook logs via function if available
@@ -1310,8 +1333,12 @@ console.log('   - Multi-tenant merchantId lookup: ✅ Enabled');
 
 // Initialize and start server
 async function startServer() {
+  console.log('🔍 [DEBUG] startServer() - بدء دالة تشغيل السيرفر');
+  
   // Initialize Redis Integration
+  console.log('🔍 [DEBUG] استدعاء initializeRedisIntegration()...');
   await initializeRedisIntegration();
+  console.log('🔍 [DEBUG] انتهى initializeRedisIntegration()');
   
   // Start server using @hono/node-server
   serve({
@@ -1329,7 +1356,11 @@ async function startServer() {
 }
 
 // Start the server
-startServer().catch(console.error);
+console.log('🔍 [DEBUG] استدعاء startServer() من النهاية...');
+startServer().catch((error) => {
+  console.error('💥 [CRITICAL] خطأ في startServer():', error);
+  console.error('🔍 [DEBUG] Stack trace:', error.stack);
+});
 
 // ===============================================
 // GRACEFUL SHUTDOWN HANDLING

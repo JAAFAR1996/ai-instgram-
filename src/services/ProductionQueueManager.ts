@@ -62,6 +62,7 @@ export class ProductionQueueManager {
   private isProcessing = false;
   private lastProcessedAt?: Date;
   private processedJobs = 0;
+  private completedJobs = 0;
   private failedJobs = 0;
   private monitoringInterval?: NodeJS.Timeout;
 
@@ -303,6 +304,15 @@ export class ProductionQueueManager {
     // 🎯 معالج مخصص للويب هوك - الأساسي للمعالجة
     this.logger.info('🔧 [DEBUG] تسجيل معالج process-webhook...');
     
+    // إضافة listener لمراقبة أن الـ queue يتلقى jobs
+    this.queue.on('waiting', (jobId) => {
+      this.logger.info('📥 [JOB-WAITING] Job جديد في الطابور', { jobId });
+    });
+    
+    this.queue.on('stalled', (job) => {
+      this.logger.warn('⏸️ [JOB-STALLED] Job متوقف!', { jobId: job.id, jobName: job.name });
+    });
+    
     this.queue.process('process-webhook', 5, async (job) => { // زيادة concurrency من 3 إلى 5
       this.logger.info('🎯 [WORKER-START] معالج webhook استقبل job!', { jobId: job.id, jobName: job.name });
       // إلغاء تحذير عدم بدء Workers عند أول معالجة
@@ -445,6 +455,101 @@ export class ProductionQueueManager {
       concurrency: { webhook: 5, ai: 3, cleanup: 1 },
       total: 9
     });
+    
+    // 🔍 تحقق فوري من أن القائمة يمكنها إرسال إشعارات
+    setTimeout(async () => {
+      try {
+        this.logger.info('🔍 [BULL-TEST] اختبار إضافة job تجريبي فوري...');
+        const testJob = await this.queue!.add('test-notification', { test: true }, { 
+          priority: 1,
+          delay: 0,
+          attempts: 1
+        });
+        this.logger.info('🔍 [BULL-TEST] تم إضافة test job:', testJob.id);
+      } catch (error) {
+        this.logger.error('🔍 [BULL-TEST] فشل في إضافة test job:', error);
+      }
+    }, 1000);
+    
+    // 🚨 Manual Polling Fallback - للتعامل مع مشاكل Upstash notification
+    this.startManualPolling();
+  }
+
+  private startManualPolling(): void {
+    this.logger.info('🔄 [MANUAL-POLLING] بدء Manual Polling كـ fallback للإشعارات');
+    
+    // فحص الطابور كل 5 ثوانٍ للبحث عن jobs منتظرة
+    setInterval(async () => {
+      try {
+        if (!this.queue) return;
+        
+        const waitingJobs = await this.queue.getWaiting();
+        
+        if (waitingJobs.length > 0) {
+          this.logger.info('🔍 [MANUAL-POLLING] تم اكتشاف jobs منتظرة', { 
+            count: waitingJobs.length,
+            jobIds: waitingJobs.slice(0, 3).map(j => j.id) // أول 3 فقط لتجنب spam
+          });
+          
+          // محاولة تشغيل jobs يدوياً
+          for (const job of waitingJobs.slice(0, 3)) { // معالجة أول 3 jobs فقط
+            try {
+              this.logger.info('🔄 [MANUAL-PROCESSING] محاولة معالجة job يدوياً', {
+                jobId: job.id,
+                jobName: job.name,
+                data: job.data
+              });
+              
+              // معالجة حسب نوع Job
+              if (job.name === 'process-webhook') {
+                const result = await this.processWebhookJob(job.data);
+                // استخدام remove بدلاً من moveToCompleted للتوافق مع Upstash
+                await job.remove();
+                this.completedJobs++;
+                this.logger.info('✅ [MANUAL-PROCESSING] تمت معالجة webhook job', { 
+                  jobId: job.id, 
+                  result,
+                  completedCount: this.completedJobs 
+                });
+              } else if (job.name === 'ai-response') {
+                const result = await this.processAIResponseJob(job.data);
+                await job.remove();
+                this.completedJobs++;
+                this.logger.info('✅ [MANUAL-PROCESSING] تمت معالجة AI job', { 
+                  jobId: job.id,
+                  result,
+                  completedCount: this.completedJobs
+                });
+              } else {
+                // Job غير معروف - إزالة
+                await job.remove();
+                this.logger.warn('⚠️ [MANUAL-PROCESSING] تمت إزالة job غير معروف', { 
+                  jobId: job.id, 
+                  jobName: job.name 
+                });
+              }
+            } catch (jobError) {
+              this.logger.error('❌ [MANUAL-PROCESSING] فشل في معالجة job', {
+                jobId: job.id,
+                error: jobError instanceof Error ? jobError.message : String(jobError)
+              });
+              try {
+                // استخدام remove في حالة الفشل أيضاً
+                await job.remove();
+                this.failedJobs++;
+              } catch (removeError) {
+                this.logger.error('❌ [MANUAL-PROCESSING] فشل حتى في إزالة job', {
+                  jobId: job.id,
+                  removeError: removeError instanceof Error ? removeError.message : String(removeError)
+                });
+              }
+            }
+          }
+        }
+      } catch (error) {
+        this.logger.error('❌ [MANUAL-POLLING] خطأ في Manual Polling', { error });
+      }
+    }, 5000); // كل 5 ثوانٍ
   }
 
   async addWebhookJob(
