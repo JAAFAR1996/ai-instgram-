@@ -13,7 +13,7 @@ import { getServiceController } from '../services/service-controller.js';
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
 import { getDatabase } from '../database/connection.js';
 import { getConfig } from '../config/environment.js';
-import { verifyHMAC } from '../services/encryption.js';
+import { verifyHMAC, verifyHMACRaw, type HmacVerifyResult } from '../services/encryption.js';
 import { pushDLQ } from '../queue/dead-letter.js';
 import { z } from 'zod';
 import crypto from 'node:crypto';
@@ -261,9 +261,10 @@ export class WebhookRouter {
         return c.text('Server configuration error', 500);
       }
       
-      // 3. Unified HMAC verification
-      if (!sigHeader || !verifyHMAC(rawBuf.toString('utf8'), sigHeader.replace('sha256=', ''), appSecret)) {
-        console.error('❌ Instagram webhook signature verification failed');
+      // 3. Unified HMAC verification with raw Buffer
+      const verifyResult = verifyHMACRaw(rawBuf, sigHeader, appSecret);
+      if (!verifyResult.ok) {
+        console.error(`❌ Instagram webhook signature verification failed: ${verifyResult.reason}`);
         return c.text('Invalid signature', 401);
       }
       
@@ -403,10 +404,11 @@ export class WebhookRouter {
         return c.text('Payload Too Large', 413);
       }
       
-      // ✅ Unified HMAC verification
+      // ✅ Unified HMAC verification with raw Buffer
       const appSecret = this.getAppSecret();
-      if (!signature || !verifyHMAC(rawBody.toString('utf8'), signature.replace('sha256=', ''), appSecret)) {
-        console.error('❌ WhatsApp webhook signature verification failed');
+      const verifyResult = verifyHMACRaw(rawBody, signature, appSecret);
+      if (!verifyResult.ok) {
+        console.error(`❌ WhatsApp webhook signature verification failed: ${verifyResult.reason}`);
         return c.text('Invalid signature', 401);
       }
 

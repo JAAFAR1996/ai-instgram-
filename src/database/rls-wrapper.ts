@@ -30,8 +30,9 @@ export class RLSDatabase {
     const sql = this.db.getSQL();
     
     try {
-      // تحديد سياق التاجر
-      await sql`SELECT set_merchant_context(${merchantId}::uuid)`;
+      // Use SET LOCAL for transaction-scoped context (critical for pooled connections)
+      await sql`SET LOCAL app.tenant_id = ${merchantId}`;
+      await sql`SET LOCAL app.current_merchant_id = ${merchantId}`;
       
       this.currentContext = {
         merchantId,
@@ -39,10 +40,7 @@ export class RLSDatabase {
         isAdmin: false,
         sessionId: this.generateSessionId()
       };
-
-      console.log(`🔐 RLS context set for merchant: ${merchantId}`);
     } catch (error) {
-      console.error('❌ Failed to set merchant context:', error);
       throw new Error('Failed to set RLS merchant context');
     }
   }
@@ -54,17 +52,15 @@ export class RLSDatabase {
     const sql = this.db.getSQL();
     
     try {
-      await sql`SELECT set_admin_context(${isAdmin})`;
+      // Use SET LOCAL for transaction-scoped context
+      await sql`SET LOCAL app.is_admin = ${isAdmin ? 'true' : 'false'}`;
       
       this.currentContext = {
         isAdmin,
         userId,
         sessionId: this.generateSessionId()
       };
-
-      console.log(`🔐 Admin context set: ${isAdmin}`);
     } catch (error) {
-      console.error('❌ Failed to set admin context:', error);
       throw new Error('Failed to set RLS admin context');
     }
   }
@@ -76,11 +72,13 @@ export class RLSDatabase {
     const sql = this.db.getSQL();
     
     try {
-      await sql`SELECT clear_security_context()`;
+      // Clear all LOCAL settings (automatic at transaction end for pooled connections)
+      await sql`SET LOCAL app.tenant_id = DEFAULT`;
+      await sql`SET LOCAL app.current_merchant_id = DEFAULT`;
+      await sql`SET LOCAL app.is_admin = DEFAULT`;
       this.currentContext = {};
-      console.log('🔐 RLS context cleared');
     } catch (error) {
-      console.error('❌ Failed to clear context:', error);
+      // Silently fail - context will be cleared at transaction end anyway
     }
   }
 

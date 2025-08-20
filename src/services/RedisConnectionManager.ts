@@ -71,7 +71,7 @@ export class RedisConnectionManager {
       ...poolConfig
     };
 
-    this.startHealthChecking();
+    // this.startHealthChecking(); // DISABLED: Using centralized health check instead
   }
 
   async getConnection(usageType: RedisUsageType): Promise<RedisType> {
@@ -361,17 +361,9 @@ export class RedisConnectionManager {
   }
 
   private startHealthChecking(): void {
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-    }
-
-    this.healthCheckInterval = setInterval(async () => {
-      await this.performHealthChecks();
-    }, this.poolConfig.healthCheckInterval);
-
-    this.logger?.debug('Health checking started', {
-      interval: this.poolConfig.healthCheckInterval
-    });
+    // DISABLED: Background health checking disabled in favor of centralized health check
+    // The new health-check.ts service handles health monitoring with proper timeout handling
+    this.logger?.debug('Background health checking disabled - using centralized service');
   }
 
   private async performHealthChecks(): Promise<void> {

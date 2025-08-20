@@ -7,6 +7,56 @@
 
 import crypto from 'node:crypto';
 
+export type HmacVerifyResult =
+  | { ok: true }
+  | { ok: false; reason: 'missing_params' | 'bad_format' | 'mismatch' | 'error' };
+
+export function verifyHMACRaw(payload: Buffer, signature: string, secret: string): HmacVerifyResult {
+  try {
+    // 1) وجود القيم
+    if (!payload || !signature || !secret) return { ok: false, reason: 'missing_params' };
+
+    // 2) تنظيف التوقيع
+    const sig = signature.startsWith('sha256=') ? signature.slice(7) : signature;
+
+    // 3) تحقق من الصيغة: 64 hex
+    if (!/^[a-f0-9]{64}$/i.test(sig)) return { ok: false, reason: 'bad_format' };
+
+    // 4) حساب المتوقع على الـ raw payload
+    const expectedHex = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+
+    // 5) مقارنة ثابتة الوقت
+    const a = Buffer.from(expectedHex, 'hex');
+    const b = Buffer.from(sig, 'hex');
+    if (a.length !== b.length) return { ok: false, reason: 'bad_format' }; // نظرياً دائمًا 32 بايت
+
+    const equal = crypto.timingSafeEqual(a, b);
+    return equal ? { ok: true } : { ok: false, reason: 'mismatch' };
+  } catch {
+    return { ok: false, reason: 'error' };
+  }
+}
+
+/**
+ * Read raw body from Hono request (preserves exact bytes)
+ */
+export async function readRawBody(c: any): Promise<Buffer> {
+  const r = c.req.raw.body;
+  if (!r) return Buffer.alloc(0);
+  const reader = r.getReader();
+  const chunks: Uint8Array[] = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (value) chunks.push(value);
+  }
+  const size = chunks.reduce((n, u) => n + u.length, 0);
+  const out = Buffer.allocUnsafe(size);
+  let off = 0;
+  for (const u of chunks) { out.set(u, off); off += u.length; }
+  return out;
+}
+
 export interface EncryptedData {
   iv: string;
   ct: string;
@@ -91,7 +141,8 @@ export class EncryptionService {
   }
 
   /**
-   * HMAC verification for webhooks
+   * @deprecated Use verifyHMACRaw(payload: Buffer, signature, secret) instead
+   * HMAC verification for webhooks - kept for backward compatibility
    */
   public verifyHMAC(payload: string, signature: string, secret: string): boolean {
     const expectedSig = crypto.createHmac('sha256', secret).update(payload).digest('hex');

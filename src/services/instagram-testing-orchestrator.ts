@@ -5,6 +5,41 @@
  * ===============================================
  */
 
+function settleOnce<T>() {
+  let settled = false;
+  return {
+    guardResolve:
+      (resolve: (v: T) => void, reject: (e: any) => void, clear?: () => void) =>
+      (v: T) => {
+        if (settled) return;
+        settled = true;
+        clear?.();
+        resolve(v);
+      },
+    guardReject:
+      (resolve: (v: T) => void, reject: (e: any) => void, clear?: () => void) =>
+      (e: any) => {
+        if (settled) return;
+        settled = true;
+        clear?.();
+        reject(e);
+      },
+  };
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const { guardResolve, guardReject } = settleOnce<T>();
+    const timer = setTimeout(
+      guardReject(resolve, reject, () => clearTimeout(timer)),
+      ms,
+      new Error(`${label} timeout`)
+    );
+    p.then(guardResolve(resolve, reject, () => clearTimeout(timer)))
+     .catch(guardReject(resolve, reject, () => clearTimeout(timer)));
+  });
+}
+
 import { getDatabase } from '../database/connection.js';
 import { getInstagramClient } from './instagram-api.js';
 import { getInstagramWebhookHandler } from './instagram-webhook.js';
@@ -741,12 +776,7 @@ export class InstagramTestingOrchestrator {
       };
 
       // Execute with timeout
-      result = await Promise.race([
-        executeAction(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Test step timeout')), timeout)
-        )
-      ]);
+      result = await withTimeout(executeAction(), timeout, 'test step');
 
       // Validate results
       const validationSuccess = this.validateStepResult(result, step.validations);

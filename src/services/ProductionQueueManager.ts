@@ -1,6 +1,41 @@
 import Bull from 'bull';
 import { Redis } from 'ioredis';
 import type { Redis as RedisType } from 'ioredis';
+
+function settleOnce<T>() {
+  let settled = false;
+  return {
+    guardResolve:
+      (resolve: (v: T) => void, reject: (e: any) => void, clear?: () => void) =>
+      (v: T) => {
+        if (settled) return;
+        settled = true;
+        clear?.();
+        resolve(v);
+      },
+    guardReject:
+      (resolve: (v: T) => void, reject: (e: any) => void, clear?: () => void) =>
+      (e: any) => {
+        if (settled) return;
+        settled = true;
+        clear?.();
+        reject(e);
+      },
+  };
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const { guardResolve, guardReject } = settleOnce<T>();
+    const timer = setTimeout(
+      guardReject(resolve, reject, () => clearTimeout(timer)),
+      ms,
+      new Error(`${label} timeout`)
+    );
+    p.then(guardResolve(resolve, reject, () => clearTimeout(timer)))
+     .catch(guardReject(resolve, reject, () => clearTimeout(timer)));
+  });
+}
 import { RedisUsageType, Environment } from '../config/RedisConfigurationFactory.js';
 import RedisConnectionManager from './RedisConnectionManager.js';
 import RedisHealthMonitor from './RedisHealthMonitor.js';
@@ -1407,12 +1442,7 @@ export class ProductionQueueManager {
     if (this.queue) {
       try {
         // انتظار إكمال المهام الجارية مع timeout
-        const waitPromise = this.waitForActiveJobs();
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Shutdown timeout')), timeoutMs)
-        );
-
-        await Promise.race([waitPromise, timeoutPromise]);
+        await withTimeout(this.waitForActiveJobs(), timeoutMs, 'queue shutdown');
 
         await this.queue!.close();
         this.queue = null;

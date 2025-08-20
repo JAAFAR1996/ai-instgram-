@@ -3,7 +3,11 @@
  * Main entry point with full feature stack
  */
 
-// CRITICAL: Import error handlers FIRST
+// CRITICAL: Initialize logging FIRST (before console usage)
+import { initLogging } from './bootstrap/logging.js';
+initLogging();
+
+// CRITICAL: Import error handlers SECOND
 import './boot/error-handlers.js';
 import { fireAndForget } from './boot/error-handlers.js';
 
@@ -26,7 +30,7 @@ import { ensurePageMapping } from './startup/ensurePageMapping.js';
 import { RedisProductionIntegration } from './services/RedisProductionIntegration.js';
 import { createMerchantIsolationMiddleware } from './middleware/rls-merchant-isolation.js';
 import { getHealthCached, getLastSnapshot } from './services/health-check.js';
-import { verifyHMAC } from './services/encryption.js';
+import { verifyHMAC, verifyHMACRaw, readRawBody, type HmacVerifyResult } from './services/encryption.js';
 import { pushDLQ, getDLQStats } from './queue/dead-letter.js';
 import { GRAPH_API_VERSION } from './config/graph-api.js';
 import type { IGWebhookPayload } from './types/instagram.js';
@@ -61,6 +65,9 @@ type AppEnv = {
     rawBody?: string;
     rawBodyString?: string;
     secureHeadersNonce?: string;
+    log?: any;
+    traceId?: string;
+    correlationId?: string;
   };
 };
 
@@ -220,6 +227,33 @@ console.log('🔧 Environment:', { NODE_ENV, PORT });
 
 // Initialize Hono app with typed environment
 const app = new Hono<AppEnv>();
+
+// ===============================================
+// REQUEST LOGGING MIDDLEWARE - structured logging with trace IDs
+// ===============================================
+import { getLogger, bindRequestLogger } from './services/logger.js';
+
+app.use('*', async (c, next) => {
+  const reqId = crypto.randomUUID();
+  const traceId = c.req.header('x-trace-id') || `trace_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const correlationId = c.req.header('x-correlation-id') || `corr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  const log = bindRequestLogger(getLogger(), { 
+    requestId: reqId, 
+    traceId, 
+    correlationId 
+  });
+  
+  c.set('log', log);
+  c.set('traceId', traceId);
+  c.set('correlationId', correlationId);
+  
+  // Add trace headers to response
+  c.header('x-trace-id', traceId);
+  c.header('x-correlation-id', correlationId);
+  
+  await next();
+});
 
 // ===============================================
 // WEBHOOK RAW BODY MIDDLEWARE - capture for signature verification
@@ -845,31 +879,44 @@ app.get("/webhooks/instagram", (c) => {
   return c.text("forbidden", 403);
 });
 
-// POST webhook handler with full processing
+// POST webhook handler with production-grade security (2025)
 app.post("/webhooks/instagram", async (c) => {
-  const rawBodyString = c.get("rawBody") as string;
-  if (!rawBodyString) return c.text("No raw body", 400);
-  
-  // Check payload size to prevent server overload
-  if (rawBodyString.length > 512 * 1024) {
-    return c.text('Payload Too Large', 413);
+  // 1. التحقق من الحدود قبل القراءة
+  const contentLength = c.req.header('content-length');
+  const maxSize = 512 * 1024; // 512KB
+  if (contentLength && Number(contentLength) > maxSize) {
+    return c.text('payload too large', 413);
   }
+
+  // 2. قراءة raw body (preserves exact bytes)
+  const rawBody = await readRawBody(c);
+  if (rawBody.length > maxSize) {
+    return c.text('payload too large', 413);
+  }
+
+  // 3. التحقق من الإعدادات
+  const signature = c.req.header("x-hub-signature-256") ?? "";
+  const secret = process.env.IG_WEBHOOK_SECRET || process.env.IG_APP_SECRET || process.env.META_APP_SECRET || "";
   
-  // التحقق من التوقيع - Unified HMAC verification
-  const signature = c.req.header("x-hub-signature-256") || "";
-  const secret = process.env.IG_APP_SECRET || process.env.META_APP_SECRET || "";
-  
-  if (!signature || !verifyHMAC(rawBodyString, signature.replace('sha256=', ''), secret)) {
-    console.error("❌ IG signature verification failed", { 
+  if (!secret) {
+    console.error("❌ IG_WEBHOOK_SECRET not configured");
+    return c.text('misconfigured', 500);
+  }
+
+  // 4. التحقق من التوقيع باستخدام raw buffer
+  const verifyResult = verifyHMACRaw(rawBody, signature, secret);
+  if (!verifyResult.ok) {
+    console.error(`❌ IG signature verification failed: ${verifyResult.reason}`, { 
       hasSignature: !!signature,
-      bodyLength: rawBodyString.length 
+      bodyLength: rawBody.length,
+      reason: verifyResult.reason
     });
     return c.text("invalid signature", 401);
   }
   
-  // المعالجة الفعلية مع Database + Queue
+  // 5. المعالجة الفعلية مع Database + Queue
   try {
-    const payload = JSON.parse(rawBodyString);
+    const payload = JSON.parse(rawBody.toString('utf8'));
     const eventId = payload.entry?.[0]?.id || Date.now().toString();
     
     // 🔍 استخراج merchantId من database lookup (multi-tenant support)
@@ -891,7 +938,7 @@ app.post("/webhooks/instagram", async (c) => {
     
     // تسجيل في Database (مع merchantId الصحيح)
     if (pool && merchantId) {
-      await logInstagramEvent(Buffer.from(rawBodyString, 'utf8'), payload);
+      await logInstagramEvent(rawBody, payload);
     }
     
     // معالجة الويب هوك عبر النظام المتكامل (مع merchantId الصحيح)
@@ -906,7 +953,7 @@ app.post("/webhooks/instagram", async (c) => {
           merchantId,
           jobId: result.jobId,
           processedBy: result.processedBy,
-          len: rawBodyString.length
+          len: rawBody.length
         });
       } else {
         console.error(`❌ IG webhook failed: ${result.error}`, {
@@ -928,7 +975,7 @@ app.post("/webhooks/instagram", async (c) => {
     pushDLQ({
       ts: Date.now(),
       reason: 'webhook-processing-failed',
-      payload: { error: e instanceof Error ? e.message : String(e), rawBodyLength: rawBodyString.length },
+      payload: { error: e instanceof Error ? e.message : String(e), rawBodyLength: rawBody.length },
       platform: 'instagram'
     });
     
@@ -1265,8 +1312,8 @@ app.get('/internal/system/health', async (c) => {
     }, 503);
   }
   
-  const health = await redisIntegration.performHealthCheck();
-  return c.json(health, health.healthy ? 200 : 503);
+  const snap = await getHealthCached();
+  return c.json(snap.ok ? { status: 'ok', ...snap } : { status: 'fail', ...snap }, snap.ok ? 200 : 503);
 });
 
 // تقرير مفصل
@@ -1291,7 +1338,7 @@ app.get('/internal/redis/stats', async (c) => {
   return c.json({
     queue: queueManager ? await queueManager.getQueueStats() : null,
     circuitBreaker: circuitBreaker.getStats(),
-    redisIntegration: await redisIntegration.performHealthCheck(),
+    redisIntegration: getLastSnapshot() || { status: 'no_data' },
     timestamp: new Date().toISOString()
   });
 });
