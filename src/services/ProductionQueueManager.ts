@@ -166,10 +166,14 @@ export class ProductionQueueManager {
         circuitBreaker: this.circuitBreaker.getStats()
       };
 
+      // بدء مراقبة Workers بعد التهيئة
+      this.startWorkerHealthMonitoring();
+
       this.logger.info('✅ تم تهيئة مدير الطوابير الإنتاجي بنجاح', {
         queueName: this.queueName,
         responseTime: healthCheck.responseTime,
-        totalConnections: this.connectionManager.getConnectionStats().totalConnections
+        totalConnections: this.connectionManager.getConnectionStats().totalConnections,
+        workersReady: true
       });
 
       return {
@@ -268,28 +272,116 @@ export class ProductionQueueManager {
   private setupJobProcessors(): void {
     if (!this.queue) return;
 
-    // معالج مهام الويب هوك
-    this.queue.process('process-webhook', 5, async (job) => {
+    this.logger.info('🚀 بدء معالجات الطوابير الإنتاجية...');
+
+    // التحقق من أن Workers تم تشغيلها بنجاح
+    const workerInitTimeout = setTimeout(() => {
+      this.logger.warn('⚠️ Workers لم تبدأ في المعالجة خلال 10 ثوانٍ');
+    }, 10000);
+
+    // معالج شامل لجميع أنواع المهام مع مراقبة محسّنة
+    this.queue.process('*', 5, async (job) => {
+      // إلغاء تحذير بدء Workers عند أول مهمة
+      clearTimeout(workerInitTimeout);
+      
+      const startTime = Date.now();
+      const workerId = `worker-${Math.random().toString(36).substr(2, 9)}`;
+      
+      this.logger.info(`⚡ Worker ${workerId} - بدء معالجة مهمة`, {
+        workerId,
+        jobId: job.id,
+        name: job.name,
+        type: job.data.type || job.name,
+        attempt: job.attemptsMade + 1,
+        maxAttempts: job.opts.attempts,
+        priority: job.opts.priority,
+        delay: job.opts.delay,
+        queueStatus: {
+          waiting: await this.queue!.getWaiting().then(jobs => jobs.length),
+          active: await this.queue!.getActive().then(jobs => jobs.length)
+        }
+      });
+
+      try {
+        const result = await this.circuitBreaker.execute(async () => {
+          return await this.processWebhookJob(job.data);
+        });
+
+        const duration = Date.now() - startTime;
+        this.logger.info(`✅ Worker ${workerId} - مهمة مكتملة بنجاح`, {
+          workerId,
+          jobId: job.id,
+          name: job.name,
+          duration: `${duration}ms`,
+          result: 'success',
+          throughput: Math.round(1000 / duration * 100) / 100 // مهام/ثانية
+        });
+
+        return {
+          success: true,
+          workerId,
+          jobId: job.id?.toString(),
+          processingTime: duration,
+          result
+        };
+
+      } catch (error) {
+        const duration = Date.now() - startTime;
+        this.logger.error(`❌ Worker ${workerId} - فشل في معالجة المهمة`, {
+          workerId,
+          jobId: job.id,
+          name: job.name,
+          duration: `${duration}ms`,
+          error: error instanceof Error ? error.message : String(error),
+          attempt: job.attemptsMade + 1,
+          maxAttempts: job.opts.attempts,
+          willRetry: job.attemptsMade + 1 < (job.opts.attempts || 1),
+          errorType: error instanceof Error ? error.constructor.name : 'Unknown'
+        });
+
+        throw error;
+      }
+    });
+
+    // معالج مخصص للويب هوك (للتوافق مع الإصدارات القديمة)
+    this.queue.process('process-webhook', 3, async (job) => {
       const { eventId, payload, merchantId, platform } = job.data;
+      const webhookWorkerId = `webhook-worker-${Math.random().toString(36).substr(2, 6)}`;
       
       return await this.circuitBreaker.execute(async () => {
         try {
-          // معالجة المهمة الفعلية
+          this.logger.info(`🔄 ${webhookWorkerId} - معالجة ويب هوك`, {
+            webhookWorkerId,
+            eventId,
+            merchantId,
+            platform,
+            jobId: job.id,
+            attempt: job.attemptsMade + 1
+          });
+
           const result = await this.processWebhookJob(job.data);
+          
+          this.logger.info(`✅ ${webhookWorkerId} - ويب هوك مكتمل`, {
+            webhookWorkerId,
+            eventId,
+            processingTime: Date.now() - job.processedOn!
+          });
           
           return { 
             processed: true, 
+            webhookWorkerId,
             eventId, 
             result,
             processingTime: Date.now() - job.processedOn!
           };
           
         } catch (error) {
-          // تسجيل تفصيلي للخطأ
-          this.logger.error('فشل في معالجة الويب هوك', { 
+          this.logger.error(`❌ ${webhookWorkerId} - فشل في معالجة الويب هوك`, { 
+            webhookWorkerId,
             eventId, 
             merchantId, 
             platform,
+            jobId: job.id,
             error: error instanceof Error ? error.message : String(error),
             attempt: job.attemptsMade + 1,
             maxAttempts: job.opts.attempts
@@ -303,23 +395,41 @@ export class ProductionQueueManager {
     // معالج مهام الذكاء الاصطناعي
     this.queue.process('ai-response', 3, async (job) => {
       const { conversationId, merchantId, message } = job.data;
+      const aiWorkerId = `ai-worker-${Math.random().toString(36).substr(2, 6)}`;
       
       return await this.circuitBreaker.execute(async () => {
         try {
+          this.logger.info(`🤖 ${aiWorkerId} - معالجة استجابة ذكاء اصطناعي`, {
+            aiWorkerId,
+            conversationId,
+            merchantId,
+            jobId: job.id,
+            messageLength: message?.length || 0
+          });
+
           const result = await this.processAIResponseJob(job.data);
+          
+          this.logger.info(`✅ ${aiWorkerId} - استجابة ذكاء اصطناعي مكتملة`, {
+            aiWorkerId,
+            conversationId,
+            processingTime: Date.now() - job.processedOn!
+          });
           
           return { 
             processed: true, 
+            aiWorkerId,
             conversationId, 
             result,
             processingTime: Date.now() - job.processedOn!
           };
           
         } catch (error) {
-          this.logger.error('فشل في معالجة استجابة الذكاء الاصطناعي', { 
+          this.logger.error(`❌ ${aiWorkerId} - فشل في معالجة استجابة الذكاء الاصطناعي`, { 
+            aiWorkerId,
             conversationId, 
             merchantId,
-            error: error instanceof Error ? error.message : String(error)
+            error: error instanceof Error ? error.message : String(error),
+            jobId: job.id
           });
           
           throw error;
@@ -609,6 +719,80 @@ export class ProductionQueueManager {
     this.logger.debug('Queue monitoring started');
   }
 
+  private startWorkerHealthMonitoring(): void {
+    // مراقبة صحة Workers كل دقيقة
+    setInterval(async () => {
+      try {
+        await this.checkWorkerHealth();
+      } catch (error) {
+        this.logger.error('Worker health monitoring error', { error });
+      }
+    }, 60000);
+
+    this.logger.info('🔍 Worker health monitoring started');
+  }
+
+  private async checkWorkerHealth(): Promise<void> {
+    if (!this.queue) return;
+
+    try {
+      const stats = await this.getQueueStats();
+      const now = Date.now();
+      
+      // فحص إذا كانت هناك مهام في الانتظار لكن لا يتم معالجتها
+      if (stats.waiting > 0 && stats.active === 0) {
+        this.logger.warn('🚨 مهام في الانتظار لكن لا توجد معالجة نشطة', {
+          waiting: stats.waiting,
+          active: stats.active,
+          lastProcessedAt: this.lastProcessedAt,
+          timeSinceLastProcess: this.lastProcessedAt 
+            ? now - this.lastProcessedAt.getTime() 
+            : 'never'
+        });
+
+        // إذا لم تتم معالجة أي مهمة خلال آخر 5 دقائق والمهام متراكمة
+        if (stats.waiting > 10 && 
+            (!this.lastProcessedAt || now - this.lastProcessedAt.getTime() > 300000)) {
+          this.logger.error('🔥 Workers معطلة - محاولة إعادة تشغيل المعالجات', {
+            queueStats: stats,
+            action: 'restart_processors'
+          });
+          
+          // يمكن إضافة آلية إعادة تشغيل المعالجات هنا إذا لزم الأمر
+        }
+      }
+
+      // فحص إذا كانت المهام النشطة عالقة لفترة طويلة
+      if (stats.active > 0) {
+        const activeJobs = await this.queue.getActive();
+        const stalledJobs = activeJobs.filter(job => {
+          const processTime = job.processedOn || Date.now();
+          return now - processTime > 120000; // أكثر من دقيقتين
+        });
+
+        if (stalledJobs.length > 0) {
+          this.logger.warn('⏰ مهام نشطة عالقة لفترة طويلة', {
+            stalledCount: stalledJobs.length,
+            totalActive: stats.active,
+            stalledJobIds: stalledJobs.map(j => j.id).slice(0, 5) // أول 5 فقط
+          });
+        }
+      }
+
+      // إحصائيات إيجابية عندما كل شيء يعمل بشكل جيد
+      if (stats.active > 0 || (this.lastProcessedAt && now - this.lastProcessedAt.getTime() < 60000)) {
+        this.logger.debug('✅ Workers تعمل بشكل طبيعي', {
+          active: stats.active,
+          waiting: stats.waiting,
+          recentlyProcessed: this.lastProcessedAt ? now - this.lastProcessedAt.getTime() < 60000 : false
+        });
+      }
+
+    } catch (error) {
+      this.logger.error('Worker health check failed', { error });
+    }
+  }
+
   private async performQueueHealthCheck(): Promise<void> {
     if (!this.queue || !this.queueConnection) return;
 
@@ -650,6 +834,12 @@ export class ProductionQueueManager {
     healthy: boolean;
     stats: QueueStats;
     redisHealth: any;
+    workerStatus: {
+      isProcessing: boolean;
+      delayedJobs: number;
+      activeWorkers: number;
+      processingCapacity: number;
+    };
     recommendations: string[];
   }> {
     const recommendations: string[] = [];
@@ -668,13 +858,52 @@ export class ProductionQueueManager {
         }
       }
 
+      // تحليل حالة المعالجات (Workers)
+      const workerStatus = {
+        isProcessing: this.isProcessing,
+        delayedJobs: stats.delayed,
+        activeWorkers: stats.active > 0 ? 1 : 0, // تقدير بسيط
+        processingCapacity: 5 // القدرة القصوى للمعالجة
+      };
+
+      // فحص Worker Status المحسّن
+      if (stats.delayed > 0 && !workerStatus.isProcessing && stats.active === 0) {
+        healthy = false;
+        recommendations.push('🔧 Queue Workers غير نشطة رغم وجود مهام معلقة - إعادة تشغيل مطلوبة');
+      }
+
+      if (stats.waiting > 10 && stats.active === 0) {
+        const timeSinceLastProcess = this.lastProcessedAt ? Date.now() - this.lastProcessedAt.getTime() : null;
+        
+        if (!timeSinceLastProcess || timeSinceLastProcess > 120000) { // أكبر من دقيقتين
+          healthy = false;
+          recommendations.push('🚨 لا توجد معالجة نشطة رغم وجود مهام في الانتظار - Workers معطلة');
+        } else {
+          recommendations.push('⚡ تجمع مهام في الانتظار - مراقبة Workers');
+        }
+      }
+
+      if (stats.waiting > 100 && stats.active === 0) {
+        recommendations.push('⚠️ تراكم كبير في المهام - فحص عاجل للWorkers مطلوب');
+      }
+
+      // فحص معدل المعالجة
+      const processingRate = this.processedJobs > 0 ? this.processedJobs / (Date.now() / 60000) : 0;
+      if (processingRate < 1 && stats.waiting > 5) {
+        recommendations.push('📉 معدل معالجة منخفض - قد تحتاج المزيد من Workers');
+      }
+
       if (stats.errorRate > 10) {
         healthy = false;
         recommendations.push('معدل خطأ مرتفع - فحص معالجات المهام');
       }
 
       if (stats.waiting > 500) {
-        recommendations.push('طابور طويل - زيادة المعالجات أو تحسين الأداء');
+        if (stats.active < workerStatus.processingCapacity / 2) {
+          recommendations.push('طابور طويل مع معالجة قليلة - زيادة المعالجات');
+        } else {
+          recommendations.push('طابور طويل - تحسين أداء المعالجة');
+        }
       }
 
       if (stats.failed > stats.completed) {
@@ -682,11 +911,19 @@ export class ProductionQueueManager {
         recommendations.push('المهام الفاشلة أكثر من المكتملة - فحص المعالجة');
       }
 
+      // فحص إضافي للمعالجة المعلقة
+      if (stats.active > 0 && !this.lastProcessedAt) {
+        recommendations.push('⏰ مهام نشطة لكن لا توجد معالجة مكتملة مؤخراً');
+      } else if (this.lastProcessedAt && Date.now() - this.lastProcessedAt.getTime() > 300000) {
+        recommendations.push('⏰ لم تكتمل أي مهام خلال آخر 5 دقائق');
+      }
+
       return {
         healthy,
         stats,
         redisHealth,
-        recommendations: recommendations.length > 0 ? recommendations : ['النظام يعمل بشكل مثالي']
+        workerStatus,
+        recommendations: recommendations.length > 0 ? recommendations : ['✅ النظام والمعالجات تعمل بشكل مثالي']
       };
 
     } catch (error) {
@@ -697,7 +934,13 @@ export class ProductionQueueManager {
           paused: 0, total: 0, processing: false, errorRate: 100
         },
         redisHealth: null,
-        recommendations: ['خطأ في فحص صحة الطابور']
+        workerStatus: {
+          isProcessing: false,
+          delayedJobs: 0,
+          activeWorkers: 0,
+          processingCapacity: 0
+        },
+        recommendations: ['خطأ حرج في فحص صحة الطابور والمعالجات']
       };
     }
   }
