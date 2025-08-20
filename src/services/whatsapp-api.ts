@@ -393,7 +393,7 @@ export class WhatsAppAPIClient {
    */
   public async validateWebhookSignature(signature: string, payload: string): Promise<boolean> {
     try {
-      if (!this.credentials) {
+      if (!this.credentials?.appSecret) {
         return false;
       }
 
@@ -447,12 +447,18 @@ export class WhatsAppAPIClient {
         JSON.parse(cred.whatsapp_token_encrypted)
       );
 
+      const appSecret = process.env.WHATSAPP_APP_SECRET;
+      if (!appSecret) {
+        console.error('❌ WHATSAPP_APP_SECRET is not configured');
+        return null;
+      }
+
       return {
         phoneNumberId: cred.whatsapp_phone_number_id || '',
         accessToken: decryptedToken,
         businessAccountId: cred.whatsapp_business_account_id || '',
         webhookVerifyToken: cred.webhook_verify_token || '',
-        appSecret: process.env.WHATSAPP_APP_SECRET || ''
+        appSecret
       };
     } catch (error) {
       console.error('❌ Failed to load merchant credentials:', error);

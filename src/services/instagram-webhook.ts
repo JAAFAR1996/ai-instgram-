@@ -162,11 +162,18 @@ export class InstagramWebhookHandler {
     challenge: string,
     expectedVerifyToken: string
   ): string | null {
-    if (mode === 'subscribe' && crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expectedVerifyToken))) {
-      console.log('✅ Instagram webhook verification successful');
-      return challenge;
+    if (mode === 'subscribe') {
+      if (token.length !== expectedVerifyToken.length) {
+        console.error('❌ Instagram webhook verification failed: token length mismatch');
+        return null;
+      }
+
+      if (crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expectedVerifyToken))) {
+        console.log('✅ Instagram webhook verification successful');
+        return challenge;
+      }
     }
-    
+
     console.error('❌ Instagram webhook verification failed');
     return null;
   }
@@ -936,7 +943,7 @@ export class InstagramWebhookHandler {
 
       // Create media content object
       const mediaContent: MediaContent = {
-        id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id: `media_${Date.now()}_${crypto.randomUUID()}`,
         type: this.mapInstagramMediaType(attachment.type),
         url: attachment.payload.url,
         caption: textContent || undefined,

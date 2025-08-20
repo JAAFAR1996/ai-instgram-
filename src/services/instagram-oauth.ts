@@ -63,11 +63,15 @@ export class InstagramOAuthService {
     path: string,
     params?: Record<string, any>,
     body?: Record<string, any>,
-    merchantId = process.env.MERCHANT_ID || 'oauth-default'
+    merchantId?: string
   ): Promise<T> {
+    const resolvedMerchantId = merchantId ?? requireMerchantId();
+    if (merchantId) {
+      console.log(`Using MERCHANT_ID: ${resolvedMerchantId}`);
+    }
     const windowMs = 60_000;
     const maxRequests = 90;
-    const rateKey = `ig-oauth:${merchantId}:${method}:${path}`;
+    const rateKey = `ig-oauth:${resolvedMerchantId}:${method}:${path}`;
 
     const check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
     if (!check.allowed) {
@@ -633,6 +637,11 @@ export class InstagramOAuthService {
         .digest('hex')
         .substring(0, 16);
 
+      if (signature.length !== expectedSignature.length) {
+        console.error('❌ State signature length mismatch');
+        return false;
+      }
+
       if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
         console.error('❌ State signature verification failed');
         return false;
@@ -795,7 +804,7 @@ export class InstagramOAuthService {
    * توليد webhook verify token
    */
   private generateWebhookVerifyToken(): string {
-    return 'ig_webhook_' + Math.random().toString(36).substr(2, 12);
+    return 'ig_webhook_' + crypto.randomBytes(16).toString('hex');
   }
 
   /**

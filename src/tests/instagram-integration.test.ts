@@ -10,7 +10,7 @@ import { getInstagramAIService } from '../services/instagram-ai.js';
 import { getInstagramClient } from '../services/instagram-api.js';
 import { getServiceController } from '../services/service-controller.js';
 import { getConversationAIOrchestrator } from '../services/conversation-ai-orchestrator.js';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase, initializeDatabase } from '../database/connection.js';
 
 // Test configuration
 const TEST_MERCHANT_ID = 'test-merchant-uuid-12345';
@@ -22,7 +22,7 @@ describe('Instagram Integration Tests', () => {
   
   beforeAll(async () => {
     // Setup test database
-    db = getDatabase();
+    db = await initializeDatabase();
     sql = db.getSQL();
     
     // Create test merchant if not exists

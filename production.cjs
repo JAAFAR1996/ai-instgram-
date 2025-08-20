@@ -11,11 +11,14 @@ const PORT = Number(process.env.PORT) || 10000;
 const NODE_ENV = process.env.NODE_ENV || 'production';
 const IG_VERIFY_TOKEN = (process.env.IG_VERIFY_TOKEN || '').trim();
 const META_APP_SECRET = (process.env.META_APP_SECRET || '').trim();
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').trim();
 
-if (!META_APP_SECRET || !IG_VERIFY_TOKEN) {
-  console.error('❌ Missing META_APP_SECRET or IG_VERIFY_TOKEN. Refusing to start.');
+if (!META_APP_SECRET || !IG_VERIFY_TOKEN || !CORS_ORIGINS) {
+  console.error('❌ Missing META_APP_SECRET, IG_VERIFY_TOKEN, or CORS_ORIGINS. Refusing to start.');
   process.exit(1);
 }
+
+const ALLOWED_ORIGINS = CORS_ORIGINS.split(',').map(o => o.trim()).filter(Boolean);
 
 console.log('🚀 AI Sales Platform - Production Runtime');
 console.log('🔧 Environment:', { NODE_ENV, PORT });
@@ -26,14 +29,31 @@ function verifyInstagramSignature(rawBody, signature) {
     console.error('❌ Missing signature');
     return false;
   }
-  
-  let sig = signature.trim().replace(/^"?([^"]*)"?$/, '$1');
-  const provided = sig.replace(/^sha(1|256)=/i, '').toLowerCase();
+
+  const sig = signature.trim().replace(/^"?([^"]*)"?$/, '$1');
+
+  // Signature must start with sha256=
+  if (!sig.startsWith('sha256=')) {
+    console.error('❌ Invalid signature algorithm');
+    return false;
+  }
+
+  const provided = sig.slice(7); // remove 'sha256='
+
+  // Provided signature must be 64 lowercase hex characters
+  if (!/^[a-f0-9]{64}$/.test(provided)) {
+    console.error('❌ Invalid signature format');
+    return false;
+  }
+
   const expected = crypto.createHmac('sha256', META_APP_SECRET.trim())
-    .update(rawBody).digest('hex').toLowerCase();
-  
+    .update(rawBody).digest('hex');
+
   try {
-    return crypto.timingSafeEqual(Buffer.from(provided, 'hex'), Buffer.from(expected, 'hex'));
+    return crypto.timingSafeEqual(
+      Buffer.from(provided, 'hex'),
+      Buffer.from(expected, 'hex')
+    );
   } catch (e) {
     console.error('❌ Signature verification error:', e.message);
     return false;
@@ -43,7 +63,15 @@ function verifyInstagramSignature(rawBody, signature) {
 // Create HTTP server
 const server = createServer(async (req, res) => {
   // CORS and Security Headers
-  res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGINS || '*');
+  const origin = req.headers.origin || '';
+  if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+    res.statusCode = 403;
+    res.end('Forbidden origin');
+    return;
+  }
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Content-Security-Policy', "default-src 'none'; connect-src 'self' https://graph.facebook.com https://graph.instagram.com");
@@ -170,7 +198,7 @@ const server = createServer(async (req, res) => {
           return;
         }
 
-        const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const messageId = `msg_${Date.now()}_${crypto.randomUUID().replace(/-/g, '')}`;
         
         res.setHeader('Content-Type', 'application/json');
         res.statusCode = 200;

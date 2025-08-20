@@ -60,7 +60,7 @@ async function runInstagramMigrations() {
                 
                 // Execute migration
                 const startTime = Date.now();
-                await sql.unsafe(migrationSQL);
+                await sql(migrationSQL);
                 const executionTime = Date.now() - startTime;
                 
                 // Record migration

@@ -6,6 +6,7 @@
  */
 
 import { getDatabase } from '../database/connection.js';
+import type { Sql } from 'postgres';
 
 export interface Merchant {
   id: string;
@@ -147,77 +148,60 @@ export class MerchantRepository {
   async update(id: string, data: UpdateMerchantRequest): Promise<Merchant | null> {
     const sql = this.db.getSQL();
     
-    const updateFields: string[] = [];
-    const updateValues: any[] = [];
-    let paramIndex = 1;
+    const updateFields: Sql[] = [];
 
     if (data.businessName !== undefined) {
-      updateFields.push(`business_name = $${paramIndex++}`);
-      updateValues.push(data.businessName);
+      updateFields.push(sql`business_name = ${data.businessName}`);
     }
 
     if (data.businessCategory !== undefined) {
-      updateFields.push(`business_category = $${paramIndex++}`);
-      updateValues.push(data.businessCategory);
+      updateFields.push(sql`business_category = ${data.businessCategory}`);
     }
 
     if (data.businessDescription !== undefined) {
-      updateFields.push(`business_description = $${paramIndex++}`);
-      updateValues.push(data.businessDescription);
+      updateFields.push(sql`business_description = ${data.businessDescription}`);
     }
 
     if (data.contactEmail !== undefined) {
-      updateFields.push(`contact_email = $${paramIndex++}`);
-      updateValues.push(data.contactEmail);
+      updateFields.push(sql`contact_email = ${data.contactEmail}`);
     }
 
     if (data.contactPhone !== undefined) {
-      updateFields.push(`contact_phone = $${paramIndex++}`);
-      updateValues.push(data.contactPhone);
+      updateFields.push(sql`contact_phone = ${data.contactPhone}`);
     }
 
     if (data.isActive !== undefined) {
-      updateFields.push(`is_active = $${paramIndex++}`);
-      updateValues.push(data.isActive);
+      updateFields.push(sql`is_active = ${data.isActive}`);
     }
 
     if (data.subscriptionTier !== undefined) {
-      updateFields.push(`subscription_tier = $${paramIndex++}`);
-      updateValues.push(data.subscriptionTier);
-      
-      // Update message limit based on tier if not explicitly set
+      updateFields.push(sql`subscription_tier = ${data.subscriptionTier}`);
+
       if (data.monthlyMessageLimit === undefined) {
-        updateFields.push(`monthly_message_limit = $${paramIndex++}`);
-        updateValues.push(this.getDefaultMessageLimit(data.subscriptionTier));
+        updateFields.push(sql`monthly_message_limit = ${this.getDefaultMessageLimit(data.subscriptionTier)}`);
       }
     }
 
     if (data.monthlyMessageLimit !== undefined) {
-      updateFields.push(`monthly_message_limit = $${paramIndex++}`);
-      updateValues.push(data.monthlyMessageLimit);
+      updateFields.push(sql`monthly_message_limit = ${data.monthlyMessageLimit}`);
     }
 
     if (data.settings !== undefined) {
-      updateFields.push(`settings = $${paramIndex++}`);
-      updateValues.push(JSON.stringify(data.settings));
+      updateFields.push(sql`settings = ${JSON.stringify(data.settings)}`);
     }
 
-    updateFields.push(`updated_at = NOW()`);
+    updateFields.push(sql`updated_at = NOW()`);
 
-    if (updateFields.length === 1) { // Only updated_at
+    if (updateFields.length === 1) {
       return await this.findById(id);
     }
 
-    const query = `
-      UPDATE merchants 
-      SET ${updateFields.join(', ')}
-      WHERE id = $${paramIndex}::uuid
+    const [merchant] = await this.db.query`
+      UPDATE merchants
+      SET ${sql.join(updateFields, sql`, `)}
+      WHERE id = ${id}::uuid
       RETURNING *
     `;
-    
-    updateValues.push(id);
-    
-    const [merchant] = await this.db.query(query, updateValues);
     return merchant ? this.mapToMerchant(merchant) : null;
   }
 
@@ -296,58 +280,48 @@ export class MerchantRepository {
   async findMany(filters: MerchantFilters = {}): Promise<Merchant[]> {
     const sql = this.db.getSQL();
     
-    let whereConditions: string[] = [];
-    let params: any[] = [];
-    let paramIndex = 1;
+    const conditions: Sql[] = [];
 
     if (filters.isActive !== undefined) {
-      whereConditions.push(`is_active = $${paramIndex++}`);
-      params.push(filters.isActive);
+      conditions.push(sql`is_active = ${filters.isActive}`);
     }
 
     if (filters.subscriptionTier) {
-      whereConditions.push(`subscription_tier = $${paramIndex++}`);
-      params.push(filters.subscriptionTier);
+      conditions.push(sql`subscription_tier = ${filters.subscriptionTier}`);
     }
 
     if (filters.businessCategory) {
-      whereConditions.push(`business_category = $${paramIndex++}`);
-      params.push(filters.businessCategory);
+      conditions.push(sql`business_category = ${filters.businessCategory}`);
     }
 
     if (filters.searchQuery) {
-      whereConditions.push(`(business_name ILIKE $${paramIndex++} OR contact_email ILIKE $${paramIndex++})`);
       const searchQuery = `%${filters.searchQuery}%`;
-      params.push(searchQuery, searchQuery);
-      paramIndex++; // Increment for second parameter
+      conditions.push(
+        sql`(business_name ILIKE ${searchQuery} OR contact_email ILIKE ${searchQuery})`
+      );
     }
 
     if (filters.createdAfter) {
-      whereConditions.push(`created_at >= $${paramIndex++}`);
-      params.push(filters.createdAfter);
+      conditions.push(sql`created_at >= ${filters.createdAfter}`);
     }
 
     if (filters.createdBefore) {
-      whereConditions.push(`created_at <= $${paramIndex++}`);
-      params.push(filters.createdBefore);
+      conditions.push(sql`created_at <= ${filters.createdBefore}`);
     }
 
-    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-    const limitClause = filters.limit ? `LIMIT $${paramIndex++}` : '';
-    const offsetClause = filters.offset ? `OFFSET $${paramIndex++}` : '';
-    
-    if (filters.limit) params.push(filters.limit);
-    if (filters.offset) params.push(filters.offset);
+    const whereClause = conditions.length
+      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      : sql``;
+    const limitClause = filters.limit ? sql`LIMIT ${filters.limit}` : sql``;
+    const offsetClause = filters.offset ? sql`OFFSET ${filters.offset}` : sql``;
 
-    const query = `
+    const merchants = await this.db.query`
       SELECT * FROM merchants
       ${whereClause}
       ORDER BY created_at DESC
       ${limitClause}
       ${offsetClause}
     `;
-
-    const merchants = await this.db.query(query, params);
     return merchants.map(m => this.mapToMerchant(m));
   }
 
@@ -357,7 +331,7 @@ export class MerchantRepository {
   async getStats(): Promise<MerchantStats> {
     const sql = this.db.getSQL();
     
-    const statsQuery = `
+    const results = await this.db.query`
       SELECT 
         COUNT(*) as total_merchants,
         COUNT(*) FILTER (WHERE is_active = true) as active_merchants,
@@ -369,8 +343,6 @@ export class MerchantRepository {
       GROUP BY ROLLUP(subscription_tier, business_category)
       ORDER BY subscription_tier, business_category
     `;
-
-    const results = await this.db.query(statsQuery, []);
     
     const stats: MerchantStats = {
       totalMerchants: 0,
@@ -458,29 +430,27 @@ export class MerchantRepository {
   async count(filters: MerchantFilters = {}): Promise<number> {
     const sql = this.db.getSQL();
     
-    let whereConditions: string[] = [];
-    let params: any[] = [];
-    let paramIndex = 1;
+    const conditions: Sql[] = [];
 
     if (filters.isActive !== undefined) {
-      whereConditions.push(`is_active = $${paramIndex++}`);
-      params.push(filters.isActive);
+      conditions.push(sql`is_active = ${filters.isActive}`);
     }
 
     if (filters.subscriptionTier) {
-      whereConditions.push(`subscription_tier = $${paramIndex++}`);
-      params.push(filters.subscriptionTier);
+      conditions.push(sql`subscription_tier = ${filters.subscriptionTier}`);
     }
 
     if (filters.businessCategory) {
-      whereConditions.push(`business_category = $${paramIndex++}`);
-      params.push(filters.businessCategory);
+      conditions.push(sql`business_category = ${filters.businessCategory}`);
     }
 
-    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-    
-    const query = `SELECT COUNT(*) as count FROM merchants ${whereClause}`;
-    const [result] = await this.db.query(query, params);
+    const whereClause = conditions.length
+      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      : sql``;
+
+    const [result] = await this.db.query`
+      SELECT COUNT(*) as count FROM merchants ${whereClause}
+    `;
     
     return parseInt(result.count);
   }

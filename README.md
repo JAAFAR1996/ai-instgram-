@@ -81,6 +81,7 @@
 - **🎯 التركيز الحالي**: Instagram فقط للحصول على أفضل جودة
 - **🔐 الأمان**: مطابق لأعلى معايير 2025
 - **🌍 السوق المستهدف**: التجار العراقيون والعرب
+- **🗄️ قاعدة البيانات**: يجب تحديد بيانات الاتصال (خصوصًا `DB_PASSWORD`) بشكل صريح في الإنتاج؛ لا توجد قيمة افتراضية وسيتم رفض الاتصال إذا لم تتوفر.
 
 ---
 
@@ -202,6 +203,9 @@ bun install
 # إعداد متغيرات البيئة
 cp .env.example .env
 
+# ⚠️ تأكد من ضبط بيانات الاتصال بقاعدة البيانات قبل تشغيل أي سكربت
+# خاصة متغير DB_PASSWORD الذي يمثل كلمة مرور قاعدة البيانات
+
 # تشغيل الـ migrations
 bun run db:migrate
 
@@ -223,6 +227,7 @@ PORT=3001
 
 # Database Configuration (PostgreSQL)
 DATABASE_URL=postgresql://username:password@localhost:5432/ai_sales_platform
+DB_PASSWORD=your_db_password_here
 DB_MAX_CONNECTIONS=20
 DB_IDLE_TIMEOUT=30
 DB_CONNECT_TIMEOUT=10
@@ -241,10 +246,13 @@ OPENAI_MAX_TOKENS=500
 OPENAI_TEMPERATURE=0.7
 
 # Security Configuration (مطلوب)
+# ملاحظة: يجب إعداد JWT_SECRET بشكل مستقل ولا يمكن استخدام ENCRYPTION_KEY كقيمة احتياطية
 ENCRYPTION_KEY=your_32_character_encryption_key_here123456
 JWT_SECRET=your_jwt_secret_here
 
-# CORS Configuration (فصل بفاصلة)
+# CORS Configuration (مطلوب - قائمة نطاقات مسموحة مفصولة بفاصلة)
+# مثال: https://myshop.com,https://admin.myshop.com
+# يجب ضبط هذا المتغير وإلا سيتوقف الخادم عن العمل
 CORS_ORIGINS=https://ai-instgram.onrender.com,https://graph.facebook.com,https://api.whatsapp.com
 
 # Rate Limiting

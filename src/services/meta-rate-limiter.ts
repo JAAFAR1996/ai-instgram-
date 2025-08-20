@@ -8,6 +8,7 @@
 import { RATE_LIMIT_HEADERS, RATE_LIMITS } from '../config/graph-api.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
+import { randomUUID } from 'crypto';
 
 export interface RateLimitStatus {
   appUsage: number;
@@ -102,7 +103,7 @@ export class MetaRateLimiter {
    * Force backoff (for 429 responses)
    */
   forceBackoff(durationMs: number = RATE_LIMITS.BACKOFF_BASE_MS, reason: string = '429_response'): void {
-    const jitter = Math.random() * RATE_LIMITS.JITTER_MS;
+    const jitter = crypto.randomInt(0, RATE_LIMITS.JITTER_MS);
     const actualDuration = Math.min(durationMs + jitter, RATE_LIMITS.BACKOFF_MAX_MS);
 
     this.backoffState = {
@@ -221,7 +222,7 @@ export class MetaRateLimiter {
       // Remove old entries and add current request
       const multi = redis.multi();
       multi.zremrangebyscore(windowKey, 0, windowStart);
-      multi.zadd(windowKey, now, `${now}-${Math.random()}`);
+      multi.zadd(windowKey, now, `${now}-${randomUUID()}`);
       multi.zcard(windowKey);
       multi.expire(windowKey, Math.ceil(windowMs / 1000) + 1);
       

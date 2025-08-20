@@ -7,6 +7,8 @@
 
 import { getDatabase } from '../database/connection.js';
 import { getConfig } from '../config/environment.js';
+import { getAnalyticsService } from '../services/analytics-service.js';
+import type { Sql } from 'postgres';
 
 export interface QueueJob {
   id: string;
@@ -285,7 +287,7 @@ export class MessageQueue {
   async getStats(): Promise<QueueStats> {
     const sql = this.db.getSQL();
     
-    const statsQuery = `
+    const results = await this.db.query`
       SELECT 
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
@@ -300,8 +302,6 @@ export class MessageQueue {
       GROUP BY ROLLUP(type, priority)
       ORDER BY type, priority
     `;
-
-    const results = await this.db.query(statsQuery, []);
     
     const stats: QueueStats = {
       total: 0,
@@ -350,7 +350,7 @@ export class MessageQueue {
       AND updated_at < ${cutoffDate}
     `;
 
-    const deletedCount = result.length || 0;
+    const deletedCount = result.count || 0;
     console.log(`🧹 Cleaned up ${deletedCount} old jobs`);
     
     return deletedCount;
@@ -362,26 +362,25 @@ export class MessageQueue {
   async retryFailedJobs(jobType?: QueueJobType): Promise<number> {
     const sql = this.db.getSQL();
     
-    let whereClause = "WHERE status = 'FAILED' AND attempts < max_attempts";
-    const params: any[] = [];
-    
+    const conditions: Sql[] = [
+      sql`status = 'FAILED'`,
+      sql`attempts < max_attempts`
+    ];
+
     if (jobType) {
-      whereClause += " AND type = $1";
-      params.push(jobType);
+      conditions.push(sql`type = ${jobType}`);
     }
 
-    const query = `
+    const result = await this.db.query`
       UPDATE queue_jobs
-      SET 
+      SET
         status = 'PENDING',
         scheduled_at = NOW(),
         error = NULL,
         updated_at = NOW()
-      ${whereClause}
+      WHERE ${sql.join(conditions, sql` AND `)}
     `;
-
-    const result = await this.db.query(query, params);
-    const retriedCount = result.length || 0;
+    const retriedCount = result.count || 0;
     
     console.log(`🔄 Retried ${retriedCount} failed jobs`);
     return retriedCount;
@@ -428,16 +427,33 @@ export class MessageQueue {
     this.registerProcessor('ANALYTICS_PROCESSING', {
       async process(job: QueueJob) {
         console.log(`📊 Processing analytics: ${job.payload.type}`);
-        
-        // Safe minimum: convert event to simple log now, send later
-        if (job.payload.kind === 'analytics') {
-          console.log('[analytics]', { at: Date.now(), payload: job.payload });
-          return { success: true, result: { logged: true } };
+
+        try {
+          const analytics = getAnalyticsService();
+          const recordResult = await analytics.recordEvent({
+            type: job.payload.type,
+            merchantId: job.payload.merchantId,
+            data: job.payload.data
+          });
+
+          if (!recordResult.success) {
+            return { success: false, error: recordResult.error || 'Analytics recording failed' };
+          }
+
+          return {
+            success: true,
+            result: {
+              eventType: job.payload.type,
+              total: recordResult.total
+            }
+          };
+        } catch (error) {
+          console.error('❌ Analytics processing error:', error);
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown analytics error'
+          };
         }
-        
-        // Generic analytics processing
-        console.log('[ANALYTICS_PROCESSING] Event processed for future analysis');
-        return { success: true, result: { processed: true, placeholder: true } };
       }
     });
   }

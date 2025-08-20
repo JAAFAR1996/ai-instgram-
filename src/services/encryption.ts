@@ -145,9 +145,18 @@ export class EncryptionService {
    * HMAC verification for webhooks - kept for backward compatibility
    */
   public verifyHMAC(payload: string, signature: string, secret: string): boolean {
-    const expectedSig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-    const receivedSig = signature.replace('sha256=', '');
-    return crypto.timingSafeEqual(Buffer.from(expectedSig), Buffer.from(receivedSig));
+    // Remove common prefix and validate format
+    const sig = signature.startsWith('sha256=') ? signature.slice(7) : signature;
+    if (!/^[a-f0-9]{64}$/i.test(sig)) return false;
+
+    // Calculate expected HMAC
+    const expectedHex = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+
+    // Compare buffers safely
+    const a = Buffer.from(expectedHex, 'hex');
+    const b = Buffer.from(sig, 'hex');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
   }
 
   /**

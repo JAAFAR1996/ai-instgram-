@@ -10,6 +10,7 @@ import { getDatabase } from '../database/connection.js';
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { getMetaRateLimiter } from './meta-rate-limiter.js';
 import type { Platform } from '../types/database.js';
+import { telemetry } from './telemetry.js';
 
 export interface InstagramCredentials {
   businessAccountId: string;
@@ -130,12 +131,16 @@ export class InstagramAPIClient {
     body?: Record<string, any>,
     merchantId = process.env.MERCHANT_ID || 'default-merchant-001'
   ): Promise<T> {
+    const resolvedMerchantId = merchantId ?? requireMerchantId();
+    if (merchantId) {
+      console.log(`Using MERCHANT_ID: ${resolvedMerchantId}`);
+    }
     const windowMs = 60_000;         // 1 دقيقة
     const maxRequests = 90;          // حد لكل تاجر/دقيقة (عدّله كما يلزم)
-    const rateKey = `ig:${merchantId}:${method}:${path}`;
+    const rateKey = `ig:${resolvedMerchantId}:${method}:${path}`;
 
     // ✅ فحص المعدّل قبل الإرسال
-    const check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
+      const check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
     if (!check.allowed) {
       throw Object.assign(new Error('RATE_LIMIT_EXCEEDED'), {
         resetTime: check.resetTime,
@@ -144,12 +149,16 @@ export class InstagramAPIClient {
       });
     }
 
-    const url = `${GRAPH_API_BASE_URL}${path}${path.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken)}`;
+      const url = `${GRAPH_API_BASE_URL}${path}${path.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken)}`;
+    const start = Date.now();
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined
     });
+
+    const latency = Date.now() - start;
+    telemetry.recordMetaRequest('instagram', path, res.status, latency, res.status === 429);
 
     // اختياري: قراءة رؤوس فيسبوك الخاصة بالاستهلاك (إن وُجدت) لتسجيلها
     const appUsage = res.headers.get('x-app-usage');
@@ -322,7 +331,16 @@ export class InstagramAPIClient {
         .digest('hex');
 
       const receivedSignature = signature.replace('sha256=', '');
-      
+      const isHex = /^[0-9a-f]+$/i;
+      if (
+        receivedSignature.length !== expectedSignature.length ||
+        !isHex.test(receivedSignature) ||
+        !isHex.test(expectedSignature)
+      ) {
+        console.warn('⚠️ Invalid webhook signature length or format');
+        return false;
+      }
+
       return crypto.timingSafeEqual(
         Buffer.from(expectedSignature, 'hex'),
         Buffer.from(receivedSignature, 'hex')

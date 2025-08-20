@@ -34,6 +34,8 @@ import { verifyHMAC, verifyHMACRaw, readRawBody, type HmacVerifyResult } from '.
 import { pushDLQ, getDLQStats } from './queue/dead-letter.js';
 import { GRAPH_API_VERSION } from './config/graph-api.js';
 import type { IGWebhookPayload } from './types/instagram.js';
+import { getLogger, bindRequestLogger } from './services/logger.js';
+import { telemetry, telemetryMiddleware } from './services/telemetry.js';
 
 // ===== Debug helpers =====
 const sigEnvOn = () => process.env.DEBUG_SIG === '1';
@@ -62,7 +64,7 @@ function debugSig(appSecret: string, providedHeader: string, rawBody: Buffer) {
 // Define App Environment for TypeScript
 type AppEnv = {
   Variables: {
-    rawBody?: string;
+    rawBody?: Buffer;
     rawBodyString?: string;
     secureHeadersNonce?: string;
     log?: any;
@@ -77,7 +79,10 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const IG_VERIFY_TOKEN = (process.env.IG_VERIFY_TOKEN || '').trim();
 const META_APP_SECRET = (process.env.META_APP_SECRET || '').trim();
 const DATABASE_URL = process.env.DATABASE_URL;
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const REDIS_URL = process.env.REDIS_URL;
+
+// Temporary store for PKCE code verifiers keyed by state
+const pkceSessions = new Map<string, { codeVerifier: string; createdAt: number }>();
 
 if (!META_APP_SECRET || !IG_VERIFY_TOKEN) {
   console.error('❌ Missing META_APP_SECRET or IG_VERIFY_TOKEN. Refusing to start.');
@@ -118,47 +123,47 @@ function detectEnvironment(): Environment {
 
 async function initializeRedisIntegration() {
   console.log('🔍 [DEBUG] initializeRedisIntegration() - بدء دالة تهيئة النظام المتكامل');
-  
+
+  if (!REDIS_URL) {
+    console.error('❌ REDIS_URL not configured - Redis integration disabled');
+    return;
+  }
+
   try {
-    if (REDIS_URL) {
-      console.log('🔍 [DEBUG] REDIS_URL موجود:', REDIS_URL.substring(0, 20) + '...');
-      
-      const environment = detectEnvironment();
-      console.log('🔍 [DEBUG] تم تحديد البيئة:', environment);
-      
-      console.log('🔍 [DEBUG] إنشاء RedisProductionIntegration...');
-      redisIntegration = new RedisProductionIntegration(REDIS_URL, console, environment);
-      
-      console.log('🔍 [DEBUG] استدعاء redisIntegration.initialize()...');
-      const result = await redisIntegration.initialize();
-      
-      console.log('🔍 [DEBUG] نتيجة initialize():', { 
-        success: result.success, 
-        error: result.error?.substring(0, 100) 
+    console.log('🔍 [DEBUG] REDIS_URL موجود:', REDIS_URL.substring(0, 20) + '...');
+
+    const environment = detectEnvironment();
+    console.log('🔍 [DEBUG] تم تحديد البيئة:', environment);
+
+    console.log('🔍 [DEBUG] إنشاء RedisProductionIntegration...');
+    redisIntegration = new RedisProductionIntegration(REDIS_URL, console, environment);
+
+    console.log('🔍 [DEBUG] استدعاء redisIntegration.initialize()...');
+    const result = await redisIntegration.initialize();
+
+    console.log('🔍 [DEBUG] نتيجة initialize():', {
+      success: result.success,
+      error: result.error?.substring(0, 100)
+    });
+
+    if (result.success) {
+      console.log('✅ نظام ريديس المتكامل جاهز', {
+        responseTime: result.diagnostics?.redisHealth?.responseTime,
+        queueStats: result.diagnostics?.queueStats
       });
-      
-      if (result.success) {
-        console.log('✅ نظام ريديس المتكامل جاهز', {
-          responseTime: result.diagnostics?.redisHealth?.responseTime,
-          queueStats: result.diagnostics?.queueStats
-        });
-        console.log('🔍 [DEBUG] queueManager موجود؟', !!result.queueManager);
-        
-        // Start health monitoring after Redis and queue are ready
-        console.log('🏥 بدء نظام مراقبة الصحة...');
-        startHealthMonitoring({
-          redisReady: () => result.diagnostics?.redisHealth?.connected || false,
-          queueReady: () => !!result.queueManager
-        });
-        console.log('✅ نظام مراقبة الصحة نشط');
-      } else {
-        console.error('❌ فشل تهيئة نظام ريديس:', result.error);
-        console.warn('⚠️ سيتم استخدام المعالجة البديلة');
-        console.log('🔍 [DEBUG] تفاصيل الفشل:', result.diagnostics);
-      }
+      console.log('🔍 [DEBUG] queueManager موجود؟', !!result.queueManager);
+
+      // Start health monitoring after Redis and queue are ready
+      console.log('🏥 بدء نظام مراقبة الصحة...');
+      startHealthMonitoring({
+        redisReady: () => result.diagnostics?.redisHealth?.connected || false,
+        queueReady: () => !!result.queueManager
+      });
+      console.log('✅ نظام مراقبة الصحة نشط');
     } else {
-      console.warn('⚠️ REDIS_URL not configured - Redis integration disabled');
-      console.log('🔍 [DEBUG] REDIS_URL غير موجود في متغيرات البيئة');
+      console.error('❌ فشل تهيئة نظام ريديس:', result.error);
+      console.warn('⚠️ سيتم استخدام المعالجة البديلة');
+      console.log('🔍 [DEBUG] تفاصيل الفشل:', result.diagnostics);
     }
   } catch (error) {
     console.error('❌ خطأ في تهيئة النظام المتكامل:', error);
@@ -236,15 +241,17 @@ console.log('🔧 Environment:', { NODE_ENV, PORT });
 // Initialize Hono app with typed environment
 const app = new Hono<AppEnv>();
 
+// Telemetry metrics middleware
+app.use('*', telemetryMiddleware());
+
 // ===============================================
 // REQUEST LOGGING MIDDLEWARE - structured logging with trace IDs
 // ===============================================
-import { getLogger, bindRequestLogger } from './services/logger.js';
 
 app.use('*', async (c, next) => {
   const reqId = crypto.randomUUID();
-  const traceId = c.req.header('x-trace-id') || `trace_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const correlationId = c.req.header('x-correlation-id') || `corr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const traceId = c.req.header('x-trace-id') || `trace_${crypto.randomUUID()}`;
+  const correlationId = c.req.header('x-correlation-id') || `corr_${crypto.randomUUID()}`;
   
   const log = bindRequestLogger(getLogger(), { 
     requestId: reqId, 
@@ -268,14 +275,20 @@ app.use('*', async (c, next) => {
 // ===============================================
 app.use("/webhooks/*", async (c, next) => {
   if (c.req.method === "POST") {
-    const raw = await c.req.text();
-    
+    const clone = c.req.raw.clone();
+    const rawBody = Buffer.from(await clone.arrayBuffer());
+
     // حماية إضافية: حدّد حجم البودي
-    if (raw.length > 512*1024) return c.text("payload too large", 413);
-    
+    if (rawBody.length > 512 * 1024) return c.text("payload too large", 413);
+
     // Store raw body for signature verification in handlers
-    // لا نعيد إنشاء الrequest - نحتفظ بالraw في context فقط
-    c.set("rawBody", raw);
+    c.set("rawBody", rawBody);
+
+    // Recreate the request so downstream handlers can read the body again
+    Object.defineProperty(c, 'req', {
+      value: new Request(c.req.raw, { body: rawBody }),
+      writable: true
+    });
   }
   await next();
 });
@@ -357,8 +370,15 @@ const csrfProtection = async (c: any, next: any) => {
 class ProductionEncryptionService {
   private encryptionKey: Buffer;
 
-  constructor(key?: string) {
-    this.encryptionKey = Buffer.from(key || '0'.repeat(64), 'hex');
+  constructor() {
+    const key = process.env.ENCRYPTION_KEY_HEX;
+    if (!key) {
+      throw new Error('ENCRYPTION_KEY_HEX environment variable required');
+    }
+    if (!/^[0-9a-fA-F]{64}$/.test(key)) {
+      throw new Error('ENCRYPTION_KEY_HEX must be 64 hex characters (32 bytes)');
+    }
+    this.encryptionKey = Buffer.from(key, 'hex');
   }
 
   encrypt(text: string): { encrypted: string; iv: string; authTag: string } {
@@ -571,9 +591,22 @@ function verifyInstagramSignatureLegacy(rawBody: Buffer, signature: string, cont
     rawBodyLen: rawBody.length,
     rawBodyFirst50: rawBody.toString('utf8').substring(0, 50).replace(/[\r\n]/g, '')
   });
-  
+
   try {
-    const result = crypto.timingSafeEqual(Buffer.from(provided, 'hex'), Buffer.from(expected, 'hex'));
+    const providedBuf = Buffer.from(provided, 'hex');
+    const expectedBuf = Buffer.from(expected, 'hex');
+    const hexPattern = /^[a-f0-9]{64}$/;
+
+    if (providedBuf.length !== 32 || expectedBuf.length !== 32) {
+      console.warn(`❌ Invalid signature length: provided=${providedBuf.length} expected=${expectedBuf.length}`);
+      return false;
+    }
+    if (!hexPattern.test(provided) || !hexPattern.test(expected)) {
+      console.warn('❌ Signature format invalid: expected 64 hex characters.');
+      return false;
+    }
+
+    const result = crypto.timingSafeEqual(providedBuf, expectedBuf);
     console.log('🔍 Signature verification result:', result);
     return result;
   } catch (e) {
@@ -763,7 +796,7 @@ app.post('/api/utility-messages/:merchantId/send', async (c) => {
     }
 
     // Simulate utility message sending
-    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const messageId = `msg_${Date.now()}_${crypto.randomUUID()}`;
     
     return c.json({
       success: true,
@@ -836,21 +869,30 @@ app.post('/api/auth/instagram/initiate', async (c) => {
     }
     
     console.log('🔗 Enhanced OAuth initiation for merchant:', merchantId);
-    
+
     // Generate secure OAuth URL with 2025 enhancements
     const state = `secure_${Date.now()}_${Math.random().toString(36).substr(2, 15)}`;
     const appId = process.env.IG_APP_ID;
     const redirectUri = process.env.REDIRECT_URI || 'https://ai-instgram.onrender.com/auth/instagram/callback';
-    
-    const oauthUrl = `https://api.instagram.com/oauth/authorize?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=instagram_business_basic,instagram_business_content_publish,instagram_business_manage_messages,instagram_business_manage_comments&response_type=code&state=${state}&code_challenge=placeholder&code_challenge_method=S256&business_login=true`;
-    
+
+    // PKCE: create code_verifier and code_challenge
+    const codeVerifier = crypto.randomBytes(32).toString('base64url');
+    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+    // Store verifier in temporary session tied to state
+    pkceSessions.set(state, { codeVerifier, createdAt: Date.now() });
+    setTimeout(() => pkceSessions.delete(state), 10 * 60 * 1000); // expire after 10 minutes
+
+    const oauthUrl = `https://api.instagram.com/oauth/authorize?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=instagram_business_basic,instagram_business_content_publish,instagram_business_manage_messages,instagram_business_manage_comments&response_type=code&state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256&business_login=true`;
+
     return c.json({
       success: true,
       oauthUrl,
       state,
+      codeVerifier,
       requiredScopes: [
         'instagram_business_basic',
-        'instagram_business_content_publish', 
+        'instagram_business_content_publish',
         'instagram_business_manage_messages',
         'instagram_business_manage_comments'
       ],

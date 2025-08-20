@@ -11,7 +11,7 @@ All production environment variables have been configured in `.env.production`:
 - `OPENAI_API_KEY` - OpenAI API key for AI features
 - `DATABASE_URL` - PostgreSQL production database
 - `ENCRYPTION_KEY` - AES-256 encryption key
-- `JWT_SECRET` - JWT signing secret
+- `JWT_SECRET` - JWT signing secret (must be set separately; no fallback to ENCRYPTION_KEY) (must be set separately; no fallback to ENCRYPTION_KEY)
 
 ### 📱 **Platform Configuration**
 - **Instagram Business Account ID**: `17841405545604018`
@@ -21,6 +21,7 @@ All production environment variables have been configured in `.env.production`:
 
 ### 🗄️ **Database Configuration**
 - **PostgreSQL**: Configured with SSL enabled
+- **Credentials Required**: You must explicitly set database host, user, and `DB_PASSWORD` in environment variables; the application will exit if credentials are missing.
 - **Connection Pool**: 5-20 connections
 - **Redis**: Configured for caching
 
@@ -108,7 +109,8 @@ The application includes comprehensive monitoring:
 2. **Instagram Access Token** may need periodic refresh
 3. **WhatsApp tokens** are set to placeholder values - update as needed
 4. **Database SSL** is enabled for production security
-5. **CORS** is restricted to `https://ai-instgram.onrender.com`
+ 5. **CORS** is restricted to `https://ai-instgram.onrender.com`
++6. **Set `REDIS_PASSWORD`** in your environment before deployment
 
 ## 🆘 **Troubleshooting**
 

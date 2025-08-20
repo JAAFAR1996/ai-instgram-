@@ -289,7 +289,13 @@ export class WebhookRouter {
       if (event.object !== 'instagram') return c.text('Wrong object', 400);
 
       // Check for idempotency using merchant and body hash
-      const idempotencyMerchantId = process.env.MERCHANT_ID || 'default-merchant-001';
+      const idempotencyMerchantId = process.env.MERCHANT_ID || c.req.header('x-merchant-id');
+      if (!idempotencyMerchantId) {
+        return c.json({
+          error: 'Merchant ID required',
+          code: 'MERCHANT_ID_MISSING'
+        }, 400);
+      }
       const idempotencyCheck = await this.checkWebhookIdempotency(idempotencyMerchantId, event, 'instagram');
       
       if (idempotencyCheck.isDuplicate) {
@@ -372,7 +378,13 @@ export class WebhookRouter {
       console.log('📨 WhatsApp webhook event received');
       
       // Apply Redis sliding window rate limiting
-      const whatsappMerchantId = process.env.MERCHANT_ID || 'default-merchant-001';
+      const whatsappMerchantId = process.env.MERCHANT_ID || c.req.header('x-merchant-id');
+      if (!whatsappMerchantId) {
+        return c.json({
+          error: 'Merchant ID required',
+          code: 'MERCHANT_ID_MISSING'
+        }, 400);
+      }
       const rateLimitKey = `webhook:whatsapp:${whatsappMerchantId}`;
       const windowMs = 60000; // 1 minute window
       const maxRequests = 200; // 200 requests per minute per merchant (WhatsApp has higher volume)
@@ -437,20 +449,25 @@ export class WebhookRouter {
       return c.text('EVENT_RECEIVED', 200);
 
     } catch (error) {
+      if (error instanceof MerchantIdMissingError) {
+        return c.json({
+          error: 'Merchant ID required',
+          code: 'MERCHANT_ID_MISSING'
+        }, 400);
+      }
       console.error('❌ WhatsApp webhook processing failed:', error);
-      
-      // Push to DLQ for analysis
+
       pushDLQ({
         ts: Date.now(),
         reason: 'whatsapp-webhook-processing-failed',
-        payload: { 
+        payload: {
           error: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined
         },
         platform: 'whatsapp',
-        merchantId: process.env.MERCHANT_ID || 'unknown'
+        merchantId: merchantId ?? 'unknown'
       });
-      
+
       return c.text('Webhook processing failed', 500);
     }
   }

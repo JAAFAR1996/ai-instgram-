@@ -8,6 +8,8 @@
 import { getMessageQueue, type MessageQueue, type QueueJobType } from './message-queue.js';
 import { webhookProcessor } from './processors/webhook-processor.js';
 import { aiProcessor } from './processors/ai-processor.js';
+import { messageDeliveryProcessor } from './processors/message-delivery-processor.js';
+import { notificationProcessor } from './processors/notification-processor.js';
 import { getRepositories } from '../repositories/index.js';
 
 export interface QueueManagerStats {
@@ -68,15 +70,7 @@ export class QueueManager {
     this.messageQueue.registerProcessor('AI_RESPONSE_GENERATION', aiProcessor);
 
     // Register message delivery processor
-    this.messageQueue.registerProcessor('MESSAGE_DELIVERY', {
-      async process(job) {
-        console.log(`📤 Processing message delivery: ${job.id}`);
-        
-        // Safe minimum implementation - realistic processors
-        console.log('[MESSAGE_DELIVERY] تنفيذ حقيقي لاحقًا - placeholder active');
-        return { success: true, result: { delivered: true, placeholder: true } };
-      }
-    });
+    this.messageQueue.registerProcessor('MESSAGE_DELIVERY', messageDeliveryProcessor);
 
     // Register conversation cleanup processor
     this.messageQueue.registerProcessor('CONVERSATION_CLEANUP', {
@@ -118,15 +112,7 @@ export class QueueManager {
     });
 
     // Register notification processor
-    this.messageQueue.registerProcessor('NOTIFICATION_SEND', {
-      async process(job) {
-        console.log(`📧 Processing notification: ${job.payload.type}`);
-        
-        // Safe minimum implementation - realistic processors  
-        console.log('[NOTIFICATION_SEND] تنفيذ حقيقي لاحقًا - placeholder active');
-        return { success: true, result: { sent: true, placeholder: true } };
-      }
-    });
+    this.messageQueue.registerProcessor('NOTIFICATION_SEND', notificationProcessor);
 
     console.log('🔧 All job processors registered');
   }

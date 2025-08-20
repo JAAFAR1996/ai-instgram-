@@ -709,8 +709,32 @@ export class InstagramHashtagMentionProcessor {
   }
 
   private async calculateHashtagGrowth(hashtag: string, merchantId: string, timeframe: string): Promise<number> {
-    // Simplified growth calculation - would need more sophisticated analysis
-    return Math.random() * 50; // Placeholder
+    try {
+      const sql = this.db.getSQL();
+      const interval = this.getTimeFilter(timeframe);
+      const result = await sql.unsafe(`
+        SELECT
+          COUNT(*) FILTER (WHERE created_at >= NOW() - ${interval}) AS current_count,
+          COUNT(*) FILTER (
+            WHERE created_at >= NOW() - ${interval} * 2
+              AND created_at < NOW() - ${interval}
+          ) AS previous_count
+        FROM hashtag_mentions
+        WHERE hashtag = $1
+          AND merchant_id = $2::uuid
+      `, [hashtag, merchantId]);
+
+      const current = Number(result[0]?.current_count || 0);
+      const previous = Number(result[0]?.previous_count || 0);
+
+      if (previous === 0) {
+        return current > 0 ? 100 : 0;
+      }
+      return ((current - previous) / previous) * 100;
+    } catch (error) {
+      console.error('Error calculating hashtag growth:', error);
+      return 0;
+    }
   }
 
   private async getAssociatedWords(hashtag: string, merchantId: string): Promise<string[]> {

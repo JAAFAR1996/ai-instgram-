@@ -5,8 +5,9 @@
 
 const { Hono } = require('hono');
 const { cors } = require('hono/cors');
-const { logger } = require('hono/logger');
+const { logger: honoLogger } = require('hono/logger');
 const { serve } = require('@hono/node-server');
+const winston = require('winston');
 const crypto = require('crypto');
 
 // Environment variables
@@ -15,11 +16,38 @@ const IG_VERIFY_TOKEN = process.env.IG_VERIFY_TOKEN || 'test_token_123';
 const META_APP_SECRET = process.env.META_APP_SECRET || 'test_secret_123';
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
-console.log('🔧 Production Server Environment:');
-console.log('  NODE_ENV:', NODE_ENV);
-console.log('  PORT:', PORT);
-console.log('  IG_VERIFY_TOKEN:', IG_VERIFY_TOKEN ? '[SET]' : '[NOT SET]');
-console.log('  META_APP_SECRET:', META_APP_SECRET ? '[SET]' : '[NOT SET]');
+// Maximum accepted body size for incoming requests (512KB)
+const MAX_BODY_SIZE = 512 * 1024; // 512KB
+
+if (!IG_VERIFY_TOKEN) {
+  console.error('❌ Missing IG_VERIFY_TOKEN environment variable');
+  process.exit(1);
+}
+
+if (!META_APP_SECRET) {
+  console.error('❌ Missing META_APP_SECRET environment variable');
+  process.exit(1);
+}
+
+if (!INTERNAL_API_KEY) {
+  console.error('❌ Missing INTERNAL_API_KEY environment variable');
+  process.exit(1);
+}
+
+// Application logger with JSON output
+const appLogger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: winston.format.json(),
+  transports: [new winston.transports.Console()]
+});
+
+appLogger.info('Production Server Environment', {
+  NODE_ENV,
+  PORT,
+  IG_VERIFY_TOKEN: IG_VERIFY_TOKEN ? '[SET]' : '[NOT SET]',
+  META_APP_SECRET: META_APP_SECRET ? '[SET]' : '[NOT SET]',
+  INTERNAL_API_KEY: INTERNAL_API_KEY ? '[SET]' : '[NOT SET]'
+});
 
 // Initialize Hono app
 const app = new Hono();
@@ -52,7 +80,7 @@ app.use('*', async (c, next) => {
 });
 
 // Logging middleware
-app.use('*', logger());
+app.use('*', honoLogger());
 
 // CORS for webhook endpoints (strict origins)
 app.use('/webhooks/*', cors({
@@ -60,6 +88,19 @@ app.use('/webhooks/*', cors({
   allowHeaders: ['Content-Type', 'X-Hub-Signature-256', 'X-Hub-Signature'],
   methods: ['GET', 'POST']
 }));
+
+// Middleware to enforce body size limits before reading request body
+const limitBodySize = async (c, next) => {
+  const contentLength = c.req.header('content-length');
+  if (contentLength && parseInt(contentLength, 10) > MAX_BODY_SIZE) {
+    console.error('❌ Payload too large:', contentLength);
+    return c.text('Payload too large', 413);
+  }
+  await next();
+};
+
+app.use('/webhooks/*', limitBodySize);
+app.use('/api/*', limitBodySize);
 
 // ===============================================
 // CRYPTOGRAPHIC FUNCTIONS (PRODUCTION GRADE)
@@ -74,9 +115,20 @@ function verifyInstagramSignature(body, signature) {
     console.error('❌ Invalid signature format');
     return false;
   }
-  
+
   const providedSignature = signature.replace('sha256=', '');
-  
+
+  // Ensure signature is exactly 64 hexadecimal characters
+  if (providedSignature.length !== 64) {
+    console.error(`❌ Signature length mismatch: expected 64 hex chars, got ${providedSignature.length}`);
+    return false;
+  }
+
+  if (!/^[0-9a-fA-F]{64}$/.test(providedSignature)) {
+    console.error('❌ Signature format invalid: non-hexadecimal characters detected');
+    return false;
+  }
+
   // Generate expected signature using META_APP_SECRET
   const expectedSignature = crypto
     .createHmac('sha256', META_APP_SECRET)
@@ -90,7 +142,7 @@ function verifyInstagramSignature(body, signature) {
       Buffer.from(expectedSignature, 'hex')
     );
   } catch (error) {
-    console.error('❌ Signature comparison failed:', error.message);
+    appLogger.error('Signature comparison failed', { error: error.message });
     return false;
   }
 }
@@ -156,54 +208,58 @@ app.get('/health', async (c) => {
 
 // Instagram webhook verification (GET)
 app.get('/webhooks/instagram', async (c) => {
-  console.log('🔍 Instagram webhook verification request');
+  appLogger.info('Instagram webhook verification request');
   
   const mode = c.req.query('hub.mode');
   const token = c.req.query('hub.verify_token');
   const challenge = c.req.query('hub.challenge');
   
-  console.log('Verification params:', { mode, token, challenge });
+  appLogger.info('Verification params', {
+    mode,
+    token: token ? '[REDACTED]' : '[MISSING]',
+    challenge
+  });
   
   if (mode !== 'subscribe') {
-    console.error('❌ Invalid hub mode:', mode);
+    appLogger.error('Invalid hub mode', { mode });
     return c.text('Invalid hub mode', 400);
   }
   
   // Verify token matches stored webhook verify token
   if (token !== IG_VERIFY_TOKEN) {
-    console.error('❌ Invalid webhook verify token');
+    appLogger.error('Invalid webhook verify token');
     return c.text('Invalid verify token', 403);
   }
   
-  console.log('✅ Instagram webhook verification successful');
+  appLogger.info('Instagram webhook verification successful');
   return c.text(challenge || '');
 });
 
 // Instagram webhook events (POST)
 app.post('/webhooks/instagram', async (c) => {
-  console.log('📨 Instagram webhook event received');
+  appLogger.info('Instagram webhook event received');
   
   // Get raw body for signature verification
   const body = await c.req.text();
   const signature = c.req.header('X-Hub-Signature-256');
   
-  console.log('Event details:', {
+  appLogger.info('Event details', {
     bodyLength: body.length,
     signature: signature ? '[PRESENT]' : '[MISSING]',
     timestamp: new Date().toISOString()
   });
   
   if (!signature) {
-    console.error('❌ Missing X-Hub-Signature-256 header');
+    appLogger.error('Missing X-Hub-Signature-256 header');
     return c.text('Missing signature', 400);
   }
   
   // Verify signature BEFORE any processing
   const isValidSignature = verifyInstagramSignature(body, signature);
-  console.log('📋 Signature verification:', isValidSignature ? '✅ VALID' : '❌ INVALID');
+  appLogger.info('Signature verification', { valid: isValidSignature });
   
   if (!isValidSignature) {
-    console.error('❌ Instagram webhook signature verification failed');
+    appLogger.error('Instagram webhook signature verification failed');
     return c.text('Invalid signature', 401);
   }
   
@@ -211,7 +267,7 @@ app.post('/webhooks/instagram', async (c) => {
   let event;
   try {
     event = JSON.parse(body);
-    console.log('✅ Valid Instagram event:', {
+    appLogger.info('Valid Instagram event', {
       object: event.object,
       entries: event.entry?.length || 0
     });
@@ -220,7 +276,7 @@ app.post('/webhooks/instagram', async (c) => {
     // For now, we just acknowledge receipt
     
   } catch (parseError) {
-    console.error('❌ Invalid JSON in webhook payload:', parseError.message);
+    appLogger.error('Invalid JSON in webhook payload', { error: parseError.message });
     return c.text('Invalid JSON payload', 400);
   }
   
@@ -247,18 +303,18 @@ const csrfProtection = async (c, next) => {
 
 // WhatsApp send endpoint (24h policy enforcement)
 app.post('/api/whatsapp/send', csrfProtection, async (c) => {
-  console.log('📱 WhatsApp send request received');
+  appLogger.info('WhatsApp send request received');
   
   let payload;
   try {
     payload = await c.req.json();
   } catch (e) {
-    console.error('❌ Invalid JSON in WhatsApp send request');
+    appLogger.error('Invalid JSON in WhatsApp send request');
     return c.json({ error: 'Invalid JSON' }, 400);
   }
   
-  console.log('📋 Send request details:', {
-    to: payload.to,
+  appLogger.info('Send request details', {
+    to: payload.to ? '[REDACTED]' : undefined,
     hasText: !!payload.text,
     hasTemplate: !!(payload.template || payload.templateName),
     timestamp: new Date().toISOString()
@@ -266,8 +322,9 @@ app.post('/api/whatsapp/send', csrfProtection, async (c) => {
   
   // WhatsApp 24h policy: Outside window requires approved templates
   if (!payload.template && !payload.templateName) {
-    console.log('🛑 WhatsApp 24h policy violation detected');
-    console.log('   Reason: No template provided for message outside 24h window');
+    appLogger.warn('WhatsApp 24h policy violation detected', {
+      reason: 'No template provided for message outside 24h window'
+    });
     
     return c.json({ 
       error: 'TEMPLATE_REQUIRED',
@@ -277,7 +334,7 @@ app.post('/api/whatsapp/send', csrfProtection, async (c) => {
     }, 422);
   }
   
-  console.log('✅ WhatsApp message approved (template provided)');
+  appLogger.info('WhatsApp message approved (template provided)');
   return c.json({ 
     success: true, 
     messageId: `wamsg_${Date.now()}`,
@@ -289,14 +346,15 @@ app.post('/api/whatsapp/send', csrfProtection, async (c) => {
 app.get('/internal/diagnostics/meta-ping', async (c) => {
   // Security: Require authorization header
   const authHeader = c.req.header('Authorization');
-  if (!authHeader || authHeader !== `Bearer ${process.env.INTERNAL_API_KEY || 'dev-key-123'}`) {
+  if (!authHeader || authHeader !== `Bearer ${INTERNAL_API_KEY}`) {
+    console.warn('⚠️ Unauthorized access attempt to /internal/diagnostics/meta-ping');
     return c.text('Unauthorized', 401);
   }
   
   // Security: Block in production unless internal IP
   if (NODE_ENV === 'production') {
     const clientIP = c.req.header('X-Real-IP') || c.req.header('X-Forwarded-For') || 'unknown';
-    console.log(`🔒 Internal endpoint accessed by IP: ${clientIP}`);
+    appLogger.info('Internal endpoint accessed', { ip: clientIP });
   }
   
   return c.json({
@@ -327,7 +385,8 @@ app.get('/internal/diagnostics/meta-ping', async (c) => {
 app.get('/internal/crypto-test', async (c) => {
   // Security: Require authorization header
   const authHeader = c.req.header('Authorization');
-  if (!authHeader || authHeader !== `Bearer ${process.env.INTERNAL_API_KEY || 'dev-key-123'}`) {
+  if (!authHeader || authHeader !== `Bearer ${INTERNAL_API_KEY}`) {
+    console.warn('⚠️ Unauthorized access attempt to /internal/crypto-test');
     return c.text('Unauthorized', 401);
   }
   
@@ -336,21 +395,21 @@ app.get('/internal/crypto-test', async (c) => {
     return c.text('Not Found', 404);
   }
   
-  console.log('🔐 Running AES-256-GCM encryption test');
+  appLogger.info('Running AES-256-GCM encryption test');
   
   const testData = 'secure-ping-' + Date.now();
   
   try {
     // Encrypt
     const encrypted = encryptionService.encrypt(testData);
-    console.log('✅ Encryption successful');
+    appLogger.info('Encryption successful');
     
     // Decrypt
     const decrypted = encryptionService.decrypt(encrypted);
-    console.log('✅ Decryption successful');
+    appLogger.info('Decryption successful');
     
     const testPassed = testData === decrypted;
-    console.log('📋 Round-trip test:', testPassed ? 'PASS' : 'FAIL');
+    appLogger.info('Round-trip test', { result: testPassed ? 'PASS' : 'FAIL' });
     
     return c.json({
       test: 'AES-256-GCM encryption/decryption round-trip',
@@ -372,7 +431,7 @@ app.get('/internal/crypto-test', async (c) => {
     });
     
   } catch (error) {
-    console.error('❌ Crypto test failed:', error);
+    appLogger.error('Crypto test failed', { error: error.message });
     return c.json({
       test: 'AES-256-GCM encryption/decryption round-trip',
       success: false,
@@ -389,7 +448,7 @@ app.notFound((c) => {
 
 // Global error handler
 app.onError((err, c) => {
-  console.error('❌ Server error:', err);
+  appLogger.error('Server error', { error: err.message });
   return c.text('Internal Server Error', 500);
 });
 
@@ -397,32 +456,39 @@ app.onError((err, c) => {
 // SERVER STARTUP
 // ===============================================
 
-console.log('🚀 AI Sales Platform - Production Server Starting');
-console.log('📋 Available endpoints:');
-console.log('  GET  /health');
-console.log('  GET  /webhooks/instagram (verification)');
-console.log('  POST /webhooks/instagram (events)');
-console.log('  POST /api/whatsapp/send');
-console.log('  GET  /internal/diagnostics/meta-ping');
-console.log('  GET  /internal/crypto-test');
+appLogger.info('AI Sales Platform - Production Server Starting');
+appLogger.info('Available endpoints', {
+  endpoints: [
+    'GET  /health',
+    'GET  /webhooks/instagram (verification)',
+    'POST /webhooks/instagram (events)',
+    'POST /api/whatsapp/send',
+    'GET  /internal/diagnostics/meta-ping',
+    'GET  /internal/crypto-test'
+  ]
+});
 
 // Start server using @hono/node-server
 serve({
   fetch: app.fetch,
   port: PORT
 }, (info) => {
-  console.log(`✅ AI Instagram Platform running on https://ai-instgram.onrender.com`);
-  console.log(`   Local port: ${info.port}`);
-  console.log('🔒 Security features active:');
-  console.log('  • CSP: API-only (no unsafe-inline)');
-  console.log('  • X-XSS-Protection: removed (deprecated)');
-  console.log('  • HMAC-SHA256: webhook signature verification');
-  console.log('  • AES-256-GCM: 12-byte IV encryption');
-  console.log('  • WhatsApp 24h: policy enforcement');
-  console.log('  • Graph API: v23.0 with rate limit headers');
-  console.log('🌐 Webhooks ready for:');
-  console.log('  • Instagram: https://ai-instgram.onrender.com/webhooks/instagram');
-  console.log('  • WhatsApp: https://ai-instgram.onrender.com/webhooks/whatsapp');
+  appLogger.info('AI Instagram Platform running on https://ai-instgram.onrender.com');
+  appLogger.info('Local port', { port: info.port });
+  appLogger.info('Security features active', {
+    features: [
+      'CSP: API-only (no unsafe-inline)',
+      'X-XSS-Protection: removed (deprecated)',
+      'HMAC-SHA256: webhook signature verification',
+      'AES-256-GCM: 12-byte IV encryption',
+      'WhatsApp 24h: policy enforcement',
+      'Graph API: v23.0 with rate limit headers'
+    ]
+  });
+  appLogger.info('Webhooks ready for', {
+    instagram: 'https://ai-instgram.onrender.com/webhooks/instagram',
+    whatsapp: 'https://ai-instgram.onrender.com/webhooks/whatsapp'
+  });
 });
 
 module.exports = app;

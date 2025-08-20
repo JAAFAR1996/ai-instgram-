@@ -5,6 +5,8 @@
  * ===============================================
  */
 
+import crypto from 'crypto';
+
 export interface LogContext {
   traceId?: string;
   correlationId?: string;
@@ -299,14 +301,14 @@ export function createRequestLogger(traceId?: string, correlationId?: string): L
  * Generate trace ID
  */
 function generateTraceId(): string {
-  return `trace_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return `trace_${crypto.randomUUID()}`;
 }
 
 /**
  * Generate correlation ID
  */
 function generateCorrelationId(): string {
-  return `corr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return `corr_${Date.now()}_${crypto.randomUUID()}`;
 }
 
 export default Logger;

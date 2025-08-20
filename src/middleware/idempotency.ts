@@ -48,18 +48,25 @@ async function generateIdempotencyKey(
   
   // Hash merchant ID and request body for uniqueness
   if (config.hashMerchantAndBody && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+    let rawBody: string | undefined;
     try {
-      const body = await c.req.text();
-      if (body) {
+      const clonedRequest = c.req.raw.clone();
+      rawBody = await clonedRequest.text();
+      if (rawBody) {
         const bodyHash = crypto
           .createHash('sha256')
-          .update(body)
+          .update(rawBody)
           .digest('hex')
           .substring(0, 16);
         keyData += `:${bodyHash}`;
       }
     } catch (error) {
       // If body parsing fails, continue without body hash
+    }
+
+    // Restore original request body so downstream handlers can read it
+    if (rawBody !== undefined) {
+      c.req.raw = new Request(c.req.raw, { body: rawBody });
     }
   }
   

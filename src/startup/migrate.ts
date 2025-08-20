@@ -96,7 +96,7 @@ export async function migrateAndSeed(): Promise<void> {
  */
 async function seedInitialData(client: any): Promise<void> {
   // Get configuration from environment
-  const merchantId = process.env.MERCHANT_ID || '550e8400-e29b-41d4-a716-446655440000';
+  const merchantId = requireMerchantId();
   const merchantName = process.env.MERCHANT_NAME || 'Default Merchant';
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com';
   const adminPhone = process.env.ADMIN_PHONE_NUMBER || '+1234567890';

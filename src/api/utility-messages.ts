@@ -11,6 +11,7 @@ import { validator } from 'hono/validator';
 import { getUtilityMessagesService, type UtilityMessageType } from '../services/utility-messages.js';
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
 import { z } from 'zod';
+import { getDatabase } from '../database/connection.js';
 
 // Validation schemas
 const SendUtilityMessageSchema = z.object({
@@ -310,36 +311,73 @@ app.get('/api/utility-messages/:merchantId/stats',
   async (c) => {
     try {
       const { merchantId } = c.req.valid('param');
-      
-      // TODO: Implement actual statistics from utility_message_logs table
-      return c.json({
-        success: true,
-        merchant_id: merchantId,
-        stats: {
-          total_sent: 0,
-          sent_today: 0,
-          sent_this_week: 0,
-          sent_this_month: 0,
-          by_type: {
-            ORDER_UPDATE: 0,
-            DELIVERY_NOTIFICATION: 0,
-            PAYMENT_UPDATE: 0,
-            ACCOUNT_NOTIFICATION: 0,
-            APPOINTMENT_REMINDER: 0
-          },
-          compliance_status: 'compliant',
-          last_sent: null
-        },
-        period: {
-          from: new Date().toISOString(),
-          to: new Date().toISOString()
+      const db = getDatabase();
+      const sql = db.getSQL();
+
+      try {
+        const [counts] = await sql`
+          SELECT 
+            COUNT(*) AS total_sent,
+            COUNT(*) FILTER (WHERE sent_at >= DATE_TRUNC('day', NOW())) AS sent_today,
+            COUNT(*) FILTER (WHERE sent_at >= DATE_TRUNC('week', NOW())) AS sent_this_week,
+            COUNT(*) FILTER (WHERE sent_at >= DATE_TRUNC('month', NOW())) AS sent_this_month,
+            MAX(sent_at) AS last_sent
+          FROM utility_message_logs
+          WHERE merchant_id = ${merchantId}::uuid
+        `;
+
+        const typeRows = await sql`
+          SELECT message_type, COUNT(*) AS count
+          FROM utility_message_logs
+          WHERE merchant_id = ${merchantId}::uuid
+          GROUP BY message_type
+        `;
+
+        const byType: Record<UtilityMessageType, number> = {
+          ORDER_UPDATE: 0,
+          DELIVERY_NOTIFICATION: 0,
+          PAYMENT_UPDATE: 0,
+          ACCOUNT_NOTIFICATION: 0,
+          APPOINTMENT_REMINDER: 0
+        };
+
+        for (const row of typeRows) {
+          const type = row.message_type as UtilityMessageType;
+          byType[type] = Number(row.count);
         }
-      });
-      
+
+        return c.json({
+          success: true,
+          merchant_id: merchantId,
+          stats: {
+            total_sent: Number(counts.total_sent || 0),
+            sent_today: Number(counts.sent_today || 0),
+            sent_this_week: Number(counts.sent_this_week || 0),
+            sent_this_month: Number(counts.sent_this_month || 0),
+            by_type: byType,
+            compliance_status: 'compliant',
+            last_sent: counts.last_sent ? new Date(counts.last_sent).toISOString() : null
+          },
+          period: {
+            from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+            to: new Date().toISOString()
+          }
+        });
+
+      } catch (dbError) {
+        console.error('❌ Failed to fetch utility message stats:', dbError);
+        const err = dbError instanceof Error ? dbError : new Error(String(dbError));
+        return c.json({
+          error: 'فشل في الاستعلام عن الإحصائيات',
+          details: err.message,
+          timestamp: new Date().toISOString()
+        }, 500);
+      }
+
     } catch (error) {
       console.error('❌ Get stats API error:', error);
       const err = error instanceof Error ? error : new Error(String(error));
-      
+
       return c.json({
         error: 'فشل في جلب الإحصائيات',
         details: err.message,

@@ -108,7 +108,7 @@ export class InstagramAuthAPI {
         const tokens = await this.oauthService.exchangeCodeForToken(code, merchantId);
         
         // Get user profile
-        const profile = await this.oauthService.getUserProfile(tokens.longLivedToken);
+        const profile = await this.oauthService.getUserProfile(tokens.longLivedToken, merchantId);
         
         // Store tokens in database
         await this.oauthService.storeTokens(merchantId, tokens, profile);
@@ -192,7 +192,7 @@ export class InstagramAuthAPI {
         const currentToken = result[0].instagram_access_token;
         
         // Refresh token
-        const refreshedToken = await this.oauthService.refreshLongLivedToken(currentToken);
+        const refreshedToken = await this.oauthService.refreshLongLivedToken(currentToken, merchantId);
         
         // Update in database
         const newExpiresAt = new Date(Date.now() + (refreshedToken.expires_in * 1000));
@@ -313,7 +313,7 @@ export class InstagramAuthAPI {
         }
 
         // Validate with Instagram
-        const isValid = await this.oauthService.validateToken(record.instagram_access_token);
+        const isValid = await this.oauthService.validateToken(record.instagram_access_token, merchantId);
 
         return c.json({
           success: true,

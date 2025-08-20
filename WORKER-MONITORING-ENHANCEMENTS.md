@@ -25,9 +25,11 @@ clearTimeout(workerInitTimeout);
 - **إحصائيات الأداء**: قياس throughput لكل Worker
 
 ```typescript
-const workerId = `worker-${Math.random().toString(36).substr(2, 9)}`;
-const webhookWorkerId = `webhook-worker-${Math.random().toString(36).substr(2, 6)}`;
-const aiWorkerId = `ai-worker-${Math.random().toString(36).substr(2, 6)}`;
+import crypto from 'node:crypto';
+
+const workerId = `worker-${crypto.randomUUID().replace(/-/g, '').slice(0, 9)}`;
+const webhookWorkerId = `webhook-worker-${crypto.randomUUID().replace(/-/g, '').slice(0, 6)}`;
+const aiWorkerId = `ai-worker-${crypto.randomUUID().replace(/-/g, '').slice(0, 6)}`;
 ```
 
 ### 3. مراقبة صحة Workers الدورية

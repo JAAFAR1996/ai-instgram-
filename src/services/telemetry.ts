@@ -2,88 +2,80 @@
  * ===============================================
  * OpenTelemetry Metrics & Observability (2025 Standards)
  * ✅ Production-grade monitoring and metrics collection
- * Note: OpenTelemetry packages not installed - stub implementation
  * ===============================================
  */
 
-// TODO: Install OpenTelemetry packages when needed
-// import { metrics, trace, context } from '@opentelemetry/api';
-// import { MeterProvider } from '@opentelemetry/sdk-metrics';
-// import { TracerProvider } from '@opentelemetry/sdk-trace-node';
-// import { Resource } from '@opentelemetry/resources';
-// import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
-// import { NodeSDK } from '@opentelemetry/auto-instrumentations-node';
-import { getConfig } from '../config/environment.js';
+import {
+  context,
+  metrics,
+  trace,
+  SpanStatusCode,
+  type Meter,
+  type Tracer,
+  type Counter,
+  type Histogram,
+  type UpDownCounter,
+  type Span,
+  type Context,
+  type Attributes
+} from '@opentelemetry/api';
+import { MeterProvider } from '@opentelemetry/sdk-metrics';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import type { Context as HonoContext, Next } from 'hono';
 
 export interface MetricsCollector {
   // Meta API metrics
-  metaRequestsTotal: any;
-  metaLatency: any;
-  metaRateLimited: any;
-  
+  metaRequestsTotal: Counter;
+  metaLatency: Histogram;
+  metaRateLimited: Counter;
+
   // WhatsApp/Instagram metrics
-  messagesTotal: any;
-  messagesSent: any;
-  messagesDelivered: any;
-  messagesFailed: any;
-  
+  messagesTotal: Counter;
+  messagesSent: Counter;
+  messagesDelivered: Counter;
+  messagesFailed: Counter;
+
   // Queue metrics
-  queueJobsTotal: any;
-  queueProcessingTime: any;
-  queueDepth: any;
-  dlqJobs: any;
-  
+  queueJobsTotal: Counter;
+  queueProcessingTime: Histogram;
+  queueDepth: UpDownCounter;
+  dlqJobs: Counter;
+
   // Business metrics
-  conversionsTotal: any;
-  ordersTotal: any;
-  revenueTotal: any;
-  merchantsActive: any;
-  
+  conversionsTotal: Counter;
+  ordersTotal: Counter;
+  revenueTotal: Counter;
+  merchantsActive: UpDownCounter;
+
   // System metrics
-  httpRequestsTotal: any;
-  httpRequestDuration: any;
-  databaseConnections: any;
-  encryptionOperations: any;
+  httpRequestsTotal: Counter;
+  httpRequestDuration: Histogram;
+  databaseConnections: UpDownCounter;
+  encryptionOperations: Counter;
 }
 
 export class TelemetryService {
-  private meter: any = null;
-  private tracer: any = null;
+  private meter: Meter | null = null;
+  private tracer: Tracer | null = null;
   private metrics: MetricsCollector = {} as MetricsCollector;
   private isInitialized = false;
 
   constructor() {
-    this.initializeStubSDK();
+    this.initializeSDK();
   }
 
   /**
-   * Initialize stub SDK (OpenTelemetry packages not installed)
+   * Initialize OpenTelemetry providers
    */
-  private initializeStubSDK(): void {
-    console.log('⚠️ Telemetry service running in stub mode - OpenTelemetry packages not installed');
-    
-    // Create stub metrics
-    const stubMetric = {
-      add: () => {},
-      record: () => {},
-      createHistogram: () => stubMetric,
-      createCounter: () => stubMetric,
-      createGauge: () => stubMetric
-    };
+  private initializeSDK(): void {
+    const meterProvider = new MeterProvider();
+    metrics.setGlobalMeterProvider(meterProvider);
+    this.meter = metrics.getMeter('ai-instagram-platform');
 
-    this.meter = {
-      createCounter: () => stubMetric,
-      createHistogram: () => stubMetric,
-      createGauge: () => stubMetric
-    };
-
-    this.tracer = {
-      startSpan: () => ({
-        setAttributes: () => {},
-        setStatus: () => {},
-        end: () => {}
-      })
-    };
+    const tracerProvider = new NodeTracerProvider();
+    tracerProvider.register();
+    trace.setGlobalTracerProvider(tracerProvider);
+    this.tracer = trace.getTracer('ai-instagram-platform');
 
     this.initializeMetrics();
     this.isInitialized = true;
@@ -95,104 +87,101 @@ export class TelemetryService {
   private initializeMetrics(): void {
     this.metrics = {
       // Meta API metrics
-      metaRequestsTotal: this.meter.createCounter('meta_requests_total', {
+      metaRequestsTotal: this.meter!.createCounter('meta_requests_total', {
         description: 'Total Meta API requests',
         unit: '1'
       }),
       
-      metaLatency: this.meter.createHistogram('meta_latency_ms', {
+      metaLatency: this.meter!.createHistogram('meta_latency_ms', {
         description: 'Meta API request latency',
-        unit: 'ms',
-        boundaries: [10, 50, 100, 250, 500, 1000, 2500, 5000]
+        unit: 'ms'
       }),
       
-      metaRateLimited: this.meter.createCounter('meta_rate_limited_total', {
+      metaRateLimited: this.meter!.createCounter('meta_rate_limited_total', {
         description: 'Meta API rate limit hits',
         unit: '1'
       }),
 
       // Messaging metrics
-      messagesTotal: this.meter.createCounter('messages_total', {
+      messagesTotal: this.meter!.createCounter('messages_total', {
         description: 'Total messages processed',
         unit: '1'
       }),
       
-      messagesSent: this.meter.createCounter('messages_sent_total', {
+      messagesSent: this.meter!.createCounter('messages_sent_total', {
         description: 'Messages successfully sent',
         unit: '1'
       }),
       
-      messagesDelivered: this.meter.createCounter('messages_delivered_total', {
+      messagesDelivered: this.meter!.createCounter('messages_delivered_total', {
         description: 'Messages confirmed delivered',
         unit: '1'
       }),
       
-      messagesFailed: this.meter.createCounter('messages_failed_total', {
+      messagesFailed: this.meter!.createCounter('messages_failed_total', {
         description: 'Failed message deliveries',
         unit: '1'
       }),
 
       // Queue metrics
-      queueJobsTotal: this.meter.createCounter('queue_jobs_total', {
+      queueJobsTotal: this.meter!.createCounter('queue_jobs_total', {
         description: 'Total queue jobs processed',
         unit: '1'
       }),
       
-      queueProcessingTime: this.meter.createHistogram('queue_processing_time_ms', {
+      queueProcessingTime: this.meter!.createHistogram('queue_processing_time_ms', {
         description: 'Queue job processing time',
-        unit: 'ms',
-        boundaries: [100, 500, 1000, 2500, 5000, 10000, 30000]
+        unit: 'ms'
       }),
       
-      queueDepth: this.meter.createUpDownCounter('queue_depth', {
+      queueDepth: this.meter!.createUpDownCounter('queue_depth', {
         description: 'Current queue depth',
         unit: '1'
       }),
       
-      dlqJobs: this.meter.createCounter('dlq_jobs_total', {
+      dlqJobs: this.meter!.createCounter('dlq_jobs_total', {
         description: 'Jobs sent to Dead Letter Queue',
         unit: '1'
       }),
 
       // Business metrics
-      conversionsTotal: this.meter.createCounter('conversions_total', {
+      conversionsTotal: this.meter!.createCounter('conversions_total', {
         description: 'Total conversation conversions',
         unit: '1'
       }),
       
-      ordersTotal: this.meter.createCounter('orders_total', {
+      ordersTotal: this.meter!.createCounter('orders_total', {
         description: 'Total orders created',
         unit: '1'
       }),
       
-      revenueTotal: this.meter.createCounter('revenue_total', {
+      revenueTotal: this.meter!.createCounter('revenue_total', {
         description: 'Total revenue generated',
         unit: 'USD'
       }),
       
-      merchantsActive: this.meter.createUpDownCounter('merchants_active', {
+      merchantsActive: this.meter!.createUpDownCounter('merchants_active', {
         description: 'Currently active merchants',
         unit: '1'
       }),
 
       // System metrics
-      httpRequestsTotal: this.meter.createCounter('http_requests_total', {
+      httpRequestsTotal: this.meter!.createCounter('http_requests_total', {
         description: 'Total HTTP requests',
         unit: '1'
       }),
       
-      httpRequestDuration: this.meter.createHistogram('http_request_duration_ms', {
+      httpRequestDuration: this.meter!.createHistogram('http_request_duration_ms', {
         description: 'HTTP request duration',
-        unit: 'ms',
-        boundaries: [5, 10, 25, 50, 100, 250, 500, 1000, 2500]
+        unit: 'ms'
       }),
       
-      databaseConnections: this.meter.createUpDownCounter('database_connections', {
+      databaseConnections: this.meter!.createUpDownCounter('database_connections', {
         description: 'Active database connections',
         unit: '1'
       }),
       
-      encryptionOperations: this.meter.createCounter('encryption_operations_total', {
+      encryptionOperations: this.meter!.createCounter('encryption_operations_total', {
         description: 'Total encryption/decryption operations',
         unit: '1'
       })
@@ -344,15 +333,19 @@ export class TelemetryService {
   /**
    * Create custom trace span
    */
-  createSpan<T>(name: string, operation: () => Promise<T>, attributes?: Record<string, any>): Promise<T> {
-    return this.tracer.startActiveSpan(name, { attributes }, async (span: any) => {
+  createSpan<T>(name: string, operation: () => Promise<T>, attributes?: Attributes): Promise<T> {
+    if (!this.tracer) {
+      return operation();
+    }
+
+    return this.tracer.startActiveSpan(name, { attributes }, async (span: Span) => {
       try {
         const result = await operation();
-        span.setStatus({ code: 1 }); // OK
+        span.setStatus({ code: SpanStatusCode.OK });
         return result;
-      } catch (error) {
-        span.recordException(error);
-        span.setStatus({ code: 2, message: error.message }); // ERROR
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
         throw error;
       } finally {
         span.end();
@@ -363,23 +356,24 @@ export class TelemetryService {
   /**
    * Add custom attributes to current span (stub implementation)
    */
-  addSpanAttributes(attributes: Record<string, any>): void {
-    // Stub implementation - OpenTelemetry not available
-    console.log('⚠️ Telemetry addSpanAttributes called (stub mode):', Object.keys(attributes));
+  addSpanAttributes(attributes: Attributes): void {
+    const span = trace.getActiveSpan();
+    if (span) {
+      span.setAttributes(attributes);
+    }
   }
 
   /**
    * Get current trace context for propagation (stub implementation)
    */
-  getCurrentTraceContext(): any {
-    // Stub implementation
-    return {};
+  getCurrentTraceContext(): Context {
+    return context.active();
   }
 
   /**
    * Health check for telemetry system
    */
-  healthCheck(): { status: 'healthy' | 'unhealthy'; details: any } {
+  healthCheck(): { status: 'healthy' | 'unhealthy'; details: Record<string, unknown> } {
     return {
       status: this.isInitialized ? 'healthy' : 'unhealthy',
       details: {
@@ -409,8 +403,8 @@ export function getTelemetryService(): TelemetryService {
  */
 export function telemetryMiddleware() {
   const telemetry = getTelemetryService();
-  
-  return async (c: any, next: any) => {
+
+  return async (c: HonoContext, next: Next) => {
     const startTime = Date.now();
     const method = c.req.method;
     const route = c.req.routePath || c.req.url;

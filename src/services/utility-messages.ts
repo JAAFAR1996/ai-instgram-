@@ -10,6 +10,12 @@ import { getInstagramClient } from './instagram-api.js';
 import { getDatabase } from '../database/connection.js';
 import { getConfig } from '../config/environment.js';
 import type { SendMessageRequest } from './instagram-api.js';
+import crypto from 'crypto';
+
+// Escape special characters for use in RegExp
+function escapeRegex(str: string): string {
+  return str.replace(/([.*+?^${}()|\[\]\\])/g, '\\$1');
+}
 
 export type UtilityMessageType = 
   | 'ORDER_UPDATE'
@@ -214,10 +220,11 @@ export class UtilityMessagesService {
    */
   private interpolateTemplate(template: string, variables: Record<string, string>): string {
     let result = template;
-    
+
     for (const [key, value] of Object.entries(variables)) {
       const placeholder = `{{${key}}}`;
-      result = result.replace(new RegExp(placeholder, 'g'), value);
+      const escaped = escapeRegex(placeholder);
+      result = result.replace(new RegExp(escaped, 'g'), value);
     }
 
     return result;

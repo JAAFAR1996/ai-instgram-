@@ -111,7 +111,7 @@ export class CrossPlatformConversationManager {
       const sql = this.db.getSQL();
 
       // Find all conversations for this customer across platforms
-      const conversations = await sql.unsafe(`
+      const conversations = await sql`
         SELECT 
           c.*,
           COUNT(ml.id) as message_count,
@@ -248,7 +248,7 @@ export class CrossPlatformConversationManager {
       );
 
       // Log the platform switch
-      await sql.unsafe(`
+      await sql`
         INSERT INTO platform_switches (
           merchant_id,
           from_platform,
@@ -321,7 +321,7 @@ export class CrossPlatformConversationManager {
       const mergeStrategy = options?.mergeStrategy || 'most_complete';
 
       // Find all conversations for this customer
-      const conversations = await sql.unsafe(`
+      const conversations = await sql`
         SELECT c.*, COUNT(ml.id) as message_count
         FROM conversations c
         LEFT JOIN message_logs ml ON c.id = ml.conversation_id
@@ -355,7 +355,7 @@ export class CrossPlatformConversationManager {
       );
 
       // Update primary conversation with merged context
-      await sql.unsafe(`
+      await sql`
         UPDATE conversations 
         SET 
           session_data = ${JSON.stringify(mergedContext)},
@@ -365,28 +365,28 @@ export class CrossPlatformConversationManager {
 
       // Transfer messages from secondary conversations
       for (const secondaryConv of secondaryConversations) {
-        await sql.unsafe(`
+        await sql`
           UPDATE message_logs 
           SET conversation_id = ${primaryConversation.id}::uuid
           WHERE conversation_id = ${secondaryConv.id}::uuid
         `);
 
         // Mark secondary conversation as merged
-        await sql.unsafe(`
+        await sql`
           UPDATE conversations 
           SET 
             conversation_stage = 'MERGED',
             session_data = jsonb_set(
               COALESCE(session_data, '{}'),
               '{merged_into}',
-              '"${primaryConversation.id}"'
+              to_jsonb(${primaryConversation.id})
             )
           WHERE id = ${secondaryConv.id}::uuid
         `);
       }
 
       // Log merge operation
-      await sql.unsafe(`
+      await sql`
         INSERT INTO audit_logs (
           merchant_id,
           action,
@@ -455,7 +455,7 @@ export class CrossPlatformConversationManager {
         sql`AND ml.created_at >= NOW() - INTERVAL '30 days'`;
 
       // Get journey stages
-      const journeyData = await sql.unsafe(`
+      const journeyData = await sql`
         SELECT 
           c.platform,
           c.conversation_stage,
@@ -677,7 +677,7 @@ export class CrossPlatformConversationManager {
   private async getLatestConversation(merchantId: string, platform: Platform, identifier: string): Promise<any> {
     const sql = this.db.getSQL();
     
-    const conversations = await sql.unsafe(`
+    const conversations = await sql`
       SELECT * FROM conversations
       WHERE merchant_id = ${merchantId}::uuid
       AND platform = ${platform}
@@ -707,7 +707,7 @@ export class CrossPlatformConversationManager {
     }
 
     // Create new conversation
-    const result = await sql.unsafe(`
+    const result = await sql`
       INSERT INTO conversations (
         merchant_id,
         customer_phone,
@@ -752,7 +752,7 @@ export class CrossPlatformConversationManager {
       };
 
       const sql = this.db.getSQL();
-      await sql.unsafe(`
+      await sql`
         UPDATE conversations 
         SET session_data = ${JSON.stringify(mergedContext)}
         WHERE id = ${targetConversation.id}::uuid
@@ -849,10 +849,10 @@ export class CrossPlatformConversationManager {
       const sql = this.db.getSQL();
       
       const timeFilter = timeRange ? 
-        sql.unsafe(`AND switch_timestamp BETWEEN '${timeRange.start.toISOString()}' AND '${timeRange.end.toISOString()}'`) : 
+        sql`AND switch_timestamp BETWEEN '${timeRange.start.toISOString()}' AND '${timeRange.end.toISOString()}'`) : 
         sql``;
 
-      const switches = await sql.unsafe(`
+      const switches = await sql`
         SELECT * FROM platform_switches
         WHERE merchant_id = ${merchantId}::uuid
         AND (

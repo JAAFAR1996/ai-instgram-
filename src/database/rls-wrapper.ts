@@ -7,6 +7,7 @@
 
 import { getDatabase } from './connection';
 import type postgres from 'postgres';
+import crypto from 'crypto';
 
 export interface RLSContext {
   merchantId?: string;
@@ -118,13 +119,10 @@ export class RLSDatabase {
   /**
    * Execute query with automatic context validation
    */
-  async query<T>(
-    query: string | postgres.PendingQuery<postgres.Row[]>,
-    params?: any[]
-  ): Promise<T[]> {
+  async query<T>(strings: TemplateStringsArray, ...params: any[]): Promise<T[]> {
     // التحقق من السياق قبل التنفيذ
     const contextValidation = await this.validateContext();
-    
+
     if (!contextValidation.isValid) {
       throw new RLSContextError(
         'No valid RLS context set. Call setMerchantContext() or setAdminContext() first.',
@@ -132,14 +130,7 @@ export class RLSDatabase {
       );
     }
 
-    // تنفيذ الاستعلام
-    const sql = this.db.getSQL();
-    
-    if (typeof query === 'string' && params) {
-      return await this.db.query(query, params) as T[];
-    } else {
-      return await sql.unsafe(query as string) as T[];
-    }
+    return await this.db.query(strings, ...params) as T[];
   }
 
   /**
@@ -219,7 +210,7 @@ export class RLSDatabase {
    * Generate session ID for tracking
    */
   private generateSessionId(): string {
-    return `rls_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `rls_${Date.now()}_${crypto.randomUUID()}`;
   }
 
   /**

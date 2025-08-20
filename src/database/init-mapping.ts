@@ -1,17 +1,23 @@
 import { Pool } from 'pg';
+import { requireMerchantId } from '../utils/merchant.js';
 
 export async function ensurePageMapping(): Promise<void> {
   const dbUrl = process.env.DATABASE_URL;
   const pageId = process.env.IG_PAGE_ID;
-  const merchantId = process.env.MERCHANT_ID || 'merchant-default-001';
+  const merchantId = process.env.MERCHANT_ID;
+
+  if (!merchantId) {
+    console.error('❌ Environment variable MERCHANT_ID is missing. Aborting page mapping.');
+    throw new Error('MERCHANT_ID not set');
+  }
 
   if (!pageId) {
-    console.log('⚠️ No IG_PAGE_ID set in env, skipping mapping');
+    console.log('⚠️ Environment variable IG_PAGE_ID is missing. Skipping page mapping.');
     return;
   }
 
   if (!dbUrl) {
-    console.log('⚠️ No DATABASE_URL set, skipping mapping');
+    console.log('⚠️ Environment variable DATABASE_URL is missing. Skipping page mapping.');
     return;
   }
 

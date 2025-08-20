@@ -7,6 +7,8 @@
 
 import { getLogger } from '../services/logger.js';
 import { withTimeout } from '../utils/timeout.js';
+import crypto from 'node:crypto';
+import { randomUUID } from 'crypto';
 
 export interface DeadLetterItem {
   id: string;
@@ -189,7 +191,7 @@ export function getDLQHealth(): {
  * Generate unique DLQ item ID
  */
 function generateDLQId(): string {
-  return `dlq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return `dlq_${Date.now()}_${randomUUID()}`;
 }
 
 /**

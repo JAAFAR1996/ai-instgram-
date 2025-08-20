@@ -6,16 +6,23 @@
  */
 
 import { Context, Next } from 'hono';
-import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible';
+import { RateLimiterRedis, RateLimiterRes } from 'rate-limiter-flexible';
+import Redis from 'ioredis';
 import crypto from 'crypto';
 import { getMessageWindowService } from '../services/message-window.js';
 import { getDatabase } from '../database/connection.js';
 import type { Platform } from '../types/database.js';
 
+// Redis connection for distributed rate limiting
+const redisClient = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  enableOfflineQueue: false,
+});
+
 // Rate limiter configurations
 const rateLimiters = {
   // General API endpoints
-  general: new RateLimiterMemory({
+  general: new RateLimiterRedis({
+    storeClient: redisClient,
     keyPrefix: 'api_general',
     points: 100, // requests
     duration: 60, // per 60 seconds
@@ -23,7 +30,8 @@ const rateLimiters = {
   }),
 
   // Per merchant rate limiting
-  merchant: new RateLimiterMemory({
+  merchant: new RateLimiterRedis({
+    storeClient: redisClient,
     keyPrefix: 'api_merchant',
     points: 500, // requests per merchant
     duration: 60, // per 60 seconds
@@ -31,7 +39,8 @@ const rateLimiters = {
   }),
 
   // Webhook endpoints (higher limits)
-  webhook: new RateLimiterMemory({
+  webhook: new RateLimiterRedis({
+    storeClient: redisClient,
     keyPrefix: 'webhook',
     points: 1000, // requests
     duration: 60, // per 60 seconds
@@ -39,7 +48,8 @@ const rateLimiters = {
   }),
 
   // Message sending (strict limits)
-  messaging: new RateLimiterMemory({
+  messaging: new RateLimiterRedis({
+    storeClient: redisClient,
     keyPrefix: 'messaging',
     points: 20, // messages per customer
     duration: 60, // per 60 seconds
@@ -348,27 +358,58 @@ export function webhookSignatureMiddleware(secretKey: string) {
     }
 
     try {
-      const body = await c.req.text();
+      const originalRequest = c.req.raw;
+      let bodyBuffer: ArrayBuffer;
+      try {
+        bodyBuffer = await originalRequest.arrayBuffer();
+      } catch (bodyError) {
+        console.warn('⚠️ Failed to retrieve webhook body for signature verification:', bodyError);
+        return c.json({
+          error: 'Unable to read request body',
+          code: 'BODY_RETRIEVAL_FAILED'
+        }, 400);
+      }
+
+      const bodyText = Buffer.from(bodyBuffer).toString();
       const expectedSignature = crypto
         .createHmac('sha256', secretKey)
-        .update(body)
+        .update(bodyText)
         .digest('hex');
-      
+
       const providedSignature = signature.replace('sha256=', '');
-      
-      if (!crypto.timingSafeEqual(
-        Buffer.from(expectedSignature, 'hex'),
-        Buffer.from(providedSignature, 'hex')
-      )) {
+
+      if (!/^[0-9a-f]{64}$/i.test(providedSignature)) {
+        return c.json({
+          error: 'Invalid webhook signature',
+          code: 'INVALID_SIGNATURE_FORMAT'
+        }, 401);
+      }
+
+      const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+      const providedBuffer = Buffer.from(providedSignature, 'hex');
+
+      if (expectedBuffer.length !== providedBuffer.length) {
+        return c.json({
+          error: 'Invalid webhook signature',
+          code: 'INVALID_SIGNATURE_LENGTH'
+        }, 401);
+      }
+
+      if (!crypto.timingSafeEqual(expectedBuffer, providedBuffer)) {
         return c.json({
           error: 'Invalid webhook signature',
           code: 'INVALID_SIGNATURE'
         }, 401);
       }
-      
-      // Restore body for next middleware
-      // Note: bodyCache property handling may vary by Hono version
-      
+
+      // Rebuild request with consumed body for downstream middleware
+      const newRequest = new Request(originalRequest.url, {
+        method: originalRequest.method,
+        headers: new Headers(originalRequest.headers),
+        body: bodyBuffer
+      });
+      c.req.raw = newRequest;
+
       await next();
     } catch (error) {
       console.error('❌ Webhook signature verification failed:', error);

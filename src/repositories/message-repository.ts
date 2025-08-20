@@ -6,6 +6,7 @@
  */
 
 import { getDatabase } from '../database/connection.js';
+import type { Sql } from 'postgres';
 
 export interface Message {
   id: string;
@@ -148,56 +149,44 @@ export class MessageRepository {
   async update(id: string, data: UpdateMessageRequest): Promise<Message | null> {
     const sql = this.db.getSQL();
     
-    const updateFields: string[] = [];
-    const updateValues: any[] = [];
-    let paramIndex = 1;
+    const updateFields: Sql[] = [];
 
     if (data.deliveryStatus !== undefined) {
-      updateFields.push(`delivery_status = $${paramIndex++}`);
-      updateValues.push(data.deliveryStatus);
+      updateFields.push(sql`delivery_status = ${data.deliveryStatus}`);
     }
 
     if (data.aiProcessed !== undefined) {
-      updateFields.push(`ai_processed = $${paramIndex++}`);
-      updateValues.push(data.aiProcessed);
+      updateFields.push(sql`ai_processed = ${data.aiProcessed}`);
     }
 
     if (data.aiConfidence !== undefined) {
-      updateFields.push(`ai_confidence = $${paramIndex++}`);
-      updateValues.push(data.aiConfidence);
+      updateFields.push(sql`ai_confidence = ${data.aiConfidence}`);
     }
 
     if (data.aiIntent !== undefined) {
-      updateFields.push(`ai_intent = $${paramIndex++}`);
-      updateValues.push(data.aiIntent);
+      updateFields.push(sql`ai_intent = ${data.aiIntent}`);
     }
 
     if (data.processingTimeMs !== undefined) {
-      updateFields.push(`processing_time_ms = $${paramIndex++}`);
-      updateValues.push(data.processingTimeMs);
+      updateFields.push(sql`processing_time_ms = ${data.processingTimeMs}`);
     }
 
     if (data.platformMessageId !== undefined) {
-      updateFields.push(`platform_message_id = $${paramIndex++}`);
-      updateValues.push(data.platformMessageId);
+      updateFields.push(sql`platform_message_id = ${data.platformMessageId}`);
     }
 
-    updateFields.push(`updated_at = NOW()`);
+    updateFields.push(sql`updated_at = NOW()`);
 
-    if (updateFields.length === 1) { // Only updated_at
+    if (updateFields.length === 1) {
       return await this.findById(id);
     }
 
-    const query = `
-      UPDATE message_logs 
-      SET ${updateFields.join(', ')}
-      WHERE id = $${paramIndex}::uuid
+    const [message] = await this.db.query`
+      UPDATE message_logs
+      SET ${sql.join(updateFields, sql`, `)}
+      WHERE id = ${id}::uuid
       RETURNING *
     `;
-    
-    updateValues.push(id);
-    
-    const [message] = await this.db.query(query, updateValues);
     return message ? this.mapToMessage(message) : null;
   }
 
@@ -207,71 +196,58 @@ export class MessageRepository {
   async findMany(filters: MessageFilters = {}): Promise<Message[]> {
     const sql = this.db.getSQL();
     
-    let whereConditions: string[] = [];
-    let params: any[] = [];
-    let paramIndex = 1;
+    const conditions: Sql[] = [];
 
     if (filters.conversationId) {
-      whereConditions.push(`conversation_id = $${paramIndex++}::uuid`);
-      params.push(filters.conversationId);
+      conditions.push(sql`conversation_id = ${filters.conversationId}::uuid`);
     }
 
     if (filters.direction) {
-      whereConditions.push(`direction = $${paramIndex++}`);
-      params.push(filters.direction);
+      conditions.push(sql`direction = ${filters.direction}`);
     }
 
     if (filters.platform) {
-      whereConditions.push(`platform = $${paramIndex++}`);
-      params.push(filters.platform);
+      conditions.push(sql`platform = ${filters.platform}`);
     }
 
     if (filters.messageType) {
-      whereConditions.push(`message_type = $${paramIndex++}`);
-      params.push(filters.messageType);
+      conditions.push(sql`message_type = ${filters.messageType}`);
     }
 
     if (filters.aiProcessed !== undefined) {
-      whereConditions.push(`ai_processed = $${paramIndex++}`);
-      params.push(filters.aiProcessed);
+      conditions.push(sql`ai_processed = ${filters.aiProcessed}`);
     }
 
     if (filters.deliveryStatus) {
-      whereConditions.push(`delivery_status = $${paramIndex++}`);
-      params.push(filters.deliveryStatus);
+      conditions.push(sql`delivery_status = ${filters.deliveryStatus}`);
     }
 
     if (filters.dateFrom) {
-      whereConditions.push(`created_at >= $${paramIndex++}`);
-      params.push(filters.dateFrom);
+      conditions.push(sql`created_at >= ${filters.dateFrom}`);
     }
 
     if (filters.dateTo) {
-      whereConditions.push(`created_at <= $${paramIndex++}`);
-      params.push(filters.dateTo);
+      conditions.push(sql`created_at <= ${filters.dateTo}`);
     }
 
     if (filters.contentSearch) {
-      whereConditions.push(`content ILIKE $${paramIndex++}`);
-      params.push(`%${filters.contentSearch}%`);
+      const search = `%${filters.contentSearch}%`;
+      conditions.push(sql`content ILIKE ${search}`);
     }
 
-    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-    const limitClause = filters.limit ? `LIMIT $${paramIndex++}` : '';
-    const offsetClause = filters.offset ? `OFFSET $${paramIndex++}` : '';
-    
-    if (filters.limit) params.push(filters.limit);
-    if (filters.offset) params.push(filters.offset);
+    const whereClause = conditions.length
+      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      : sql``;
+    const limitClause = filters.limit ? sql`LIMIT ${filters.limit}` : sql``;
+    const offsetClause = filters.offset ? sql`OFFSET ${filters.offset}` : sql``;
 
-    const query = `
+    const messages = await this.db.query`
       SELECT * FROM message_logs
       ${whereClause}
       ORDER BY created_at DESC
       ${limitClause}
       ${offsetClause}
     `;
-
-    const messages = await this.db.query(query, params);
     return messages.map(m => this.mapToMessage(m));
   }
 
@@ -379,28 +355,25 @@ export class MessageRepository {
   ): Promise<MessageStats> {
     const sql = this.db.getSQL();
     
-    let whereConditions: string[] = [];
-    let params: any[] = [];
-    let paramIndex = 1;
+    const conditions: Sql[] = [];
 
     if (conversationId) {
-      whereConditions.push(`conversation_id = $${paramIndex++}::uuid`);
-      params.push(conversationId);
+      conditions.push(sql`conversation_id = ${conversationId}::uuid`);
     }
 
     if (dateFrom) {
-      whereConditions.push(`created_at >= $${paramIndex++}`);
-      params.push(dateFrom);
+      conditions.push(sql`created_at >= ${dateFrom}`);
     }
 
     if (dateTo) {
-      whereConditions.push(`created_at <= $${paramIndex++}`);
-      params.push(dateTo);
+      conditions.push(sql`created_at <= ${dateTo}`);
     }
 
-    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+    const whereClause = conditions.length
+      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      : sql``;
 
-    const statsQuery = `
+    const results = await this.db.query`
       SELECT 
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE direction = 'INCOMING') as incoming,
@@ -415,8 +388,6 @@ export class MessageRepository {
       GROUP BY ROLLUP(platform, message_type, delivery_status)
       ORDER BY platform, message_type, delivery_status
     `;
-
-    const results = await this.db.query(statsQuery, params);
     
     const stats: MessageStats = {
       total: 0,
@@ -495,34 +466,31 @@ export class MessageRepository {
   async count(filters: MessageFilters = {}): Promise<number> {
     const sql = this.db.getSQL();
     
-    let whereConditions: string[] = [];
-    let params: any[] = [];
-    let paramIndex = 1;
+    const conditions: Sql[] = [];
 
     if (filters.conversationId) {
-      whereConditions.push(`conversation_id = $${paramIndex++}::uuid`);
-      params.push(filters.conversationId);
+      conditions.push(sql`conversation_id = ${filters.conversationId}::uuid`);
     }
 
     if (filters.direction) {
-      whereConditions.push(`direction = $${paramIndex++}`);
-      params.push(filters.direction);
+      conditions.push(sql`direction = ${filters.direction}`);
     }
 
     if (filters.platform) {
-      whereConditions.push(`platform = $${paramIndex++}`);
-      params.push(filters.platform);
+      conditions.push(sql`platform = ${filters.platform}`);
     }
 
     if (filters.deliveryStatus) {
-      whereConditions.push(`delivery_status = $${paramIndex++}`);
-      params.push(filters.deliveryStatus);
+      conditions.push(sql`delivery_status = ${filters.deliveryStatus}`);
     }
 
-    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-    
-    const query = `SELECT COUNT(*) as count FROM message_logs ${whereClause}`;
-    const [result] = await this.db.query(query, params);
+    const whereClause = conditions.length
+      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      : sql``;
+
+    const [result] = await this.db.query`
+      SELECT COUNT(*) as count FROM message_logs ${whereClause}
+    `;
     
     return parseInt(result.count);
   }

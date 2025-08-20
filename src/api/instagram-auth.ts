@@ -10,6 +10,19 @@ import { validator } from 'hono/validator';
 import { getInstagramOAuthService } from '../services/instagram-oauth.js';
 import { getDatabase } from '../database/connection.js';
 import { z } from 'zod';
+import { getConfig } from '../config/environment.js';
+
+const config = getConfig();
+
+function isTrustedRedirectUrl(url: string): boolean {
+  const allowed = config.security.trustedRedirectDomains;
+  try {
+    const hostname = new URL(url).hostname;
+    return allowed.some(domain => hostname === domain || hostname.endsWith('.' + domain));
+  } catch {
+    return false;
+  }
+}
 
 // Validation schemas
 const AuthRequestSchema = z.object({
@@ -30,11 +43,17 @@ const app = new Hono();
 /**
  * بدء تدفق OAuth - إنشاء رابط التفويض
  */
-app.post('/auth/instagram/initiate', 
+app.post('/auth/instagram/initiate',
   validator('json', (value, c) => {
     const parsed = AuthRequestSchema.safeParse(value);
     if (!parsed.success) {
       return c.json({ error: 'Invalid request data', details: parsed.error.issues }, 400);
+    }
+    if (parsed.data.redirectUrl && !isTrustedRedirectUrl(parsed.data.redirectUrl)) {
+      return c.json({
+        error: 'Untrusted redirect URL',
+        details: `redirectUrl must belong to trusted domains: ${config.security.trustedRedirectDomains.join(', ') || 'none'}`
+      }, 400);
     }
     return parsed.data;
   }),
@@ -170,7 +189,7 @@ app.get('/auth/instagram/callback', async (c) => {
     const businessAccountInfo = await oauthService.getBusinessAccountInfo(tokenData.longLivedToken);
     
     // الحصول على معلومات المستخدم
-    const userProfile = await oauthService.getUserProfile(tokenData.longLivedToken);
+    const userProfile = await oauthService.getUserProfile(tokenData.longLivedToken, merchantId);
     
     // حفظ البيانات في قاعدة البيانات
     console.log('💾 Saving credentials...');

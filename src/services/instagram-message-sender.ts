@@ -8,6 +8,9 @@
 import { getInstagramClient, type InstagramAPIResponse } from './instagram-api.js';
 import { getDatabase } from '../database/connection.js';
 import { getMessageWindowService } from './message-window.js';
+import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 export interface SendMessageRequest {
   recipientId: string;
@@ -567,18 +570,59 @@ export class InstagramMessageSender {
       const client = getInstagramClient();
       await client.initialize(merchantId);
 
-      // Upload media (implementation would depend on Instagram API)
-      // This is a placeholder - actual implementation would handle file upload
-      const uploadResponse = await (client as any).uploadMedia(mediaPath, mediaType);
+      // Validate file exists and type
+      const stats = await fs.stat(mediaPath);
+      const ext = path.extname(mediaPath).toLowerCase();
 
-      return {
-        success: uploadResponse.success,
-        mediaId: uploadResponse.mediaId,
-        mediaType,
-        error: uploadResponse.success ? undefined : uploadResponse.error
+      const typeConfig: Record<string, { exts: string[]; max: number }> = {
+        image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
+        video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
+        audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
       };
 
+      const config = typeConfig[mediaType];
+      if (!config.exts.includes(ext)) {
+        return { success: false, mediaType, error: `Unsupported ${mediaType} format: ${ext}` };
+      }
+
+      if (stats.size > config.max) {
+        return {
+          success: false,
+          mediaType,
+          size: stats.size,
+          error: `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
+        };
+      }
+
+      const creds = (client as any).credentials;
+      if (!creds) {
+        throw new Error('Instagram API not initialized');
+      }
+
+      const fileBuffer = await fs.readFile(mediaPath);
+      const form = new FormData();
+      form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
+      form.append('media_type', mediaType);
+
+      const uploadUrl = `${GRAPH_API_BASE_URL}/${creds.businessAccountId}/media?access_token=${encodeURIComponent(
+        creds.pageAccessToken
+      )}`;
+      const response = await fetch(uploadUrl, {
+        method: 'POST',
+        body: form
+      });
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => response.statusText);
+        return { success: false, mediaType, size: stats.size, error: errText };
+      }
+
+      const data = await response.json().catch(() => ({}));
+      const mediaId = data.id || data.media_id || data.mediaId;
+
+      return { success: true, mediaType, mediaId, size: stats.size };
     } catch (error) {
+      console.error('❌ Media upload failed:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Media upload failed',

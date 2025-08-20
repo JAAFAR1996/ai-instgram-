@@ -38,6 +38,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 import { RedisUsageType, Environment } from '../config/RedisConfigurationFactory.js';
 import RedisConnectionManager from './RedisConnectionManager.js';
+import crypto from 'node:crypto';
 import RedisHealthMonitor from './RedisHealthMonitor.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
 import {
@@ -362,7 +363,7 @@ export class ProductionQueueManager {
       clearTimeout(workerInitTimeout);
       
       const { eventId, payload, merchantId, platform } = job.data;
-      const webhookWorkerId = `webhook-worker-${Math.random().toString(36).substr(2, 6)}`;
+      const webhookWorkerId = `webhook-worker-${crypto.randomUUID()}`;
       const startTime = Date.now();
       
       return await this.circuitBreaker.execute(async () => {
@@ -425,7 +426,7 @@ export class ProductionQueueManager {
     this.queue.process('ai-response', 3, async (job) => {
       this.logger.info('🤖 [WORKER-START] معالج AI استقبل job!', { jobId: job.id, jobName: job.name });
       const { conversationId, merchantId, message } = job.data;
-      const aiWorkerId = `ai-worker-${Math.random().toString(36).substr(2, 6)}`;
+      const aiWorkerId = `ai-worker-${crypto.randomUUID().replace(/-/g, '').slice(0, 6)}`;
       const startTime = Date.now();
       
       return await this.circuitBreaker.execute(async () => {

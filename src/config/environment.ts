@@ -37,6 +37,11 @@ export interface SecurityConfig {
   corsOrigins: string[];
   rateLimitWindow: number;
   rateLimitMax: number;
+  trustedRedirectDomains: string[];
+}
+
+export interface RedisConfig {
+  url: string;
 }
 
 export interface AppConfig {
@@ -44,6 +49,7 @@ export interface AppConfig {
   ai: AIConfig;
   instagram: InstagramConfig;
   security: SecurityConfig;
+  redis: RedisConfig;
   environment: 'development' | 'production' | 'test';
   port: number;
 }
@@ -98,6 +104,19 @@ const REQUIRED_ENV_VARS = {
     required: true,
     validator: (value: string) => /^[0-9a-fA-F]{64}$/.test(value) || value.length === 32,
     error: 'ENCRYPTION_KEY must be 32 bytes (64 hex characters) or 32 ASCII characters'
+  },
+  'CORS_ORIGINS': {
+    required: true,
+    validator: (value: string) =>
+      value.split(',').every(origin => origin.trim().length > 0),
+    error: 'CORS_ORIGINS must be a comma-separated list of allowed origins'
+  },
+  
+  // Redis
+  'REDIS_URL': {
+    required: true,
+    validator: (value: string) => value.startsWith('redis://') || value.startsWith('rediss://'),
+    error: 'REDIS_URL must be a valid Redis connection string'
   },
   
   // Optional with defaults
@@ -195,13 +214,18 @@ export function loadAndValidateEnvironment(): AppConfig {
       redirectUri: env.REDIRECT_URI!,
       apiVersion: env.GRAPH_API_VERSION || 'v23.0'
     },
-    
+
+    redis: {
+      url: env.REDIS_URL!,
+    },
+
     security: {
       encryptionKey: env.ENCRYPTION_KEY!,
-      jwtSecret: env.JWT_SECRET || env.ENCRYPTION_KEY!,
-      corsOrigins: env.CORS_ORIGINS ? env.CORS_ORIGINS.split(',') : ['*'],
+      jwtSecret: env.JWT_SECRET!,
+      corsOrigins: env.CORS_ORIGINS!.split(',').map(o => o.trim()),
       rateLimitWindow: parseInt(env.RATE_LIMIT_WINDOW || '900000'), // 15 minutes
-      rateLimitMax: parseInt(env.RATE_LIMIT_MAX || '100')
+      rateLimitMax: parseInt(env.RATE_LIMIT_MAX || '100'),
+      trustedRedirectDomains: env.TRUSTED_REDIRECT_DOMAINS ? env.TRUSTED_REDIRECT_DOMAINS.split(',') : []
     }
   };
 

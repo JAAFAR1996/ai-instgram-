@@ -46,17 +46,27 @@ export class DatabaseConnection {
     } catch (error) {
       // Fallback to environment variables if config validation fails
       console.warn('⚠️ Using fallback database configuration (environment validation failed)');
+
+      const password = config?.password || process.env.DB_PASSWORD;
+      if (!password) {
+        throw new Error('Database password is required. Set DB_PASSWORD or provide via config.');
+      }
+
       this.config = {
         host: config?.host || process.env.DB_HOST || 'localhost',
         port: config?.port || parseInt(process.env.DB_PORT || '5432'),
         database: config?.database || process.env.DB_NAME || 'ai_sales_dev',
         username: config?.username || process.env.DB_USER || 'postgres',
-        password: config?.password || process.env.DB_PASSWORD || 'dev_password_123',
+        password,
         ssl: config?.ssl !== undefined ? config.ssl : process.env.NODE_ENV === 'production',
         max_connections: config?.max_connections || parseInt(process.env.DB_POOL_MAX || '10'),
         idle_timeout: config?.idle_timeout || parseInt(process.env.DB_IDLE_TIMEOUT || '30'),
         connect_timeout: config?.connect_timeout || parseInt(process.env.DB_CONNECT_TIMEOUT || '10')
       };
+    }
+
+    if (!this.config.password) {
+      throw new Error('Database password must be provided via DB_PASSWORD or configuration.');
     }
   }
 
@@ -178,73 +188,23 @@ export class DatabaseConnection {
   }
 
   /**
-   * Execute a query with security validation
-   * ⚠️ Use parameterized queries only - prevents SQL injection
+   * Execute a parameterized query using tagged templates
+   * Provides automatic sanitization via the postgres library
    */
-  public async query<T = any>(query: string, params: any[] = []): Promise<T[]> {
+  public async query<T = any>(
+    strings: TemplateStringsArray,
+    ...params: any[]
+  ): Promise<T[]> {
     try {
       if (!this.sql) {
         throw new Error('Database connection not initialized');
       }
 
-      // 🔒 Security validation before executing query
-      this.validateQuerySecurity(query, params);
-
-      const result = await this.sql.unsafe(query, params);
+      const result = await (this.sql as any)(strings, ...params);
       return result as unknown as T[];
     } catch (error) {
       console.error('❌ Database query error:', error);
       throw this.formatDatabaseError(error);
-    }
-  }
-
-  /**
-   * Validate query for potential SQL injection risks
-   * @param query SQL query string
-   * @param params Query parameters
-   */
-  private validateQuerySecurity(query: string, params: any[]): void {
-    // Check for potential SQL injection patterns
-    if (params.length === 0) {
-      // If no parameters, check for suspicious patterns
-      const suspiciousPatterns = [
-        /\$\d+/,                    // Parameter placeholders without params
-        /;.*(?:DROP|DELETE|UPDATE|INSERT|CREATE|ALTER)/i,  // Multiple statements
-        /UNION.*SELECT/i,           // Union-based injection
-        /OR.*1=1/i,                // Boolean-based injection
-        /AND.*1=2/i,               // Boolean-based injection
-        /\/\*.*\*\//,              // SQL comments
-        /--/,                      // SQL line comments
-        /xp_cmdshell/i,            // Command execution
-        /sp_executesql/i           // Dynamic SQL execution
-      ];
-
-      for (const pattern of suspiciousPatterns) {
-        if (pattern.test(query)) {
-          throw new Error(
-            `🚨 Potential SQL injection detected: Query contains suspicious pattern. Use parameterized queries instead.`
-          );
-        }
-      }
-    }
-
-    // Validate parameter types
-    for (let i = 0; i < params.length; i++) {
-      const param = params[i];
-      if (typeof param === 'string') {
-        // Check for SQL injection in string parameters
-        const injectionPatterns = [
-          /['"].*(?:OR|AND).*['"]/i,
-          /['"].*(?:UNION|SELECT).*['"]/i,
-          /['"].*(?:DROP|DELETE).*['"]/i
-        ];
-
-        for (const pattern of injectionPatterns) {
-          if (pattern.test(param)) {
-            console.warn(`⚠️ Suspicious parameter detected at index ${i}:`, param.substring(0, 50));
-          }
-        }
-      }
     }
   }
 

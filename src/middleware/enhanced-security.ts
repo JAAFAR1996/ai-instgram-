@@ -8,6 +8,7 @@
 import { Context, Next } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
+import crypto from 'crypto';
 import { getConfig } from '../config/environment.js';
 import { getMetaRateLimiter } from '../services/meta-rate-limiter.js';
 
@@ -21,7 +22,7 @@ export interface SecurityConfig {
  * Generate nonce for CSP
  */
 export function generateCSPNonce(): string {
-  return Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64');
+  return crypto.randomBytes(16).toString('base64');
 }
 
 /**
@@ -142,16 +143,26 @@ export function inputSanitizationMiddleware() {
   return async (c: Context, next: Next) => {
     // Sanitize query parameters
     const url = new URL(c.req.url);
+    let modified = false;
+
     for (const [key, value] of url.searchParams.entries()) {
       // Remove potential XSS vectors
       const sanitized = value
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
         .replace(/javascript:/gi, '')
         .replace(/on\w+\s*=/gi, '');
-        
+
       if (sanitized !== value) {
         console.warn(`⚠️ Potentially malicious input sanitized: ${key}=${value}`);
+        url.searchParams.set(key, sanitized);
+        modified = true;
       }
+    }
+
+    if (modified) {
+      // Rebuild the request with sanitized query parameters
+      const sanitizedRequest = new Request(url.toString(), c.req.raw);
+      c.req.raw = sanitizedRequest;
     }
 
     await next();
@@ -173,9 +184,14 @@ export function webhookSignatureMiddleware(platform: 'instagram' | 'whatsapp') {
       }, 400);
     }
 
-    // Get raw body for signature verification
-    const rawBody = await c.req.text();
-    const secret = platform === 'instagram' 
+    // Get raw body for signature verification without consuming original
+    const clonedRequest = c.req.raw.clone();
+    const rawBody = await clonedRequest.text();
+
+    // Reattach body so downstream handlers can access it
+    c.req.raw = new Request(c.req.raw, { body: rawBody });
+
+    const secret = platform === 'instagram'
       ? config.instagram.metaAppSecret
       : config.instagram.metaAppSecret; // Same secret for both
 
@@ -188,15 +204,23 @@ export function webhookSignatureMiddleware(platform: 'instagram' | 'whatsapp') {
 
     const providedSignature = signature.replace('sha256=', '');
 
-    if (!crypto.timingSafeEqual(
-      Buffer.from(expectedSignature, 'hex'),
-      Buffer.from(providedSignature, 'hex')
-    )) {
+    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+    const providedBuffer = Buffer.from(providedSignature, 'hex');
+
+    // Compare lengths before timingSafeEqual
+    if (expectedBuffer.length !== providedBuffer.length) {
+      return c.json({
+        error: 'Invalid signature',
+        code: 'WEBHOOK_SIGNATURE_INVALID'
+      }, 401);
+    }
+
+    if (!crypto.timingSafeEqual(expectedBuffer, providedBuffer)) {
       console.error('❌ Webhook signature verification failed', {
         provided: providedSignature.substring(0, 8) + '...',
         expected: expectedSignature.substring(0, 8) + '...'
       });
-      
+
       return c.json({
         error: 'Invalid signature',
         code: 'WEBHOOK_SIGNATURE_INVALID'
