@@ -22,22 +22,22 @@ export class DatabaseTester {
 
     try {
       // Test 1: Connection
-      allTestsPassed &= await this.testConnection();
+      allTestsPassed = allTestsPassed && await this.testConnection();
       
       // Test 2: Migrations
-      allTestsPassed &= await this.testMigrations();
+      allTestsPassed = allTestsPassed && await this.testMigrations();
       
       // Test 3: Basic CRUD operations
-      allTestsPassed &= await this.testCRUD();
+      allTestsPassed = allTestsPassed && await this.testCRUD();
       
       // Test 4: Analytics views
-      allTestsPassed &= await this.testAnalytics();
+      allTestsPassed = allTestsPassed && await this.testAnalytics();
       
       // Test 5: Search functionality
-      allTestsPassed &= await this.testSearch();
+      allTestsPassed = allTestsPassed && await this.testSearch();
       
       // Test 6: Performance
-      allTestsPassed &= await this.testPerformance();
+      allTestsPassed = allTestsPassed && await this.testPerformance();
 
       if (allTestsPassed) {
         console.log('\n✅ All database tests passed successfully! 🎉');
@@ -423,7 +423,7 @@ export async function showStats(): Promise<void> {
 }
 
 // CLI script runner
-if (import.meta.main) {
+if (process.argv[1] === new URL(import.meta.url).pathname) {
   const command = process.argv[2];
   
   try {

@@ -7,8 +7,8 @@
 
 import { Hono } from 'hono';
 import { validator } from 'hono/validator';
-import { getInstagramOAuthService } from '../services/instagram-oauth';
-import { getDatabase } from '../database/connection';
+import { getInstagramOAuthService } from '../services/instagram-oauth.js';
+import { getDatabase } from '../database/connection.js';
 import { z } from 'zod';
 
 // Validation schemas

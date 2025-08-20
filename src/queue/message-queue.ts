@@ -5,8 +5,8 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
-import { getConfig } from '../config/environment';
+import { getDatabase } from '../database/connection.js';
+import { getConfig } from '../config/environment.js';
 
 export interface QueueJob {
   id: string;
@@ -429,10 +429,15 @@ export class MessageQueue {
       async process(job: QueueJob) {
         console.log(`📊 Processing analytics: ${job.payload.type}`);
         
-        // TODO: Implement analytics processing
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate processing
+        // Safe minimum: convert event to simple log now, send later
+        if (job.payload.kind === 'analytics') {
+          console.log('[analytics]', { at: Date.now(), payload: job.payload });
+          return { success: true, result: { logged: true } };
+        }
         
-        return { success: true, result: { processed: true } };
+        // Generic analytics processing
+        console.log('[ANALYTICS_PROCESSING] Event processed for future analysis');
+        return { success: true, result: { processed: true, placeholder: true } };
       }
     });
   }

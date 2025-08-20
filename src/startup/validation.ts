@@ -5,9 +5,9 @@
  * ===============================================
  */
 
-import { getConfig, EnvironmentValidationError } from '../config/environment';
-import { getDatabase } from '../database/connection';
-import { GRAPH_API_BASE_URL } from '../config/graph-api';
+import { getConfig, EnvironmentValidationError } from '../config/environment.js';
+import { getDatabase } from '../database/connection.js';
+import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 
 export interface ValidationResult {
   success: boolean;

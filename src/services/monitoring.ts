@@ -5,8 +5,8 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
-import type { Platform, QualityStatus, QualityMetrics } from '../types/database';
+import { getDatabase } from '../database/connection.js';
+import type { Platform, QualityStatus, QualityMetrics } from '../types/database.js';
 
 export interface QualityCheck {
   merchantId: string;

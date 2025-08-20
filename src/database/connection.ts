@@ -6,8 +6,8 @@
  */
 
 import postgres from 'postgres';
-import type { DatabaseConfig, DatabaseError } from '../types/database';
-import { getConfig } from '../config/environment';
+import type { DatabaseConfig, DatabaseError } from '../types/database.js';
+import { getConfig } from '../config/environment.js';
 
 // Configuration interface
 interface ConnectionConfig {

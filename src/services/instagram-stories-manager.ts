@@ -5,13 +5,13 @@
  * ===============================================
  */
 
-import { getInstagramClient } from './instagram-api';
-import { getDatabase } from '../database/connection';
-import { getConversationAIOrchestrator } from './conversation-ai-orchestrator';
-import type { InstagramContext } from './instagram-ai';
-import { hashMerchantAndBody } from '../middleware/idempotency';
-import { getRedisConnectionManager } from './RedisConnectionManager';
-import { RedisUsageType } from '../config/RedisConfigurationFactory';
+import { getInstagramClient } from './instagram-api.js';
+import { getDatabase } from '../database/connection.js';
+import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
+import type { InstagramContext } from './instagram-ai.js';
+import { hashMerchantAndBody } from '../middleware/idempotency.js';
+import { getRedisConnectionManager } from './RedisConnectionManager.js';
+import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 
 export interface StoryInteraction {
   id: string;

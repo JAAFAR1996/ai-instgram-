@@ -8,8 +8,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { validator } from 'hono/validator';
-import { getServiceController } from '../services/service-controller';
-import { securityHeaders, rateLimiter } from '../middleware/security';
+import { getServiceController } from '../services/service-controller.js';
+import { securityHeaders, rateLimiter } from '../middleware/security.js';
 import { z } from 'zod';
 
 // Validation schemas

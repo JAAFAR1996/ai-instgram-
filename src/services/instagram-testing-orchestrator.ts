@@ -5,13 +5,13 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
-import { getInstagramClient } from './instagram-api';
-import { getInstagramWebhookHandler } from './instagram-webhook';
-import { getInstagramStoriesManager } from './instagram-stories-manager';
-import { getInstagramCommentsManager } from './instagram-comments-manager';
-import { getInstagramMediaManager } from './instagram-media-manager';
-import { getInstagramHashtagMentionProcessor } from './instagram-hashtag-mention-processor';
+import { getDatabase } from '../database/connection.js';
+import { getInstagramClient } from './instagram-api.js';
+import { getInstagramWebhookHandler } from './instagram-webhook.js';
+import { getInstagramStoriesManager } from './instagram-stories-manager.js';
+import { getInstagramCommentsManager } from './instagram-comments-manager.js';
+import { getInstagramMediaManager } from './instagram-media-manager.js';
+import { getInstagramHashtagMentionProcessor } from './instagram-hashtag-mention-processor.js';
 
 export interface TestScenario {
   id: string;

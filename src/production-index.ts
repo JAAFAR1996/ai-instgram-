@@ -11,14 +11,20 @@ import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import { serve } from '@hono/node-server';
 import crypto from 'node:crypto';
+import path from 'node:path';
+import fs from 'node:fs';
 import { Pool } from 'pg';
 import Bull from 'bull';
-import { runStartupValidation } from './startup/validation';
-import { runMigrations } from './startup/runMigrations';
-import { ensurePageMapping } from './startup/ensurePageMapping';
-import { RedisProductionIntegration } from './services/RedisProductionIntegration';
-import { createMerchantIsolationMiddleware } from './middleware/rls-merchant-isolation';
-import { getHealthCheckService } from './services/health-check';
+import { runStartupValidation } from './startup/validation.js';
+import { runMigrations } from './startup/runMigrations.js';
+import { ensurePageMapping } from './startup/ensurePageMapping.js';
+import { RedisProductionIntegration } from './services/RedisProductionIntegration.js';
+import { createMerchantIsolationMiddleware } from './middleware/rls-merchant-isolation.js';
+import { getHealthCheckService } from './services/health-check.js';
+import { verifyHMAC } from './services/encryption.js';
+import { pushDLQ, getDLQStats } from './queue/dead-letter.js';
+import { GRAPH_API_VERSION } from './config/graph-api.js';
+import type { IGWebhookPayload } from './types/instagram.js';
 
 // ===== Debug helpers =====
 const sigEnvOn = () => process.env.DEBUG_SIG === '1';
@@ -80,7 +86,7 @@ const pool = DATABASE_URL ? new Pool({
 // ===============================================
 // REDIS PRODUCTION INTEGRATION SETUP
 // ===============================================
-import { Environment } from './config/RedisConfigurationFactory';
+import { Environment } from './config/RedisConfigurationFactory.js';
 
 let redisIntegration: RedisProductionIntegration | null = null;
 
@@ -341,7 +347,7 @@ const encryptionService = new ProductionEncryptionService();
 // ===============================================
 // DATABASE LOGGING FOR INSTAGRAM EVENTS (WITH IDEMPOTENCY)
 // ===============================================
-async function logInstagramEvent(rawBody: Buffer, payload: any): Promise<void> {
+async function logInstagramEvent(rawBody: Buffer, payload: IGWebhookPayload): Promise<void> {
   if (!pool) {
     console.log('⚠️ Database not configured, skipping webhook log');
     return;
@@ -349,7 +355,7 @@ async function logInstagramEvent(rawBody: Buffer, payload: any): Promise<void> {
 
   // Properly define variables with fallbacks
   const entry = payload?.entry?.[0] ?? {};
-  const pageId = entry?.id ?? entry?.instagram_id ?? null;
+  const pageId = entry?.id ?? (entry as any)?.instagram_id ?? null;
   const field = entry?.changes?.[0]?.field ?? null;
 
   if (!pageId) {
@@ -470,7 +476,6 @@ function verifyInstagramSignatureLegacy(rawBody: Buffer, signature: string, cont
   // Debug dump if enabled
   if (process.env.DEBUG_DUMP === '1') {
     try {
-      const fs = require('fs');
       fs.writeFileSync('/tmp/ig.raw', rawBody);
       console.log('📁 Raw body dumped to /tmp/ig.raw');
       
@@ -630,12 +635,76 @@ class MockQueueService {
 
 const mockQueue = new MockQueueService();
 
-// Comprehensive Health endpoint for monitoring
+// DLQ monitoring endpoint
+app.get('/internal/dlq/stats', async (c) => {
+  try {
+    const stats = getDLQStats();
+    const { getRecentDLQItems, getDLQHealth } = await import('./queue/dead-letter.js');
+    const recentItems = getRecentDLQItems(5);
+    const health = getDLQHealth();
+    
+    return c.json({
+      stats,
+      health,
+      recent_items: recentItems.map(item => ({
+        ts: item.ts,
+        reason: item.reason,
+        eventId: item.eventId,
+        merchantId: item.merchantId,
+        platform: item.platform
+      })),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    return c.json({ 
+      error: 'Failed to get DLQ stats',
+      message: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// Enhanced Health endpoint with comprehensive monitoring
 app.get('/health', async (c) => {
   const svc = getHealthCheckService();
   const report = await svc.performHealthCheck();
+  const dlqStats = getDLQStats();
+  
+  // Get processor count from Redis integration if available
+  let processorCount = 0;
+  let queueHealth = 'unknown';
+  
+  if (redisIntegration) {
+    try {
+      const queueManager = redisIntegration.getQueueManager();
+      if (queueManager && typeof queueManager.getQueueStats === 'function') {
+        const stats = await queueManager.getQueueStats();
+        processorCount = (stats as any).processors?.registered || 0;
+        queueHealth = (stats as any).health || 'unknown';
+      }
+    } catch (e) {
+      // Ignore queue stats errors in health check
+    }
+  }
+  
+  const healthData = {
+    ...report,
+    extended: {
+      db: { connected: !!pool },
+      redis: { 
+        enabled: !!REDIS_URL, 
+        connected: !!redisIntegration 
+      },
+      queue: { 
+        processors: processorCount, 
+        health: queueHealth 
+      },
+      dlq: dlqStats,
+      graphApiVersion: GRAPH_API_VERSION
+    }
+  };
+  
   c.header('Cache-Control', 'no-store');
-  return c.json(report, report.status === 'healthy' ? 200 : report.status === 'degraded' ? 200 : 503);
+  return c.json(healthData, report.status === 'healthy' ? 200 : report.status === 'degraded' ? 200 : 503);
 });
 
 // Readiness endpoint for load balancer
@@ -793,25 +862,20 @@ app.post("/webhooks/instagram", async (c) => {
   const rawBodyString = c.get("rawBody") as string;
   if (!rawBodyString) return c.text("No raw body", 400);
   
-  // التحقق من التوقيع - MUST KEEP
+  // Check payload size to prevent server overload
+  if (rawBodyString.length > 512 * 1024) {
+    return c.text('Payload Too Large', 413);
+  }
+  
+  // التحقق من التوقيع - Unified HMAC verification
   const signature = c.req.header("x-hub-signature-256") || "";
-  const secret = process.env.IG_APP_SECRET || "";
+  const secret = process.env.IG_APP_SECRET || process.env.META_APP_SECRET || "";
   
-  // 🔍 SIGNATURE DEBUG LOGGING
-  console.log('🔍 SIGNATURE DEBUG:', {
-    providedHeader: signature,
-    secretLength: secret.length,
-    secretFingerprint: secret.slice(0, 4) + '...' + secret.slice(-4),
-    bodyLength: rawBodyString.length,
-    bodyFirst100: rawBodyString.substring(0, 100)
-  });
-  
-  // استخدام Buffer للconsistency مع crypto operations
-  const rawBodyBuffer = Buffer.from(rawBodyString);
-  const expected = "sha256=" + crypto.createHmac("sha256", secret).update(rawBodyBuffer).digest("hex");
-  
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
-    console.error("IG sig mismatch", { len: rawBodyString.length });
+  if (!signature || !verifyHMAC(rawBodyString, signature.replace('sha256=', ''), secret)) {
+    console.error("❌ IG signature verification failed", { 
+      hasSignature: !!signature,
+      bodyLength: rawBodyString.length 
+    });
     return c.text("invalid signature", 401);
   }
   
@@ -839,7 +903,7 @@ app.post("/webhooks/instagram", async (c) => {
     
     // تسجيل في Database (مع merchantId الصحيح)
     if (pool && merchantId) {
-      await logInstagramEvent(rawBodyBuffer, payload);
+      await logInstagramEvent(Buffer.from(rawBodyString, 'utf8'), payload);
     }
     
     // معالجة الويب هوك عبر النظام المتكامل (مع merchantId الصحيح)
@@ -870,7 +934,16 @@ app.post("/webhooks/instagram", async (c) => {
     }
     
   } catch (e) {
-    console.error("Webhook processing error:", e);
+    console.error("❌ Webhook processing error:", e);
+    
+    // Push to DLQ for analysis
+    pushDLQ({
+      ts: Date.now(),
+      reason: 'webhook-processing-failed',
+      payload: { error: e instanceof Error ? e.message : String(e), rawBodyLength: rawBodyString.length },
+      platform: 'instagram'
+    });
+    
     // لا نرجع خطأ - نرد 200 لمنع إعادة المحاولة
   }
   
@@ -887,6 +960,19 @@ app.onError((err, c) => {
       path: p,
       timestamp: new Date().toISOString()
     });
+    
+    // Push critical webhook errors to DLQ
+    pushDLQ({
+      ts: Date.now(),
+      reason: 'webhook-critical-error',
+      payload: { 
+        error: err.message, 
+        stack: err.stack,
+        path: p 
+      },
+      platform: 'instagram'
+    });
+    
     return c.text("OK", 200); // منع إعادة المحاولة من Instagram
   }
   console.error("❌ Server error:", err);
@@ -913,44 +999,15 @@ app.post('/test-sig', async (c) => {
   });
 });
 
-// WhatsApp send endpoint (24h policy enforcement)
-app.post('/api/whatsapp/send', csrfProtection, async (c) => {
-  console.log('📱 WhatsApp send request received');
-  
-  let payload: any;
-  try {
-    payload = await c.req.json();
-  } catch (e) {
-    console.error('❌ Invalid JSON in WhatsApp send request');
-    return c.json({ error: 'Invalid JSON' }, 400);
-  }
-  
-  console.log('📋 Send request:', {
-    to: payload.to,
-    hasText: !!payload.text,
-    hasTemplate: !!(payload.template || payload.templateName),
-    timestamp: new Date().toISOString()
-  });
-  
-  // WhatsApp 24h policy: Outside window requires approved templates
-  if (!payload.template && !payload.templateName) {
-    console.log('🛑 WhatsApp 24h policy violation detected');
-    console.log('   Reason: No template provided for message outside 24h window');
-    
-    return c.json({ 
-      error: 'TEMPLATE_REQUIRED',
-      message: 'Outside 24h window: template required',
-      code: 'POLICY_VIOLATION',
-      timestamp: new Date().toISOString()
-    }, 422);
-  }
-  
-  console.log('✅ WhatsApp message approved (template provided)');
+// WhatsApp send endpoint - DISABLED
+app.post('/api/whatsapp/send', async (c) => {
+  console.log('❌ WhatsApp send request rejected - feature disabled');
   return c.json({ 
-    success: true, 
-    messageId: `wamsg_${Date.now()}`,
+    error: 'FEATURE_DISABLED',
+    message: 'WhatsApp features are currently disabled',
+    code: 'WHATSAPP_DISABLED',
     timestamp: new Date().toISOString()
-  });
+  }, 503);
 });
 
 // Internal validation endpoints
@@ -1279,8 +1336,7 @@ app.get('/legal', async (c) => {
 });
 
 app.get('/legal/', async (c) => {
-  const p = require('path');
-  const fs = require('fs');
+  const p = path;
   try {
     const html = fs.readFileSync(p.join(process.cwd(), 'legal', 'index.html'), 'utf8');
     c.header('Content-Type', 'text/html; charset=utf-8');
@@ -1292,8 +1348,7 @@ app.get('/legal/', async (c) => {
 });
 
 app.get('/privacy.html', async (c) => {
-  const p = require('path');
-  const fs = require('fs');
+  const p = path;
   try {
     const html = fs.readFileSync(p.join(process.cwd(), 'legal', 'privacy.html'), 'utf8');
     c.header('Content-Type', 'text/html; charset=utf-8');
@@ -1305,8 +1360,7 @@ app.get('/privacy.html', async (c) => {
 });
 
 app.get('/deletion.html', async (c) => {
-  const p = require('path');
-  const fs = require('fs');
+  const p = path;
   try {
     const html = fs.readFileSync(p.join(process.cwd(), 'legal', 'deletion.html'), 'utf8');
     c.header('Content-Type', 'text/html; charset=utf-8');
@@ -1343,12 +1397,9 @@ if (sigEnvOn()) {
   console.log('  POST /internal/debug/ig-echo (DEBUG_SIG=1)');
 }
 console.log('⚠️  Production checklist:');
-console.log('   - IG_APP_SECRET matches connected app');
-console.log('   - Single tool connected for webhook');
-console.log('   - Replica=1 for testing, scale later');
-console.log('   - Payload limit: 512KB');
-console.log('   - Redis Integration:', redisIntegration ? '✅ Active' : '❌ Disabled');
-console.log('   - Multi-tenant merchantId lookup: ✅ Enabled');
+console.log('   - Single connected app on IG webhook');
+console.log('   - Payload limit: 512KB enforced');
+console.log('   - Redis:', redisIntegration ? '✅' : '❌');
 
 // Initialize and start server
 async function startServer() {

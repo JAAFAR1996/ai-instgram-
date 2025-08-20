@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
+import { getDatabase } from '../database/connection.js';
 import { createHash } from 'crypto';
 
 export interface EnhancedQueueJob {

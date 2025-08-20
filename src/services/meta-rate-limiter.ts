@@ -5,9 +5,9 @@
  * ===============================================
  */
 
-import { RATE_LIMIT_HEADERS, RATE_LIMITS } from '../config/graph-api';
-import { getRedisConnectionManager } from './RedisConnectionManager';
-import { RedisUsageType } from '../config/RedisConfigurationFactory';
+import { RATE_LIMIT_HEADERS, RATE_LIMITS } from '../config/graph-api.js';
+import { getRedisConnectionManager } from './RedisConnectionManager.js';
+import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 
 export interface RateLimitStatus {
   appUsage: number;

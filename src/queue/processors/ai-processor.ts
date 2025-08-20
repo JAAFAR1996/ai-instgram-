@@ -5,10 +5,10 @@
  * ===============================================
  */
 
-import type { QueueJob, JobProcessor } from '../message-queue';
-import { getConversationAIOrchestrator } from '../../services/conversation-ai-orchestrator';
-import { getRepositories } from '../../repositories';
-import { getInstagramClient } from '../../services/instagram-api';
+import type { QueueJob, JobProcessor } from '../message-queue.js';
+import { getConversationAIOrchestrator } from '../../services/conversation-ai-orchestrator.js';
+import { getRepositories } from '../../repositories/index.js';
+import { getInstagramClient } from '../../services/instagram-api.js';
 
 export interface AIJobPayload {
   conversationId: string;
@@ -242,18 +242,17 @@ export class AIProcessor implements JobProcessor {
   }
 
   /**
-   * Deliver WhatsApp message (placeholder)
+   * Deliver WhatsApp message - DISABLED
    */
   private async deliverWhatsAppMessage(
     payload: AIJobPayload,
     message: string
   ): Promise<{ success: boolean; platformMessageId?: string; error?: string }> {
-    // TODO: Implement WhatsApp message delivery
-    console.log('📱 WhatsApp message delivery not yet implemented');
+    console.log('❌ WhatsApp message delivery disabled');
     
     return {
       success: false,
-      error: 'WhatsApp delivery not implemented'
+      error: 'WhatsApp features are disabled'
     };
   }
 }

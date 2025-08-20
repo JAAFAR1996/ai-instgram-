@@ -6,11 +6,11 @@
  * ===============================================
  */
 
-import { getConfig } from '../config/environment';
-import { getDatabase } from '../database/connection';
-import { hashMerchantAndBody } from '../middleware/idempotency';
-import { getRedisConnectionManager } from './RedisConnectionManager';
-import { RedisUsageType } from '../config/RedisConfigurationFactory';
+import { getConfig } from '../config/environment.js';
+import { getDatabase } from '../database/connection.js';
+import { hashMerchantAndBody } from '../middleware/idempotency.js';
+import { getRedisConnectionManager } from './RedisConnectionManager.js';
+import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 
 export interface InstagramMessage {
   id: string;

@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
+import { getDatabase } from '../database/connection.js';
 import type { Sql } from 'postgres';
 
 export interface Conversation {

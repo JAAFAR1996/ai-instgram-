@@ -5,8 +5,8 @@
  * ===============================================
  */
 
-import { AIService, type ConversationContext, type AIResponse, type MessageHistory } from './ai';
-import { getDatabase } from '../database/connection';
+import { AIService, type ConversationContext, type AIResponse, type MessageHistory } from './ai.js';
+import { getDatabase } from '../database/connection.js';
 import OpenAI from 'openai';
 
 export interface WhatsAppAIResponse extends AIResponse {

@@ -1,18 +1,19 @@
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
+import type { Redis as RedisType } from 'ioredis';
 import {
   RedisUsageType,
   Environment,
   ProductionRedisConfigurationFactory,
   RedisConfiguration
-} from '../config/RedisConfigurationFactory';
-import RedisHealthMonitor from './RedisHealthMonitor';
+} from '../config/RedisConfigurationFactory.js';
+import RedisHealthMonitor from './RedisHealthMonitor.js';
 import {
   RedisConnectionError,
   RedisValidationError,
   RedisErrorHandler,
   isConnectionError,
   isTimeoutError
-} from '../errors/RedisErrors';
+} from '../errors/RedisErrors.js';
 
 export interface ConnectionInfo {
   usageType: RedisUsageType;
@@ -43,7 +44,7 @@ export interface ConnectionPoolConfig {
 }
 
 export class RedisConnectionManager {
-  private connections: Map<RedisUsageType, Redis> = new Map();
+  private connections: Map<RedisUsageType, RedisType> = new Map();
   private connectionInfo: Map<RedisUsageType, ConnectionInfo> = new Map();
   private configFactory: ProductionRedisConfigurationFactory;
   private healthMonitor: RedisHealthMonitor;
@@ -73,7 +74,7 @@ export class RedisConnectionManager {
     this.startHealthChecking();
   }
 
-  async getConnection(usageType: RedisUsageType): Promise<Redis> {
+  async getConnection(usageType: RedisUsageType): Promise<RedisType> {
     // التحقق من وجود اتصال صحي
     if (this.connections.has(usageType)) {
       const connection = this.connections.get(usageType)!;
@@ -95,7 +96,7 @@ export class RedisConnectionManager {
     return await this.createConnection(usageType);
   }
 
-  async createConnection(usageType: RedisUsageType): Promise<Redis> {
+  async createConnection(usageType: RedisUsageType): Promise<RedisType> {
     if (this.connections.size >= this.poolConfig.maxConnections) {
       throw new RedisConnectionError(
         'Connection pool limit exceeded',
@@ -184,7 +185,7 @@ export class RedisConnectionManager {
   }
 
   private setupConnectionMonitoring(
-    connection: Redis, 
+    connection: RedisType, 
     usageType: RedisUsageType, 
     info: ConnectionInfo
   ): void {
@@ -207,7 +208,7 @@ export class RedisConnectionManager {
       this.logger?.info('Redis connection ready', { usageType });
     });
 
-    connection.on('error', (error) => {
+    connection.on('error', (error: any) => {
       info.status = 'error';
       info.lastError = error.message;
       info.healthScore = 0;
@@ -455,11 +456,11 @@ export class RedisConnectionManager {
   }
 
   // الحصول على اتصال محدد للاستخدام المباشر (للحالات الخاصة)
-  getDirectConnection(usageType: RedisUsageType): Redis | undefined {
+  getDirectConnection(usageType: RedisUsageType): RedisType | undefined {
     return this.connections.get(usageType);
   }
 
-  private async waitForConnection(connection: Redis, timeoutMs: number): Promise<void> {
+  private async waitForConnection(connection: RedisType, timeoutMs: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new RedisConnectionError(
@@ -509,7 +510,7 @@ export class RedisConnectionManager {
   async createTemporaryConnection(
     usageType: RedisUsageType,
     ttl: number = 60000 // 60 ثانية افتراضياً
-  ): Promise<Redis> {
+  ): Promise<RedisType> {
     const config = this.configFactory.createConfiguration(
       usageType,
       this.environment,

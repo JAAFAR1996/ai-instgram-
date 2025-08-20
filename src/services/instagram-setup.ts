@@ -5,10 +5,10 @@
  * ===============================================
  */
 
-import { getInstagramClient, getInstagramCredentialsManager } from './instagram-api';
-import { getEncryptionService } from './encryption';
-import { getDatabase } from '../database/connection';
-import { GRAPH_API_BASE_URL } from '../config/graph-api';
+import { getInstagramClient, getInstagramCredentialsManager } from './instagram-api.js';
+import { getEncryptionService } from './encryption.js';
+import { getDatabase } from '../database/connection.js';
+import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 
 export interface InstagramSetupConfig {
   pageAccessToken: string;

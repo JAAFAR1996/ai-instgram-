@@ -1,13 +1,54 @@
 /**
- * ===============================================
+ * =============================================== 
  * Comprehensive Health Check Service
- * Production-ready health monitoring for Render deployment
+ * Production-ready health monitoring with background caching
+ * منع multiple resolves وsnapshot-based responses
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
-import { getRedisConnectionManager } from './RedisConnectionManager';
-import { RedisUsageType } from '../config/RedisConfigurationFactory';
+import { getDatabase } from '../database/connection.js';
+import { getRedisConnectionManager } from './RedisConnectionManager.js';
+import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
+import { safeAsync, wrapError } from '../boot/error-handlers.js';
+
+/**
+ * withTimeout - منع multiple resolves في العمليات غير المتزامنة
+ */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, context: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    
+    const safeResolve = (value: T) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    
+    const safeReject = (reason: any) => {
+      if (settled) return;
+      settled = true;
+      reject(reason);
+    };
+    
+    // Set timeout
+    const timeoutId = setTimeout(() => {
+      const err = new Error(`[health] ${context} timed out after ${timeoutMs}ms`);
+      (err as any).code = 'HEALTH_TIMEOUT';
+      safeReject(err);
+    }, timeoutMs);
+    
+    // Handle the actual promise
+    promise
+      .then((result) => {
+        clearTimeout(timeoutId);
+        safeResolve(result);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        safeReject(error);
+      });
+  });
+}
 
 export interface HealthCheck {
   name: string;
@@ -34,26 +75,146 @@ export interface HealthReport {
 
 export class HealthCheckService {
   private startTime = Date.now();
+  private cachedHealthReport: HealthReport | null = null;
+  private lastHealthCheckTime = 0;
+  private readonly CACHE_DURATION_MS = 30000; // 30 seconds cache
+  private healthUpdateInterval: ReturnType<typeof setInterval> | null = null;
+  private isUpdating = false;
+
+  constructor() {
+    // Start background health updates
+    this.startBackgroundUpdates();
+  }
 
   /**
-   * Perform comprehensive health check
+   * Start background health snapshot updates
+   */
+  private startBackgroundUpdates(): void {
+    // Initial update
+    this.updateHealthSnapshot();
+    
+    // Schedule regular updates
+    this.healthUpdateInterval = setInterval(() => {
+      this.updateHealthSnapshot();
+    }, this.CACHE_DURATION_MS);
+    
+    // لا تُبقي العملية حيّة لوحدها
+    (this.healthUpdateInterval as any).unref?.();
+  }
+
+  /**
+   * Stop background updates (for graceful shutdown)
+   */
+  public stopBackgroundUpdates(): void {
+    if (this.healthUpdateInterval) {
+      clearInterval(this.healthUpdateInterval);
+      this.healthUpdateInterval = null;
+    }
+  }
+
+  /**
+   * Update health snapshot in background
+   */
+  private async updateHealthSnapshot(): Promise<void> {
+    if (this.isUpdating) return; // Prevent concurrent updates
+    
+    this.isUpdating = true;
+    try {
+      const healthReport = await this.performActualHealthCheck();
+      this.cachedHealthReport = healthReport;
+      this.lastHealthCheckTime = Date.now();
+    } catch (error) {
+      const wrappedError = wrapError(error, 'updateHealthSnapshot');
+      console.error('[HealthCheck] Failed to update snapshot:', wrappedError.message);
+    } finally {
+      this.isUpdating = false;
+    }
+  }
+
+  /**
+   * Get cached health report (fast response)
    */
   async performHealthCheck(): Promise<HealthReport> {
+    const now = Date.now();
+    
+    // Return cached result if available and fresh
+    if (this.cachedHealthReport && (now - this.lastHealthCheckTime) < this.CACHE_DURATION_MS) {
+      return this.cachedHealthReport;
+    }
+    
+    // If no cache or stale, wait for fresh data (with timeout)
+    if (!this.cachedHealthReport || this.isUpdating) {
+      try {
+        const fresh = await withTimeout(this.performActualHealthCheck(), 5000, 'health check update');
+        this.cachedHealthReport = fresh;
+        this.lastHealthCheckTime = Date.now();
+        return fresh;
+      } catch (error) {
+        console.warn('[HealthCheck] Failed to get fresh data, returning emergency report');
+        return this.getEmergencyHealthReport();
+      }
+    }
+    
+    return this.cachedHealthReport;
+  }
+
+  /**
+   * Emergency health report when all else fails
+   */
+  private getEmergencyHealthReport(): HealthReport {
+    return {
+      status: 'degraded',
+      timestamp: new Date().toISOString(),
+      uptime: Date.now() - this.startTime,
+      version: process.env.APP_VERSION || '2.0.0',
+      environment: process.env.NODE_ENV || 'production',
+      checks: [{
+        name: 'emergency_fallback',
+        status: 'degraded',
+        responseTime: 0,
+        message: 'Using emergency fallback - health checks unavailable'
+      }],
+      summary: {
+        healthy: 0,
+        unhealthy: 0,
+        degraded: 1,
+        totalResponseTime: 0
+      }
+    };
+  }
+
+  /**
+   * Perform actual comprehensive health check
+   */
+  private async performActualHealthCheck(): Promise<HealthReport> {
     const startTime = Date.now();
     const checks: HealthCheck[] = [];
 
-    // Database health check
-    checks.push(await this.checkDatabase());
+    // Database health check with timeout
+    const dbCheck = await safeAsync(async () => {
+      return await withTimeout(this.checkDatabase(), 3000, 'database check');
+    }, 'database health check');
+    if (dbCheck) checks.push(dbCheck);
     
-    // Redis health check
-    checks.push(await this.checkRedis());
+    // Redis health check with timeout
+    const redisCheck = await safeAsync(async () => {
+      return await withTimeout(this.checkRedis(), 3000, 'redis check');
+    }, 'redis health check');
+    if (redisCheck) checks.push(redisCheck);
     
-    // Memory health check
-    checks.push(await this.checkMemory());
+    // Memory health check (always fast)
+    const memCheck = await safeAsync(async () => {
+      return await this.checkMemory();
+    }, 'memory health check');
+    if (memCheck) checks.push(memCheck);
     
     // External API health check (light check) - skip in restricted environments
-    if (process.env.SKIP_EXTERNAL_HEALTH !== '1') {
-      checks.push(await this.checkExternalAPIs());
+    const skip = /^(1|true|yes)$/i.test(process.env.SKIP_EXTERNAL_HEALTH ?? '');
+    if (!skip) {
+      const apiCheck = await safeAsync(async () => {
+        return await withTimeout(this.checkExternalAPIs(), 2000, 'external APIs check');
+      }, 'external APIs health check');
+      if (apiCheck) checks.push(apiCheck);
     }
 
     const summary = {
@@ -83,17 +244,22 @@ export class HealthCheckService {
   }
 
   /**
-   * Quick readiness check for Render
+   * Quick readiness check for Render (uses cached data)
    */
   async performReadinessCheck(): Promise<{ ready: boolean; message: string; responseTime: number }> {
     const startTime = Date.now();
     
     try {
-      // Essential checks only - DB and Redis
-      const dbCheck = await this.checkDatabase();
-      const redisCheck = await this.checkRedis();
+      // Use cached health report for fast response
+      const healthReport = await this.performHealthCheck();
       
-      const ready = dbCheck.status !== 'unhealthy' && redisCheck.status !== 'unhealthy';
+      // Consider ready if no unhealthy critical services (DB, Redis)
+      const criticalChecks = healthReport.checks.filter(check => 
+        check.name === 'database' || check.name === 'redis'
+      );
+      
+      const hasUnhealthyCritical = criticalChecks.some(check => check.status === 'unhealthy');
+      const ready = !hasUnhealthyCritical && healthReport.status !== 'unhealthy';
       
       return {
         ready,
@@ -297,14 +463,34 @@ export class HealthCheckService {
   }
 }
 
-// Singleton instance
+// Singleton instance with proper cleanup
 let healthCheckInstance: HealthCheckService | null = null;
 
 export function getHealthCheckService(): HealthCheckService {
   if (!healthCheckInstance) {
     healthCheckInstance = new HealthCheckService();
+    
+    // Register cleanup for multiple shutdown signals
+    const cleanup = () => {
+      if (healthCheckInstance) {
+        healthCheckInstance.stopBackgroundUpdates();
+      }
+    };
+    process.once('beforeExit', cleanup);
+    process.once('SIGTERM', cleanup);
+    process.once('SIGINT', cleanup);
   }
   return healthCheckInstance;
+}
+
+/**
+ * For testing or explicit cleanup
+ */
+export function resetHealthCheckService(): void {
+  if (healthCheckInstance) {
+    healthCheckInstance.stopBackgroundUpdates();
+    healthCheckInstance = null;
+  }
 }
 
 export default getHealthCheckService;

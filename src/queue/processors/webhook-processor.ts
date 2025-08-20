@@ -5,9 +5,9 @@
  * ===============================================
  */
 
-import type { QueueJob, JobProcessor } from '../message-queue';
-import { getInstagramWebhookHandler } from '../../services/instagram-webhook';
-import { getRepositories } from '../../repositories';
+import type { QueueJob, JobProcessor } from '../message-queue.js';
+import { getInstagramWebhookHandler } from '../../services/instagram-webhook.js';
+import { getRepositories } from '../../repositories/index.js';
 
 export interface WebhookJobPayload {
   platform: 'instagram' | 'whatsapp';
@@ -53,8 +53,7 @@ export class WebhookProcessor implements JobProcessor {
           break;
           
         case 'whatsapp':
-          result = await this.processWhatsAppWebhook(payload);
-          break;
+          return { success: false, error: 'WhatsApp processing is disabled' };
           
         default:
           return { success: false, error: `Unsupported platform: ${payload.platform}` };
@@ -107,19 +106,11 @@ export class WebhookProcessor implements JobProcessor {
   }
 
   /**
-   * Process WhatsApp webhook (placeholder)
+   * Process WhatsApp webhook - DISABLED
    */
   private async processWhatsAppWebhook(payload: WebhookJobPayload): Promise<any> {
-    // TODO: Implement WhatsApp webhook processing
-    console.log('📱 WhatsApp webhook processing not yet implemented');
-    
-    return {
-      platform: 'whatsapp',
-      eventsProcessed: 0,
-      messagesProcessed: 0,
-      conversationsCreated: 0,
-      processingTime: Date.now()
-    };
+    console.log('❌ WhatsApp webhook processing disabled');
+    throw new Error('WhatsApp processing is disabled');
   }
 }
 

@@ -8,8 +8,8 @@
 import { Context, Next } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
-import { getConfig } from '../config/environment';
-import { getMetaRateLimiter } from '../services/meta-rate-limiter';
+import { getConfig } from '../config/environment.js';
+import { getMetaRateLimiter } from '../services/meta-rate-limiter.js';
 
 export interface SecurityConfig {
   corsOrigins: string[];

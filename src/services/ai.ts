@@ -6,9 +6,9 @@
  */
 
 import OpenAI from 'openai';
-import { getEncryptionService } from './encryption';
-import { getDatabase } from '../database/connection';
-import type { ConversationStage, Platform } from '../types/database';
+import { getEncryptionService } from './encryption.js';
+import { getDatabase } from '../database/connection.js';
+import type { ConversationStage, Platform } from '../types/database.js';
 
 export interface AIResponse {
   message: string;

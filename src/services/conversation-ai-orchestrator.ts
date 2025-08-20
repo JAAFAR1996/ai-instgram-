@@ -6,10 +6,10 @@
  * ===============================================
  */
 
-import { getAIService, type ConversationContext, type AIResponse } from './ai';
-import { getInstagramAIService, type InstagramContext, type InstagramAIResponse } from './instagram-ai';
-import { getDatabase } from '../database/connection';
-import type { Platform } from '../types/database';
+import { getAIService, type ConversationContext, type AIResponse } from './ai.js';
+import { getInstagramAIService, type InstagramContext, type InstagramAIResponse } from './instagram-ai.js';
+import { getDatabase } from '../database/connection.js';
+import type { Platform } from '../types/database.js';
 
 export interface PlatformAIResponse {
   response: AIResponse | InstagramAIResponse;

@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
+import { getDatabase } from '../database/connection.js';
 import type postgres from 'postgres';
 
 export interface MessageWindowStatus {

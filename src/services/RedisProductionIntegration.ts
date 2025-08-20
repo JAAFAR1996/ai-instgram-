@@ -1,14 +1,14 @@
-import { ProductionQueueManager } from './ProductionQueueManager';
-import { RedisUsageType, Environment } from '../config/RedisConfigurationFactory';
-import RedisConnectionManager from './RedisConnectionManager';
-import RedisHealthMonitor from './RedisHealthMonitor';
-import { CircuitBreaker } from './CircuitBreaker';
+import { ProductionQueueManager } from './ProductionQueueManager.js';
+import { RedisUsageType, Environment } from '../config/RedisConfigurationFactory.js';
+import RedisConnectionManager from './RedisConnectionManager.js';
+import RedisHealthMonitor from './RedisHealthMonitor.js';
+import { CircuitBreaker } from './CircuitBreaker.js';
 import {
   RedisConnectionError,
   RedisErrorHandler,
   isConnectionError,
   isTimeoutError
-} from '../errors/RedisErrors';
+} from '../errors/RedisErrors.js';
 
 export interface RedisIntegrationResult {
   success: boolean;

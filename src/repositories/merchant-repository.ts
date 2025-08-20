@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
+import { getDatabase } from '../database/connection.js';
 
 export interface Merchant {
   id: string;

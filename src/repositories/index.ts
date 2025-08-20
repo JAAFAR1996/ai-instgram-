@@ -5,9 +5,9 @@
  * ===============================================
  */
 
-import { getConversationRepository, type ConversationRepository } from './conversation-repository';
-import { getMessageRepository, type MessageRepository } from './message-repository';
-import { getMerchantRepository, type MerchantRepository } from './merchant-repository';
+import { getConversationRepository, type ConversationRepository } from './conversation-repository.js';
+import { getMessageRepository, type MessageRepository } from './message-repository.js';
+import { getMerchantRepository, type MerchantRepository } from './merchant-repository.js';
 
 export interface RepositoryManager {
   conversation: ConversationRepository;
@@ -146,7 +146,7 @@ export type {
   UpdateConversationRequest,
   ConversationFilters,
   ConversationStats
-} from './conversation-repository';
+} from './conversation-repository.js';
 
 export type {
   Message,
@@ -155,7 +155,7 @@ export type {
   MessageFilters,
   MessageStats,
   ConversationHistory
-} from './message-repository';
+} from './message-repository.js';
 
 export type {
   Merchant,
@@ -164,19 +164,19 @@ export type {
   MerchantFilters,
   MerchantStats,
   MerchantCredentials
-} from './merchant-repository';
+} from './merchant-repository.js';
 
 export {
   ConversationRepository,
   getConversationRepository
-} from './conversation-repository';
+} from './conversation-repository.js';
 
 export {
   MessageRepository,
   getMessageRepository
-} from './message-repository';
+} from './message-repository.js';
 
 export {
   MerchantRepository,
   getMerchantRepository
-} from './merchant-repository';
+} from './merchant-repository.js';

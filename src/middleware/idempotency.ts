@@ -8,8 +8,8 @@
 
 import crypto from 'crypto';
 import { Context, Next } from 'hono';
-import { getRedisConnectionManager } from '../services/RedisConnectionManager';
-import { RedisUsageType } from '../config/RedisConfigurationFactory';
+import { getRedisConnectionManager } from '../services/RedisConnectionManager.js';
+import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 
 export interface IdempotencyConfig {
   ttlSeconds: number;

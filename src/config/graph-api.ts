@@ -5,7 +5,8 @@
  * ===============================================
  */
 
-export const GRAPH_API_VERSION = process.env.GRAPH_API_VERSION ?? 'v23.0';
+export const GRAPH_API_VERSION =
+  process.env.GRAPH_API_VERSION ?? process.env.API_VERSION ?? 'v23.0';
 export const GRAPH_API_BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 
 export const API_ENDPOINTS = {

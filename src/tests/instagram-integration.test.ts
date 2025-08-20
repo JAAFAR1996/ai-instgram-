@@ -6,11 +6,11 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
-import { getInstagramAIService } from '../services/instagram-ai';
-import { getInstagramClient } from '../services/instagram-api';
-import { getServiceController } from '../services/service-controller';
-import { getConversationAIOrchestrator } from '../services/conversation-ai-orchestrator';
-import { getDatabase } from '../database/connection';
+import { getInstagramAIService } from '../services/instagram-ai.js';
+import { getInstagramClient } from '../services/instagram-api.js';
+import { getServiceController } from '../services/service-controller.js';
+import { getConversationAIOrchestrator } from '../services/conversation-ai-orchestrator.js';
+import { getDatabase } from '../database/connection.js';
 
 // Test configuration
 const TEST_MERCHANT_ID = 'test-merchant-uuid-12345';

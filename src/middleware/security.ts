@@ -8,9 +8,9 @@
 import { Context, Next } from 'hono';
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible';
 import crypto from 'crypto';
-import { getMessageWindowService } from '../services/message-window';
-import { getDatabase } from '../database/connection';
-import type { Platform } from '../types/database';
+import { getMessageWindowService } from '../services/message-window.js';
+import { getDatabase } from '../database/connection.js';
+import type { Platform } from '../types/database.js';
 
 // Rate limiter configurations
 const rateLimiters = {

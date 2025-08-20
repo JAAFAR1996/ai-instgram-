@@ -5,8 +5,8 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
-import type { Platform } from '../types/database';
+import { getDatabase } from '../database/connection.js';
+import type { Platform } from '../types/database.js';
 
 export interface ServiceStatus {
   enabled: boolean;

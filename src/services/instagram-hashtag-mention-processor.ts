@@ -5,8 +5,8 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
-import { getConversationAIOrchestrator } from './conversation-ai-orchestrator';
+import { getDatabase } from '../database/connection.js';
+import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 
 export interface HashtagAnalysis {
   hashtag: string;

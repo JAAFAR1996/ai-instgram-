@@ -5,8 +5,8 @@
  * ===============================================
  */
 
-import { getMessageWindowService } from './message-window';
-import type { CustomerIdentifier } from './message-window';
+import { getMessageWindowService } from './message-window.js';
+import type { CustomerIdentifier } from './message-window.js';
 
 export interface WhatsAppSendRequest {
   merchantId: string;

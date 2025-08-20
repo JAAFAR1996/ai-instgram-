@@ -6,20 +6,20 @@
  */
 
 import crypto from 'crypto';
-import { getInstagramClient } from './instagram-api';
-import { getMessageWindowService } from './message-window';
-import { getDatabase } from '../database/connection';
-import { getConversationAIOrchestrator } from './conversation-ai-orchestrator';
-import { getRepositories } from '../repositories';
-import { getInstagramStoriesManager } from './instagram-stories-manager';
-import { getInstagramCommentsManager } from './instagram-comments-manager';
-import { getInstagramMediaManager } from './instagram-media-manager';
-import { getServiceController } from './service-controller';
-import type { InstagramMessage, InstagramComment, InstagramStoryMention } from './instagram-api';
-import type { InstagramContext } from './instagram-ai';
-import type { StoryInteraction } from './instagram-stories-manager';
-import type { CommentInteraction } from './instagram-comments-manager';
-import type { MediaContent } from './instagram-media-manager';
+import { getInstagramClient } from './instagram-api.js';
+import { getMessageWindowService } from './message-window.js';
+import { getDatabase } from '../database/connection.js';
+import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
+import { getRepositories } from '../repositories/index.js';
+import { getInstagramStoriesManager } from './instagram-stories-manager.js';
+import { getInstagramCommentsManager } from './instagram-comments-manager.js';
+import { getInstagramMediaManager } from './instagram-media-manager.js';
+import { getServiceController } from './service-controller.js';
+import type { InstagramMessage, InstagramComment, InstagramStoryMention } from './instagram-api.js';
+import type { InstagramContext } from './instagram-ai.js';
+import type { StoryInteraction } from './instagram-stories-manager.js';
+import type { CommentInteraction } from './instagram-comments-manager.js';
+import type { MediaContent } from './instagram-media-manager.js';
 
 export interface InstagramWebhookEvent {
   object: 'instagram';

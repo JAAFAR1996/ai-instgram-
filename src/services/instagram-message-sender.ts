@@ -5,9 +5,9 @@
  * ===============================================
  */
 
-import { getInstagramClient, type InstagramAPIResponse } from './instagram-api';
-import { getDatabase } from '../database/connection';
-import { getMessageWindowService } from './message-window';
+import { getInstagramClient, type InstagramAPIResponse } from './instagram-api.js';
+import { getDatabase } from '../database/connection.js';
+import { getMessageWindowService } from './message-window.js';
 
 export interface SendMessageRequest {
   recipientId: string;

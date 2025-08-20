@@ -7,13 +7,13 @@
  */
 
 import crypto from 'crypto';
-import { getConfig } from '../config/environment';
-import { getEncryptionService } from './encryption';
-import { getDatabase } from '../database/connection';
-import { getRedisConnectionManager } from './RedisConnectionManager';
-import { RedisUsageType } from '../config/RedisConfigurationFactory';
-import { getMetaRateLimiter } from './meta-rate-limiter';
-import { GRAPH_API_BASE_URL } from '../config/graph-api';
+import { getConfig } from '../config/environment.js';
+import { getEncryptionService } from './encryption.js';
+import { getDatabase } from '../database/connection.js';
+import { getRedisConnectionManager } from './RedisConnectionManager.js';
+import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
+import { getMetaRateLimiter } from './meta-rate-limiter.js';
+import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 
 // safe JSON helper for non-typed responses
 const jsonAny = async (r: any): Promise<any> => {

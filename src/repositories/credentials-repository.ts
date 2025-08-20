@@ -5,9 +5,9 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
-import { getEncryptionService } from '../services/encryption';
-import type { MerchantCredentials, Platform } from '../types/database';
+import { getDatabase } from '../database/connection.js';
+import { getEncryptionService } from '../services/encryption.js';
+import type { MerchantCredentials, Platform } from '../types/database.js';
 
 export interface StoredCredentials {
   merchantId: string;

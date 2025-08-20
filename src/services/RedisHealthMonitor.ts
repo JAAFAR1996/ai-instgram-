@@ -1,4 +1,5 @@
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
+import type { Redis as RedisType } from 'ioredis';
 import {
   RedisHealthCheckError,
   RedisValidationError,
@@ -6,7 +7,7 @@ import {
   RedisErrorFactory,
   RedisErrorHandler,
   isTimeoutError
-} from '../errors/RedisErrors';
+} from '../errors/RedisErrors.js';
 
 export interface RedisMetrics {
   version: string;
@@ -73,7 +74,7 @@ export class RedisHealthMonitor {
     this.errorHandler = new RedisErrorHandler(logger);
   }
 
-  async isConnectionHealthy(connection: Redis, timeout: number = 3000): Promise<boolean> {
+  async isConnectionHealthy(connection: RedisType, timeout: number = 3000): Promise<boolean> {
     try {
       const start = Date.now();
       
@@ -98,7 +99,7 @@ export class RedisHealthMonitor {
     }
   }
 
-  async validateConnection(connection: Redis): Promise<void> {
+  async validateConnection(connection: RedisType): Promise<void> {
     try {
       // اختبار مباشر بدون انتظار ready state
       // إذا كان الاتصال يعمل، العمليات ستنجح حتى لو status !== 'ready'
@@ -173,7 +174,7 @@ export class RedisHealthMonitor {
     }
   }
 
-  private async waitForConnectionReady(connection: Redis, timeoutMs: number = 10000): Promise<void> {
+  private async waitForConnectionReady(connection: RedisType, timeoutMs: number = 10000): Promise<void> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new RedisValidationError(
@@ -224,7 +225,7 @@ export class RedisHealthMonitor {
     });
   }
 
-  private getConnectionState(connection: Redis): any {
+  private getConnectionState(connection: RedisType): any {
     return {
       status: connection.status,
       options: {
@@ -236,7 +237,7 @@ export class RedisHealthMonitor {
     };
   }
 
-  async performComprehensiveHealthCheck(connection: Redis): Promise<RedisHealthResult> {
+  async performComprehensiveHealthCheck(connection: RedisType): Promise<RedisHealthResult> {
     const timestamp = new Date();
     const checks = {
       ping: false,
@@ -318,7 +319,7 @@ export class RedisHealthMonitor {
     }
   }
 
-  async getConnectionMetrics(connection: Redis): Promise<RedisMetrics> {
+  async getConnectionMetrics(connection: RedisType): Promise<RedisMetrics> {
     try {
       const [info, memory, stats, keyspace] = await Promise.all([
         connection.info(),
@@ -362,7 +363,7 @@ export class RedisHealthMonitor {
   }
 
   async performLoadTest(
-    connection: Redis, 
+    connection: RedisType, 
     operations: number = 1000,
     concurrency: number = 10
   ): Promise<RedisLoadTestResult> {
@@ -433,7 +434,7 @@ export class RedisHealthMonitor {
   }
 
   private async runLoadTestBatch(
-    connection: Redis,
+    connection: RedisType,
     batchId: number,
     batchSize: number,
     responseTimes: number[],
@@ -486,7 +487,7 @@ export class RedisHealthMonitor {
   }
 
   async diagnoseConnection(redisUrl: string): Promise<RedisConnectionDiagnosis> {
-    let connection: Redis | null = null;
+    let connection: RedisType | null = null;
     
     try {
       connection = new Redis(redisUrl, {

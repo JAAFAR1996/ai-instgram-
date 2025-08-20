@@ -6,7 +6,7 @@
  */
 
 import { setTimeout as delay } from 'node:timers/promises';
-import { safeAsync, wrapError, shutdownController } from '../boot/error-handlers';
+import { safeAsync, wrapError, shutdownController } from '../boot/error-handlers.js';
 
 type Health = 'healthy' | 'degraded' | 'unhealthy';
 

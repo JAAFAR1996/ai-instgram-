@@ -6,10 +6,10 @@
  * ===============================================
  */
 
-import { getInstagramClient } from './instagram-api';
-import { getDatabase } from '../database/connection';
-import { getConfig } from '../config/environment';
-import type { SendMessageRequest } from './instagram-api';
+import { getInstagramClient } from './instagram-api.js';
+import { getDatabase } from '../database/connection.js';
+import { getConfig } from '../config/environment.js';
+import type { SendMessageRequest } from './instagram-api.js';
 
 export type UtilityMessageType = 
   | 'ORDER_UPDATE'

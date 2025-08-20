@@ -5,10 +5,10 @@
  * ===============================================
  */
 
-import { getEncryptionService } from './encryption';
-import { getDatabase } from '../database/connection';
-import { GRAPH_API_BASE_URL } from '../config/graph-api';
-import type { Platform } from '../types/database';
+import { getEncryptionService } from './encryption.js';
+import { getDatabase } from '../database/connection.js';
+import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
+import type { Platform } from '../types/database.js';
 
 export interface WhatsAppCredentials {
   phoneNumberId: string;

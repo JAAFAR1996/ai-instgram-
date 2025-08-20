@@ -5,10 +5,10 @@
  * ===============================================
  */
 
-import { getInstagramClient } from './instagram-api';
-import { getDatabase } from '../database/connection';
-import { getConversationAIOrchestrator } from './conversation-ai-orchestrator';
-import type { InstagramContext } from './instagram-ai';
+import { getInstagramClient } from './instagram-api.js';
+import { getDatabase } from '../database/connection.js';
+import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
+import type { InstagramContext } from './instagram-ai.js';
 
 export interface MediaContent {
   id: string;

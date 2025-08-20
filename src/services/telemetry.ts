@@ -2,16 +2,18 @@
  * ===============================================
  * OpenTelemetry Metrics & Observability (2025 Standards)
  * ✅ Production-grade monitoring and metrics collection
+ * Note: OpenTelemetry packages not installed - stub implementation
  * ===============================================
  */
 
-import { metrics, trace, context } from '@opentelemetry/api';
-import { MeterProvider } from '@opentelemetry/sdk-metrics';
-import { TracerProvider } from '@opentelemetry/sdk-trace-node';
-import { Resource } from '@opentelemetry/resources';
-import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
-import { NodeSDK } from '@opentelemetry/auto-instrumentations-node';
-import { getConfig } from '../config/environment';
+// TODO: Install OpenTelemetry packages when needed
+// import { metrics, trace, context } from '@opentelemetry/api';
+// import { MeterProvider } from '@opentelemetry/sdk-metrics';
+// import { TracerProvider } from '@opentelemetry/sdk-trace-node';
+// import { Resource } from '@opentelemetry/resources';
+// import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
+// import { NodeSDK } from '@opentelemetry/auto-instrumentations-node';
+import { getConfig } from '../config/environment.js';
 
 export interface MetricsCollector {
   // Meta API metrics
@@ -45,45 +47,46 @@ export interface MetricsCollector {
 }
 
 export class TelemetryService {
-  private meter: any;
-  private tracer: any;
-  private metrics: MetricsCollector;
+  private meter: any = null;
+  private tracer: any = null;
+  private metrics: MetricsCollector = {} as MetricsCollector;
   private isInitialized = false;
 
   constructor() {
-    this.initializeSDK();
+    this.initializeStubSDK();
   }
 
   /**
-   * Initialize OpenTelemetry SDK
+   * Initialize stub SDK (OpenTelemetry packages not installed)
    */
-  private initializeSDK(): void {
-    const config = getConfig();
+  private initializeStubSDK(): void {
+    console.log('⚠️ Telemetry service running in stub mode - OpenTelemetry packages not installed');
     
-    // Create resource identification
-    const resource = new Resource({
-      [SemanticResourceAttributes.SERVICE_NAME]: 'ai-sales-platform',
-      [SemanticResourceAttributes.SERVICE_VERSION]: '1.0.0',
-      [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: config.environment,
-      [SemanticResourceAttributes.SERVICE_INSTANCE_ID]: process.env.HOSTNAME || 'unknown'
-    });
+    // Create stub metrics
+    const stubMetric = {
+      add: () => {},
+      record: () => {},
+      createHistogram: () => stubMetric,
+      createCounter: () => stubMetric,
+      createGauge: () => stubMetric
+    };
 
-    // Initialize SDK with auto-instrumentation
-    const sdk = new NodeSDK({
-      resource,
-      instrumentations: [], // Auto-instruments HTTP, database, etc.
-    });
+    this.meter = {
+      createCounter: () => stubMetric,
+      createHistogram: () => stubMetric,
+      createGauge: () => stubMetric
+    };
 
-    sdk.start();
-
-    // Get meter and tracer
-    this.meter = metrics.getMeter('ai-sales-platform', '1.0.0');
-    this.tracer = trace.getTracer('ai-sales-platform', '1.0.0');
+    this.tracer = {
+      startSpan: () => ({
+        setAttributes: () => {},
+        setStatus: () => {},
+        end: () => {}
+      })
+    };
 
     this.initializeMetrics();
     this.isInitialized = true;
-
-    console.log('📊 OpenTelemetry initialized for', config.environment);
   }
 
   /**
@@ -358,22 +361,19 @@ export class TelemetryService {
   }
 
   /**
-   * Add custom attributes to current span
+   * Add custom attributes to current span (stub implementation)
    */
   addSpanAttributes(attributes: Record<string, any>): void {
-    const activeSpan = trace.getActiveSpan();
-    if (activeSpan) {
-      Object.entries(attributes).forEach(([key, value]) => {
-        activeSpan.setAttribute(key, value);
-      });
-    }
+    // Stub implementation - OpenTelemetry not available
+    console.log('⚠️ Telemetry addSpanAttributes called (stub mode):', Object.keys(attributes));
   }
 
   /**
-   * Get current trace context for propagation
+   * Get current trace context for propagation (stub implementation)
    */
   getCurrentTraceContext(): any {
-    return trace.setSpanContext(context.active(), trace.getActiveSpan()?.spanContext() || {});
+    // Stub implementation
+    return {};
   }
 
   /**

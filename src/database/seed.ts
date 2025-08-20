@@ -5,8 +5,8 @@
  * ===============================================
  */
 
-import { getDatabase } from './connection';
-import type { Merchant, Product, Order, Conversation } from '../types/database';
+import { getDatabase } from './connection.js';
+import type { Merchant, Product, Order, Conversation } from '../types/database.js';
 
 export class DatabaseSeeder {
   private db = getDatabase();
@@ -603,7 +603,7 @@ export async function clearDatabase(): Promise<void> {
 }
 
 // CLI script runner
-if (import.meta.main) {
+if (process.argv[1] === new URL(import.meta.url).pathname) {
   const command = process.argv[2];
   
   try {

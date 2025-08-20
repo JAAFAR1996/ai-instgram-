@@ -7,8 +7,8 @@
 
 import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
-import { getDatabase } from './connection';
-import type { Migration } from '../types/database';
+import { getDatabase } from './connection.js';
+import type { Migration } from '../types/database.js';
 
 export class MigrationRunner {
   private db = getDatabase();

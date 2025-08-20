@@ -7,12 +7,14 @@
 
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
-import { InstagramWebhookHandler, type InstagramWebhookEvent } from '../services/instagram-webhook';
-import { getServiceController } from '../services/service-controller';
+import { InstagramWebhookHandler, type InstagramWebhookEvent } from '../services/instagram-webhook.js';
+import { getServiceController } from '../services/service-controller.js';
 // removed unused imports
-import { securityHeaders, rateLimiter } from '../middleware/security';
-import { getDatabase } from '../database/connection';
-import { getConfig } from '../config/environment';
+import { securityHeaders, rateLimiter } from '../middleware/security.js';
+import { getDatabase } from '../database/connection.js';
+import { getConfig } from '../config/environment.js';
+import { verifyHMAC } from '../services/encryption.js';
+import { pushDLQ } from '../queue/dead-letter.js';
 import { z } from 'zod';
 import crypto from 'node:crypto';
 
@@ -75,16 +77,16 @@ export class WebhookRouter {
   }
 
   /**
-   * Setup webhook routes for both platforms
+   * Setup webhook routes - Instagram only
    */
   private setupRoutes(): void {
     // Instagram webhook routes
     this.app.get('/webhooks/instagram', this.handleInstagramVerification.bind(this));
     this.app.post('/webhooks/instagram', this.handleInstagramWebhook.bind(this));
     
-    // WhatsApp webhook routes
-    this.app.get('/webhooks/whatsapp', this.handleWhatsAppVerification.bind(this));
-    this.app.post('/webhooks/whatsapp', this.handleWhatsAppWebhook.bind(this));
+    // WhatsApp webhook routes - DISABLED
+    this.app.get('/webhooks/whatsapp', (c) => c.text('WhatsApp features disabled', 503));
+    this.app.post('/webhooks/whatsapp', (c) => c.text('WhatsApp features disabled', 503));
     
     // Health check endpoint
     this.app.get('/webhooks/health', async (c) => {
@@ -93,7 +95,7 @@ export class WebhookRouter {
         timestamp: new Date().toISOString(),
         platforms: {
           instagram: 'active',
-          whatsapp: 'active'
+          whatsapp: 'disabled'
         }
       });
     });
@@ -216,6 +218,11 @@ export class WebhookRouter {
       const rawAB = await c.req.arrayBuffer();
       const rawBuf = Buffer.from(rawAB);
       
+      // Check payload size to prevent server overload
+      if (rawBuf.byteLength > 512 * 1024) {
+        return c.text('Payload Too Large', 413);
+      }
+      
       // Get critical headers and config
       const sigHeader = c.req.header('x-hub-signature-256') ?? '';
       const appId = c.req.header('x-app-id') ?? '';
@@ -254,25 +261,9 @@ export class WebhookRouter {
         return c.text('Server configuration error', 500);
       }
       
-      // 3. Calculate HMAC-SHA256 and convert to lowercase
-      const expected = crypto.createHmac('sha256', appSecret).update(rawBuf).digest('hex').toLowerCase();
-      const received = sigHeader.slice(7).trim().toLowerCase();
-      
-      // 4. Timing-safe comparison
-      let ok = false;
-      if (received.length === expected.length) {
-        try {
-          ok = crypto.timingSafeEqual(Buffer.from(received, 'hex'), Buffer.from(expected, 'hex'));
-        } catch {}
-      }
-      
-      if (!ok) {
-        // Safe logging - only show first 8 characters
+      // 3. Unified HMAC verification
+      if (!sigHeader || !verifyHMAC(rawBuf.toString('utf8'), sigHeader.replace('sha256=', ''), appSecret)) {
         console.error('❌ Instagram webhook signature verification failed');
-        console.error('Signature mismatch', {
-          received8: received.slice(0, 8),
-          expected8: expected.slice(0, 8)
-        });
         return c.text('Invalid signature', 401);
       }
       
@@ -316,6 +307,19 @@ export class WebhookRouter {
 
     } catch (error) {
       console.error('❌ Instagram webhook processing failed:', error);
+      
+      // Push to DLQ for analysis
+      pushDLQ({
+        ts: Date.now(),
+        reason: 'instagram-webhook-processing-failed',
+        payload: { 
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        },
+        platform: 'instagram',
+        merchantId: process.env.MERCHANT_ID || 'unknown'
+      });
+      
       return c.text('Webhook processing failed', 500);
     }
   }
@@ -394,9 +398,17 @@ export class WebhookRouter {
         console.error('❌ Missing WhatsApp webhook signature');
         return c.text('Missing signature', 400);
       }
-      // ✅ verify BEFORE parsing
-      const ok = await this.verifyWhatsAppSignature(rawBody, signature);
-      if (!ok) return c.text('Invalid signature', 401);
+      // Check payload size to prevent server overload
+      if (rawBody.byteLength > 512 * 1024) {
+        return c.text('Payload Too Large', 413);
+      }
+      
+      // ✅ Unified HMAC verification
+      const appSecret = this.getAppSecret();
+      if (!signature || !verifyHMAC(rawBody.toString('utf8'), signature.replace('sha256=', ''), appSecret)) {
+        console.error('❌ WhatsApp webhook signature verification failed');
+        return c.text('Invalid signature', 401);
+      }
 
       // Parse after verification
       let event;
@@ -424,6 +436,19 @@ export class WebhookRouter {
 
     } catch (error) {
       console.error('❌ WhatsApp webhook processing failed:', error);
+      
+      // Push to DLQ for analysis
+      pushDLQ({
+        ts: Date.now(),
+        reason: 'whatsapp-webhook-processing-failed',
+        payload: { 
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        },
+        platform: 'whatsapp',
+        merchantId: process.env.MERCHANT_ID || 'unknown'
+      });
+      
       return c.text('Webhook processing failed', 500);
     }
   }
@@ -475,6 +500,18 @@ export class WebhookRouter {
 
     } catch (error) {
       console.error('❌ Failed to process Instagram entry:', error);
+      
+      // Push to DLQ for analysis
+      pushDLQ({
+        ts: Date.now(),
+        reason: 'instagram-entry-processing-failed',
+        payload: {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          entry: entry
+        },
+        platform: 'instagram'
+      });
+      
       await this.logWebhookEvent('instagram', 'unknown', 'ERROR', {
         error: error instanceof Error ? error.message : 'Unknown error'
       });
@@ -482,25 +519,13 @@ export class WebhookRouter {
   }
 
   /**
-   * Process WhatsApp webhook entry (placeholder implementation)
+   * Process WhatsApp webhook entry - DISABLED
    */
   private async processWhatsAppEntry(entry: any): Promise<void> {
-    try {
-      // TODO: Implement WhatsApp webhook processing
-      console.log('📱 WhatsApp webhook entry received (processing to be implemented):', entry.id ? String(entry.id).replace(/[\r\n]/g, '') : '');
-      
-      // For now, just log the event
-      await this.logWebhookEvent('whatsapp', 'unknown', 'SUCCESS', {
-        entryId: entry.id,
-        note: 'WhatsApp processing placeholder'
-      });
-
-    } catch (error) {
-      console.error('❌ Failed to process WhatsApp entry:', error);
-      await this.logWebhookEvent('whatsapp', 'unknown', 'ERROR', {
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
+    console.log('❌ WhatsApp processing disabled - entry ignored');
+    await this.logWebhookEvent('whatsapp', 'disabled', 'ERROR', {
+      error: 'WhatsApp features are disabled'
+    });
   }
 
   /**

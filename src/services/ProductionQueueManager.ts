@@ -1,18 +1,19 @@
 import Bull from 'bull';
-import Redis from 'ioredis';
-import { RedisUsageType, Environment } from '../config/RedisConfigurationFactory';
-import RedisConnectionManager from './RedisConnectionManager';
-import RedisHealthMonitor from './RedisHealthMonitor';
-import { CircuitBreaker } from './CircuitBreaker';
+import { Redis } from 'ioredis';
+import type { Redis as RedisType } from 'ioredis';
+import { RedisUsageType, Environment } from '../config/RedisConfigurationFactory.js';
+import RedisConnectionManager from './RedisConnectionManager.js';
+import RedisHealthMonitor from './RedisHealthMonitor.js';
+import { CircuitBreaker } from './CircuitBreaker.js';
 import {
   RedisQueueError,
   RedisConnectionError,
   RedisErrorHandler,
   isConnectionError
-} from '../errors/RedisErrors';
-import { getInstagramWebhookHandler } from './instagram-webhook';
-import { getConversationAIOrchestrator } from './conversation-ai-orchestrator';
-import type { InstagramWebhookEvent, ProcessedWebhookResult } from './instagram-webhook';
+} from '../errors/RedisErrors.js';
+import { getInstagramWebhookHandler } from './instagram-webhook.js';
+import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
+import type { InstagramWebhookEvent, ProcessedWebhookResult } from './instagram-webhook.js';
 
 export interface QueueJob {
   eventId: string;

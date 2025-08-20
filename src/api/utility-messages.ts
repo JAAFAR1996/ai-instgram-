@@ -8,8 +8,8 @@
 
 import { Hono } from 'hono';
 import { validator } from 'hono/validator';
-import { getUtilityMessagesService, type UtilityMessageType } from '../services/utility-messages';
-import { securityHeaders, rateLimiter } from '../middleware/security';
+import { getUtilityMessagesService, type UtilityMessageType } from '../services/utility-messages.js';
+import { securityHeaders, rateLimiter } from '../middleware/security.js';
 import { z } from 'zod';
 
 // Validation schemas

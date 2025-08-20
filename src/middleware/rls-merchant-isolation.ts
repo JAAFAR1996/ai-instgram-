@@ -6,7 +6,7 @@
  */
 
 import { Context, Next } from 'hono';
-import { getDatabase } from '../database/connection';
+import { getDatabase } from '../database/connection.js';
 
 export interface MerchantIsolationConfig {
   strictMode: boolean; // Fail if no merchant ID found

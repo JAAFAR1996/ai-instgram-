@@ -1,4 +1,5 @@
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
+import type { Redis as RedisType } from 'ioredis';
 
 export interface RedisHealthResult {
   connected: boolean;

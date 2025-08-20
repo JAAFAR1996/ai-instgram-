@@ -6,9 +6,9 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection';
-import { getConversationAIOrchestrator, type CrossPlatformContext } from './conversation-ai-orchestrator';
-import type { Platform } from '../types/database';
+import { getDatabase } from '../database/connection.js';
+import { getConversationAIOrchestrator, type CrossPlatformContext } from './conversation-ai-orchestrator.js';
+import type { Platform } from '../types/database.js';
 
 export interface UnifiedCustomerProfile {
   customerId: string;
