@@ -7,6 +7,11 @@
 import './boot/error-handlers.js';
 import { fireAndForget } from './boot/error-handlers.js';
 
+// تسجيل تحذير multipleResolves مرة واحدة (للتشخيص)
+process.prependListener('multipleResolves', (type, _promise, reason) => {
+  console.warn('[MULTIPLE_RESOLVES_DETECTED]', { type, reason: String(reason) });
+});
+
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import { serve } from '@hono/node-server';
@@ -20,7 +25,7 @@ import { runMigrations } from './startup/runMigrations.js';
 import { ensurePageMapping } from './startup/ensurePageMapping.js';
 import { RedisProductionIntegration } from './services/RedisProductionIntegration.js';
 import { createMerchantIsolationMiddleware } from './middleware/rls-merchant-isolation.js';
-import { getHealthCheckService } from './services/health-check.js';
+import { getHealthCached, getLastSnapshot } from './services/health-check.js';
 import { verifyHMAC } from './services/encryption.js';
 import { pushDLQ, getDLQStats } from './queue/dead-letter.js';
 import { GRAPH_API_VERSION } from './config/graph-api.js';
@@ -663,56 +668,39 @@ app.get('/internal/dlq/stats', async (c) => {
   }
 });
 
-// Enhanced Health endpoint with comprehensive monitoring
+// Fast Health endpoint with cached snapshots
 app.get('/health', async (c) => {
-  const svc = getHealthCheckService();
-  const report = await svc.performHealthCheck();
-  const dlqStats = getDLQStats();
-  
-  // Get processor count from Redis integration if available
-  let processorCount = 0;
-  let queueHealth = 'unknown';
-  
-  if (redisIntegration) {
-    try {
-      const queueManager = redisIntegration.getQueueManager();
-      if (queueManager && typeof queueManager.getQueueStats === 'function') {
-        const stats = await queueManager.getQueueStats();
-        processorCount = (stats as any).processors?.registered || 0;
-        queueHealth = (stats as any).health || 'unknown';
-      }
-    } catch (e) {
-      // Ignore queue stats errors in health check
-    }
+  // أعد آخر لقطة فوراً إن وُجدت
+  const last = getLastSnapshot();
+  // أطلق تحديث بالخلفية دون انتظار
+  getHealthCached().catch(() => { /* لا شيء */ });
+
+  if (last && last.ok) {
+    c.header('Cache-Control', 'no-store');
+    return c.json({ status: 'ok', ...last }, 200);
   }
-  
-  const healthData = {
-    ...report,
-    extended: {
-      db: { connected: !!pool },
-      redis: { 
-        enabled: !!REDIS_URL, 
-        connected: !!redisIntegration 
-      },
-      queue: { 
-        processors: processorCount, 
-        health: queueHealth 
-      },
-      dlq: dlqStats,
-      graphApiVersion: GRAPH_API_VERSION
-    }
-  };
-  
+
+  // إن لم توجد لقطة أو آخر لقطة فاشلة: انتظر نتيجة واحدة فقط لكن بدون تكرار الحسم
+  const snap = await getHealthCached();
   c.header('Cache-Control', 'no-store');
-  return c.json(healthData, report.status === 'healthy' ? 200 : report.status === 'degraded' ? 200 : 503);
+  return c.json(
+    snap.ok ? { status: 'ok', ...snap } : { status: 'fail', ...snap },
+    snap.ok ? 200 : 503
+  );
 });
 
 // Readiness endpoint for load balancer
 app.get('/ready', async (c) => {
-  const svc = getHealthCheckService();
-  const r = await svc.performReadinessCheck();
+  // استخدام اللقطة السريعة للجهوزية
+  const snap = await getHealthCached();
+  const ready = snap.ok && snap.circuitState !== 'OPEN';
+  
   c.header('Cache-Control', 'no-store');
-  return c.json(r, r.ready ? 200 : 503);
+  return c.json({ 
+    ready, 
+    message: ready ? 'Service is ready to accept traffic' : 'Service not ready',
+    responseTime: Date.now() - snap.ts
+  }, ready ? 200 : 503);
 });
 
 // ===============================================
