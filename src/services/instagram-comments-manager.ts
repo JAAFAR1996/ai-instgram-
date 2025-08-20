@@ -9,6 +9,9 @@ import { getInstagramClient } from './instagram-api';
 import { getDatabase } from '../database/connection';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator';
 import type { InstagramContext } from './instagram-ai';
+import { hashMerchantAndBody } from '../middleware/idempotency';
+import { getRedisConnectionManager } from './RedisConnectionManager';
+import { RedisUsageType } from '../config/RedisConfigurationFactory';
 
 export interface CommentInteraction {
   id: string;
@@ -83,6 +86,7 @@ export interface CommentModerationRule {
 export class InstagramCommentsManager {
   private db = getDatabase();
   private aiOrchestrator = getConversationAIOrchestrator();
+  private redis = getRedisConnectionManager();
 
   /**
    * Process new comment interaction
@@ -93,6 +97,25 @@ export class InstagramCommentsManager {
   ): Promise<{ success: boolean; responseGenerated: boolean; actionTaken?: string; error?: string }> {
     try {
       console.log(`💬 Processing Instagram comment: @${comment.username} → ${comment.content.substring(0, 50)}...`);
+
+      // 🔒 Idempotency check - prevent duplicate comment processing
+      const bodyForHash = {
+        merchantId,
+        commentId: comment.id,
+        postId: comment.postId,
+        content: comment.content,
+        userId: comment.userId,
+        date: new Date().toISOString().slice(0, 10)
+      };
+      const idempotencyKey = `ig:comment_process:${hashMerchantAndBody(merchantId, bodyForHash)}`;
+      
+      const redis = await this.redis.getConnection(RedisUsageType.IDEMPOTENCY);
+      const existingResult = await redis.get(idempotencyKey);
+      
+      if (existingResult) {
+        console.log(`🔒 Idempotent comment processing detected: ${idempotencyKey}`);
+        return JSON.parse(existingResult);
+      }
 
       // Store comment in database
       await this.storeComment(comment, merchantId);
@@ -149,11 +172,17 @@ export class InstagramCommentsManager {
 
       console.log(`✅ Comment processed: ${actionTaken} (confidence: ${response.confidence}%)`);
 
-      return {
+      const successResult = {
         success: true,
         responseGenerated,
         actionTaken
       };
+
+      // 💾 Cache successful result for idempotency (24 hours TTL)
+      await redis.setex(idempotencyKey, 86400, JSON.stringify(successResult));
+      console.log(`💾 Cached comment processing result: ${idempotencyKey}`);
+
+      return successResult;
     } catch (error) {
       console.error('❌ Comment processing failed:', error);
       return {

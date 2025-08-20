@@ -8,6 +8,7 @@
 import { getEncryptionService } from './encryption';
 import { getDatabase } from '../database/connection';
 import { GRAPH_API_BASE_URL } from '../config/graph-api';
+import { getMetaRateLimiter } from './meta-rate-limiter';
 import type { Platform } from '../types/database';
 
 export interface InstagramCredentials {
@@ -115,8 +116,57 @@ export class InstagramAPIClient {
   private credentials: InstagramCredentials | null = null;
   private encryptionService = getEncryptionService();
   private db = getDatabase();
+  private rateLimiter = getMetaRateLimiter();
 
   constructor() {}
+
+  /**
+   * Unified Graph API request with Redis sliding-window rate limiting
+   */
+  private async graphRequest<T>(
+    method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH',
+    path: string,
+    accessToken: string,
+    body?: Record<string, any>,
+    merchantId = process.env.MERCHANT_ID || 'default-merchant-001'
+  ): Promise<T> {
+    const windowMs = 60_000;         // 1 دقيقة
+    const maxRequests = 90;          // حد لكل تاجر/دقيقة (عدّله كما يلزم)
+    const rateKey = `ig:${merchantId}:${method}:${path}`;
+
+    // ✅ فحص المعدّل قبل الإرسال
+    const check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
+    if (!check.allowed) {
+      throw Object.assign(new Error('RATE_LIMIT_EXCEEDED'), {
+        resetTime: check.resetTime,
+        remaining: check.remaining,
+        code: 'RATE_LIMIT_EXCEEDED'
+      });
+    }
+
+    const url = `${GRAPH_API_BASE_URL}${path}${path.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken)}`;
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    });
+
+    // اختياري: قراءة رؤوس فيسبوك الخاصة بالاستهلاك (إن وُجدت) لتسجيلها
+    const appUsage = res.headers.get('x-app-usage');
+    const pageUsage = res.headers.get('x-page-usage');
+    if (appUsage || pageUsage) {
+      console.log(`📊 Graph API usage - App: ${appUsage}, Page: ${pageUsage}`);
+    }
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      const e = new Error(`IG Graph error ${res.status}: ${errBody}`);
+      (e as any).status = res.status;
+      throw e;
+    }
+
+    return res.json() as Promise<T>;
+  }
 
   /**
    * Initialize with merchant credentials
@@ -148,36 +198,19 @@ export class InstagramAPIClient {
         throw new Error('Instagram API not initialized');
       }
 
-      const url = `${this.baseUrl}/${this.credentials.businessAccountId}/messages`;
-      
       const payload = this.buildMessagePayload(request);
       
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.credentials.pageAccessToken}`
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        return {
-          success: false,
-          error: {
-            code: (result as any).error?.code || response.status,
-            message: (result as any).error?.message || 'Failed to send message',
-            type: (result as any).error?.type || 'API_ERROR'
-          }
-        };
-      }
+      const result = await this.graphRequest<any>(
+        'POST',
+        `/${this.credentials.businessAccountId}/messages`,
+        this.credentials.pageAccessToken,
+        payload
+      );
 
       return {
         success: true,
-        messageId: (result as any).message_id,
-        rateLimitRemaining: this.parseRateLimitHeaders(response)
+        messageId: result.message_id,
+        rateLimitRemaining: 200 // Default rate limit
       };
     } catch (error) {
       console.error('❌ Instagram message send failed:', error);
@@ -220,31 +253,20 @@ export class InstagramAPIClient {
         throw new Error('Instagram API not initialized');
       }
 
-      const url = `${this.baseUrl}/${commentId}/replies`;
-      
       const payload = {
         message: message
       };
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.credentials.pageAccessToken}`
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const result = await response.json();
+      const result = await this.graphRequest<any>(
+        'POST',
+        `/${commentId}/replies`,
+        this.credentials.pageAccessToken,
+        payload
+      );
 
       return {
-        success: response.ok,
-        messageId: (result as any).id,
-        error: !response.ok ? {
-          code: (result as any).error?.code || response.status,
-          message: (result as any).error?.message || 'Failed to reply to comment',
-          type: (result as any).error?.type || 'API_ERROR'
-        } : undefined
+        success: true,
+        messageId: result.id
       };
     } catch (error) {
       console.error('❌ Instagram comment reply failed:', error);
@@ -268,20 +290,13 @@ export class InstagramAPIClient {
         throw new Error('Instagram API not initialized');
       }
 
-      const url = `${this.baseUrl}/${userId}`;
-      const params = new URLSearchParams({
-        fields: 'id,username,name,profile_picture_url,followers_count,media_count,biography',
-        access_token: this.credentials.pageAccessToken
-      });
-
-      const response = await fetch(`${url}?${params}`);
+      const result = await this.graphRequest<InstagramProfile>(
+        'GET',
+        `/${userId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,
+        this.credentials.pageAccessToken
+      );
       
-      if (!response.ok) {
-        console.error('Failed to fetch user profile:', await response.text());
-        return null;
-      }
-
-      return await response.json() as InstagramProfile;
+      return result;
     } catch (error) {
       console.error('❌ Get user profile failed:', error);
       return null;
@@ -327,29 +342,18 @@ export class InstagramAPIClient {
         throw new Error('Instagram API not initialized');
       }
 
-      const url = `${this.baseUrl}/${this.credentials.pageId}/subscribed_apps`;
-      
       const payload = {
         subscribed_fields: 'messages,messaging_postbacks,comments,mentions',
         callback_url: webhookUrl,
         verify_token: this.credentials.webhookVerifyToken
       };
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.credentials.pageAccessToken}`
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const result = await response.json();
-      
-      if (!response.ok) {
-        console.error('❌ Webhook subscription failed:', result);
-        return false;
-      }
+      const result = await this.graphRequest<any>(
+        'POST',
+        `/${this.credentials.pageId}/subscribed_apps`,
+        this.credentials.pageAccessToken,
+        payload
+      );
 
       console.log('✅ Instagram webhook subscribed successfully');
       return true;
@@ -368,19 +372,11 @@ export class InstagramAPIClient {
         throw new Error('Instagram API not initialized');
       }
 
-      const url = `${this.baseUrl}/${this.credentials.businessAccountId}`;
-      const params = new URLSearchParams({
-        fields: 'id,username,name,profile_picture_url,followers_count,media_count',
-        access_token: this.credentials.pageAccessToken
-      });
-
-      const response = await fetch(`${url}?${params}`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to get business account info: ${response.statusText}`);
-      }
-
-      return await response.json();
+      return await this.graphRequest<any>(
+        'GET',
+        `/${this.credentials.businessAccountId}?fields=id,username,name,profile_picture_url,followers_count,media_count`,
+        this.credentials.pageAccessToken
+      );
     } catch (error) {
       console.error('❌ Get business account info failed:', error);
       throw error;

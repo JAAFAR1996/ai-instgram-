@@ -10,6 +10,10 @@ import crypto from 'crypto';
 import { getConfig } from '../config/environment';
 import { getEncryptionService } from './encryption';
 import { getDatabase } from '../database/connection';
+import { getRedisConnectionManager } from './RedisConnectionManager';
+import { RedisUsageType } from '../config/RedisConfigurationFactory';
+import { getMetaRateLimiter } from './meta-rate-limiter';
+import { GRAPH_API_BASE_URL } from '../config/graph-api';
 
 // safe JSON helper for non-typed responses
 const jsonAny = async (r: any): Promise<any> => {
@@ -42,11 +46,70 @@ export interface InstagramCredentials {
 export class InstagramOAuthService {
   private config = getConfig();
   private db = getDatabase();
+  private redis = getRedisConnectionManager();
+  private rateLimiter = getMetaRateLimiter();
 
   constructor() {
     if (!this.config.instagram.appId || !this.config.instagram.appSecret) {
       throw new Error('Instagram OAuth credentials not configured');
     }
+  }
+
+  /**
+   * Unified Graph API request with Redis sliding-window rate limiting for OAuth operations
+   */
+  private async graphRequest<T>(
+    method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH',
+    path: string,
+    params?: Record<string, any>,
+    body?: Record<string, any>,
+    merchantId = process.env.MERCHANT_ID || 'oauth-default'
+  ): Promise<T> {
+    const windowMs = 60_000;
+    const maxRequests = 90;
+    const rateKey = `ig-oauth:${merchantId}:${method}:${path}`;
+
+    const check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
+    if (!check.allowed) {
+      throw Object.assign(new Error('RATE_LIMIT_EXCEEDED'), {
+        resetTime: check.resetTime,
+        remaining: check.remaining,
+        code: 'RATE_LIMIT_EXCEEDED'
+      });
+    }
+
+    let url: string;
+    if (path.startsWith('https://')) {
+      url = path;
+    } else {
+      url = `${GRAPH_API_BASE_URL}${path}`;
+    }
+
+    if (params) {
+      const paramString = new URLSearchParams(params).toString();
+      url += (url.includes('?') ? '&' : '?') + paramString;
+    }
+
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    });
+
+    const appUsage = res.headers.get('x-app-usage');
+    const pageUsage = res.headers.get('x-page-usage');
+    if (appUsage || pageUsage) {
+      console.log(`📊 OAuth Graph API usage - App: ${appUsage}, Page: ${pageUsage}`);
+    }
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      const e = new Error(`Instagram OAuth Graph error ${res.status}: ${errBody}`);
+      (e as any).status = res.status;
+      throw e;
+    }
+
+    return res.json() as Promise<T>;
   }
 
   /**
@@ -91,11 +154,15 @@ export class InstagramOAuthService {
 
     const oauthUrl = `${baseUrl}?${params.toString()}`;
     
+    // Store PKCE verifier securely in Redis for later retrieval
+    this.storePKCEInRedis(secureState, codeVerifier);
+    
     console.log('🔗 Instagram Business Login URL built (2025):', oauthUrl);
     console.log('📋 Enhanced scopes for 2025:', params.get('scope'));
     console.log('✨ Business Login Mode: Enabled (No Facebook login required)');
     console.log('🔒 PKCE Security: Enabled (code_challenge generated)');
     console.log('🛡️ Secure State: Generated with signature verification');
+    console.log('💾 PKCE Verifier: Stored securely in Redis');
     
     return {
       oauthUrl,
@@ -144,6 +211,16 @@ export class InstagramOAuthService {
         throw new Error('Invalid or expired state parameter');
       }
 
+      // Try to retrieve PKCE verifier from Redis first, then fallback to parameter
+      let actualCodeVerifier = codeVerifier;
+      if (state) {
+        const redisCodeVerifier = await this.retrievePKCEFromRedis(state);
+        if (redisCodeVerifier) {
+          actualCodeVerifier = redisCodeVerifier;
+          console.log('🔓 Using PKCE verifier from Redis for enhanced security');
+        }
+      }
+
       const formData = new URLSearchParams({
         client_id: this.config.instagram.appId,
         client_secret: this.config.instagram.appSecret,
@@ -153,8 +230,8 @@ export class InstagramOAuthService {
       });
 
       // Add PKCE code verifier if provided (2025 security enhancement)
-      if (codeVerifier) {
-        formData.append('code_verifier', codeVerifier);
+      if (actualCodeVerifier) {
+        formData.append('code_verifier', actualCodeVerifier);
         console.log('🔒 PKCE verification included in token exchange');
       }
 
@@ -216,23 +293,17 @@ export class InstagramOAuthService {
     try {
       console.log('🔄 Converting to long-lived token...');
 
-      const params = new URLSearchParams({
+      const params = {
         grant_type: 'ig_exchange_token',
         client_secret: this.config.instagram.appSecret,
         access_token: shortLivedToken
-      });
+      };
 
-      const response = await fetch(`https://graph.instagram.com/access_token?${params.toString()}`, {
-        method: 'GET'
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Long-lived token conversion failed:', errorText);
-        throw new Error(`Long-lived token conversion failed: ${response.status} ${errorText}`);
-      }
-
-      const data: any = await jsonAny(response);
+      const data: any = await this.graphRequest<any>(
+        'GET',
+        'https://graph.instagram.com/access_token',
+        params
+      );
       console.log('✅ Long-lived token obtained successfully');
       
       return data as { access_token: string; token_type: string; expires_in: number; };
@@ -255,22 +326,16 @@ export class InstagramOAuthService {
     try {
       console.log('🔄 Refreshing long-lived token...');
 
-      const params = new URLSearchParams({
+      const params = {
         grant_type: 'ig_refresh_token',
         access_token: currentToken
-      });
+      };
 
-      const response = await fetch(`https://graph.instagram.com/refresh_access_token?${params.toString()}`, {
-        method: 'GET'
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Token refresh failed:', errorText);
-        throw new Error(`Token refresh failed: ${response.status} ${errorText}`);
-      }
-
-      const data: any = await jsonAny(response);
+      const data: any = await this.graphRequest<any>(
+        'GET',
+        'https://graph.instagram.com/refresh_access_token',
+        params
+      );
       console.log('✅ Token refreshed successfully');
       
       return data as { access_token: string; token_type: string; expires_in: number; };
@@ -288,22 +353,16 @@ export class InstagramOAuthService {
     try {
       console.log('🔍 Fetching Instagram user profile...');
 
-      const params = new URLSearchParams({
+      const params = {
         fields: 'id,username,account_type,media_count,followers_count,follows_count',
         access_token: accessToken
-      });
+      };
 
-      const response = await fetch(`https://graph.instagram.com/me?${params.toString()}`, {
-        method: 'GET'
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Failed to fetch user profile:', errorText);
-        throw new Error(`Profile fetch failed: ${response.status} ${errorText}`);
-      }
-
-      const data: any = await jsonAny(response);
+      const data: any = await this.graphRequest<any>(
+        'GET',
+        'https://graph.instagram.com/me',
+        params
+      );
       console.log('✅ User profile fetched successfully');
 
       return {
@@ -602,6 +661,45 @@ export class InstagramOAuthService {
   }
 
   /**
+   * Store PKCE verifier securely in Redis with short TTL
+   */
+  private async storePKCEInRedis(state: string, codeVerifier: string): Promise<void> {
+    try {
+      const redis = await this.redis.getConnection(RedisUsageType.OAUTH);
+      const key = `pkce:${state}`;
+      
+      // Store PKCE verifier with 10-minute TTL for security
+      await redis.setex(key, 600, codeVerifier);
+      console.log(`🔒 PKCE verifier stored in Redis with key: ${key}`);
+    } catch (error) {
+      console.error('❌ Failed to store PKCE verifier in Redis:', error);
+      // Don't throw - fallback to database storage
+    }
+  }
+
+  /**
+   * Retrieve PKCE verifier from Redis and delete after use
+   */
+  private async retrievePKCEFromRedis(state: string): Promise<string | null> {
+    try {
+      const redis = await this.redis.getConnection(RedisUsageType.OAUTH);
+      const key = `pkce:${state}`;
+      
+      // Get and immediately delete for one-time use security
+      const codeVerifier = await redis.get(key);
+      if (codeVerifier) {
+        await redis.del(key);
+        console.log(`🔓 PKCE verifier retrieved and deleted from Redis`);
+      }
+      
+      return codeVerifier;
+    } catch (error) {
+      console.error('❌ Failed to retrieve PKCE verifier from Redis:', error);
+      return null;
+    }
+  }
+
+  /**
    * Store OAuth session securely (2025 Enhancement)
    */
   async storeOAuthSession(
@@ -769,11 +867,13 @@ export class InstagramOAuthService {
    */
   async validateToken(accessToken: string): Promise<boolean> {
     try {
-      const response = await fetch(`https://graph.instagram.com/me?access_token=${accessToken}`, {
-        method: 'GET'
-      });
+      await this.graphRequest<any>(
+        'GET',
+        'https://graph.instagram.com/me',
+        { access_token: accessToken }
+      );
 
-      return response.ok;
+      return true;
 
     } catch (error) {
       console.error('❌ Token validation failed:', error);

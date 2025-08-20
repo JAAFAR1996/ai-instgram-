@@ -8,6 +8,9 @@
 
 import { getConfig } from '../config/environment';
 import { getDatabase } from '../database/connection';
+import { hashMerchantAndBody } from '../middleware/idempotency';
+import { getRedisConnectionManager } from './RedisConnectionManager';
+import { RedisUsageType } from '../config/RedisConfigurationFactory';
 
 export interface InstagramMessage {
   id: string;
@@ -35,6 +38,7 @@ export interface MessageContext {
 export class InstagramMessagingService {
   private config = getConfig();
   private db = getDatabase();
+  private redis = getRedisConnectionManager();
   private readonly MESSAGING_WINDOW_HOURS = 24;
 
   /**
@@ -53,6 +57,24 @@ export class InstagramMessagingService {
   ): Promise<InstagramMessageResponse> {
     try {
       console.log(`📤 Sending Instagram message from ${merchantId} to ${recipientId}`);
+
+      // 🔒 Idempotency check - prevent duplicate message sends
+      const messageBody = {
+        merchantId,
+        recipientId,
+        messageText,
+        options, // Include options to differentiate requests with different parameters
+        timestamp: new Date().toISOString().split('T')[0] // Date only for deduplication
+      };
+      const idempotencyKey = `msg_send:${hashMerchantAndBody(merchantId, messageBody)}`;
+      
+      const redis = await this.redis.getConnection(RedisUsageType.IDEMPOTENCY);
+      const existingResult = await redis.get(idempotencyKey);
+      
+      if (existingResult) {
+        console.log(`🔒 Idempotent message send detected: ${idempotencyKey}`);
+        return JSON.parse(existingResult);
+      }
 
       // Get merchant access token
       const accessToken = await this.getMerchantAccessToken(merchantId);
@@ -107,11 +129,17 @@ export class InstagramMessagingService {
       // Log the sent message
       await this.logSentMessage(merchantId, recipientId, messageText, responseData.message_id, options);
 
-      return {
+      const successResult = {
         messageId: responseData.message_id,
         recipientId: recipientId,
         success: true
       };
+
+      // 💾 Cache successful result for idempotency (24 hours TTL)
+      await redis.setex(idempotencyKey, 86400, JSON.stringify(successResult));
+      console.log(`💾 Cached message send result: ${idempotencyKey}`);
+
+      return successResult;
 
     } catch (error) {
       console.error('❌ Instagram messaging failed:', error);

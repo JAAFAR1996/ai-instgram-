@@ -1,0 +1,392 @@
+{
+  "ports_summary": {
+    "env": [],
+    "dockerfile": [],
+    "compose": [],
+    "health_targets": [],
+    "code": []
+  },
+  "env_validation": {
+    "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/startup/validation.ts",
+    "missing_checks": [],
+    "placeholders_leaking": []
+  },
+  "pkce": {
+    "ok": true,
+    "hits": {
+      "has_pkce_terms": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/instagram-auth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-oauth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/013_add_utility_messages_tables.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/019_merchant_instagram_mapping_composite_key.sql"
+      ],
+      "stores_in_redis": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/idempotency.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-oauth.ts"
+      ],
+      "callback_reads_verifier": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/instagram-auth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/environment.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/idempotency.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-oauth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/meta-rate-limiter.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisHealthChecker.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/auth/instagram.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/013_add_utility_messages_tables.sql"
+      ],
+      "deletes_after_use": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-oauth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisHealthChecker.ts"
+      ]
+    }
+  },
+  "idempotency": {
+    "ok": false,
+    "hits": {
+      "hash_merchant_and_body": [],
+      "db_unique": []
+    }
+  },
+  "redis_required": {
+    "ok": true,
+    "hits": {
+      "env_required": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/RedisConfigurationFactory.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/RedisProductionConfig.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/startup/validation.ts"
+      ],
+      "fail_on_end": [],
+      "rediss_tls": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/RedisConfigurationFactory.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/RedisProductionConfig.ts"
+      ]
+    }
+  },
+  "rate_limiter": {
+    "ok": false,
+    "hits": {
+      "redis_window": []
+    }
+  },
+  "retry_backoff": {
+    "ok": true,
+    "hits": {
+      "handles_429_5xx": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/webhooks.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/connection.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/enhanced-security.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/security.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/meta-rate-limiter.ts"
+      ],
+      "exponential_backoff": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/graph-api.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/enhanced-security.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/enhanced-queue.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/message-queue.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/meta-rate-limiter.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ProductionQueueManager.ts"
+      ],
+      "jitter": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/rls-wrapper.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ai.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-ai.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-comments-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-hashtag-mention-processor.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-oauth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-stories-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-webhook.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/meta-rate-limiter.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ProductionQueueManager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisHealthMonitor.ts"
+      ]
+    }
+  },
+  "dlq": {
+    "ok": true,
+    "hits": {
+      "queue_failed_handler": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ProductionQueueManager.ts"
+      ],
+      "push_dlq": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/enhanced-queue.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/telemetry.ts"
+      ]
+    }
+  },
+  "token_renewal": {
+    "ok": true,
+    "hits": {
+      "renew_long_lived": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/instagram-auth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/credentials-repository.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-oauth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-setup.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/auth/instagram.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/012_instagram_oauth_integration.sql"
+      ]
+    }
+  },
+  "rls": {
+    "ok": true,
+    "hits": {
+      "policies": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/004_webhook_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/006_cross_platform_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/011_service_control_tables.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/012_instagram_oauth_integration.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/013_add_utility_messages_tables.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/015_enable_rls.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/018_webhook_events_idempotency.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/019_merchant_instagram_mapping_composite_key.sql"
+      ],
+      "context_fn": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/connection.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/rls-wrapper.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/015_enable_rls.sql"
+      ]
+    }
+  },
+  "mapping_table": {
+    "ok": true,
+    "hits": {
+      "composite_pk": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/019_merchant_instagram_mapping_composite_key.sql"
+      ],
+      "encrypted_token": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/environment.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/credentials-repository.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/merchant-repository.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ai.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/encryption.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-api.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-oauth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-setup.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/telemetry.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/whatsapp-api.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/startup/validation.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/types/database.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/007_instagram_stories_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/008_instagram_comments_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/009_instagram_media_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/010_instagram_testing_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/012_instagram_oauth_integration.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/013_add_utility_messages_tables.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/019_merchant_instagram_mapping_composite_key.sql"
+      ]
+    }
+  },
+  "hmac_rawbody": {
+    "ok": true,
+    "hits": {
+      "header_check": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/webhooks.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/enhanced-security.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/idempotency.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/security.ts"
+      ],
+      "raw_body_used": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/webhooks.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/enhanced-security.ts"
+      ],
+      "timing_safe_equal": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/webhooks.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/enhanced-security.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/security.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/encryption.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-api.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-oauth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-webhook.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/whatsapp-api.ts"
+      ]
+    }
+  },
+  "openai_hardening": {
+    "ok": true,
+    "hits": {
+      "timeout": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/RedisConfigurationFactory.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/RedisProductionConfig.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-testing-orchestrator.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ProductionQueueManager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisConnectionManager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisHealthMonitor.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisProductionIntegration.ts"
+      ],
+      "json_parse_guard": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/instagram-auth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/service-control.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/utility-messages.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/webhooks.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/environment.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/RedisConfigurationFactory.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/RedisProductionConfig.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/connection.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/init-mapping.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrate.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/rls-wrapper.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/seed.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/test.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/errors/RedisErrors.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/enhanced-security.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/idempotency.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/security.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/enhanced-queue.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/message-queue.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/queue-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/conversation-repository.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/credentials-repository.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/merchant-repository.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/message-repository.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ai.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/CircuitBreaker.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/conversation-ai-orchestrator.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/cross-platform-conversation-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/encryption.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-ai.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-api.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-comments-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-hashtag-mention-processor.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-media-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-message-sender.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-messaging.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-oauth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-setup.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-stories-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-testing-orchestrator.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-webhook.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/message-window.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/meta-rate-limiter.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/monitoring.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ProductionQueueManager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisConnectionManager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisHealthChecker.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisHealthMonitor.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisProductionIntegration.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/service-controller.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/telemetry.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/utility-messages.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/whatsapp-ai.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/whatsapp-api.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/startup/ensurePageMapping.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/startup/migrate.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/startup/runMigrations.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/startup/validation.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/tests/instagram-integration.test.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/types/shims.d.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/auth/instagram.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/processors/ai-processor.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/processors/webhook-processor.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/004_webhook_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/006_cross_platform_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/008_instagram_comments_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/009_instagram_media_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/014_queue_jobs.sql"
+      ],
+      "input_cap": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts"
+      ]
+    }
+  },
+  "media_validation": {
+    "ok": true,
+    "hits": {
+      "size_type_checks": [
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/production-index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/service-control.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/api/webhooks.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/environment.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/graph-api.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/RedisConfigurationFactory.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/RedisProductionConfig.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/connection.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrate.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/rls-wrapper.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/seed.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/test.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/errors/RedisErrors.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/enhanced-security.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/idempotency.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/security.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/enhanced-queue.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/message-queue.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/queue-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/conversation-repository.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/credentials-repository.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/index.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/merchant-repository.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/message-repository.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ai.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/CircuitBreaker.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/conversation-ai-orchestrator.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/cross-platform-conversation-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/encryption.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-ai.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-api.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-comments-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-hashtag-mention-processor.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-media-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-message-sender.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-messaging.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-oauth.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-setup.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-stories-manager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-testing-orchestrator.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-webhook.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/message-window.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/meta-rate-limiter.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/monitoring.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ProductionQueueManager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisConnectionManager.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisHealthChecker.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisHealthMonitor.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisProductionIntegration.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/service-controller.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/telemetry.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/utility-messages.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/whatsapp-ai.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/whatsapp-api.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/whatsapp-policy-enforcer.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/startup/migrate.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/startup/validation.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/types/database.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/processors/ai-processor.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/processors/webhook-processor.ts",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/001_initial_schema.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/004_webhook_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/006_cross_platform_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/008_instagram_comments_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/009_instagram_media_infrastructure.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/014_queue_jobs.sql",
+        "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrations/015_enable_rls.sql"
+      ]
+    }
+  },
+  "docker_multistage": {
+    "ok": false,
+    "hits": {
+      "has_build_stage": [],
+      "runtime_stage": []
+    }
+  },
+  "compose_ports": {
+    "ports": []
+  },
+  "score": {
+    "passed": 10,
+    "total": 13
+  }
+}

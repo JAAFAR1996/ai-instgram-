@@ -5,7 +5,10 @@ export enum RedisUsageType {
   QUEUE_SYSTEM = 'queue_system',
   CACHING = 'caching',
   SESSION = 'session',
-  PUBSUB = 'pubsub'
+  PUBSUB = 'pubsub',
+  OAUTH = 'oauth',
+  RATE_LIMITER = 'rate_limiter',
+  IDEMPOTENCY = 'idempotency'
 }
 
 export enum Environment {

@@ -540,4 +540,28 @@ export class RedisConnectionManager {
   }
 }
 
+// Singleton instance for global access
+let globalRedisManager: RedisConnectionManager | null = null;
+
+function toEnv(): Environment {
+  const n = (process.env.NODE_ENV || 'production').toLowerCase();
+  if (n === 'development' || n === 'dev') return Environment.DEVELOPMENT;
+  if (n === 'test' || n === 'testing') return Environment.STAGING; // Using STAGING for test
+  return Environment.PRODUCTION;
+}
+
+export function getRedisConnectionManager(): RedisConnectionManager {
+  if (!globalRedisManager) {
+    const url = process.env.REDIS_URL; // الزامي في الإنتاج
+    if (!url && toEnv() === Environment.PRODUCTION) {
+      throw new Error('REDIS_URL is required in production');
+    }
+    globalRedisManager = new RedisConnectionManager(
+      url || 'redis://localhost:6379',
+      toEnv()
+    );
+  }
+  return globalRedisManager;
+}
+
 export default RedisConnectionManager;

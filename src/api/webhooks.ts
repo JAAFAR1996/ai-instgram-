@@ -190,6 +190,28 @@ export class WebhookRouter {
     try {
       console.log('📨 Instagram webhook event received');
       
+      // Apply Redis sliding window rate limiting
+      const instagramMerchantId = process.env.MERCHANT_ID || 'default-merchant-001';
+      const rateLimitKey = `webhook:instagram:${instagramMerchantId}`;
+      const windowMs = 60000; // 1 minute window
+      const maxRequests = 100; // 100 requests per minute per merchant
+      
+      const { getMetaRateLimiter } = await import('../services/meta-rate-limiter.js');
+      const rateLimiter = getMetaRateLimiter();
+      
+      const rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
+      
+      if (!rateCheck.allowed) {
+        console.warn(`🚫 Instagram webhook rate limit exceeded for merchant: ${instagramMerchantId}`);
+        return c.json({
+          error: 'Rate limit exceeded',
+          resetTime: rateCheck.resetTime,
+          remaining: rateCheck.remaining
+        }, 429);
+      }
+      
+      console.log(`✅ Rate limit check passed: ${rateCheck.remaining} remaining`);
+      
       // Get raw buffer - CRITICAL: do this before any other body parsing
       const rawAB = await c.req.arrayBuffer();
       const rawBuf = Buffer.from(rawAB);
@@ -274,9 +296,21 @@ export class WebhookRouter {
 
       if (event.object !== 'instagram') return c.text('Wrong object', 400);
 
+      // Check for idempotency using merchant and body hash
+      const idempotencyMerchantId = process.env.MERCHANT_ID || 'default-merchant-001';
+      const idempotencyCheck = await this.checkWebhookIdempotency(idempotencyMerchantId, event, 'instagram');
+      
+      if (idempotencyCheck.isDuplicate) {
+        console.log(`🔒 Duplicate Instagram webhook ignored: ${idempotencyCheck.eventId}`);
+        return c.json({ status: 'duplicate', eventId: idempotencyCheck.eventId }, 200);
+      }
+
       for (const entry of event.entry) {
         await this.processInstagramEntry(entry);
       }
+
+      // Mark webhook as successfully processed
+      await this.markWebhookProcessed(idempotencyCheck.eventId);
 
       return c.text('EVENT_RECEIVED', 200);
 
@@ -331,6 +365,28 @@ export class WebhookRouter {
   private async handleWhatsAppWebhook(c: any) {
     try {
       console.log('📨 WhatsApp webhook event received');
+      
+      // Apply Redis sliding window rate limiting
+      const whatsappMerchantId = process.env.MERCHANT_ID || 'default-merchant-001';
+      const rateLimitKey = `webhook:whatsapp:${whatsappMerchantId}`;
+      const windowMs = 60000; // 1 minute window
+      const maxRequests = 200; // 200 requests per minute per merchant (WhatsApp has higher volume)
+      
+      const { getMetaRateLimiter } = await import('../services/meta-rate-limiter.js');
+      const rateLimiter = getMetaRateLimiter();
+      
+      const rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
+      
+      if (!rateCheck.allowed) {
+        console.warn(`🚫 WhatsApp webhook rate limit exceeded for merchant: ${whatsappMerchantId}`);
+        return c.json({
+          error: 'Rate limit exceeded',
+          resetTime: rateCheck.resetTime,
+          remaining: rateCheck.remaining
+        }, 429);
+      }
+      
+      console.log(`✅ WhatsApp rate limit check passed: ${rateCheck.remaining} remaining`);
       
       const rawBody = Buffer.from(await c.req.arrayBuffer()); // RAW
       const signature = (c.req.header('X-Hub-Signature-256') || c.req.header('X-Hub-Signature') || '').trim();
@@ -578,6 +634,80 @@ export class WebhookRouter {
 
     } catch (error) {
       console.error('❌ Failed to log webhook event:', error);
+    }
+  }
+
+  /**
+   * Generate hash for merchant and body (idempotency)
+   */
+  private generateMerchantBodyHash(merchantId: string, body: any): string {
+    const content = `${merchantId}:${JSON.stringify(body)}`;
+    return crypto.createHash('sha256').update(content).digest('hex');
+  }
+
+  /**
+   * Check if webhook is duplicate based on merchant and body hash
+   */
+  private async checkWebhookIdempotency(
+    merchantId: string, 
+    body: any,
+    platform: 'instagram' | 'whatsapp'
+  ): Promise<{ isDuplicate: boolean; eventId: string }> {
+    const eventId = this.generateMerchantBodyHash(merchantId, body);
+    
+    try {
+      const sql = this.db.getSQL();
+      
+      // Try to insert the webhook event with unique constraint
+      const result = await sql`
+        INSERT INTO webhook_events (
+          event_id,
+          merchant_id,
+          platform,
+          body_hash,
+          processed_at,
+          created_at
+        ) VALUES (
+          ${eventId},
+          ${merchantId}::uuid,
+          ${platform.toUpperCase()},
+          ${eventId},
+          NULL,
+          NOW()
+        )
+        ON CONFLICT (merchant_id, platform, event_id) 
+        DO NOTHING
+        RETURNING event_id
+      `;
+      
+      const isFirstTime = result.length > 0;
+      console.log(`🔒 Webhook idempotency check: ${eventId} - ${isFirstTime ? 'First time' : 'Duplicate'}`);
+      
+      return {
+        isDuplicate: !isFirstTime,
+        eventId
+      };
+    } catch (error) {
+      console.error('❌ Idempotency check failed:', error);
+      // Fail open - allow processing on error
+      return { isDuplicate: false, eventId };
+    }
+  }
+
+  /**
+   * Mark webhook as processed
+   */
+  private async markWebhookProcessed(eventId: string): Promise<void> {
+    try {
+      const sql = this.db.getSQL();
+      await sql`
+        UPDATE webhook_events 
+        SET processed_at = NOW()
+        WHERE event_id = ${eventId}
+      `;
+      console.log(`✅ Webhook marked as processed: ${eventId}`);
+    } catch (error) {
+      console.error('❌ Failed to mark webhook as processed:', error);
     }
   }
 

@@ -93,6 +93,41 @@ async function validateEnvironmentConfiguration(): Promise<ValidationResult> {
   const startTime = Date.now();
   
   try {
+    // First, validate required environment variables exist
+    const requiredEnvVars = [
+      'META_APP_ID',
+      'IG_APP_SECRET', 
+      'GRAPH_API_VERSION',
+      'ENCRYPTION_KEY',
+      'DATABASE_URL',
+      'REDIS_URL',
+      'OPENAI_API_KEY',
+      'IG_VERIFY_TOKEN',
+      'REDIRECT_URI'
+    ];
+
+    const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+    
+    if (missingEnvVars.length > 0) {
+      throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
+    }
+
+    // Check for placeholder values that shouldn't be in production
+    const placeholderChecks = [
+      { var: 'IG_APP_SECRET', value: process.env.IG_APP_SECRET, placeholder: 'your_app_secret_here' },
+      { var: 'OPENAI_API_KEY', value: process.env.OPENAI_API_KEY, placeholder: 'sk-your_openai_api_key_here' },
+      { var: 'ENCRYPTION_KEY', value: process.env.ENCRYPTION_KEY, placeholder: 'your_32_character_encryption_key_here' },
+      { var: 'IG_VERIFY_TOKEN', value: process.env.IG_VERIFY_TOKEN, placeholder: 'your_webhook_verify_token_here' }
+    ];
+
+    const placeholderLeaks = placeholderChecks.filter(check => 
+      check.value && check.value.includes(check.placeholder)
+    );
+
+    if (placeholderLeaks.length > 0) {
+      throw new Error(`Placeholder values detected in production: ${placeholderLeaks.map(p => p.var).join(', ')}`);
+    }
+
     const config = getConfig();
     
     // Additional runtime validations

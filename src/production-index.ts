@@ -13,6 +13,8 @@ import { runStartupValidation } from './startup/validation';
 import { runMigrations } from './startup/runMigrations';
 import { ensurePageMapping } from './startup/ensurePageMapping';
 import { RedisProductionIntegration } from './services/RedisProductionIntegration';
+import { createMerchantIsolationMiddleware } from './middleware/rls-merchant-isolation';
+import { getHealthCheckService } from './services/health-check';
 
 // ===== Debug helpers =====
 const sigEnvOn = () => process.env.DEBUG_SIG === '1';
@@ -247,6 +249,21 @@ app.use('*', async (c, next) => {
   
   await next();
 });
+
+// ===============================================
+// RLS & MERCHANT ISOLATION MIDDLEWARE
+// ===============================================
+app.use('*', createMerchantIsolationMiddleware({
+  strictMode: true,
+  allowedPublicPaths: [
+    '/health', '/ready', 
+    '/webhook', '/auth', 
+    '/api/auth', '/api/instagram-auth',
+    '/debug' // للـ debugging في التطوير
+  ],
+  headerName: 'x-merchant-id',
+  queryParam: 'merchant_id'
+}));
 
 // Logging middleware (skip webhooks to avoid body interference)
 app.use('*', async (c, next) => {
@@ -609,22 +626,20 @@ class MockQueueService {
 
 const mockQueue = new MockQueueService();
 
-// Health endpoint
+// Comprehensive Health endpoint for monitoring
 app.get('/health', async (c) => {
-  return c.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    server: 'ai-sales-platform-production',
-    version: '2.0.0',
-    environment: NODE_ENV,
-    features: {
-      instagram_business_login: true,
-      utility_messages: true,
-      enhanced_oauth: true,
-      graph_api_version: 'v23.0',
-      hmac_security: 'sha256_only'
-    }
-  });
+  const svc = getHealthCheckService();
+  const report = await svc.performHealthCheck();
+  c.header('Cache-Control', 'no-store');
+  return c.json(report, report.status === 'healthy' ? 200 : report.status === 'degraded' ? 200 : 503);
+});
+
+// Readiness endpoint for load balancer
+app.get('/ready', async (c) => {
+  const svc = getHealthCheckService();
+  const r = await svc.performReadinessCheck();
+  c.header('Cache-Control', 'no-store');
+  return c.json(r, r.ready ? 200 : 503);
 });
 
 // ===============================================

@@ -9,6 +9,9 @@ import { getInstagramClient } from './instagram-api';
 import { getDatabase } from '../database/connection';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator';
 import type { InstagramContext } from './instagram-ai';
+import { hashMerchantAndBody } from '../middleware/idempotency';
+import { getRedisConnectionManager } from './RedisConnectionManager';
+import { RedisUsageType } from '../config/RedisConfigurationFactory';
 
 export interface StoryInteraction {
   id: string;
@@ -76,6 +79,7 @@ export interface StoryTemplate {
 export class InstagramStoriesManager {
   private db = getDatabase();
   private aiOrchestrator = getConversationAIOrchestrator();
+  private redis = getRedisConnectionManager();
 
   /**
    * Process story interaction (reply, mention, etc.)
@@ -86,6 +90,26 @@ export class InstagramStoriesManager {
   ): Promise<{ success: boolean; responseGenerated: boolean; error?: string }> {
     try {
       console.log(`📱 Processing Instagram story ${interaction.type}: ${interaction.id}`);
+
+      // 🔒 Idempotency check - prevent duplicate story processing
+      const bodyForHash = {
+        merchantId,
+        interactionId: interaction.id,
+        storyId: interaction.storyId,
+        type: interaction.type,
+        userId: interaction.userId,
+        content: interaction.content,
+        date: new Date().toISOString().slice(0, 10)
+      };
+      const idempotencyKey = `ig:story_process:${hashMerchantAndBody(merchantId, bodyForHash)}`;
+      
+      const redis = await this.redis.getConnection(RedisUsageType.IDEMPOTENCY);
+      const existingResult = await redis.get(idempotencyKey);
+      
+      if (existingResult) {
+        console.log(`🔒 Idempotent story processing detected: ${idempotencyKey}`);
+        return JSON.parse(existingResult);
+      }
 
       // Store the interaction
       await this.storeStoryInteraction(interaction, merchantId);
@@ -104,10 +128,16 @@ export class InstagramStoriesManager {
         await this.analyzeSalesOpportunity(interaction, merchantId);
       }
 
-      return {
+      const successResult = {
         success: true,
         responseGenerated
       };
+
+      // 💾 Cache successful result for idempotency (24 hours TTL)
+      await redis.setex(idempotencyKey, 86400, JSON.stringify(successResult));
+      console.log(`💾 Cached story processing result: ${idempotencyKey}`);
+
+      return successResult;
     } catch (error) {
       console.error('❌ Story interaction processing failed:', error);
       return {

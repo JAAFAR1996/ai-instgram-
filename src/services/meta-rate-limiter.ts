@@ -6,6 +6,8 @@
  */
 
 import { RATE_LIMIT_HEADERS, RATE_LIMITS } from '../config/graph-api';
+import { getRedisConnectionManager } from './RedisConnectionManager';
+import { RedisUsageType } from '../config/RedisConfigurationFactory';
 
 export interface RateLimitStatus {
   appUsage: number;
@@ -37,6 +39,8 @@ export class MetaRateLimiter {
     backoffDurationMs: 0,
     reason: ''
   };
+
+  private redis = getRedisConnectionManager();
 
   /**
    * Process rate limit headers from Meta API response
@@ -197,6 +201,42 @@ export class MetaRateLimiter {
     // If we should reduce but not critical, enter shorter backoff
     if (shouldReduce) {
       this.forceBackoff(RATE_LIMITS.BACKOFF_BASE_MS, 'High usage detected');
+    }
+  }
+
+  /**
+   * Redis-based sliding window rate limiter
+   */
+  async checkRedisRateLimit(
+    key: string, 
+    windowMs: number, 
+    maxRequests: number
+  ): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
+    try {
+      const redis = await this.redis.getConnection(RedisUsageType.RATE_LIMITER);
+      const now = Date.now();
+      const windowStart = now - windowMs;
+      const windowKey = `rate_limit:${key}:${Math.floor(now / windowMs)}`;
+      
+      // Remove old entries and add current request
+      const multi = redis.multi();
+      multi.zremrangebyscore(windowKey, 0, windowStart);
+      multi.zadd(windowKey, now, `${now}-${Math.random()}`);
+      multi.zcard(windowKey);
+      multi.expire(windowKey, Math.ceil(windowMs / 1000) + 1);
+      
+      const results = await multi.exec();
+      const currentCount = results?.[2]?.[1] as number || 0;
+      
+      return {
+        allowed: currentCount <= maxRequests,
+        remaining: Math.max(0, maxRequests - currentCount),
+        resetTime: now + windowMs
+      };
+    } catch (error) {
+      console.error('❌ Redis rate limit check failed:', error);
+      // Fail open - allow request on Redis errors
+      return { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
     }
   }
 }
