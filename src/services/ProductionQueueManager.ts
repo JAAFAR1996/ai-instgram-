@@ -153,8 +153,11 @@ export class ProductionQueueManager {
       });
 
       // 4. إعداد معالجات الأحداث والمهام
+      this.logger.info('🔧 بدء إعداد معالجات الأحداث والمهام...');
       this.setupEventHandlers();
+      this.logger.info('📡 تم إعداد معالجات الأحداث');
       this.setupJobProcessors();
+      this.logger.info('⚙️ تم إعداد معالجات المهام');
 
       // 5. تنظيف أولي وبدء المراقبة
       await this.performInitialCleanup();
@@ -270,13 +273,19 @@ export class ProductionQueueManager {
   }
 
   private setupJobProcessors(): void {
-    if (!this.queue) return;
+    this.logger.info('🔍 [DEBUG] setupJobProcessors() - بدء دالة إعداد المعالجات');
+    
+    if (!this.queue) {
+      this.logger.error('💥 [CRITICAL] this.queue is null/undefined في setupJobProcessors!');
+      return;
+    }
 
-    this.logger.info('🚀 بدء معالجات الطوابير الإنتاجية...');
+    this.logger.info('🚀 [SUCCESS] بدء معالجات الطوابير الإنتاجية - Queue متوفر');
+    this.logger.info('🔧 [DEBUG] Queue status:', this.queue.name, 'clients:', this.queue.client ? 'connected' : 'disconnected');
 
     // التحقق من أن Workers تم تشغيلها بنجاح
     const workerInitTimeout = setTimeout(() => {
-      this.logger.warn('⚠️ Workers لم تبدأ في المعالجة خلال 10 ثوانٍ');
+      this.logger.warn('⚠️ [TIMEOUT] Workers لم تبدأ في المعالجة خلال 10 ثوانٍ');
     }, 10000);
 
     // ⚠️ تم إزالة المعالج العام '*' لأنه يسرق jobs من المعالجات المخصصة
@@ -292,7 +301,10 @@ export class ProductionQueueManager {
     }, 100);
 
     // 🎯 معالج مخصص للويب هوك - الأساسي للمعالجة
+    this.logger.info('🔧 [DEBUG] تسجيل معالج process-webhook...');
+    
     this.queue.process('process-webhook', 5, async (job) => { // زيادة concurrency من 3 إلى 5
+      this.logger.info('🎯 [WORKER-START] معالج webhook استقبل job!', { jobId: job.id, jobName: job.name });
       // إلغاء تحذير عدم بدء Workers عند أول معالجة
       clearTimeout(workerInitTimeout);
       
@@ -355,7 +367,10 @@ export class ProductionQueueManager {
     });
 
     // 🤖 معالج مهام الذكاء الاصطناعي 
+    this.logger.info('🔧 [DEBUG] تسجيل معالج ai-response...');
+    
     this.queue.process('ai-response', 3, async (job) => {
+      this.logger.info('🤖 [WORKER-START] معالج AI استقبل job!', { jobId: job.id, jobName: job.name });
       const { conversationId, merchantId, message } = job.data;
       const aiWorkerId = `ai-worker-${Math.random().toString(36).substr(2, 6)}`;
       const startTime = Date.now();
@@ -423,6 +438,13 @@ export class ProductionQueueManager {
         throw error;
       }
     });
+
+    // تأكيد إنجاز تسجيل جميع المعالجات
+    this.logger.info('🎯 [SUCCESS] تم تسجيل جميع معالجات الطوابير بنجاح!', {
+      processors: ['process-webhook', 'ai-response', 'cleanup'],
+      concurrency: { webhook: 5, ai: 3, cleanup: 1 },
+      total: 9
+    });
   }
 
   async addWebhookJob(
@@ -454,12 +476,26 @@ export class ProductionQueueManager {
 
       const priorityValue = this.getPriorityValue(priority);
       
+      this.logger.info('📤 [ADD-JOB] إضافة webhook job إلى الطابور...', {
+        jobName: 'process-webhook',
+        eventId,
+        merchantId,
+        platform,
+        priority
+      });
+
       const job = await this.queue.add('process-webhook', jobData, {
         priority: priorityValue,
-        delay: priority === 'CRITICAL' ? 0 : 100,
+        delay: priority === 'CRITICAL' ? 0 : 100, // ⚠️ هذا قد يكون السبب - jobs تبدأ delayed!
         removeOnComplete: priority === 'CRITICAL' ? 200 : 100,
         removeOnFail: priority === 'CRITICAL' ? 100 : 50,
         attempts: priority === 'CRITICAL' ? 5 : 3
+      });
+
+      this.logger.info('✅ [ADD-JOB] تم إضافة webhook job بنجاح', {
+        jobId: job.id,
+        jobName: job.name,
+        eventId
       });
 
       // الحصول على موقع المهمة في الطابور
@@ -619,16 +655,83 @@ export class ProductionQueueManager {
   }
 
   private async processWebhookJob(jobData: QueueJob): Promise<any> {
-    // تنفيذ معالجة الويب هوك الفعلية
-    // هذا مجرد مثال - يجب استبداله بالمعالجة الحقيقية
-    await new Promise(resolve => setTimeout(resolve, 100)); // محاكاة معالجة
-    return { processed: true, eventId: jobData.eventId };
+    try {
+      this.logger.info('🔄 [WEBHOOK-PROCESS] بدء معالجة webhook job', {
+        eventId: jobData.eventId,
+        merchantId: jobData.merchantId,
+        platform: jobData.platform,
+        hasPayload: !!jobData.payload
+      });
+
+      // TODO: هنا يجب استبدال هذا بالمعالجة الحقيقية للويب هوك
+      // مثلاً: استدعاء Instagram API، معالجة البيانات، إرسال ردود، إلخ
+      
+      // محاكاة معالجة ناجحة حالياً
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const result = { 
+        processed: true, 
+        eventId: jobData.eventId,
+        timestamp: new Date().toISOString(),
+        mockProcessing: true // تحديد أن هذا معالجة وهمية
+      };
+
+      this.logger.info('✅ [WEBHOOK-PROCESS] تمت معالجة webhook بنجاح', {
+        eventId: jobData.eventId,
+        result
+      });
+
+      return result;
+
+    } catch (error) {
+      this.logger.error('💥 [WEBHOOK-ERROR] خطأ في معالجة webhook', {
+        eventId: jobData.eventId,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      
+      // إعادة throw للخطأ ليتم التعامل معه بواسطة Bull
+      throw error;
+    }
   }
 
   private async processAIResponseJob(jobData: any): Promise<any> {
-    // تنفيذ معالجة الذكاء الاصطناعي الفعلية
-    await new Promise(resolve => setTimeout(resolve, 200)); // محاكاة معالجة
-    return { processed: true, conversationId: jobData.conversationId };
+    try {
+      this.logger.info('🤖 [AI-PROCESS] بدء معالجة AI job', {
+        conversationId: jobData.conversationId,
+        merchantId: jobData.merchantId,
+        messageLength: jobData.message?.length || 0
+      });
+
+      // TODO: هنا يجب استبدال هذا بالمعالجة الحقيقية للـ AI
+      // مثلاً: استدعاء OpenAI، Claude، معالجة النص، إلخ
+      
+      // محاكاة معالجة AI
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      const result = { 
+        processed: true, 
+        conversationId: jobData.conversationId,
+        timestamp: new Date().toISOString(),
+        mockProcessing: true // تحديد أن هذا معالجة وهمية
+      };
+
+      this.logger.info('✅ [AI-PROCESS] تمت معالجة AI بنجاح', {
+        conversationId: jobData.conversationId,
+        result
+      });
+
+      return result;
+
+    } catch (error) {
+      this.logger.error('💥 [AI-ERROR] خطأ في معالجة AI', {
+        conversationId: jobData.conversationId,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      
+      throw error;
+    }
   }
 
   private async performInitialCleanup(): Promise<void> {

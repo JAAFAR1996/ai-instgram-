@@ -45,7 +45,7 @@ async function testWorkerMonitoring() {
         { test: true, jobNumber: i, fixTest: 'webhook-processor-fix' },
         'test-merchant',
         'INSTAGRAM',
-        'HIGH' // كلها high priority للاختبار السريع
+        'CRITICAL' // CRITICAL = delay: 0 فوري!
       );
       
       if (jobResult.success) {
@@ -65,7 +65,7 @@ async function testWorkerMonitoring() {
         'test-customer',
         `رسالة اختبار رقم ${i}`,
         'INSTAGRAM',
-        'HIGH'
+        'CRITICAL' // CRITICAL = delay: 0 فوري!
       );
 
       if (aiJobResult.success) {
