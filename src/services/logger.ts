@@ -136,6 +136,11 @@ export class Logger {
       } : {})
     };
 
+    // Remove timestamp from production output since Render adds its own
+    if (process.env.NODE_ENV === 'production') {
+      delete (entry as any).timestamp;
+    }
+
     const out = (level === 'error' || level === 'fatal') ? process.stderr : process.stdout;
     if (process.env.NODE_ENV === 'production') {
       out.write(JSON.stringify(entry) + '\n');

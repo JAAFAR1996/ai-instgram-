@@ -29,7 +29,7 @@ import { runMigrations } from './startup/runMigrations.js';
 import { ensurePageMapping } from './startup/ensurePageMapping.js';
 import { RedisProductionIntegration } from './services/RedisProductionIntegration.js';
 import { createMerchantIsolationMiddleware } from './middleware/rls-merchant-isolation.js';
-import { getHealthCached, getLastSnapshot } from './services/health-check.js';
+import { getHealthCached, getLastSnapshot, startHealthMonitoring } from './services/health-check.js';
 import { verifyHMAC, verifyHMACRaw, readRawBody, type HmacVerifyResult } from './services/encryption.js';
 import { pushDLQ, getDLQStats } from './queue/dead-letter.js';
 import { GRAPH_API_VERSION } from './config/graph-api.js';
@@ -143,6 +143,14 @@ async function initializeRedisIntegration() {
           queueStats: result.diagnostics?.queueStats
         });
         console.log('🔍 [DEBUG] queueManager موجود؟', !!result.queueManager);
+        
+        // Start health monitoring after Redis and queue are ready
+        console.log('🏥 بدء نظام مراقبة الصحة...');
+        startHealthMonitoring({
+          redisReady: () => result.diagnostics?.redisHealth?.connected || false,
+          queueReady: () => !!result.queueManager
+        });
+        console.log('✅ نظام مراقبة الصحة نشط');
       } else {
         console.error('❌ فشل تهيئة نظام ريديس:', result.error);
         console.warn('⚠️ سيتم استخدام المعالجة البديلة');

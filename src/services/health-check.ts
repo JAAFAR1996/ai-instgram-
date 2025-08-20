@@ -1,20 +1,76 @@
 // src/services/health-check.ts
 
 export type HealthSnapshot = {
+  ready: boolean;
+  status: 'ok' | 'degraded';
+  lastUpdated: number;
+  details: Record<string, unknown>;
+};
+
+let SNAPSHOT: HealthSnapshot = {
+  ready: false,
+  status: 'degraded',
+  lastUpdated: Date.now(),
+  details: { reason: 'cold start' },
+};
+
+export function getHealthSnapshot(): HealthSnapshot {
+  return SNAPSHOT;
+}
+
+export function setHealthSnapshot(partial: Partial<HealthSnapshot>) {
+  SNAPSHOT = { ...SNAPSHOT, ...partial, lastUpdated: Date.now() };
+}
+
+export async function startHealthMonitoring(deps: {
+  redisReady: () => Promise<boolean> | boolean;
+  queueReady: () => Promise<boolean> | boolean;
+}) {
+  const [r, q] = await Promise.all([deps.redisReady(), deps.queueReady()]);
+  setHealthSnapshot({
+    ready: r && q,
+    status: r && q ? 'ok' : 'degraded',
+    details: { redis: r, queue: q },
+  });
+  setInterval(async () => {
+    const [r2, q2] = await Promise.all([deps.redisReady(), deps.queueReady()]);
+    setHealthSnapshot({
+      ready: r2 && q2,
+      status: r2 && q2 ? 'ok' : 'degraded',
+      details: { redis: r2, queue: q2 },
+    });
+  }, 5000);
+}
+
+export function registerHealthRoute(app: any) {
+  app.get('/health', (c: any) => {
+    if (process.env.HEALTH_FORCE_OK === '1') {
+      return c.json(
+        { ...getHealthSnapshot(), ready: true, status: 'ok', details: { forced: true } },
+        200
+      );
+    }
+    const snap = getHealthSnapshot();
+    return c.json(snap, snap.ready ? 200 : 503);
+  });
+}
+
+// Legacy compatibility
+export type HealthSnapshotLegacy = {
   ok: boolean;
   redisResponseTime: number | null;
   queueStats: { waiting: number; active: number; errorRate: number };
   circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
   totalConnections: number;
-  ts: number; // epoch ms
+  ts: number;
   reason?: string;
 };
 
-const TTL_MS = 10_000;           // صلاحية الكاش
-const CHECK_TIMEOUT_MS = 8_000;  // مهلة الفحص
+const TTL_MS = 10_000;
+const CHECK_TIMEOUT_MS = 8_000;
 
-let cache: HealthSnapshot | null = null;
-let inflight: Promise<HealthSnapshot> | null = null;
+let cache: HealthSnapshotLegacy | null = null;
+let inflight: Promise<HealthSnapshotLegacy> | null = null;
 
 function settleOnce<T>() {
   let settled = false;
@@ -38,7 +94,7 @@ function settleOnce<T>() {
   };
 }
 
-async function performChecks(): Promise<HealthSnapshot> {
+async function performChecks(): Promise<HealthSnapshotLegacy> {
   const t0 = Date.now();
   
   try {
@@ -97,7 +153,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number, reason: string): Promis
   });
 }
 
-export async function getHealthCached(): Promise<HealthSnapshot> {
+export async function getHealthCached(): Promise<HealthSnapshotLegacy> {
   const now = Date.now();
   if (cache && now - cache.ts <= TTL_MS) return cache;
 
@@ -109,7 +165,7 @@ export async function getHealthCached(): Promise<HealthSnapshot> {
       })
       .catch(err => {
         // لا نعيد رمي الخطأ مباشرة. نحافظ على لقطة فاشلة مفيدة
-        const failed: HealthSnapshot = {
+        const failed: HealthSnapshotLegacy = {
           ok: false,
           redisResponseTime: null,
           queueStats: { waiting: 0, active: 0, errorRate: 0 },
@@ -129,6 +185,6 @@ export async function getHealthCached(): Promise<HealthSnapshot> {
 }
 
 // لقطة جاهزة سريعاً لواجهة /health
-export function getLastSnapshot(): HealthSnapshot | null {
+export function getLastSnapshot(): HealthSnapshotLegacy | null {
   return cache;
 }
