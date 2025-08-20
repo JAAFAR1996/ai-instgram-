@@ -173,9 +173,14 @@ export function webhookSignatureMiddleware(platform: 'instagram' | 'whatsapp') {
       }, 400);
     }
 
-    // Get raw body for signature verification
-    const rawBody = await c.req.text();
-    const secret = platform === 'instagram' 
+    // Get raw body for signature verification without consuming original
+    const clonedRequest = c.req.raw.clone();
+    const rawBody = await clonedRequest.text();
+
+    // Reattach body so downstream handlers can access it
+    c.req.raw = new Request(c.req.raw, { body: rawBody });
+
+    const secret = platform === 'instagram'
       ? config.instagram.metaAppSecret
       : config.instagram.metaAppSecret; // Same secret for both
 
@@ -188,15 +193,23 @@ export function webhookSignatureMiddleware(platform: 'instagram' | 'whatsapp') {
 
     const providedSignature = signature.replace('sha256=', '');
 
-    if (!crypto.timingSafeEqual(
-      Buffer.from(expectedSignature, 'hex'),
-      Buffer.from(providedSignature, 'hex')
-    )) {
+    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+    const providedBuffer = Buffer.from(providedSignature, 'hex');
+
+    // Compare lengths before timingSafeEqual
+    if (expectedBuffer.length !== providedBuffer.length) {
+      return c.json({
+        error: 'Invalid signature',
+        code: 'WEBHOOK_SIGNATURE_INVALID'
+      }, 401);
+    }
+
+    if (!crypto.timingSafeEqual(expectedBuffer, providedBuffer)) {
       console.error('❌ Webhook signature verification failed', {
         provided: providedSignature.substring(0, 8) + '...',
         expected: expectedSignature.substring(0, 8) + '...'
       });
-      
+
       return c.json({
         error: 'Invalid signature',
         code: 'WEBHOOK_SIGNATURE_INVALID'
