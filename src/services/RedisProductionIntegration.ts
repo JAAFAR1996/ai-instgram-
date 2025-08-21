@@ -4,6 +4,7 @@ import RedisConnectionManager from './RedisConnectionManager.js';
 import RedisHealthMonitor from './RedisHealthMonitor.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
 import { UpstashQuotaMonitor } from './UpstashQuotaMonitor.js';
+import { Pool } from 'pg';
 import {
   RedisConnectionError,
   RedisErrorHandler,
@@ -45,7 +46,8 @@ export class RedisProductionIntegration {
   constructor(
     private redisUrl: string, 
     private logger: any, 
-    private environment: Environment
+    private environment: Environment,
+    private dbPool: Pool
   ) {
     this.connectionManager = new RedisConnectionManager(redisUrl, environment, logger);
     this.healthMonitor = new RedisHealthMonitor(logger);
@@ -180,6 +182,7 @@ export class RedisProductionIntegration {
         this.redisUrl,
         this.logger,
         this.environment,
+        this.dbPool,
         'ai-sales-production-v2'
       );
 

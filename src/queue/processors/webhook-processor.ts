@@ -9,6 +9,7 @@ import type { QueueJob, JobProcessor } from '../message-queue.js';
 import { getInstagramWebhookHandler } from '../../services/instagram-webhook.js';
 import { getRepositories } from '../../repositories/index.js';
 import { getLogger } from '../../services/logger.js';
+import { withTenantJob } from '../withTenantJob.js';
 
 export interface WebhookJobPayload {
   platform: 'instagram';
@@ -22,9 +23,9 @@ export class WebhookProcessor implements JobProcessor {
   private repositories = getRepositories();
   private logger = getLogger({ component: 'WebhookProcessor' });
 
-  async process(job: QueueJob): Promise<{ success: boolean; result?: any; error?: string }> {
-    const payload = job.payload as WebhookJobPayload;
-    
+  process = withTenantJob(async (job: QueueJob): Promise<{ success: boolean; result?: any; error?: string }> => {
+    const payload = ((job as any).data ?? (job as any).payload) as WebhookJobPayload;
+
     try {
       this.logger.info('Processing webhook job', { platform: payload.platform, merchantId: payload.merchantId });
       
@@ -65,47 +66,46 @@ export class WebhookProcessor implements JobProcessor {
       return { success: true, result };
       
     } catch (error) {
-      this.logger.error('Webhook processing error', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown webhook processing error' 
+        this.logger.error('Webhook processing error', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown webhook processing error'
+        };
+      }
+    });
+
+    /**
+     * Process Instagram webhook
+     */
+    private async processInstagramWebhook(payload: WebhookJobPayload): Promise<any> {
+      const webhookHandler = getInstagramWebhookHandler();
+      
+      const result = await webhookHandler.processWebhook(
+        payload.webhookData,
+        payload.merchantId
+      );
+
+      if (!result.success) {
+        throw new Error(`Instagram webhook processing failed: ${result.errors.join(', ')}`);
+      }
+
+      // Increment message usage for processed messages
+      if (result.messagesProcessed > 0) {
+        await this.repositories.merchant.incrementMessageUsage(
+          payload.merchantId, 
+          result.messagesProcessed
+        );
+      }
+
+      return {
+        platform: 'instagram',
+        eventsProcessed: result.eventsProcessed,
+        messagesProcessed: result.messagesProcessed,
+        conversationsCreated: result.conversationsCreated,
+        processingTime: Date.now()
       };
     }
   }
-
-  /**
-   * Process Instagram webhook
-   */
-  private async processInstagramWebhook(payload: WebhookJobPayload): Promise<any> {
-    const webhookHandler = getInstagramWebhookHandler();
-    
-    const result = await webhookHandler.processWebhook(
-      payload.webhookData,
-      payload.merchantId
-    );
-
-    if (!result.success) {
-      throw new Error(`Instagram webhook processing failed: ${result.errors.join(', ')}`);
-    }
-
-    // Increment message usage for processed messages
-    if (result.messagesProcessed > 0) {
-      await this.repositories.merchant.incrementMessageUsage(
-        payload.merchantId, 
-        result.messagesProcessed
-      );
-    }
-
-    return {
-      platform: 'instagram',
-      eventsProcessed: result.eventsProcessed,
-      messagesProcessed: result.messagesProcessed,
-      conversationsCreated: result.conversationsCreated,
-      processingTime: Date.now()
-    };
-  }
-
-}
 
 // Export processor instance
 export const webhookProcessor = new WebhookProcessor();

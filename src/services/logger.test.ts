@@ -622,6 +622,14 @@ describe('📝 Logger Service Tests', () => {
     });
   });
 
+  describe('Rate Limiting', () => {
+    test('✅ should suppress repeated error messages within window', () => {
+      logger.error('rate limit message');
+      logger.error('rate limit message');
+      expect(capturedErrors.length).toBe(1);
+    });
+  });
+
   describe('Security', () => {
     test('✅ should redact webhook signatures', () => {
       logger.info('Webhook received', {

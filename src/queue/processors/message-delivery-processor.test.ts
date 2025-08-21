@@ -33,15 +33,15 @@ describe('MessageDeliveryProcessor', () => {
     const result = await processor.process({
       id: 'job1',
       type: 'MESSAGE_DELIVERY',
-      payload: {
-        messageId: 'msg1',
-        conversationId: 'conv1',
-        merchantId: 'm1',
-        customerId: 'c1',
-        content: 'hello',
-        platform: 'instagram'
-      }
-    } as any);
+        payload: {
+          messageId: 'msg1',
+          conversationId: 'conv1',
+          merchantId: '123e4567-e89b-12d3-a456-426614174000',
+          customerId: 'c1',
+          content: 'hello',
+          platform: 'instagram'
+        }
+      } as any);
 
     expect(result.success).toBe(false);
     expect(repo.failed).toBe(true);

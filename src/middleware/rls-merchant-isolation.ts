@@ -7,6 +7,8 @@
 
 import { Context, Next } from 'hono';
 import { getDatabase } from '../database/connection.js';
+import { getLogger } from '../services/logger.js';
+import { serr } from '../isolation/context.js';
 
 export interface MerchantIsolationConfig {
   strictMode: boolean; // Fail if no merchant ID found
@@ -21,6 +23,8 @@ const DEFAULT_CONFIG: MerchantIsolationConfig = {
   headerName: 'x-merchant-id',
   queryParam: 'merchant_id'
 };
+
+const logger = getLogger({ component: 'MerchantIsolationMiddleware' });
 
 /**
  * PostgreSQL GUC (Grand Unified Configuration) for merchant isolation
@@ -91,8 +95,8 @@ export function createMerchantIsolationMiddleware(
         await next();
         
       } catch (dbError) {
-        console.error('❌ Failed to set merchant isolation in database:', dbError);
-        
+        logger.error({ err: serr(dbError), route: c.req.path, merchantId }, 'Merchant isolation failed');
+
         if (finalConfig.strictMode) {
           return c.json({
             error: 'Database isolation setup failed',
@@ -105,7 +109,7 @@ export function createMerchantIsolationMiddleware(
       }
       
     } catch (error) {
-      console.error('❌ Merchant isolation middleware error:', error);
+      logger.error({ err: serr(error), route: c.req.path, merchantId: c.get('merchantId') }, 'Merchant isolation failed');
       return c.json({
         error: 'Internal server error',
         code: 'MIDDLEWARE_ERROR'

@@ -15,11 +15,6 @@ initLogging();
 import './boot/error-handlers.js';
 import { fireAndForget } from './boot/error-handlers.js';
 
-// تسجيل تحذير multipleResolves مرة واحدة (للتشخيص)
-process.prependListener('multipleResolves', (type, _promise, reason) => {
-  console.warn('[MULTIPLE_RESOLVES_DETECTED]', { type, reason: String(reason) });
-});
-
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
 import { serve } from '@hono/node-server';
@@ -40,7 +35,7 @@ import { GRAPH_API_VERSION } from './config/graph-api.js';
 import type { IGWebhookPayload } from './types/instagram.js';
 import { getLogger, bindRequestLogger } from './services/logger.js';
 import { telemetry, telemetryMiddleware } from './services/telemetry.js';
-import autoTenantContext, { requireAdminContext } from './middleware/auto-tenant-context.js';
+import { requireAdminContext } from './middleware/auto-tenant-context.js';
 import instagramAuth from './api/instagram-auth.js';
 
 // Define App Environment for TypeScript
@@ -142,7 +137,7 @@ async function initializeRedisIntegration() {
     if (debugDump) {
       log.debug('إنشاء RedisProductionIntegration...');
     }
-    redisIntegration = new RedisProductionIntegration(REDIS_URL, console, environment);
+    redisIntegration = new RedisProductionIntegration(REDIS_URL, console, environment, pool!);
 
     if (debugDump) {
       log.debug('استدعاء redisIntegration.initialize()...');
@@ -264,8 +259,12 @@ console.log('🔧 Environment:', { NODE_ENV, PORT });
 // Initialize Hono app with typed environment
 const app = new Hono<AppEnv>();
 
-// Auto-tenant context middleware (applies to all routes)
-app.use('*', autoTenantContext());
+// Simplified tenant context (HTTP only)
+app.use('*', async (c, next) => {
+  const merchantId = c.req.header('x-merchant-id') || null;
+  c.set('merchantId', merchantId);
+  await next();
+});
 
 // Telemetry metrics middleware
 app.use('*', telemetryMiddleware());

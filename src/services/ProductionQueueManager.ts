@@ -1,6 +1,8 @@
 import Bull from 'bull';
 import { Redis, ReplyError } from 'ioredis';
 import type { Redis as RedisType } from 'ioredis';
+import { Pool } from 'pg';
+import { withWebhookTenantJob, withAITenantJob } from '../isolation/context.js';
 
 function settleOnce<T>() {
   let settled = false;
@@ -39,6 +41,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 import { RedisUsageType, Environment } from '../config/RedisConfigurationFactory.js';
 import RedisConnectionManager from './RedisConnectionManager.js';
 import crypto from 'node:crypto';
+import { withTenantJob, serr, JobSchema } from '../isolation/context.js';
 import RedisHealthMonitor from './RedisHealthMonitor.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
 import {
@@ -122,6 +125,7 @@ export class ProductionQueueManager {
     private redisUrl: string,
     private logger: any,
     private environment: Environment,
+    private dbPool: Pool,
     private queueName: string = 'ai-sales-production'
   ) {
     this.connectionManager = new RedisConnectionManager(
@@ -246,8 +250,7 @@ export class ProductionQueueManager {
       });
 
       this.logger.error('💥 فشل في تهيئة مدير الطوابير', {
-        error: redisError.message,
-        code: redisError.code,
+        err: serr(redisError),
         context: redisError.context
       });
 
@@ -270,7 +273,7 @@ export class ProductionQueueManager {
     // معالجة أخطاء الطابور
     this.queue.on('error', (error) => {
       this.logger.error('خطأ في الطابور', { 
-        error: error.message,
+        err: serr(error),
         queueName: this.queueName 
       });
     });
@@ -365,14 +368,23 @@ export class ProductionQueueManager {
       this.logger.warn('⏸️ [JOB-STALLED] Job متوقف!', { jobId: job.id, jobName: job.name });
     });
     
-    this.queue.process('process-webhook', 5, async (job) => { // زيادة concurrency من 3 إلى 5
-      this.logger.info('🎯 [WORKER-START] معالج webhook استقبل job!', { jobId: job.id, jobName: job.name });
-      // إلغاء تحذير عدم بدء Workers عند أول معالجة
-      clearTimeout(workerInitTimeout);
-      
-      const { eventId, payload, merchantId, platform } = job.data;
-      const webhookWorkerId = `webhook-worker-${crypto.randomUUID()}`;
-      const startTime = Date.now();
+    // معالج webhook محسن مع tenant isolation - wrapped with withWebhookTenantJob
+    this.queue.process('process-webhook', 5, withWebhookTenantJob(
+      this.dbPool,
+      this.logger,
+      async (job, data) => {
+        this.logger.info('🎯 [WORKER-START] معالج webhook استقبل job!', { 
+          jobId: job.id, 
+          jobName: job.name,
+          merchantId: data.merchantId 
+        });
+        
+        // إلغاء تحذير عدم بدء Workers عند أول معالجة
+        clearTimeout(workerInitTimeout);
+        
+        const webhookWorkerId = `webhook-worker-${crypto.randomUUID()}`;
+        const startTime = Date.now();
+        const { eventId, merchantId, platform } = data;
       
       return await this.circuitBreaker.execute(async () => {
         try {
@@ -417,23 +429,26 @@ export class ProductionQueueManager {
             platform,
             jobId: job.id,
             duration: `${duration}ms`,
-            error: error instanceof Error ? error.message : String(error),
+            err: serr(error),
             attempt: job.attemptsMade + 1,
-            maxAttempts: job.opts.attempts,
-            errorType: error instanceof Error ? error.constructor.name : 'Unknown'
+            maxAttempts: job.opts.attempts
           });
           
           throw error;
         }
       });
-    });
+    }
+  ));
 
-    // 🤖 معالج مهام الذكاء الاصطناعي 
+    // 🤖 معالج مهام الذكاء الاصطناعي - wrapped with withAITenantJob
     this.logger.info('🔧 [DEBUG] تسجيل معالج ai-response...');
     
-    this.queue.process('ai-response', 3, async (job) => {
-      this.logger.info('🤖 [WORKER-START] معالج AI استقبل job!', { jobId: job.id, jobName: job.name });
-      const { conversationId, merchantId, message } = job.data;
+    this.queue.process('ai-response', 3, withAITenantJob(
+      this.dbPool,
+      this.logger,
+      async (job, data) => {
+        this.logger.info('🤖 [WORKER-START] معالج AI استقبل job!', { jobId: job.id, jobName: job.name });
+        const { conversationId, merchantId, message } = data;
       const aiWorkerId = `ai-worker-${crypto.randomUUID().replace(/-/g, '').slice(0, 6)}`;
       const startTime = Date.now();
       
@@ -482,7 +497,8 @@ export class ProductionQueueManager {
           throw error;
         }
       });
-    });
+    }
+  ));
 
     // معالج مهام التنظيف
     this.queue.process('cleanup', 1, async (job) => {
@@ -1057,8 +1073,7 @@ export class ProductionQueueManager {
         merchantId: jobData.merchantId,
         platform: jobData.platform,
         duration: `${duration}ms`,
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack?.substring(0, 500) : undefined
+        err: serr(error)
       });
       
       // إعادة throw للخطأ ليتم التعامل معه بواسطة Bull

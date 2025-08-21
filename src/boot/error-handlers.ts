@@ -85,14 +85,9 @@ process.on('warning', (warning) => {
 
 /**
  * Handle multiple resolve/reject (debugging)
+ * REMOVED: multipleResolves event is deprecated in Node 18+ and unreliable
+ * Use single promise guards or AbortController patterns instead
  */
-process.on('multipleResolves', (type, promise, reason) => {
-  console.error('[MULTIPLE_RESOLVES]', {
-    type,
-    reason: reason instanceof Error ? reason.message : String(reason),
-    timestamp: new Date().toISOString()
-  });
-});
 
 /**
  * Graceful shutdown handler

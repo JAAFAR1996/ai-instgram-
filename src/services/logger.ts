@@ -7,6 +7,8 @@
 
 import crypto from 'crypto';
 
+// serr function moved to isolation/context.ts to avoid duplicates
+
 export interface LogContext {
   traceId?: string;
   correlationId?: string;
@@ -106,35 +108,58 @@ export class Logger {
   /**
    * Log at error level
    */
-  error(message: string, error?: Error | any, context?: LogContext): void {
-    this.log('error', message, { ...context, error });
+  error(message: string, err?: Error | any, context?: LogContext): void;
+  error(context: LogContext, message: string): void;
+  error(arg1: string | LogContext, arg2?: any, arg3?: LogContext): void {
+    if (typeof arg1 === 'string') {
+      const message = arg1;
+      const err = arg2;
+      const context = arg3;
+      this.log('error', message, { ...context, err });
+    } else {
+      const context = arg1;
+      const message = typeof arg2 === 'string' ? arg2 : '';
+      this.log('error', message, context);
+    }
   }
 
   /**
    * Log at fatal level
    */
-  fatal(message: string, error?: Error | any, context?: LogContext): void {
-    this.log('fatal', message, { ...context, error });
+  fatal(message: string, err?: Error | any, context?: LogContext): void;
+  fatal(context: LogContext, message: string): void;
+  fatal(arg1: string | LogContext, arg2?: any, arg3?: LogContext): void {
+    if (typeof arg1 === 'string') {
+      const message = arg1;
+      const err = arg2;
+      const context = arg3;
+      this.log('fatal', message, { ...context, err });
+    } else {
+      const context = arg1;
+      const message = typeof arg2 === 'string' ? arg2 : '';
+      this.log('fatal', message, context);
+    }
   }
 
   /**
    * Core logging method with top-level context and error
    */
-  private log(level: LogLevel, message: string, context?: LogContext & { error?: any }): void {
+  private log(level: LogLevel, message: string, context?: LogContext & { err?: any; error?: any }): void {
     if (!this.shouldLog(level)) return;
 
-    const ctx = this.redactSensitiveData({ ...this.context, ...(context || {}) }) as LogContext;
-    const { error, ...safeCtx } = ctx;
+    const ctx = this.redactSensitiveData({ ...this.context, ...(context || {}) }) as LogContext & { err?: any; error?: any };
+    const { err, error, ...safeCtx } = ctx as any;
+    const finalError = err ?? error;
 
     const entry: LogEntry = {
       level,
       timestamp: new Date().toISOString(),
       message,
       context: safeCtx,
-      ...(error ? {
-        error: (error instanceof Error)
-          ? { name: error.name, message: error.message, stack: error.stack }
-          : (typeof error === 'object' ? error : { message: String(error) })
+      ...(finalError ? {
+        error: (finalError instanceof Error)
+          ? { name: finalError.name, message: finalError.message, stack: finalError.stack }
+          : (typeof finalError === 'object' ? finalError : { message: String(finalError) })
       } : {})
     };
 

@@ -16,11 +16,16 @@ describe('NotificationProcessor', () => {
     const service = new FakeNotificationService(true);
     const processor = new NotificationProcessor(service as any);
 
-    const result = await processor.process({
-      id: 'job1',
-      type: 'NOTIFICATION_SEND',
-      payload: { type: 'email', recipient: 'user@test.com', content: {} }
-    } as any);
+      const result = await processor.process({
+        id: 'job1',
+        type: 'NOTIFICATION_SEND',
+        payload: {
+          type: 'email',
+          recipient: 'user@test.com',
+          content: {},
+          merchantId: '123e4567-e89b-12d3-a456-426614174000'
+        }
+      } as any);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('notify failed');

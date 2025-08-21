@@ -49,6 +49,9 @@ export function patchConsole(): void {
  * Initialize logging system with dev-only opt-in
  */
 export function initLogging(): void {
+  if (process.env.NODE_ENV === 'production' && !process.env.LOG_LEVEL) {
+    process.env.LOG_LEVEL = 'info';
+  }
   const enable = process.env.ENABLE_CONSOLE_PATCH === '1' ||
                  process.env.NODE_ENV === 'production';
   if (enable) patchConsole();

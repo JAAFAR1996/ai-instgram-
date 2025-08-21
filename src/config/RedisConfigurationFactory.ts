@@ -150,6 +150,10 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
   }
 
   private createQueueConfiguration(baseConfig: BaseRedisConfig): QueueRedisConfig {
+    // Upstash-specific configuration for rate limiting
+    const isUpstash = baseConfig.host?.includes('upstash.io') || 
+                     baseConfig.host?.includes('redis.upstash.com');
+    
     return {
       host: baseConfig.host,
       port: baseConfig.port,
@@ -159,22 +163,37 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}queue:`,
       commandTimeout: 8000,
-      enableOfflineQueue: true, // ✅ تغيير من false إلى true لحل مشكلة Stream isn't writeable
+      enableOfflineQueue: true,
+      // Upstash rate limit configuration
+      maxRetriesPerRequest: isUpstash ? 1 : 3,
+      autoResendUnfulfilledCommands: isUpstash ? false : true,
+      reconnectOnError: isUpstash ? (err: Error) => {
+        // Return false for rate limit errors to prevent reconnection spinning
+        return err.message.includes('max requests limit exceeded') ? false : 1;
+      } : undefined,
       ...(baseConfig.tls && { tls: baseConfig.tls })
     };
   }
 
   private createHealthCheckConfiguration(baseConfig: BaseRedisConfig): HealthCheckRedisConfig {
+    const isUpstash = baseConfig.host?.includes('upstash.io') || 
+                     baseConfig.host?.includes('redis.upstash.com');
+    
     return {
       host: baseConfig.host,
       port: baseConfig.port,
       password: baseConfig.password,
-      connectTimeout: 5000, // وقت أطول للاستقرار
+      connectTimeout: 5000,
       lazyConnect: true,
-      maxRetriesPerRequest: 3, // محاولات أكثر للاستقرار
-      enableOfflineQueue: true, // السماح بالطابور للاستقرار
+      maxRetriesPerRequest: isUpstash ? 1 : 3,
+      enableOfflineQueue: true,
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}health:`,
+      // Upstash rate limit handling
+      autoResendUnfulfilledCommands: isUpstash ? false : true,
+      reconnectOnError: isUpstash ? (err: Error) => {
+        return err.message.includes('max requests limit exceeded') ? false : 1;
+      } : undefined,
       ...(baseConfig.tls && { tls: baseConfig.tls })
     };
   }

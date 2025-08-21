@@ -300,6 +300,28 @@ npm run db:test
 npm run api:validate
 ```
 
+## 🛡️ Merchant Isolation Monitoring
+
+### HTTP Scenario
+1. شغّل الخادم ثم أرسل طلبًا بدون ترويسة `x-merchant-id`:
+   ```bash
+   curl -i http://localhost:3000/protected-endpoint
+   ```
+2. تحقّق من العداد عبر واجهة المقاييس:
+   ```bash
+   curl -s http://localhost:3000/metrics | grep merchant_isolation_errors_total
+   ```
+   يجب أن يظهر التسمية `source="http"` مع قيمة > 0.
+
+### Worker Scenario
+1. أضف وظيفة إلى الطابور بدون `merchantId` (مثلاً باستخدام سكربت أو بإدخال مباشر في قاعدة البيانات).
+2. انتظر معالجة الـ worker للوظيفة.
+3. افحص واجهة المقاييس للتأكّد من زيادة العداد:
+   ```bash
+   curl -s http://localhost:3000/metrics | grep merchant_isolation_errors_total
+   ```
+   ستظهر التسمية `source="worker"` مع القيمة المحدثة.
+
 ## 📞 Support
 
 For testing issues or questions:
