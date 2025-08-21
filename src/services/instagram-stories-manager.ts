@@ -168,7 +168,10 @@ export class InstagramStoriesManager {
         try {
           return JSON.parse(existingResult);
         } catch (error) {
-          this.logger.warn({ err: error, idempotencyKey }, 'Failed to parse cached story result, continuing processing');
+          this.logger.warn(
+            'Failed to parse cached story result, continuing processing',
+            { err: error, idempotencyKey }
+          );
         }
       }
 
@@ -832,10 +835,12 @@ export class InstagramStoriesManager {
         WHERE id = ${conversationId}::uuid
       `;
     } catch (error) {
-      this.logger.error(
-        { err: error, merchantId, conversationId, interactionType },
-        'Store story response failed'
-      );
+      this.logger.error('Store story response failed', {
+        err: error,
+        merchantId,
+        conversationId,
+        interactionType
+      });
       throw error;
     }
   }

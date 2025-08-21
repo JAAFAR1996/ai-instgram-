@@ -8,6 +8,7 @@
 import { getDatabase } from '../database/connection.js';
 // @ts-ignore - sql helper types not exported
 import { sql as sqlIdentifier } from 'postgres';
+import type { Sql } from 'postgres';
 
 interface ConversationRow {
   id: string;
@@ -101,9 +102,9 @@ export class ConversationRepository {
   async create(
     data: CreateConversationRequest
   ): Promise<{ conversation: Conversation; isNew: boolean }> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
 
-    const inserted = await sql<ConversationRow>`
+    const inserted = await sql<ConversationRow[]>`
       INSERT INTO conversations (
         merchant_id,
         customer_whatsapp,
@@ -132,7 +133,7 @@ export class ConversationRepository {
       return { conversation: this.mapToConversation(inserted[0]), isNew: true };
     }
 
-    const [existing] = await sql<ConversationRow>`
+    const [existing] = await sql<ConversationRow[]>`
       SELECT * FROM conversations
       WHERE merchant_id = ${data.merchantId}::uuid
         AND customer_instagram = ${data.customerInstagram || null}
@@ -147,9 +148,9 @@ export class ConversationRepository {
    * Find conversation by ID
    */
   async findById(id: string): Promise<Conversation | null> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
-    const [conversation] = await sql<ConversationRow>`
+    const [conversation] = await sql<ConversationRow[]>`
       SELECT * FROM conversations
       WHERE id = ${id}::uuid
     `;
@@ -165,11 +166,11 @@ export class ConversationRepository {
     customerIdentifier: string,
     platform: 'whatsapp' | 'instagram'
   ): Promise<Conversation | null> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
     const whereField = platform === 'whatsapp' ? 'customer_whatsapp' : 'customer_instagram';
     
-    const [conversation] = await sql<ConversationRow>`
+    const [conversation] = await sql<ConversationRow[]>`
       SELECT * FROM conversations
       WHERE merchant_id = ${merchantId}::uuid
       AND ${sqlIdentifier.identifier([whereField])} = ${customerIdentifier}
@@ -235,7 +236,7 @@ export class ConversationRepository {
    * Update last message time and increment message count
    */
   async updateLastMessage(id: string, timestamp?: Date): Promise<void> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
     await sql`
       UPDATE conversations

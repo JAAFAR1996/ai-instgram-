@@ -86,7 +86,10 @@ export class InstagramOAuthService {
       check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
     } catch (error) {
       rateLimitCheckSkipped = true;
-      this.logger.warn({ err: error }, `⚠️ Redis rate limit check failed for ${rateKey}:`);
+      this.logger.warn(
+        `⚠️ Redis rate limit check failed for ${rateKey}:`,
+        { err: error }
+      );
       telemetry.recordRateLimitStoreFailure('instagram', path);
       check = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
     }

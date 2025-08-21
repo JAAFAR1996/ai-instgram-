@@ -158,7 +158,10 @@ export class InstagramCommentsManager {
         try {
           return JSON.parse(existingResult);
         } catch (error) {
-                    this.logger.warn({ err: error, idempotencyKey }, 'Failed to parse cached comment processing result');
+          this.logger.warn(
+            'Failed to parse cached comment processing result',
+            { err: error, idempotencyKey }
+          );
         }
       }
 

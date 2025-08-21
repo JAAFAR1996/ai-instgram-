@@ -353,7 +353,7 @@ export class InstagramMessageSender {
       const instagramTemplate = this.convertToInstagramTemplate(template);
 
       // Send template message
-      const tplReq = {
+      const tplReq: SendMessageRequest = {
         recipientId,
         messageType: 'template',
         content: JSON.stringify(instagramTemplate)

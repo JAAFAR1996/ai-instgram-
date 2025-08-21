@@ -8,6 +8,7 @@
 import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
 import { validator } from 'hono/validator';
+import type { BlankEnv } from 'hono/types';
 import { getServiceController } from '../services/service-controller.js';
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
 import { z } from 'zod';
@@ -21,6 +22,8 @@ const ToggleServiceSchema = z.object({
   reason: z.string().optional(),
   toggledBy: z.string().optional()
 });
+
+type ToggleService = z.infer<typeof ToggleServiceSchema>;
 
 const MerchantIdSchema = z.object({
   merchantId: z.string().uuid('معرف التاجر يجب أن يكون UUID صالح')
@@ -59,19 +62,7 @@ export class ServiceControlAPI {
    */
   private setupRoutes(): void {
     // Toggle specific service
-    this.app.post('/api/services/toggle', 
-      validator('json', (value, c) => {
-        const parsed = ToggleServiceSchema.safeParse(value);
-        if (!parsed.success) {
-          return c.json({ 
-            error: 'بيانات غير صحيحة', 
-            details: parsed.error.errors 
-          }, 400);
-        }
-        return parsed.data;
-      }),
-      this.toggleService.bind(this)
-    );
+    this.app.post('/api/services/toggle', validator('json', ToggleServiceSchema), this.toggleService.bind(this));
 
     // Get merchant services status
     this.app.get('/api/services/:merchantId/status', this.getServicesStatus.bind(this));
@@ -96,7 +87,7 @@ export class ServiceControlAPI {
    * Toggle service on/off
    */
   private async toggleService(
-    c: Context<{}, {}, { json: z.infer<typeof ToggleServiceSchema> }>
+    c: Context<{ Bindings: BlankEnv }, { json: ToggleService }>
   ) {
     try {
       const data = c.req.valid('json');

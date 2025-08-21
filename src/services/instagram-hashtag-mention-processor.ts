@@ -7,6 +7,7 @@
 
 import { getDatabase } from '../database/connection.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
+import type { Sql } from 'postgres';
 
 const TIMEFRAME_INTERVALS: Record<'day' | 'week' | 'month', string> = {
   day: '1 day',
@@ -173,7 +174,7 @@ export class InstagramHashtagMentionProcessor {
     timeframe: 'day' | 'week' | 'month' = 'week'
   ): Promise<HashtagTrendAnalysis[]> {
     try {
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
 
       const intervalValue = TIMEFRAME_INTERVALS[timeframe] || TIMEFRAME_INTERVALS.week;
 
@@ -240,7 +241,7 @@ export class InstagramHashtagMentionProcessor {
     strategy: Omit<HashtagStrategy, 'id'>
   ): Promise<string> {
     try {
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
 
       const result = await sql`
         INSERT INTO hashtag_strategies (
@@ -298,7 +299,7 @@ export class InstagramHashtagMentionProcessor {
     recommendedHashtags: string[];
   }> {
     try {
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
 
       const dateFilter = dateRange 
         ? sql`AND created_at BETWEEN ${dateRange.from} AND ${dateRange.to}`
@@ -585,7 +586,7 @@ export class InstagramHashtagMentionProcessor {
     mentionAnalyses: MentionAnalysis[]
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
 
       // Store hashtag data concurrently
       const hashtagInsertPromises = hashtagAnalyses.map(analysis => sql`
@@ -710,7 +711,7 @@ export class InstagramHashtagMentionProcessor {
    */
   private async getHashtagFrequency(hashtag: string, merchantId: string): Promise<number> {
     try {
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
       const result = await sql`
         SELECT COUNT(*) as frequency
         FROM hashtag_mentions
@@ -731,7 +732,7 @@ export class InstagramHashtagMentionProcessor {
     timeframe: 'day' | 'week' | 'month'
   ): Promise<number> {
     try {
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
       const intervalValue = TIMEFRAME_INTERVALS[timeframe] || TIMEFRAME_INTERVALS.week;
       const result = await sql`
         SELECT
@@ -846,7 +847,7 @@ export class InstagramHashtagMentionProcessor {
 
   private async updateTrendingData(hashtags: string[], merchantId: string): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
       if (hashtags.length === 0) return;
 
       const values = hashtags.map(tag =>
@@ -880,7 +881,7 @@ export class InstagramHashtagMentionProcessor {
       const influencerMentions = mentionAnalyses.filter(m => m.mentionType === 'influencer');
 
       if (highValueHashtags.length > 0 || influencerMentions.length > 0) {
-        const sql = this.db.getSQL();
+        const sql: Sql = this.db.getSQL();
 
         await sql`
           INSERT INTO marketing_opportunities (
@@ -913,7 +914,7 @@ export class InstagramHashtagMentionProcessor {
 
   private async findRelatedHashtags(hashtag: string, merchantId: string): Promise<string[]> {
     try {
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
 
       const related = await sql`
         SELECT DISTINCT hm2.hashtag

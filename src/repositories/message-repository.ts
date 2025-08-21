@@ -6,7 +6,7 @@
  */
 
 import { getDatabase } from '../database/connection.js';
-import type { Fragment } from 'postgres';
+import type { Fragment, Sql } from 'postgres';
 
 interface MessageRow {
   id: string;
@@ -146,7 +146,7 @@ export class MessageRepository {
   async create(data: CreateMessageRequest): Promise<Message> {
     const sql: Sql = this.db.getSQL();
     
-    const [message] = await sql<MessageRow>`
+    const [message] = await sql<MessageRow[]>`
       INSERT INTO message_logs (
         conversation_id,
         direction,
@@ -188,7 +188,7 @@ export class MessageRepository {
   async findById(id: string): Promise<Message | null> {
     const sql: Sql = this.db.getSQL();
     
-    const [message] = await sql<MessageRow>`
+    const [message] = await sql<MessageRow[]>`
       SELECT * FROM message_logs
       WHERE id = ${id}::uuid
     `;
@@ -315,7 +315,7 @@ export class MessageRepository {
     const sql: Sql = this.db.getSQL();
     
     // Get messages
-    const messages = await sql<ConversationHistoryRow>`
+    const messages = await sql<ConversationHistoryRow[]>`
       SELECT * FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
       ORDER BY created_at ASC
@@ -324,7 +324,7 @@ export class MessageRepository {
     `;
 
     // Get total count
-    const [countResult] = await sql<CountRow>`
+    const [countResult] = await sql<CountRow[]>`
       SELECT COUNT(*) as count FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
     `;
@@ -349,7 +349,7 @@ export class MessageRepository {
   ): Promise<Message[]> {
     const sql: Sql = this.db.getSQL();
     
-    const messages = await sql<MessageRow>`
+    const messages = await sql<MessageRow[]>`
       SELECT * FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
       ORDER BY created_at DESC
@@ -552,6 +552,7 @@ export class MessageRepository {
    * Map database row to Message object
    */
   private mapToMessage(row: MessageRow | ConversationHistoryRow): Message {
+    const mediaMetadata = row.media_metadata ?? undefined;
     return {
       id: row.id,
       conversationId: row.conversation_id,
@@ -560,14 +561,14 @@ export class MessageRepository {
       messageType: row.message_type,
       content: row.content,
       mediaUrl: row.media_url ?? undefined,
-      platformMessageId: row.platform_message_id,
+      platformMessageId: row.platform_message_id ?? undefined,
       aiProcessed: row.ai_processed,
       deliveryStatus: row.delivery_status,
       aiConfidence: row.ai_confidence ?? undefined,
-      aiIntent: row.ai_intent,
-      processingTimeMs: row.processing_time_ms,
-      mediaMetadata: row.media_metadata ? 
-        (typeof row.media_metadata === 'string' ? JSON.parse(row.media_metadata) : row.media_metadata) 
+      aiIntent: row.ai_intent ?? undefined,
+      processingTimeMs: row.processing_time_ms ?? undefined,
+      mediaMetadata: mediaMetadata
+        ? (typeof mediaMetadata === 'string' ? JSON.parse(mediaMetadata) : mediaMetadata)
         : undefined,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at)

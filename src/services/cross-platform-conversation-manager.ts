@@ -109,7 +109,7 @@ export class CrossPlatformConversationManager {
     identifier: { phone?: string; instagram?: string }
   ): Promise<UnifiedCustomerProfile | null> {
     try {
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
 
       const conditions: Sql[] = [];
       if (identifier.phone) {
@@ -217,7 +217,7 @@ export class CrossPlatformConversationManager {
     try {
       console.log(`🔄 Handling platform switch: ${fromIdentifier.platform} → ${toIdentifier.platform}`);
 
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
       const timestamp = new Date();
 
       // Get source conversation context
@@ -323,7 +323,7 @@ export class CrossPlatformConversationManager {
     try {
       console.log('🔗 Merging customer conversations across platforms...');
 
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
       const mergeStrategy = options?.mergeStrategy || 'most_complete';
 
       const conditions: Sql[] = [];
@@ -458,7 +458,7 @@ export class CrossPlatformConversationManager {
     insights: JourneyInsight[];
   }> {
     try {
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
 
       // Build time range filter
       const timeFilter = timeRange ?
@@ -690,7 +690,7 @@ export class CrossPlatformConversationManager {
   }
 
   private async getLatestConversation(merchantId: string, platform: Platform, identifier: string): Promise<any> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
     const conversations = await sql`
       SELECT * FROM conversations
@@ -712,7 +712,7 @@ export class CrossPlatformConversationManager {
     targetIdentifier: { platform: Platform; id: string },
     sourceConversation: any
   ): Promise<any> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
 
     // Check if target conversation already exists
     const existing = await this.getLatestConversation(merchantId, targetIdentifier.platform, targetIdentifier.id);
@@ -766,7 +766,7 @@ export class CrossPlatformConversationManager {
         }
       };
 
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
       await sql`
         UPDATE conversations 
         SET session_data = ${JSON.stringify(mergedContext)}
@@ -869,7 +869,7 @@ export class CrossPlatformConversationManager {
     timeRange?: { start: Date; end: Date }
   ): Promise<PlatformSwitchEvent[]> {
     try {
-      const sql = this.db.getSQL();
+      const sql: Sql = this.db.getSQL();
       
       const timeFilter = timeRange
         ? sql`AND switch_timestamp BETWEEN ${timeRange.start.toISOString()} AND ${timeRange.end.toISOString()}`

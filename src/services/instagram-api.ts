@@ -95,6 +95,12 @@ export interface InstagramProfile {
   biography?: string;
 }
 
+function isInstagramProfile(data: unknown): data is InstagramProfile {
+  if (!data || typeof data !== 'object') return false;
+  const info = data as Record<string, unknown>;
+  return typeof info.id === 'string' && typeof info.username === 'string';
+}
+
 export class InstagramAPIClient {
   private readonly baseUrl = GRAPH_API_BASE_URL;
   private encryptionService = getEncryptionService();
@@ -153,7 +159,10 @@ export class InstagramAPIClient {
     try {
       check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
     } catch (error) {
-      this.logger.warn({ err: error }, `⚠️ Redis rate limit check failed for ${rateKey}:`);
+      this.logger.warn(
+        `⚠️ Redis rate limit check failed for ${rateKey}:`,
+        { err: error }
+      );
       telemetry.recordRateLimitStoreFailure('instagram', path);
       check = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
     }
@@ -373,15 +382,23 @@ export class InstagramAPIClient {
     userId: string
   ): Promise<InstagramProfile | null> {
     try {
-      const result: InstagramProfile = await this.graphRequest<InstagramProfile>(
+      const res = await this.graphRequest(
         'GET',
         `/${userId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,
         credentials.pageAccessToken,
         undefined,
-        merchantId
+        merchantId,
+        true
       );
-      
-      return result;
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`Instagram API error ${res.status}: ${text}`);
+      }
+      const data = await res.json();
+      if (!isInstagramProfile(data)) {
+        throw new Error('Invalid profile response');
+      }
+      return data;
     } catch (error) {
       this.logger.error('❌ Get user profile failed:', error);
       return null;

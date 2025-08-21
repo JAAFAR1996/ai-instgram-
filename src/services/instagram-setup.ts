@@ -46,6 +46,19 @@ export interface BusinessAccountInfo {
   biography?: string;
 }
 
+function isBusinessAccountInfo(data: unknown): data is BusinessAccountInfo {
+  if (!data || typeof data !== 'object') return false;
+  const info = data as Record<string, unknown>;
+  return (
+    typeof info.id === 'string' &&
+    typeof info.username === 'string' &&
+    typeof info.name === 'string' &&
+    typeof info.profile_picture_url === 'string' &&
+    typeof info.followers_count === 'number' &&
+    typeof info.media_count === 'number'
+  );
+}
+
 export class InstagramSetupService {
   private encryptionService = getEncryptionService();
   private db = getDatabase();
@@ -165,13 +178,23 @@ export class InstagramSetupService {
     try {
       const client = getInstagramClient('validation'); // Use a temporary client
 
-      const accountInfo = (await client.graphRequest<BusinessAccountInfo>(
+      const res = await client.graphRequest(
         'GET',
         `/${businessAccountId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,
         pageAccessToken,
         undefined,
-        'validation'
-      )) as BusinessAccountInfo;
+        'validation',
+        true
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`Instagram API error ${res.status}: ${text}`);
+      }
+      const data = await res.json();
+      if (!isBusinessAccountInfo(data)) {
+        throw new Error('Invalid account info response');
+      }
+      const accountInfo = data;
 
       // Validate account type
       if (!accountInfo.id) {
@@ -465,13 +488,23 @@ export class InstagramSetupService {
     config: InstagramSetupConfig
   ): Promise<BusinessAccountInfo> {
     const client = getInstagramClient('setup-test');
-    return (await client.graphRequest<BusinessAccountInfo>(
+    const res = await client.graphRequest(
       'GET',
       `/${config.businessAccountId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,
       config.pageAccessToken,
       undefined,
-      'setup-test'
-    )) as BusinessAccountInfo;
+      'setup-test',
+      true
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Instagram API error ${res.status}: ${text}`);
+    }
+    const data = await res.json();
+    if (!isBusinessAccountInfo(data)) {
+      throw new Error('Invalid account info response');
+    }
+    return data;
   }
 
   /**

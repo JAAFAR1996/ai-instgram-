@@ -10,6 +10,7 @@ import { getConfig } from '../config/environment.js';
 import { getAnalyticsService } from '../services/analytics-service.js';
 import { getLogger } from '../services/logger.js';
 import { pushDLQ } from './dead-letter.js';
+import type { Sql } from 'postgres';
 
 export interface QueueJob {
   id: string;
@@ -89,7 +90,7 @@ export class MessageQueue {
    * Add job to queue
    */
   async addJob(request: CreateJobRequest): Promise<QueueJob> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
     const [job] = await sql`
       INSERT INTO queue_jobs (
@@ -116,7 +117,7 @@ export class MessageQueue {
    * Get next job to process
    */
   async getNextJob(): Promise<QueueJob | null> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
     // Get highest priority job that's ready to process
     const [job] = await sql`
@@ -162,7 +163,7 @@ export class MessageQueue {
    * Mark job as completed
    */
   async completeJob(jobId: string, result?: Record<string, any>): Promise<void> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
     await sql`
       UPDATE queue_jobs
@@ -181,7 +182,7 @@ export class MessageQueue {
    * Mark job as failed
    */
   async failJob(jobId: string, error: string, canRetry: boolean = true): Promise<void> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
     if (canRetry) {
       // Check if we should retry
@@ -309,9 +310,9 @@ export class MessageQueue {
    * Get queue statistics
    */
   async getStats(): Promise<QueueStats> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
-    const results = await this.db.query<QueueStatsRow>`
+    const results = await this.db.query<QueueStatsRow[]>`
       SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
@@ -363,7 +364,7 @@ export class MessageQueue {
    * Clean up old completed jobs
    */
   async cleanupOldJobs(olderThanDays: number = 7): Promise<number> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
@@ -414,7 +415,7 @@ export class MessageQueue {
    * Get jobs by status
    */
   async getJobsByStatus(status: QueueJob['status'], limit: number = 100): Promise<QueueJob[]> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
     const jobs = await sql`
       SELECT * FROM queue_jobs

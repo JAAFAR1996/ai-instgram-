@@ -6,7 +6,7 @@
  */
 
 import postgres from 'postgres';
-import type { Sql, Row, UnwrapPromiseArray } from 'postgres';
+import type { Sql, Row } from 'postgres';
 import type { DatabaseError } from '../types/database.js';
 import { getConfig, getEnvVar } from '../config/environment.js';
 
@@ -246,7 +246,7 @@ export class DatabaseConnection {
    */
   public async transaction<T>(
     callback: (sql: Sql) => Promise<T>
-  ): Promise<UnwrapPromiseArray<T>> {
+  ): Promise<T> {
     if (!this.sql) {
       throw new Error('Database connection not initialized');
     }

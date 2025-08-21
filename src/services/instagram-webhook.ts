@@ -321,9 +321,11 @@ export class InstagramWebhookHandler {
     merchantId: string,
     result: ProcessedWebhookResult
   ): Promise<number> {
-    let customerId: string;
+    let customerId: string | undefined = event.sender?.id;
     try {
-      customerId = event.sender.id;
+      if (!customerId) {
+        throw new Error('Missing sender ID in messaging event');
+      }
       const timestamp = new Date(event.timestamp);
 
       // Check if this is a message or postback (story reply)
@@ -427,7 +429,7 @@ export class InstagramWebhookHandler {
     } catch (error) {
       this.logger.error('Messaging event processing failed', error, {
         merchantId,
-        customerId
+        ...(customerId ? { customerId } : {})
       });
       throw error;
     }
