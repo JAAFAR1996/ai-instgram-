@@ -244,14 +244,14 @@ export class CredentialsRepository {
 
     return {
       merchantId: row.merchant_id,
-      whatsappPhoneNumberId: row.whatsapp_phone_number_id,
-      instagramPageId: row.instagram_page_id,
-      webhookVerifyToken: row.webhook_verify_token,
+      whatsappPhoneNumberId: row.whatsapp_phone_number_id ?? undefined,
+      instagramPageId: row.instagram_page_id ?? undefined,
+      webhookVerifyToken: row.webhook_verify_token ?? undefined,
       tokenExpiresAt: row.token_expires_at ? new Date(row.token_expires_at) : undefined,
       lastTokenRefresh: row.last_token_refresh ? new Date(row.last_token_refresh) : undefined,
       tokenRefreshCount: parseInt(row.token_refresh_count) || 0,
-      tokenCreatedIp: row.token_created_ip,
-      lastAccessIp: row.last_access_ip,
+      tokenCreatedIp: row.token_created_ip ?? undefined,
+      lastAccessIp: row.last_access_ip ?? undefined,
       lastAccessAt: row.last_access_at ? new Date(row.last_access_at) : undefined
     };
   }

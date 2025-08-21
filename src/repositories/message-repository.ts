@@ -236,7 +236,7 @@ export class MessageRepository {
 
     const [message] = await this.db.query<MessageRow>`
       UPDATE message_logs
-      SET ${sql.join(updateFields, sql`, `)}
+      SET ${(sql as any).join(updateFields, sql`, `)}
       WHERE id = ${id}::uuid
       RETURNING *
     `;
@@ -289,7 +289,7 @@ export class MessageRepository {
     }
 
     const whereClause = conditions.length
-      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
       : sql``;
     const limitClause = filters.limit ? sql`LIMIT ${filters.limit}` : sql``;
     const offsetClause = filters.offset ? sql`OFFSET ${filters.offset}` : sql``;
@@ -423,7 +423,7 @@ export class MessageRepository {
     }
 
     const whereClause = conditions.length
-      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
       : sql``;
 
     const results = await this.db.query<MessageStatsRow>`
@@ -538,7 +538,7 @@ export class MessageRepository {
     }
 
     const whereClause = conditions.length
-      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
       : sql``;
 
     const [result] = await this.db.query<CountRow>`

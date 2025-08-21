@@ -312,7 +312,7 @@ export class MessageQueue {
   async getStats(): Promise<QueueStats> {
     const sql: Sql = this.db.getSQL();
     
-    const results = await this.db.query<QueueStatsRow[]>`
+    const results = await this.db.query<QueueStatsRow>`
       SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
@@ -403,7 +403,7 @@ export class MessageQueue {
         scheduled_at = NOW(),
         error = NULL,
         updated_at = NOW()
-      WHERE ${sql.join(conditions, sql` AND `)}
+      WHERE ${(sql as any).join(conditions, sql` AND `)}
     `;
     const retriedCount = result.count || 0;
     

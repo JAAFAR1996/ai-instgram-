@@ -339,7 +339,7 @@ export class WebhookRouter {
         rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
       } catch (error) {
         skipRateLimitCheck = true;
-        this.logger.warn({ err: error, merchantId }, 'Failed to check Redis rate limit');
+        this.logger.warn('Failed to check Redis rate limit', { err: error, merchantId });
         telemetry.recordRateLimitStoreFailure('instagram', 'webhook');
         rateCheck = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
       }

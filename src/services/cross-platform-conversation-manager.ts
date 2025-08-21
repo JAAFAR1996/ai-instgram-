@@ -129,7 +129,7 @@ export class CrossPlatformConversationManager {
         FROM conversations c
         LEFT JOIN message_logs ml ON c.id = ml.conversation_id
         WHERE c.merchant_id = ${merchantId}::uuid
-        ${conditions.length ? sql`AND (${sql.join(conditions, sql` OR `)})` : sql``}
+        ${conditions.length ? sql`AND (${(sql as any).join(conditions, sql` OR `)})` : sql``}
         GROUP BY c.id
         ORDER BY c.updated_at DESC
       `;
@@ -340,7 +340,7 @@ export class CrossPlatformConversationManager {
         FROM conversations c
         LEFT JOIN message_logs ml ON c.id = ml.conversation_id
         WHERE c.merchant_id = ${merchantId}::uuid
-        ${conditions.length ? sql`AND (${sql.join(conditions, sql` OR `)})` : sql``}
+        ${conditions.length ? sql`AND (${(sql as any).join(conditions, sql` OR `)})` : sql``}
         GROUP BY c.id
         ORDER BY c.updated_at DESC
       `;
@@ -485,7 +485,7 @@ export class CrossPlatformConversationManager {
         FROM conversations c
         JOIN message_logs ml ON c.id = ml.conversation_id
         WHERE c.merchant_id = ${merchantId}::uuid
-        ${conditions.length ? sql`AND (${sql.join(conditions, sql` OR `)})` : sql``}
+        ${conditions.length ? sql`AND (${(sql as any).join(conditions, sql` OR `)})` : sql``}
         ${timeFilter}
         ORDER BY ml.created_at ASC
       `;
@@ -889,7 +889,7 @@ export class CrossPlatformConversationManager {
       const switches = await sql`
         SELECT * FROM platform_switches
         WHERE merchant_id = ${merchantId}::uuid
-        ${conditions.length ? sql`AND (${sql.join(conditions, sql` OR `)})` : sql``}
+        ${conditions.length ? sql`AND (${(sql as any).join(conditions, sql` OR `)})` : sql``}
         ${timeFilter}
         ORDER BY switch_timestamp ASC
       `;

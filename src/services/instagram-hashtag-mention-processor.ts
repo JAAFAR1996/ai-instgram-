@@ -860,7 +860,7 @@ export class InstagramHashtagMentionProcessor {
           hashtag,
           usage_count,
           date
-        ) VALUES ${sql.join(values, sql`, `)}
+        ) VALUES ${(sql as any).join(values, sql`, `)}
         ON CONFLICT (merchant_id, hashtag, date)
         DO UPDATE SET
           usage_count = hashtag_trends.usage_count + EXCLUDED.usage_count,

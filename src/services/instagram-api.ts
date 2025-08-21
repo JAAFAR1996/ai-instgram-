@@ -809,11 +809,11 @@ export class InstagramAPICredentialsManager {
       }
 
       const cred = result[0];
-      
+
       return {
         hasCredentials: !!cred.instagram_token_encrypted,
-        lastAccess: cred.last_access_at,
-        pageId: cred.instagram_page_id
+        lastAccess: cred.last_access_at ? new Date(cred.last_access_at) : undefined,
+        pageId: cred.instagram_page_id ?? undefined
       };
     } catch (error) {
       this.logger.error('❌ Failed to get credentials info:', error);

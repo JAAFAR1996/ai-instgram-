@@ -5,8 +5,7 @@
  * ===============================================
  */
 
-import postgres from 'postgres';
-import type { Sql, Row } from 'postgres';
+import postgres, { Sql, Row } from 'postgres';
 import type { DatabaseError } from '../types/database.js';
 import { getConfig, getEnvVar } from '../config/environment.js';
 
@@ -233,7 +232,7 @@ export class DatabaseConnection {
         throw new Error('Database connection not initialized');
       }
 
-      const result = await this.sql<T[]>(strings, ...params);
+      const result = await this.sql<T[]>(strings, ...params).execute();
       return result;
     } catch (error) {
       console.error('❌ Database query error:', error);

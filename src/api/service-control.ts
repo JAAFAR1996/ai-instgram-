@@ -62,7 +62,11 @@ export class ServiceControlAPI {
    */
   private setupRoutes(): void {
     // Toggle specific service
-    this.app.post('/api/services/toggle', validator('json', ToggleServiceSchema), this.toggleService.bind(this));
+    this.app.post(
+      '/api/services/toggle',
+      validator('json', (value, c) => ToggleServiceSchema.parse(value)),
+      this.toggleService.bind(this)
+    );
 
     // Get merchant services status
     this.app.get('/api/services/:merchantId/status', this.getServicesStatus.bind(this));
@@ -87,7 +91,7 @@ export class ServiceControlAPI {
    * Toggle service on/off
    */
   private async toggleService(
-    c: Context<{ Bindings: BlankEnv }, { json: ToggleService }>
+    c: Context<{ Bindings: BlankEnv }, '', { json: ToggleService }>
   ) {
     try {
       const data = c.req.valid('json');

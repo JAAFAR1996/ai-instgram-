@@ -230,7 +230,7 @@ export class MerchantRepository {
 
     const [merchant] = await this.db.query`
       UPDATE merchants
-      SET ${sql.join(updateFields, sql`, `)}
+      SET ${(sql as any).join(updateFields, sql`, `)}
       WHERE id = ${id}::uuid
       RETURNING *
     `;
@@ -342,7 +342,7 @@ export class MerchantRepository {
     }
 
     const whereClause = conditions.length
-      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
       : sql``;
     const limitClause = filters.limit ? sql`LIMIT ${filters.limit}` : sql``;
     const offsetClause = filters.offset ? sql`OFFSET ${filters.offset}` : sql``;
@@ -477,7 +477,7 @@ export class MerchantRepository {
     }
 
     const whereClause = conditions.length
-      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
       : sql``;
 
     const [result] = await this.db.query<CountRow>`
