@@ -53,6 +53,7 @@ export class RedisConnectionManager {
   private healthCheckInterval?: NodeJS.Timeout;
   private poolConfig: ConnectionPoolConfig;
   private rateLimitResetAt?: Date;
+  private pauseReconnectionsUntil?: Date;
 
   constructor(
     private redisUrl: string,
@@ -195,12 +196,32 @@ export class RedisConnectionManager {
         info.status = 'error';
         info.lastError = redisError.message;
         info.healthScore = 0;
-        this.logger?.warn('Redis rate limit exceeded, reconnection paused', {
+        
+        // إيقاف محاولات إعادة الاتصال حتى إعادة تعيين الحد
+        this.pauseReconnectionsUntil = retryAt;
+        
+        this.logger?.warn('Redis rate limit exceeded, disconnecting', {
           usageType,
-          retryAt
+          retryAt: retryAt.toISOString()
         });
-        // schedule reconnection after the rate limit resets
-        this.scheduleReconnection(usageType, info);
+        
+        // قطع الاتصال فوراً لتوفير الطلبات
+        if (this.connections.has(usageType)) {
+          await this.connections.get(usageType)?.disconnect();
+          this.connections.delete(usageType);
+        }
+        
+        // جدولة إعادة المحاولة تلقائياً
+        const delayMs = retryAt.getTime() - Date.now();
+        setTimeout(async () => {
+          this.logger?.info('Rate limit reset, attempting reconnection', { usageType });
+          try {
+            await this.getConnection(usageType);
+          } catch (error) {
+            this.logger?.warn('Auto-reconnect failed after rate limit reset', error);
+          }
+        }, delayMs);
+        
         throw redisError;
       }
 

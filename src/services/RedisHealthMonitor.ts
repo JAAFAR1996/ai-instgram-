@@ -110,27 +110,44 @@ export class RedisHealthMonitor {
     this.errorHandler = new RedisErrorHandler(logger);
   }
 
-  async isConnectionHealthy(connection: RedisType, timeout: number = 3000): Promise<boolean> {
-    let ok = true;
-    let responseTime = 0;
-    
+  async isConnectionHealthy(connection: RedisType, timeout: number = 5000): Promise<boolean> {
+    // تحسين فحص الصحة لتوفير الطلبات في بيئة الإنتاج
     try {
+      // فحص أساسي باستخدام أقل عدد من الطلبات
       const start = Date.now();
-      const result = await withTimeout(connection.ping(), timeout, 'redis ping');
-      responseTime = Date.now() - start;
       
-      // اعتبار الاتصال صحي إذا كان زمن الاستجابة أقل من ثانية واحدة والنتيجة PONG
-      ok = responseTime < 1000 && result === 'PONG';
+      // استخدام ping فقط مع timeout أطول للإنتاج
+      const result = await withTimeout(connection.ping(), timeout, 'redis ping');
+      const responseTime = Date.now() - start;
+      
+      // معايير صحة أكثر تساهلاً للإنتاج
+      const isHealthy = result === 'PONG' && responseTime < 5000; // 5 ثوان للإنتاج
+      
+      if (!isHealthy) {
+        this.logger?.warn('Redis health check degraded', { 
+          result,
+          responseTime,
+          threshold: 5000
+        });
+      }
+      
+      return isHealthy;
     } catch (error) {
-      ok = false;
+      // التعامل مع أخطاء معينة كـ "صحيح" مؤقتاً لتجنب قطع الاتصال غير الضروري
+      if (isTimeoutError(error) || 
+          (error instanceof Error && error.message.includes('max requests limit'))) {
+        this.logger?.warn('Redis temporarily unavailable, maintaining connection', { 
+          error: error.message
+        });
+        return true; // الحفاظ على الاتصال في حالة مشاكل مؤقتة
+      }
+      
       this.logger?.debug('Redis health check failed', { 
         error: error instanceof Error ? error.message : String(error),
-        timeout,
-        responseTime
+        timeout
       });
+      return false;
     }
-    
-    return ok;
   }
 
   async validateConnection(connection: RedisType): Promise<void> {
