@@ -6,8 +6,6 @@
  */
 
 import { getDatabase } from '../database/connection.js';
-// @ts-ignore - sql helper types not exported
-import { sql as sqlIdentifier } from 'postgres';
 import type { Sql } from 'postgres';
 
 interface ConversationRow {
@@ -173,7 +171,7 @@ export class ConversationRepository {
     const [conversation] = await sql<ConversationRow[]>`
       SELECT * FROM conversations
       WHERE merchant_id = ${merchantId}::uuid
-      AND ${sqlIdentifier.identifier([whereField])} = ${customerIdentifier}
+      AND ${sql(whereField)} = ${customerIdentifier}
       AND platform = ${platform}
       AND ended_at IS NULL
       ORDER BY last_message_at DESC
