@@ -206,7 +206,7 @@ export class DatabaseConnection {
    * Execute a parameterized query using tagged templates
    * Provides automatic sanitization via the postgres library
    */
-  public async query<T>(
+  public async query<T extends Record<string, any> = Record<string, any>>(
     strings: TemplateStringsArray,
     ...params: any[]
   ): Promise<T[]> {
@@ -215,7 +215,7 @@ export class DatabaseConnection {
         throw new Error('Database connection not initialized');
       }
 
-      return this.sql<T[]>(strings, ...params);
+      return this.sql<T[]>(strings, ...params) as Promise<T[]>;
     } catch (error) {
       console.error('❌ Database query error:', error);
       throw this.formatDatabaseError(error);
