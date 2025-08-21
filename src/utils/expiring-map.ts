@@ -36,6 +36,11 @@ export class ExpiringMap<K, V> {
     this.map.clear();
   }
 
+  dispose(): void {
+    clearInterval(this.cleanupInterval);
+    this.map.clear();
+  }
+
   private cleanup(): void {
     const now = Date.now();
     for (const [key, entry] of this.map.entries()) {

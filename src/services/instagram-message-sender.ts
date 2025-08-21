@@ -113,6 +113,10 @@ export class InstagramMessageSender {
     }
   }
 
+  public dispose(): void {
+    this.credentialsCache.dispose();
+  }
+
   /**
    * Send text message to Instagram user
    */

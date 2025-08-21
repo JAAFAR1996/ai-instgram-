@@ -24,14 +24,19 @@ class TimerManager {
 
 export const timerManager = new TimerManager();
 
+// Store original timer functions in module scope
+const originalSetTimeout = global.setTimeout;
+const originalSetInterval = global.setInterval;
+const originalClearTimeout = global.clearTimeout;
+const originalClearInterval = global.clearInterval;
+let patched = false;
+
 /**
  * Patch global timer functions so every timer is registered.
  */
 export function setupTimerManagement(): void {
-  const originalSetTimeout = global.setTimeout;
-  const originalSetInterval = global.setInterval;
-  const originalClearTimeout = global.clearTimeout;
-  const originalClearInterval = global.clearInterval;
+  if (patched) return;
+  patched = true;
 
   global.setTimeout = (
     (handler: (...a: any[]) => void, timeout?: number, ...args: any[]) => {
@@ -64,4 +69,19 @@ export function setupTimerManagement(): void {
       return originalClearInterval(timer);
     }
   ) as typeof clearInterval;
+}
+
+/**
+ * Restore original timer globals and clear all registered timers.
+ */
+export function teardownTimerManagement(): void {
+  if (!patched) return;
+
+  global.setTimeout = originalSetTimeout;
+  global.setInterval = originalSetInterval;
+  global.clearTimeout = originalClearTimeout;
+  global.clearInterval = originalClearInterval;
+
+  timerManager.clearAll();
+  patched = false;
 }

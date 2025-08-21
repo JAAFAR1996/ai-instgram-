@@ -51,29 +51,33 @@ export async function readRawBody(c: any, maxBytes = 1024 * 1024): Promise<Buffe
   const chunks: Uint8Array[] = [];
   let size = 0;
 
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    if (value) {
-      size += value.length;
-      if (size > maxBytes) {
-        try { await reader.cancel(); } catch {}
-        if (typeof c.throw === 'function') {
-          c.throw(413, 'payload too large');
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) {
+        size += value.length;
+        if (size > maxBytes) {
+          try { await reader.cancel(); } catch {}
+          if (typeof c.throw === 'function') {
+            c.throw(413, 'payload too large');
+          }
+          throw Object.assign(new Error('payload too large'), { status: 413 });
         }
-        throw Object.assign(new Error('payload too large'), { status: 413 });
+        chunks.push(value);
       }
-      chunks.push(value);
     }
-  }
 
-  const out = Buffer.allocUnsafe(size);
-  let off = 0;
-  for (const u of chunks) {
-    out.set(u, off);
-    off += u.length;
+    const out = Buffer.allocUnsafe(size);
+    let off = 0;
+    for (const u of chunks) {
+      out.set(u, off);
+      off += u.length;
+    }
+    return out;
+  } finally {
+    reader.releaseLock();
   }
-  return out;
 }
 
 export interface EncryptedData {
@@ -91,17 +95,19 @@ export class EncryptionService {
   private readonly encryptionKey: Buffer;
 
   constructor(masterKey?: string) {
-    const key = masterKey || process.env.ENCRYPTION_KEY_HEX;
+    const key = masterKey || process.env.ENCRYPTION_KEY;
     if (!key) {
-      throw new Error('ENCRYPTION_KEY_HEX environment variable required');
+      throw new Error('ENCRYPTION_KEY environment variable required');
     }
-    
-    // Validate hex key (64 characters = 32 bytes)
-    if (!/^[0-9a-fA-F]{64}$/.test(key)) {
-      throw new Error('ENCRYPTION_KEY_HEX must be 64 hex characters (32 bytes)');
+
+    // Accept either 64 hex characters (32 bytes) or 32 ASCII characters
+    if (/^[0-9a-fA-F]{64}$/.test(key)) {
+      this.encryptionKey = Buffer.from(key, 'hex');
+    } else if (key.length === 32) {
+      this.encryptionKey = Buffer.from(key, 'utf8');
+    } else {
+      throw new Error('ENCRYPTION_KEY must be 32 bytes (64 hex characters) or 32 ASCII characters');
     }
-    
-    this.encryptionKey = Buffer.from(key, 'hex');
   }
 
   /**

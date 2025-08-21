@@ -388,14 +388,17 @@ class ProductionEncryptionService {
   private encryptionKey: Buffer;
 
   constructor() {
-    const key = process.env.ENCRYPTION_KEY_HEX;
+    const key = process.env.ENCRYPTION_KEY;
     if (!key) {
-      throw new Error('ENCRYPTION_KEY_HEX environment variable required');
+      throw new Error('ENCRYPTION_KEY environment variable required');
     }
-    if (!/^[0-9a-fA-F]{64}$/.test(key)) {
-      throw new Error('ENCRYPTION_KEY_HEX must be 64 hex characters (32 bytes)');
+    if (/^[0-9a-fA-F]{64}$/.test(key)) {
+      this.encryptionKey = Buffer.from(key, 'hex');
+    } else if (key.length === 32) {
+      this.encryptionKey = Buffer.from(key, 'utf8');
+    } else {
+      throw new Error('ENCRYPTION_KEY must be 32 bytes (64 hex characters) or 32 ASCII characters');
     }
-    this.encryptionKey = Buffer.from(key, 'hex');
   }
 
   encrypt(text: string): { encrypted: string; iv: string; authTag: string } {

@@ -92,6 +92,7 @@ describe('InstagramMessageSender client caching', () => {
   });
 
   afterEach(() => {
+    sender.dispose();
     mock.restore();
   });
 
@@ -158,6 +159,7 @@ describe('InstagramMessageSender error logging', () => {
   });
 
   afterEach(() => {
+    sender.dispose();
     mock.restore();
   });
 

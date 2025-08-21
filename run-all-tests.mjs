@@ -10,6 +10,7 @@
 import { spawn } from 'child_process';
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { teardownTimerManagement } from './src/utils/timer-manager.js';
 
 const testSuites = [
   {
@@ -243,3 +244,7 @@ if (args.includes('--list') || args.includes('-l')) {
 } else {
   runAllTests().catch(console.error);
 }
+
+process.on('exit', () => {
+  teardownTimerManagement();
+});

@@ -8,8 +8,11 @@ const sendImageMessage = mock(async (_recipient: string, _url: string, _caption:
 mock.module('../services/instagram-api.js', () => ({
   getInstagramClient: () => ({
     initialize: mock(async () => {}),
-    sendImageMessage
-  })
+    sendImageMessage,
+    loadMerchantCredentials: mock(async () => ({ tokenExpiresAt: new Date(Date.now() + 3600_000) })),
+    validateCredentials: mock(async () => {})
+  }),
+  clearInstagramClient: () => {}
 }));
 
 mock.module('../database/connection.js', () => ({
@@ -33,28 +36,55 @@ describe('InstagramMediaManager.sendMediaMessage', () => {
 
   test('sends media using template', async () => {
     const manager = new InstagramMediaManager();
-    (manager as any).getMediaTemplate = async () => ({
-      id: 'temp1',
-      name: 'template',
-      category: 'promo',
-      mediaType: 'image',
-      templateUrl: 'https://example.com/template.jpg',
-      overlayElements: {},
-      usageCount: 0,
-      isActive: true
-    });
-    (manager as any).incrementTemplateUsage = async () => {};
-    (manager as any).generateTemplateCaption = () => 'generated caption';
+    try {
+      (manager as any).getMediaTemplate = async () => ({
+        id: 'temp1',
+        name: 'template',
+        category: 'promo',
+        mediaType: 'image',
+        templateUrl: 'https://example.com/template.jpg',
+        overlayElements: {},
+        usageCount: 0,
+        isActive: true
+      });
+      (manager as any).incrementTemplateUsage = async () => {};
+      (manager as any).generateTemplateCaption = () => 'generated caption';
 
-    const result = await manager.sendMediaMessage('user1', 'image', 'temp1', undefined, undefined, 'merchant1');
-    expect(result.success).toBe(true);
-    expect(sendImageMessage).toHaveBeenCalledWith('user1', 'https://example.com/template.jpg', 'generated caption');
+      const result = await manager.sendMediaMessage('user1', 'image', 'merchant1', 'temp1', undefined, undefined);
+      expect(result.success).toBe(true);
+      expect(sendImageMessage).toHaveBeenCalledWith(
+        expect.anything(),
+        'merchant1',
+        'user1',
+        'https://example.com/template.jpg',
+        'generated caption'
+      );
+    } finally {
+      manager.dispose();
+    }
   });
 
   test('sends media using custom url', async () => {
     const manager = new InstagramMediaManager();
-    const result = await manager.sendMediaMessage('user1', 'image', undefined, 'https://example.com/custom.jpg', 'custom caption', 'merchant1');
-    expect(result.success).toBe(true);
-    expect(sendImageMessage).toHaveBeenCalledWith('user1', 'https://example.com/custom.jpg', 'custom caption');
+    try {
+      const result = await manager.sendMediaMessage(
+        'user1',
+        'image',
+        'merchant1',
+        undefined,
+        'https://example.com/custom.jpg',
+        'custom caption'
+      );
+      expect(result.success).toBe(true);
+      expect(sendImageMessage).toHaveBeenCalledWith(
+        expect.anything(),
+        'merchant1',
+        'user1',
+        'https://example.com/custom.jpg',
+        'custom caption'
+      );
+    } finally {
+      manager.dispose();
+    }
   });
 });

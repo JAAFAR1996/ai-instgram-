@@ -7,7 +7,7 @@
 
 import postgres, { Sql, Row } from 'postgres';
 import type { DatabaseError } from '../types/database.js';
-import { getConfig, getEnvVar } from '../config/environment.js';
+import { getConfig } from '../config/environment.js';
 
 // Configuration interface
 interface ConnectionConfig {
@@ -69,36 +69,19 @@ export class DatabaseConnection {
   private isConnected = false;
 
   constructor(config?: Partial<ConnectionConfig>) {
-    // Load configuration from validated environment config or fallback to provided config
-    try {
-      const appConfig = getConfig();
-      this.config = {
-        host: config?.host || appConfig.database.host,
-        port: config?.port || appConfig.database.port,
-        database: config?.database || appConfig.database.database,
-        username: config?.username || appConfig.database.username,
-        password: config?.password || appConfig.database.password,
-        ssl: config?.ssl !== undefined ? config.ssl : appConfig.database.ssl,
-        max_connections: config?.max_connections || appConfig.database.maxConnections,
-        idle_timeout: config?.idle_timeout || parseInt(process.env.DB_IDLE_TIMEOUT || '30'),
-        connect_timeout: config?.connect_timeout || parseInt(process.env.DB_CONNECT_TIMEOUT || '10')
-      };
-    } catch (error) {
-      // Fallback to environment variables if config validation fails
-      console.warn('⚠️ Using fallback database configuration (environment validation failed)');
-
-      this.config = {
-        host: config?.host || getEnvVar('DB_HOST'),
-        port: config?.port || parseInt(getEnvVar('DB_PORT'), 10),
-        database: config?.database || getEnvVar('DB_NAME'),
-        username: config?.username || getEnvVar('DB_USER'),
-        password: config?.password || getEnvVar('DB_PASSWORD'),
-        ssl: config?.ssl !== undefined ? config.ssl : process.env.NODE_ENV === 'production',
-        max_connections: config?.max_connections || parseInt(process.env.DB_POOL_MAX || '10'),
-        idle_timeout: config?.idle_timeout || parseInt(process.env.DB_IDLE_TIMEOUT || '30'),
-        connect_timeout: config?.connect_timeout || parseInt(process.env.DB_CONNECT_TIMEOUT || '10')
-      };
-    }
+    // Load configuration from validated environment config or override with provided config
+    const appConfig = getConfig();
+    this.config = {
+      host: config?.host || appConfig.database.host,
+      port: config?.port || appConfig.database.port,
+      database: config?.database || appConfig.database.database,
+      username: config?.username || appConfig.database.username,
+      password: config?.password || appConfig.database.password,
+      ssl: config?.ssl !== undefined ? config.ssl : appConfig.database.ssl,
+      max_connections: config?.max_connections || appConfig.database.maxConnections,
+      idle_timeout: config?.idle_timeout || parseInt(process.env.DB_IDLE_TIMEOUT || '30'),
+      connect_timeout: config?.connect_timeout || parseInt(process.env.DB_CONNECT_TIMEOUT || '10')
+    };
   }
 
   /**

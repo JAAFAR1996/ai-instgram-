@@ -210,7 +210,7 @@ $ npm run test:all
 # ملف .env.test
 DATABASE_URL=postgresql://test:test@localhost:5432/ai_sales_test
 REDIS_URL=redis://localhost:6379/1
-ENCRYPTION_KEY_HEX=your-test-encryption-key
+ENCRYPTION_KEY=your-test-encryption-key # 32 ASCII or 64 hex
 INSTAGRAM_TEST_TOKEN=your-test-token
 NODE_ENV=test
 ```

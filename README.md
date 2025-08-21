@@ -248,7 +248,7 @@ OPENAI_TEMPERATURE=0.7
 
 # Security Configuration (مطلوب)
 # ملاحظة: يجب إعداد JWT_SECRET بشكل مستقل ولا يمكن استخدام ENCRYPTION_KEY كقيمة احتياطية
-ENCRYPTION_KEY=your_32_character_encryption_key_here123456
+ENCRYPTION_KEY=your_32_character_ascii_or_64_hex_key_here123456
 JWT_SECRET=your_jwt_secret_here
 
 # CORS Configuration (مطلوب - قائمة نطاقات مسموحة مفصولة بفاصلة)

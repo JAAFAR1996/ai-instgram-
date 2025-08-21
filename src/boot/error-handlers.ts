@@ -6,7 +6,7 @@
  */
 
 import { setTimeout as delay } from 'node:timers/promises';
-import { timerManager } from '../utils/timer-manager.js';
+import { teardownTimerManagement } from '../utils/timer-manager.js';
 
 // Global error counters for monitoring
 let unhandledRejectionCount = 0;
@@ -162,13 +162,13 @@ export async function gracefulShutdown(signal: string, code = 0) {
       console.error('❌ Failed to close Redis connections:', error);
     }
 
-    // Cancel all registered timers
-    try {
-      timerManager.clearAll();
-      console.log('✅ Timers cleared');
-    } catch (error) {
-      console.error('❌ Failed to clear timers:', error);
-    }
+      // Cancel all registered timers and restore globals
+      try {
+        teardownTimerManagement();
+        console.log('✅ Timers cleared');
+      } catch (error) {
+        console.error('❌ Failed to clear timers:', error);
+      }
 
     console.log('✅ Graceful shutdown completed');
   } catch (error) {

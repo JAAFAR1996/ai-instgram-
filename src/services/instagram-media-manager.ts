@@ -127,6 +127,10 @@ export class InstagramMediaManager {
     }
   }
 
+  public dispose(): void {
+    this.credentialsCache.dispose();
+  }
+
   /**
    * Process incoming media message
    */

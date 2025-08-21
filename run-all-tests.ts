@@ -10,6 +10,7 @@
 import { spawn } from 'child_process';
 import { existsSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
+import { teardownTimerManagement } from './src/utils/timer-manager.js';
 
 interface TestResult {
   file: string;
@@ -576,6 +577,10 @@ process.on('unhandledRejection', (reason, promise) => {
 process.on('uncaughtException', (error) => {
   console.error('❌ Uncaught Exception:', error);
   process.exit(1);
+});
+
+process.on('exit', () => {
+  teardownTimerManagement();
 });
 
 // تشغيل البرنامج

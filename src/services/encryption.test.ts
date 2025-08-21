@@ -30,14 +30,30 @@ describe('readRawBody', () => {
 
     await expect(readRawBody(ctx, 1024)).rejects.toHaveProperty('status', 413);
   });
+
+  it('allows multiple reads on the same body', async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('hello'));
+        controller.close();
+      }
+    });
+
+    const ctx = { req: { raw: { body: stream } } };
+    const first = await readRawBody(ctx);
+    expect(first.toString()).toBe('hello');
+
+    const second = await readRawBody(ctx);
+    expect(second).toEqual(Buffer.alloc(0));
+  });
 });
 
 describe('decryptToken', () => {
   const key =
-    process.env.ENCRYPTION_KEY_HEX ||
     process.env.ENCRYPTION_KEY ||
     '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-  process.env.ENCRYPTION_KEY_HEX = key;
+  process.env.ENCRYPTION_KEY = key;
   const svc = new EncryptionService();
 
   it('returns payload for valid token', () => {

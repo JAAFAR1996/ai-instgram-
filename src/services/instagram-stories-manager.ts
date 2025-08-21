@@ -134,6 +134,10 @@ export class InstagramStoriesManager {
     clearInstagramClient(merchantId);
   }
 
+  public dispose(): void {
+    this.credentialsCache.dispose();
+  }
+
   /**
    * Process story interaction (reply, mention, etc.)
    */

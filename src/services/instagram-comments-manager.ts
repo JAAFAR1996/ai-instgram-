@@ -125,6 +125,10 @@ export class InstagramCommentsManager {
     }
   }
 
+  public dispose(): void {
+    this.credentialsCache.dispose();
+  }
+
   /**
    * Process new comment interaction
    */
