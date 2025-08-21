@@ -6,7 +6,7 @@
  */
 
 import { getDatabase } from '../database/connection.js';
-import type { Sql } from 'postgres';
+import type { Fragment } from 'postgres';
 
 interface MerchantRow {
   id: string;
@@ -27,6 +27,15 @@ interface MerchantRow {
 
 interface CountRow {
   count: string;
+}
+
+interface MerchantStatsRow {
+  total_merchants: string;
+  active_merchants: string;
+  subscription_tier: string | null;
+  business_category: string | null;
+  total_messages_used: string | null;
+  avg_messages_per_merchant: string | null;
 }
 
 export interface Merchant {
@@ -109,7 +118,7 @@ export class MerchantRepository {
    * Create new merchant
    */
   async create(data: CreateMerchantRequest): Promise<Merchant> {
-    const sql = this.db.getSQL() as any;
+    const sql = this.db.getSQL() as Sql;
     
     const [merchant] = await sql<MerchantRow>`
       INSERT INTO merchants (
@@ -141,7 +150,7 @@ export class MerchantRepository {
    * Find merchant by ID
    */
   async findById(id: string): Promise<Merchant | null> {
-    const sql = this.db.getSQL() as any;
+    const sql = this.db.getSQL() as Sql;
     
     const [merchant] = await sql<MerchantRow>`
       SELECT * FROM merchants
@@ -155,7 +164,7 @@ export class MerchantRepository {
    * Find merchant by email
    */
   async findByEmail(email: string): Promise<Merchant | null> {
-    const sql = this.db.getSQL() as any;
+    const sql = this.db.getSQL() as Sql;
     
     const [merchant] = await sql<MerchantRow>`
       SELECT * FROM merchants
@@ -169,9 +178,9 @@ export class MerchantRepository {
    * Update merchant
    */
   async update(id: string, data: UpdateMerchantRequest): Promise<Merchant | null> {
-    const sql = this.db.getSQL() as any;
+    const sql = this.db.getSQL() as Sql;
     
-    const updateFields: Sql[] = [];
+    const updateFields: Fragment[] = [];
 
     if (data.businessName !== undefined) {
       updateFields.push(sql`business_name = ${data.businessName}`);
@@ -232,7 +241,7 @@ export class MerchantRepository {
    * Update last active time
    */
   async updateLastActive(id: string): Promise<void> {
-    const sql = this.db.getSQL() as any;
+    const sql = this.db.getSQL() as Sql;
     
     await sql`
       UPDATE merchants
@@ -247,7 +256,7 @@ export class MerchantRepository {
    * Increment message usage
    */
   async incrementMessageUsage(id: string, count: number = 1): Promise<boolean> {
-    const sql = this.db.getSQL() as any;
+    const sql = this.db.getSQL() as Sql;
     
     const result = await sql`
       UPDATE merchants
@@ -266,7 +275,7 @@ export class MerchantRepository {
    * Reset monthly message usage (for new billing cycle)
    */
   async resetMonthlyUsage(id: string): Promise<void> {
-    const sql = this.db.getSQL() as any;
+    const sql = this.db.getSQL() as Sql;
     
     await sql`
       UPDATE merchants
@@ -301,9 +310,9 @@ export class MerchantRepository {
    * Find merchants with filters
    */
   async findMany(filters: MerchantFilters = {}): Promise<Merchant[]> {
-    const sql = this.db.getSQL() as any;
+    const sql = this.db.getSQL() as Sql;
     
-    const conditions: Sql[] = [];
+    const conditions: Fragment[] = [];
 
     if (filters.isActive !== undefined) {
       conditions.push(sql`is_active = ${filters.isActive}`);
@@ -338,24 +347,24 @@ export class MerchantRepository {
     const limitClause = filters.limit ? sql`LIMIT ${filters.limit}` : sql``;
     const offsetClause = filters.offset ? sql`OFFSET ${filters.offset}` : sql``;
 
-    const merchants = await this.db.query`
+    const merchants = await this.db.query<MerchantRow>`
       SELECT * FROM merchants
       ${whereClause}
       ORDER BY created_at DESC
       ${limitClause}
       ${offsetClause}
     `;
-    return merchants.map(m => this.mapToMerchant(m));
+    return merchants.map((m: MerchantRow) => this.mapToMerchant(m));
   }
 
   /**
    * Get merchant statistics
    */
   async getStats(): Promise<MerchantStats> {
-    const sql = this.db.getSQL() as any;
-    
-    const results = await this.db.query`
-      SELECT 
+    const sql = this.db.getSQL() as Sql;
+
+    const results = await sql<MerchantStatsRow>`
+      SELECT
         COUNT(*) as total_merchants,
         COUNT(*) FILTER (WHERE is_active = true) as active_merchants,
         subscription_tier,
@@ -376,7 +385,7 @@ export class MerchantRepository {
       averageMessagesPerMerchant: 0
     };
 
-    for (const row of results) {
+    for (const row of results as MerchantStatsRow[]) {
       if (!row.subscription_tier && !row.business_category) {
         // Overall totals
         stats.totalMerchants = parseInt(row.total_merchants);
@@ -418,7 +427,7 @@ export class MerchantRepository {
    * Get merchants approaching message limit
    */
   async getMerchantsApproachingLimit(threshold: number = 0.8): Promise<Merchant[]> {
-    const sql = this.db.getSQL() as any;
+    const sql = this.db.getSQL() as Sql;
     
     const merchants = await sql<MerchantRow>`
       SELECT * FROM merchants
@@ -428,14 +437,14 @@ export class MerchantRepository {
       ORDER BY (monthly_messages_used::float / monthly_message_limit) DESC
     `;
 
-    return merchants.map(m => this.mapToMerchant(m));
+    return merchants.map((m: MerchantRow) => this.mapToMerchant(m));
   }
 
   /**
    * Get merchants over message limit
    */
   async getMerchantsOverLimit(): Promise<Merchant[]> {
-    const sql = this.db.getSQL() as any;
+    const sql = this.db.getSQL() as Sql;
     
     const merchants = await sql<MerchantRow>`
       SELECT * FROM merchants
@@ -444,16 +453,16 @@ export class MerchantRepository {
       ORDER BY monthly_messages_used DESC
     `;
 
-    return merchants.map(m => this.mapToMerchant(m));
+    return merchants.map((m: MerchantRow) => this.mapToMerchant(m));
   }
 
   /**
    * Count merchants with filters
    */
   async count(filters: MerchantFilters = {}): Promise<number> {
-    const sql = this.db.getSQL() as any;
+    const sql = this.db.getSQL() as Sql;
     
-    const conditions: Sql[] = [];
+    const conditions: Fragment[] = [];
 
     if (filters.isActive !== undefined) {
       conditions.push(sql`is_active = ${filters.isActive}`);

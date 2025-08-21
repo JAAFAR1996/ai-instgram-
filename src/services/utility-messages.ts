@@ -242,7 +242,7 @@ export class UtilityMessagesService {
     try {
       const sql = this.db.getSQL() as any;
 
-      const result = await sql<UtilityMessageTemplateRow>`
+      const result = await sql<UtilityMessageTemplateRow[]>`
         SELECT * FROM utility_message_templates
         WHERE id = ${templateId} AND merchant_id = ${merchantId}::uuid AND approved = true
       `;
@@ -350,7 +350,7 @@ export class UtilityMessagesService {
     try {
       const sql = this.db.getSQL() as any;
       
-      const result = await sql<UtilityMessageTemplateRow>`
+      const result = await sql<UtilityMessageTemplateRow[]>`
         SELECT * FROM utility_message_templates
         WHERE merchant_id = ${merchantId}::uuid
         ORDER BY created_at DESC

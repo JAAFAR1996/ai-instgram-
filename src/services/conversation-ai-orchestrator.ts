@@ -223,7 +223,7 @@ export class ConversationAIOrchestrator {
       const sql = this.db.getSQL() as any;
 
       // Get customer interactions across platforms
-      const interactions = await sql<InteractionRow>`
+      const interactions = await sql<InteractionRow[]>`
         SELECT 
           c.platform,
           c.conversation_stage,
@@ -278,7 +278,7 @@ export class ConversationAIOrchestrator {
     try {
       const sql = this.db.getSQL() as any;
 
-      const platformHistory = await sql<PlatformHistoryRow>`
+      const platformHistory = await sql<PlatformHistoryRow[]>`
         SELECT 
           platform,
           COUNT(*) as interaction_count,
@@ -290,19 +290,25 @@ export class ConversationAIOrchestrator {
         GROUP BY platform
       `;
 
-      const hasWhatsAppHistory = platformHistory.some(p => p.platform === 'whatsapp');
-      const hasInstagramHistory = platformHistory.some(p => p.platform === 'instagram');
-      
-      const preferredPlatform = platformHistory.reduce((prev, current) => 
-        prev.interaction_count > current.interaction_count ? prev : current
+      const hasWhatsAppHistory = platformHistory.some(
+        (p: PlatformHistoryRow) => p.platform === 'whatsapp'
+      );
+      const hasInstagramHistory = platformHistory.some(
+        (p: PlatformHistoryRow) => p.platform === 'instagram'
+      );
+
+      const preferredPlatform = platformHistory.reduce(
+        (prev: PlatformHistoryRow, current: PlatformHistoryRow) =>
+          prev.interaction_count > current.interaction_count ? prev : current
       )?.platform || 'whatsapp';
 
       const totalInteractions = platformHistory.reduce(
-        (sum, p) => sum + parseInt(p.interaction_count), 0
+        (sum: number, p: PlatformHistoryRow) => sum + parseInt(p.interaction_count),
+        0
       );
 
       // Get customer journey stages
-      const journeyStages = await sql<JourneyStageRow>`
+      const journeyStages = await sql<JourneyStageRow[]>`
         SELECT 
           platform,
           conversation_stage,
@@ -315,12 +321,14 @@ export class ConversationAIOrchestrator {
         LIMIT 20
       `;
 
-      const customerJourney: CustomerJourneyStage[] = journeyStages.map(stage => ({
-        platform: stage.platform as Platform,
-        stage: stage.conversation_stage,
-        timestamp: new Date(stage.created_at),
-        intent: stage.intent
-      }));
+      const customerJourney: CustomerJourneyStage[] = journeyStages.map(
+        (stage: JourneyStageRow) => ({
+          platform: stage.platform as Platform,
+          stage: stage.conversation_stage,
+          timestamp: new Date(stage.created_at),
+          intent: stage.intent
+        })
+      );
 
       return {
         hasWhatsAppHistory,
@@ -556,10 +564,13 @@ export class ConversationAIOrchestrator {
    * Private: Analyze platform preferences
    */
   private analyzePlatformPreferences(interactions: InteractionRow[]): PlatformPreferences {
-    const platforms = interactions.reduce((acc, interaction) => {
-      acc[interaction.platform] = (acc[interaction.platform] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    const platforms = interactions.reduce(
+      (acc: Record<string, number>, interaction: InteractionRow) => {
+        acc[interaction.platform] = (acc[interaction.platform] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
 
     const total = interactions.length;
     

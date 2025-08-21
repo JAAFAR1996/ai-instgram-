@@ -516,7 +516,7 @@ export class RedisConnectionManager {
       await connection.ping();
       this.logger?.debug('Temporary connection established', { usageType });
     } catch (error) {
-      this.logger?.warn('Temporary connection ping failed', { error, usageType });
+      this.logger?.warn({ err: error, usageType }, 'Temporary connection ping failed');
     }
     
     // إعداد إغلاق تلقائي
@@ -525,7 +525,7 @@ export class RedisConnectionManager {
         await connection.disconnect();
         this.logger?.debug('Temporary connection closed', { usageType });
       } catch (error) {
-        this.logger?.warn('Error closing temporary connection', { error });
+        this.logger?.warn({ err: error }, 'Error closing temporary connection');
       }
     }, ttl);
 

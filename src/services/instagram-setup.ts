@@ -165,13 +165,13 @@ export class InstagramSetupService {
     try {
       const client = getInstagramClient('validation'); // Use a temporary client
 
-      const accountInfo = await client.graphRequest<BusinessAccountInfo>(
+      const accountInfo = (await client.graphRequest<BusinessAccountInfo>(
         'GET',
         `/${businessAccountId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,
         pageAccessToken,
         undefined,
         'validation'
-      );
+      )) as BusinessAccountInfo;
 
       // Validate account type
       if (!accountInfo.id) {
@@ -465,13 +465,13 @@ export class InstagramSetupService {
     config: InstagramSetupConfig
   ): Promise<BusinessAccountInfo> {
     const client = getInstagramClient('setup-test');
-    return await client.graphRequest<BusinessAccountInfo>(
+    return (await client.graphRequest<BusinessAccountInfo>(
       'GET',
       `/${config.businessAccountId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,
       config.pageAccessToken,
       undefined,
       'setup-test'
-    );
+    )) as BusinessAccountInfo;
   }
 
   /**

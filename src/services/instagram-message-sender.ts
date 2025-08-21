@@ -127,8 +127,8 @@ export class InstagramMessageSender {
 
       // Check message window if available
       if (conversationId) {
-        const canSend = await this.checkMessageWindow(merchantId, recipientId);
-        if (!canSend) {
+        const canSendMessage = await this.checkMessageWindow(merchantId, recipientId);
+        if (!canSendMessage) {
           return {
             success: false,
             error: 'Message window expired - cannot send message',
@@ -216,8 +216,8 @@ export class InstagramMessageSender {
 
       // Check message window
       if (conversationId) {
-        const canSend = await this.checkMessageWindow(merchantId, recipientId);
-        if (!canSend) {
+        const canSendMessage = await this.checkMessageWindow(merchantId, recipientId);
+        if (!canSendMessage) {
           return {
             success: false,
             error: 'Message window expired - cannot send media',
@@ -334,8 +334,8 @@ export class InstagramMessageSender {
 
       // Check message window
       if (conversationId) {
-        const canSend = await this.checkMessageWindow(merchantId, recipientId);
-        if (!canSend) {
+        const canSendMessage = await this.checkMessageWindow(merchantId, recipientId);
+        if (!canSendMessage) {
           return {
             success: false,
             error: 'Message window expired - cannot send template',
@@ -489,8 +489,8 @@ export class InstagramMessageSender {
 
       // Check message window
       if (conversationId) {
-        const canSend = await this.checkMessageWindow(merchantId, recipientId);
-        if (!canSend) {
+        const canSendMessage = await this.checkMessageWindow(merchantId, recipientId);
+        if (!canSendMessage) {
           return {
             success: false,
             error: 'Message window expired - cannot send quick replies',
@@ -751,7 +751,7 @@ export class InstagramMessageSender {
         { instagram: recipientId, platform: 'instagram' }
       );
 
-      return windowStatus.canSend;
+      return windowStatus.canSendMessage;
     } catch (error) {
       logger.error('Message window check failed, proceeding cautiously', { error });
       return true; // أو إعادة الخطأ ليُعالج أعلى الدالة

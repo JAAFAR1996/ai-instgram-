@@ -8,6 +8,7 @@
 import { getDatabase } from '../database/connection.js';
 import { getEncryptionService } from '../services/encryption.js';
 import type { MerchantCredentials, Platform } from '../types/database.js';
+import type { Sql } from 'postgres';
 
 interface TokenRow {
   token_encrypted: string | null;
@@ -288,17 +289,17 @@ export class CredentialsRepository {
    * Get expired tokens for cleanup
    */
   async getExpiredTokens(): Promise<string[]> {
-    const sql = this.db.getSQL() as any;
-    
+    const sql: Sql = this.db.getSQL();
+
     const rows = await sql<MerchantIdRow>`
       SELECT DISTINCT merchant_id
-      FROM merchant_credentials 
-      WHERE token_expires_at IS NOT NULL 
+      FROM merchant_credentials
+      WHERE token_expires_at IS NOT NULL
       AND token_expires_at < NOW()
       AND (whatsapp_token_encrypted IS NOT NULL OR instagram_token_encrypted IS NOT NULL)
     `;
 
-    return rows.map(row => row.merchant_id);
+    return rows.map((row: MerchantIdRow) => row.merchant_id);
   }
 
   /**

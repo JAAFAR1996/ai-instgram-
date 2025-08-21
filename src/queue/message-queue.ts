@@ -10,7 +10,6 @@ import { getConfig } from '../config/environment.js';
 import { getAnalyticsService } from '../services/analytics-service.js';
 import { getLogger } from '../services/logger.js';
 import { pushDLQ } from './dead-letter.js';
-import type { Sql } from 'postgres';
 
 export interface QueueJob {
   id: string;
@@ -61,6 +60,17 @@ export interface QueueStats {
   byType: Record<string, number>;
   byPriority: Record<string, number>;
   avgProcessingTimeMs: number;
+}
+
+interface QueueStatsRow {
+  total: string;
+  pending: string;
+  processing: string;
+  completed: string;
+  failed: string;
+  type: string | null;
+  priority: string | null;
+  avg_processing_time_ms: string;
 }
 
 export class MessageQueue {
@@ -301,8 +311,8 @@ export class MessageQueue {
   async getStats(): Promise<QueueStats> {
     const sql = this.db.getSQL();
     
-    const results = await this.db.query`
-      SELECT 
+    const results = await this.db.query<QueueStatsRow>`
+      SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
         COUNT(*) FILTER (WHERE status = 'PROCESSING') as processing,
@@ -374,8 +384,8 @@ export class MessageQueue {
    * Retry failed jobs
    */
   async retryFailedJobs(jobType?: QueueJobType): Promise<number> {
-    const sql = this.db.getSQL();
-    
+    const sql: Sql = this.db.getSQL();
+
     const conditions: Sql[] = [
       sql`status = 'FAILED'`,
       sql`attempts < max_attempts`
@@ -385,7 +395,7 @@ export class MessageQueue {
       conditions.push(sql`type = ${jobType}`);
     }
 
-    const result = await this.db.query`
+    const result = await sql`
       UPDATE queue_jobs
       SET
         status = 'PENDING',

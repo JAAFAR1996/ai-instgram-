@@ -83,7 +83,7 @@ describe('InstagramMessageSender client caching', () => {
     mock.module('../services/message-window.js', () => ({
       getMessageWindowService: () => ({
         recordMerchantResponse: mock(async () => {}),
-        checkWindow: mock(async () => ({ canSend: true }))
+        getWindowStatus: mock(async () => ({ canSendMessage: true }))
       })
     }));
 
@@ -147,7 +147,7 @@ describe('InstagramMessageSender error logging', () => {
           if (recipient.instagram === 'user2') {
             throw new Error('window fail');
           }
-          return { canSend: true };
+          return { canSendMessage: true };
         }),
         recordMerchantResponse: mock(async () => {})
       })

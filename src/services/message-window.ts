@@ -90,7 +90,7 @@ export class MessageWindowService {
     try {
       const sql = this.db.getSQL();
       
-      const result = await sql<MessageWindowRow>`
+      const result = await sql<MessageWindowRow[]>`
         SELECT * FROM check_message_window(
           ${merchantId}::uuid,
           ${customer.phone || null},
@@ -140,7 +140,7 @@ export class MessageWindowService {
       const isNewWindow = !existingWindow;
       
       // Update or create window
-      await sql<NoResultRow>`
+      await sql<NoResultRow[]>`
         SELECT update_message_window(
           ${merchantId}::uuid,
           ${customer.phone || null},
@@ -219,7 +219,7 @@ export class MessageWindowService {
     try {
       const sql = this.db.getSQL();
       
-      await sql<NoResultRow>`
+      await sql<NoResultRow[]>`
         UPDATE message_windows
         SET
           merchant_response_count = merchant_response_count + 1,
@@ -251,7 +251,7 @@ export class MessageWindowService {
     try {
       const sql = this.db.getSQL();
       
-      const windows = await sql<ActiveWindowRow>`
+      const windows = await sql<ActiveWindowRow[]>`
         SELECT
           id,
           COALESCE(customer_phone, customer_instagram) as customer_id,
@@ -265,7 +265,7 @@ export class MessageWindowService {
         ORDER BY window_expires_at ASC
       `;
 
-      return windows.map(window => ({
+      return windows.map((window: ActiveWindowRow) => ({
         id: window.id,
         customerId: window.customer_id,
         platform: window.platform,
@@ -286,7 +286,7 @@ export class MessageWindowService {
     try {
       const sql = this.db.getSQL();
       
-      const result = await sql<DeleteCountRow>`
+      const result = await sql<DeleteCountRow[]>`
         DELETE FROM message_windows
         WHERE window_expires_at < NOW() - INTERVAL '${olderThanDays} days'
       ` as unknown as { count: number };
@@ -317,7 +317,7 @@ export class MessageWindowService {
     try {
       const sql = this.db.getSQL();
       
-      const stats = await sql<WindowStatsRow>`
+      const stats = await sql<WindowStatsRow[]>`
         SELECT
           COUNT(*) as total_windows,
           SUM(CASE WHEN is_expired = false THEN 1 ELSE 0 END) as active_windows,
@@ -367,7 +367,7 @@ export class MessageWindowService {
     try {
       const sql = this.db.getSQL();
       
-      const windows = await sql<ExpiringWindowRow>`
+      const windows = await sql<ExpiringWindowRow[]>`
         SELECT
           COALESCE(customer_phone, customer_instagram) as customer_id,
           platform,
@@ -379,8 +379,8 @@ export class MessageWindowService {
         AND window_expires_at <= NOW() + INTERVAL '${minutesUntilExpiry} minutes'
         ORDER BY window_expires_at ASC
       `;
-
-      return windows.map(window => ({
+        
+      return windows.map((window: ExpiringWindowRow) => ({
         customerId: window.customer_id,
         platform: window.platform,
         expiresAt: new Date(window.expires_at),
@@ -398,11 +398,11 @@ export class MessageWindowService {
   private async getExistingWindow(
     merchantId: string,
     customer: CustomerIdentifier
-  ): Promise<any | null> {
+  ): Promise<MessageWindowRecord | null> {
     try {
       const sql = this.db.getSQL();
       
-      const windows = await sql<MessageWindowRecord>`
+      const windows = await sql<MessageWindowRecord[]>`
         SELECT *
         FROM message_windows
         WHERE merchant_id = ${merchantId}::uuid

@@ -235,8 +235,8 @@ export class MonitoringService {
   }>> {
     try {
       const sql = this.db.getSQL() as any;
-      
-      const trends = await sql<QualityTrendRow>
+
+      const trends = await sql<QualityTrendRow[]>
       `
         SELECT
           DATE(created_at) as date,
@@ -255,8 +255,8 @@ export class MonitoringService {
         AND created_at >= NOW() - INTERVAL '${days} days'
         ORDER BY created_at DESC
       `;
-      
-      return trends.map(trend => ({
+
+      return trends.map((trend: QualityTrendRow) => ({
         date: trend.date,
         qualityRating: trend.quality_rating ?? undefined,
         status: trend.status,
@@ -287,7 +287,7 @@ export class MonitoringService {
     try {
       const sql = this.db.getSQL() as any;
       
-      const performance = await sql<SystemPerformanceRow>
+      const performance = await sql<SystemPerformanceRow[]>
       `
         SELECT
           AVG(execution_time_ms) as avg_response_time,
@@ -299,7 +299,7 @@ export class MonitoringService {
         AND action LIKE '%API_%'
       `;
 
-      const connections = await sql<ActiveConnectionsRow>
+      const connections = await sql<ActiveConnectionsRow[]>
       `
         SELECT count(*) as active_connections
         FROM pg_stat_activity
@@ -330,7 +330,7 @@ export class MonitoringService {
     try {
       const sql = this.db.getSQL() as any;
       
-      const stats = await sql<QualityStatsRow>
+      const stats = await sql<QualityStatsRow[]>
       `
         SELECT
           COUNT(*) FILTER (WHERE direction = 'OUTGOING') as messages_sent_24h,

@@ -14,7 +14,7 @@ import type { Platform } from '../types/database.js';
 import { createHash } from 'crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { InstagramAPICredentials } from '../types/instagram.js';
+import type { InstagramAPICredentials, SendMessageRequest } from '../types/instagram.js';
 import { getLogger } from './logger.js';
 export type { InstagramAPICredentials } from '../types/instagram.js';
 
@@ -153,7 +153,7 @@ export class InstagramAPIClient {
     try {
       check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
     } catch (error) {
-      this.logger.warn(`⚠️ Redis rate limit check failed for ${rateKey}:`, error);
+      this.logger.warn({ err: error }, `⚠️ Redis rate limit check failed for ${rateKey}:`);
       telemetry.recordRateLimitStoreFailure('instagram', path);
       check = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
     }
@@ -225,7 +225,7 @@ export class InstagramAPIClient {
 
       const rateLimitRemaining =
         this.parseRateLimitHeaders(response) ?? 200;
-      const result = await response.json();
+      const result: any = await response.json();
 
       return {
         success: true,
@@ -303,7 +303,7 @@ export class InstagramAPIClient {
       throw new Error(errText);
     }
 
-    const data = await response.json().catch(() => ({}));
+    const data: any = await response.json().catch(() => ({}));
     return data.id || data.media_id || data.attachment_id || data.mediaId;
   }
 
@@ -339,7 +339,7 @@ export class InstagramAPIClient {
         message: message
       };
 
-      const result = await this.graphRequest<any>(
+      const result: any = await this.graphRequest<any>(
         'POST',
         `/${commentId}/replies`,
         credentials.pageAccessToken,
@@ -373,7 +373,7 @@ export class InstagramAPIClient {
     userId: string
   ): Promise<InstagramProfile | null> {
     try {
-      const result = await this.graphRequest<InstagramProfile>(
+      const result: InstagramProfile = await this.graphRequest<InstagramProfile>(
         'GET',
         `/${userId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,
         credentials.pageAccessToken,
@@ -439,7 +439,7 @@ export class InstagramAPIClient {
         verify_token: credentials.webhookVerifyToken
       };
 
-      const result = await this.graphRequest<any>(
+      const result: any = await this.graphRequest<any>(
         'POST',
         `/${credentials.pageId}/subscribed_apps`,
         credentials.pageAccessToken,
@@ -753,7 +753,7 @@ export class InstagramAPICredentialsManager {
     try {
       const sql = this.db.getSQL();
       
-      const result = await sql`
+      const result: any[] = await sql`
         SELECT instagram_token_encrypted
         FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
@@ -778,8 +778,8 @@ export class InstagramAPICredentialsManager {
     try {
       const sql = this.db.getSQL();
       
-      const result = await sql`
-        SELECT 
+      const result: any[] = await sql`
+        SELECT
           instagram_token_encrypted,
           instagram_page_id,
           last_access_at

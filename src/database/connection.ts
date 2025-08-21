@@ -6,7 +6,7 @@
  */
 
 import postgres from 'postgres';
-import type { Sql } from 'postgres';
+import type { Sql, Row, UnwrapPromiseArray } from 'postgres';
 import type { DatabaseError } from '../types/database.js';
 import { getConfig, getEnvVar } from '../config/environment.js';
 
@@ -162,7 +162,7 @@ export class DatabaseConnection {
       }
 
       // Test basic connectivity
-      const result = await this.sql<TestResult>`SELECT NOW() as current_time, version() as db_version`;
+      const result = await this.sql<TestResult[]>`SELECT NOW() as current_time, version() as db_version`;
       
       if (result.length === 0) {
         throw new Error('No response from database');
@@ -190,13 +190,13 @@ export class DatabaseConnection {
     try {
       if (!this.sql) throw new Error('Database not connected');
 
-      const extensions = await this.sql<ExtensionRow>`
+      const extensions = await this.sql<ExtensionRow[]>`
         SELECT extname
         FROM pg_extension
         WHERE extname = ANY(${requiredExtensions})
       `;
 
-      const installedExtensions = extensions.map((ext) => ext.extname);
+      const installedExtensions = extensions.map((ext: ExtensionRow) => ext.extname);
       const missingExtensions = requiredExtensions.filter(ext => !installedExtensions.includes(ext));
 
       if (missingExtensions.length > 0) {
@@ -224,16 +224,16 @@ export class DatabaseConnection {
    * Execute a parameterized query using tagged templates
    * Provides automatic sanitization via the postgres library
    */
-  public async query<T = unknown, TParams extends unknown[] = unknown[]>(
+  public async query<T extends object = Row>(
     strings: TemplateStringsArray,
-    ...params: TParams
+    ...params: unknown[]
   ): Promise<T[]> {
     try {
       if (!this.sql) {
         throw new Error('Database connection not initialized');
       }
 
-      const result = await this.sql<T>(strings, ...params);
+      const result = await this.sql<T[]>(strings, ...params);
       return result;
     } catch (error) {
       console.error('❌ Database query error:', error);
@@ -246,15 +246,13 @@ export class DatabaseConnection {
    */
   public async transaction<T>(
     callback: (sql: Sql) => Promise<T>
-  ): Promise<T> {
+  ): Promise<UnwrapPromiseArray<T>> {
     if (!this.sql) {
       throw new Error('Database connection not initialized');
     }
 
     try {
-      return await this.sql.begin(async (sql) => {
-        return await callback(sql);
-      });
+      return await this.sql.begin(callback);
     } catch (error) {
       console.error('❌ Database transaction error:', error);
       throw this.formatDatabaseError(error);
@@ -282,7 +280,7 @@ export class DatabaseConnection {
       }
 
       // Get connection stats
-      const stats = await this.sql<StatsRow>`
+      const stats = await this.sql<StatsRow[]>`
         SELECT
           count(*) as active_connections,
           pg_size_pretty(pg_database_size(current_database())) as database_size
@@ -333,19 +331,19 @@ export class DatabaseConnection {
       if (!this.sql) throw new Error('Database not connected');
 
       // Get table count
-      const tableCount = await this.sql<TableCountRow>`
+      const tableCount = await this.sql<TableCountRow[]>`
         SELECT count(*) as count
         FROM information_schema.tables
         WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
       `;
 
       // Get database size
-      const dbSize = await this.sql<DbSizeRow>`
+      const dbSize = await this.sql<DbSizeRow[]>`
         SELECT pg_size_pretty(pg_database_size(current_database())) as size
       `;
 
       // Get largest tables
-      const largestTables = await this.sql<LargestTableRow>`
+      const largestTables = await this.sql<LargestTableRow[]>`
         SELECT
           schemaname||'.'||tablename as table_name,
           n_tup_ins + n_tup_upd + n_tup_del as row_count,
@@ -355,7 +353,10 @@ export class DatabaseConnection {
         LIMIT 10
       `;
 
-      const totalRecords = largestTables.reduce<number>((sum, table) => sum + table.row_count, 0);
+      const totalRecords = largestTables.reduce<number>(
+        (sum: number, table: LargestTableRow) => sum + table.row_count,
+        0
+      );
 
       return {
         total_tables: parseInt(tableCount[0].count, 10),

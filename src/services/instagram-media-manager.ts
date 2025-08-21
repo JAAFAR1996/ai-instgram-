@@ -71,6 +71,7 @@ export interface MediaTemplate {
   category: 'product' | 'promo' | 'greeting' | 'thanks' | 'story';
   mediaType: 'image' | 'video' | 'gif';
   templateUrl: string;
+  attachmentId?: string;
   overlayElements: {
     text?: {
       content: string;

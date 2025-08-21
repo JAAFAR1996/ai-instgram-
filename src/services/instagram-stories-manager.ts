@@ -78,6 +78,25 @@ export interface StoryTemplate {
   responseTemplate?: StoryResponse;
 }
 
+interface TopInteractionTimeRow {
+  hour: number;
+  count: number;
+}
+
+interface StoryTemplateRow {
+  id: string;
+  name: string;
+  category: string;
+  template_data: string;
+  response_template: string | null;
+}
+
+interface MessageHistoryRow {
+  role: string;
+  content: string;
+  timestamp: Date;
+}
+
 export class InstagramStoriesManager {
   private logger = createLogger({ component: 'InstagramStoriesManager' });
   private db = getDatabase();
@@ -149,7 +168,7 @@ export class InstagramStoriesManager {
         try {
           return JSON.parse(existingResult);
         } catch (error) {
-          this.logger.warn('Failed to parse cached story result, continuing processing', error, { idempotencyKey });
+          this.logger.warn({ err: error, idempotencyKey }, 'Failed to parse cached story result, continuing processing');
         }
       }
 
@@ -292,6 +311,7 @@ export class InstagramStoriesManager {
       if (sendResult.success) {
         // Store the response in conversation
         await this.storeStoryResponse(
+          merchantId,
           conversation.id,
           personalizedResponse,
           interaction.type,
@@ -363,7 +383,7 @@ export class InstagramStoriesManager {
     dateRange?: { from: Date; to: Date }
   ): Promise<StoryAnalytics> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       const dateFilter = dateRange 
         ? sql`AND created_at BETWEEN ${dateRange.from.toISOString()} AND ${dateRange.to.toISOString()}`
@@ -403,7 +423,7 @@ export class InstagramStoriesManager {
         : 0;
 
       // Get peak interaction times
-      const timeData = await sql`
+      const timeData = await sql<TopInteractionTimeRow[]>`
         SELECT 
           EXTRACT(HOUR FROM created_at) as hour,
           COUNT(*) as count
@@ -415,7 +435,7 @@ export class InstagramStoriesManager {
         LIMIT 3
       `;
 
-      const topInteractionTimes = timeData.map(time => `${time.hour}:00`);
+      const topInteractionTimes = timeData.map((time: TopInteractionTimeRow) => `${time.hour}:00`);
 
       // Calculate engagement score (0-100)
       const userEngagementScore = Math.min(100, 
@@ -449,7 +469,7 @@ export class InstagramStoriesManager {
     template: Omit<StoryTemplate, 'id'>
   ): Promise<string> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       const result = await sql`
         INSERT INTO story_templates (
@@ -487,13 +507,13 @@ export class InstagramStoriesManager {
     category?: string
   ): Promise<StoryTemplate[]> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       const categoryFilter = category 
         ? sql`AND category = ${category}`
         : sql``;
 
-      const templates = await sql`
+      const templates = await sql<StoryTemplateRow[]>`
         SELECT *
         FROM story_templates
         WHERE merchant_id = ${merchantId}::uuid
@@ -501,7 +521,7 @@ export class InstagramStoriesManager {
         ORDER BY created_at DESC
       `;
 
-      return templates.map(template => ({
+      return templates.map((template: StoryTemplateRow) => ({
         id: template.id,
         name: template.name,
         category: template.category,
@@ -524,7 +544,7 @@ export class InstagramStoriesManager {
     merchantId: string
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       await sql`
         INSERT INTO story_interactions (
@@ -570,7 +590,7 @@ export class InstagramStoriesManager {
     username?: string
   ): Promise<{ id: string; isNew: boolean } | null> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       // Try to find existing conversation
       const existing = await sql`
@@ -631,7 +651,7 @@ export class InstagramStoriesManager {
     conversationId: string
   ): Promise<InstagramContext> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       // Get merchant and conversation data
       const data = await sql`
@@ -647,7 +667,7 @@ export class InstagramStoriesManager {
       const conversation = data[0];
 
         // Get recent conversation history
-        const messageHistory = await sql`
+        const messageHistory = await sql<MessageHistoryRow[]>`
         SELECT 
           CASE 
             WHEN direction = 'INCOMING' THEN 'user'
@@ -677,7 +697,7 @@ export class InstagramStoriesManager {
         stage: conversation.conversation_stage,
         cart: session.cart || [],
         preferences: session.preferences || {},
-        conversationHistory: messageHistory.reverse().map(msg => ({
+        conversationHistory: messageHistory.reverse().map((msg: MessageHistoryRow) => ({
           role: msg.role,
           content: msg.content,
           timestamp: new Date(msg.timestamp)
@@ -770,13 +790,14 @@ export class InstagramStoriesManager {
    * Private: Store story response
    */
   private async storeStoryResponse(
+    merchantId: string,
     conversationId: string,
     content: string,
     interactionType: string,
     messageId?: string
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       await sql`
         INSERT INTO message_logs (
@@ -811,11 +832,10 @@ export class InstagramStoriesManager {
         WHERE id = ${conversationId}::uuid
       `;
     } catch (error) {
-      this.logger.error('Store story response failed', error, {
-        merchantId,
-        conversationId,
-        interactionType
-      });
+      this.logger.error(
+        { err: error, merchantId, conversationId, interactionType },
+        'Store story response failed'
+      );
       throw error;
     }
   }
@@ -828,7 +848,7 @@ export class InstagramStoriesManager {
     interaction: StoryInteraction
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       const redis = await this.redis.getConnection(RedisUsageType.CACHING);
 
       // Ensure unique users per day using Redis set
@@ -875,7 +895,7 @@ export class InstagramStoriesManager {
     interactionType: string
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       await sql`
         INSERT INTO sales_opportunities (

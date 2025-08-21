@@ -6,7 +6,6 @@
  */
 
 import { getDatabase } from '../database/connection.js';
-import type { Sql } from 'postgres';
 // @ts-ignore - sql helper types not exported
 import { sql as sqlIdentifier } from 'postgres';
 
@@ -187,8 +186,6 @@ export class ConversationRepository {
    * Update conversation
    */
   async update(id: string, data: UpdateConversationRequest): Promise<Conversation | null> {
-    const sql = this.db.getSQL() as any;
-    
     const updateFields: string[] = [];
     const updateValues: any[] = [];
     let paramIndex = 1;
@@ -220,15 +217,17 @@ export class ConversationRepository {
     }
 
     const query = `
-      UPDATE conversations 
+      UPDATE conversations
       SET ${updateFields.join(', ')}
       WHERE id = $${paramIndex}::uuid
       RETURNING *
     `;
-    
+
     updateValues.push(id);
-    
-    const [conversation] = await this.db.query<ConversationRow>(query, updateValues);
+
+    const sql: Sql = this.db.getSQL();
+    const rows = await sql.unsafe<ConversationRow[]>(query, updateValues);
+    const [conversation] = rows;
     return conversation ? this.mapToConversation(conversation) : null;
   }
 
@@ -252,8 +251,6 @@ export class ConversationRepository {
    * Find conversations with filters
    */
   async findMany(filters: ConversationFilters = {}): Promise<Conversation[]> {
-    const sql = this.db.getSQL() as any;
-    
     let whereConditions: string[] = [];
     let params: any[] = [];
     let paramIndex = 1;
@@ -313,7 +310,8 @@ export class ConversationRepository {
       ${offsetClause}
     `;
 
-    const conversations = await this.db.query<ConversationRow>(query, params);
+    const sql: Sql = this.db.getSQL();
+    const conversations = await sql.unsafe<ConversationRow[]>(query, params);
     return conversations.map(c => this.mapToConversation(c));
   }
 
@@ -321,8 +319,6 @@ export class ConversationRepository {
    * Get conversation statistics
    */
   async getStats(merchantId?: string, dateFrom?: Date, dateTo?: Date): Promise<ConversationStats> {
-    const sql = this.db.getSQL() as any;
-    
     let whereConditions: string[] = [];
     let params: any[] = [];
     let paramIndex = 1;
@@ -345,7 +341,7 @@ export class ConversationRepository {
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
     const statsQuery = `
-      SELECT 
+      SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE ended_at IS NULL) as active,
         platform,
@@ -358,7 +354,8 @@ export class ConversationRepository {
       ORDER BY platform, conversation_stage
     `;
 
-    const results = await this.db.query<ConversationStatsRow>(statsQuery, params);
+    const sql: Sql = this.db.getSQL();
+    const results = await sql.unsafe<ConversationStatsRow[]>(statsQuery, params);
     
     const stats: ConversationStats = {
       total: 0,
@@ -408,8 +405,6 @@ export class ConversationRepository {
    * Count conversations with filters
    */
   async count(filters: ConversationFilters = {}): Promise<number> {
-    const sql = this.db.getSQL() as any;
-    
     let whereConditions: string[] = [];
     let params: any[] = [];
     let paramIndex = 1;
@@ -433,10 +428,11 @@ export class ConversationRepository {
     }
 
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-    
+
     const query = `SELECT COUNT(*) as count FROM conversations ${whereClause}`;
-    const [result] = await this.db.query<CountRow>(query, params);
-    
+    const sql: Sql = this.db.getSQL();
+    const rows = await sql.unsafe<CountRow[]>(query, params);
+    const [result] = rows;
     return parseInt(result.count);
   }
 
@@ -459,9 +455,9 @@ export class ConversationRepository {
     return {
       id: row.id,
       merchantId: row.merchant_id,
-      customerWhatsapp: row.customer_whatsapp,
-      customerInstagram: row.customer_instagram,
-      customerName: row.customer_name,
+      customerWhatsapp: row.customer_whatsapp ?? undefined,
+      customerInstagram: row.customer_instagram ?? undefined,
+      customerName: row.customer_name ?? undefined,
       platform: row.platform,
       conversationStage: row.conversation_stage,
       sessionData: typeof row.session_data === 'string' ? JSON.parse(row.session_data) : row.session_data,

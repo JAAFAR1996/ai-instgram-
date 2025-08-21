@@ -315,7 +315,7 @@ export class RedisHealthMonitor {
         await connection.ping();
         checks.ping = true;
       } catch (error) {
-        this.logger?.warn('Redis ping failed', { error });
+        this.logger?.warn({ err: error }, 'Redis ping failed');
       }
 
       // 2. فحص الكتابة
@@ -329,7 +329,7 @@ export class RedisHealthMonitor {
         await connection.set(testKey, testValue, 'EX', 30);
         checks.write = true;
       } catch (error) {
-        this.logger?.warn('Redis write failed', { error });
+        this.logger?.warn({ err: error }, 'Redis write failed');
       }
 
       // 3. فحص القراءة
@@ -337,7 +337,7 @@ export class RedisHealthMonitor {
         const retrieved = await connection.get(testKey);
         checks.read = retrieved === testValue;
       } catch (error) {
-        this.logger?.warn('Redis read failed', { error });
+        this.logger?.warn({ err: error }, 'Redis read failed');
       }
 
       // 4. فحص الحذف
@@ -345,7 +345,7 @@ export class RedisHealthMonitor {
         const deleted = await connection.del(testKey);
         checks.delete = deleted === 1;
       } catch (error) {
-        this.logger?.warn('Redis delete failed', { error });
+        this.logger?.warn({ err: error }, 'Redis delete failed');
       }
 
       const responseTime = Date.now() - startTime;
@@ -355,7 +355,7 @@ export class RedisHealthMonitor {
       try {
         metrics = await this.getConnectionMetrics(connection);
       } catch (error) {
-        this.logger?.warn('Failed to get Redis metrics', { error });
+        this.logger?.warn({ err: error }, 'Failed to get Redis metrics');
       }
 
       return {

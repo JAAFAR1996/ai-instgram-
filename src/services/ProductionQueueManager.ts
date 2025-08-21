@@ -1225,7 +1225,7 @@ export class ProductionQueueManager {
 
       this.logger.info('تم تنظيف الطابور الأولي');
     } catch (error) {
-      this.logger.warn('فشل في التنظيف الأولي', { error });
+      this.logger.warn({ err: error }, 'فشل في التنظيف الأولي');
     }
   }
 
@@ -1525,7 +1525,7 @@ export class ProductionQueueManager {
         this.logger.info('✅ تم إغلاق الطابور بأمان');
 
       } catch (error) {
-        this.logger.warn('فشل في الانتظار لإكمال المهام، إغلاق قسري', { error });
+        this.logger.warn({ err: error }, 'فشل في الانتظار لإكمال المهام، إغلاق قسري');
         await this.queue!.close();
         this.queue = null;
       }

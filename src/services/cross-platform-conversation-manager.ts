@@ -9,6 +9,7 @@
 import { getDatabase } from '../database/connection.js';
 import { getConversationAIOrchestrator, type CrossPlatformContext } from './conversation-ai-orchestrator.js';
 import type { Platform } from '../types/database.js';
+import type { Sql } from 'postgres';
 
 export interface UnifiedCustomerProfile {
   customerId: string;
@@ -110,9 +111,17 @@ export class CrossPlatformConversationManager {
     try {
       const sql = this.db.getSQL();
 
+      const conditions: Sql[] = [];
+      if (identifier.phone) {
+        conditions.push(sql`c.customer_phone = ${identifier.phone}`);
+      }
+      if (identifier.instagram) {
+        conditions.push(sql`c.customer_instagram = ${identifier.instagram}`);
+      }
+
       // Find all conversations for this customer across platforms
       const conversations = await sql`
-        SELECT 
+        SELECT
           c.*,
           COUNT(ml.id) as message_count,
           MAX(ml.created_at) as last_message_at,
@@ -120,10 +129,7 @@ export class CrossPlatformConversationManager {
         FROM conversations c
         LEFT JOIN message_logs ml ON c.id = ml.conversation_id
         WHERE c.merchant_id = ${merchantId}::uuid
-        AND (
-          (${identifier.phone} IS NOT NULL AND c.customer_phone = ${identifier.phone}) OR
-          (${identifier.instagram} IS NOT NULL AND c.customer_instagram = ${identifier.instagram})
-        )
+        ${conditions.length ? sql`AND (${sql.join(conditions, sql` OR `)})` : sql``}
         GROUP BY c.id
         ORDER BY c.updated_at DESC
       `;
@@ -320,16 +326,21 @@ export class CrossPlatformConversationManager {
       const sql = this.db.getSQL();
       const mergeStrategy = options?.mergeStrategy || 'most_complete';
 
+      const conditions: Sql[] = [];
+      if (customerIdentifiers.phone) {
+        conditions.push(sql`c.customer_phone = ${customerIdentifiers.phone}`);
+      }
+      if (customerIdentifiers.instagram) {
+        conditions.push(sql`c.customer_instagram = ${customerIdentifiers.instagram}`);
+      }
+
       // Find all conversations for this customer
       const conversations = await sql`
         SELECT c.*, COUNT(ml.id) as message_count
         FROM conversations c
         LEFT JOIN message_logs ml ON c.id = ml.conversation_id
         WHERE c.merchant_id = ${merchantId}::uuid
-        AND (
-          (${customerIdentifiers.phone} IS NOT NULL AND c.customer_phone = ${customerIdentifiers.phone}) OR
-          (${customerIdentifiers.instagram} IS NOT NULL AND c.customer_instagram = ${customerIdentifiers.instagram})
-        )
+        ${conditions.length ? sql`AND (${sql.join(conditions, sql` OR `)})` : sql``}
         GROUP BY c.id
         ORDER BY c.updated_at DESC
       `;
@@ -450,13 +461,20 @@ export class CrossPlatformConversationManager {
       const sql = this.db.getSQL();
 
       // Build time range filter
-      const timeFilter = timeRange ? 
-        sql`AND ml.created_at BETWEEN ${timeRange.start.toISOString()} AND ${timeRange.end.toISOString()}` : 
+      const timeFilter = timeRange ?
+        sql`AND ml.created_at BETWEEN ${timeRange.start.toISOString()} AND ${timeRange.end.toISOString()}` :
         sql`AND ml.created_at >= NOW() - INTERVAL '30 days'`;
+      const conditions: Sql[] = [];
+      if (customerIdentifiers.phone) {
+        conditions.push(sql`c.customer_phone = ${customerIdentifiers.phone}`);
+      }
+      if (customerIdentifiers.instagram) {
+        conditions.push(sql`c.customer_instagram = ${customerIdentifiers.instagram}`);
+      }
 
       // Get journey stages
       const journeyData = await sql`
-        SELECT 
+        SELECT
           c.platform,
           c.conversation_stage,
           ml.created_at,
@@ -467,10 +485,7 @@ export class CrossPlatformConversationManager {
         FROM conversations c
         JOIN message_logs ml ON c.id = ml.conversation_id
         WHERE c.merchant_id = ${merchantId}::uuid
-        AND (
-          (${customerIdentifiers.phone} IS NOT NULL AND c.customer_phone = ${customerIdentifiers.phone}) OR
-          (${customerIdentifiers.instagram} IS NOT NULL AND c.customer_instagram = ${customerIdentifiers.instagram})
-        )
+        ${conditions.length ? sql`AND (${sql.join(conditions, sql` OR `)})` : sql``}
         ${timeFilter}
         ORDER BY ml.created_at ASC
       `;
@@ -859,16 +874,22 @@ export class CrossPlatformConversationManager {
       const timeFilter = timeRange
         ? sql`AND switch_timestamp BETWEEN ${timeRange.start.toISOString()} AND ${timeRange.end.toISOString()}`
         : sql``;
+      const conditions: Sql[] = [];
+      if (customerIdentifiers.phone) {
+        conditions.push(
+          sql`(from_identifier = ${customerIdentifiers.phone} OR to_identifier = ${customerIdentifiers.phone})`
+        );
+      }
+      if (customerIdentifiers.instagram) {
+        conditions.push(
+          sql`(from_identifier = ${customerIdentifiers.instagram} OR to_identifier = ${customerIdentifiers.instagram})`
+        );
+      }
 
       const switches = await sql`
         SELECT * FROM platform_switches
         WHERE merchant_id = ${merchantId}::uuid
-        AND (
-          (${customerIdentifiers.phone} IS NOT NULL AND 
-           (from_identifier = ${customerIdentifiers.phone} OR to_identifier = ${customerIdentifiers.phone})) OR
-          (${customerIdentifiers.instagram} IS NOT NULL AND 
-           (from_identifier = ${customerIdentifiers.instagram} OR to_identifier = ${customerIdentifiers.instagram}))
-        )
+        ${conditions.length ? sql`AND (${sql.join(conditions, sql` OR `)})` : sql``}
         ${timeFilter}
         ORDER BY switch_timestamp ASC
       `;

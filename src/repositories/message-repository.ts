@@ -6,7 +6,7 @@
  */
 
 import { getDatabase } from '../database/connection.js';
-import type { Sql } from 'postgres';
+import type { Fragment } from 'postgres';
 
 interface MessageRow {
   id: string;
@@ -144,7 +144,7 @@ export class MessageRepository {
    * Create new message
    */
   async create(data: CreateMessageRequest): Promise<Message> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
     const [message] = await sql<MessageRow>`
       INSERT INTO message_logs (
@@ -186,7 +186,7 @@ export class MessageRepository {
    * Find message by ID
    */
   async findById(id: string): Promise<Message | null> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
     const [message] = await sql<MessageRow>`
       SELECT * FROM message_logs
@@ -200,9 +200,9 @@ export class MessageRepository {
    * Update message
    */
   async update(id: string, data: UpdateMessageRequest): Promise<Message | null> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
-    const updateFields: Sql[] = [];
+    const updateFields: Fragment[] = [];
 
     if (data.deliveryStatus !== undefined) {
       updateFields.push(sql`delivery_status = ${data.deliveryStatus}`);
@@ -234,7 +234,7 @@ export class MessageRepository {
       return await this.findById(id);
     }
 
-    const [message] = await this.db.query`
+    const [message] = await this.db.query<MessageRow>`
       UPDATE message_logs
       SET ${sql.join(updateFields, sql`, `)}
       WHERE id = ${id}::uuid
@@ -247,9 +247,9 @@ export class MessageRepository {
    * Find messages with filters
    */
   async findMany(filters: MessageFilters = {}): Promise<Message[]> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
-    const conditions: Sql[] = [];
+    const conditions: Fragment[] = [];
 
     if (filters.conversationId) {
       conditions.push(sql`conversation_id = ${filters.conversationId}::uuid`);
@@ -294,14 +294,14 @@ export class MessageRepository {
     const limitClause = filters.limit ? sql`LIMIT ${filters.limit}` : sql``;
     const offsetClause = filters.offset ? sql`OFFSET ${filters.offset}` : sql``;
 
-    const messages = await this.db.query`
+    const messages = await this.db.query<MessageRow>`
       SELECT * FROM message_logs
       ${whereClause}
       ORDER BY created_at DESC
       ${limitClause}
       ${offsetClause}
     `;
-    return messages.map(m => this.mapToMessage(m));
+    return messages.map((m: MessageRow) => this.mapToMessage(m));
   }
 
   /**
@@ -312,7 +312,7 @@ export class MessageRepository {
     limit: number = 50,
     offset: number = 0
   ): Promise<ConversationHistory> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
     // Get messages
     const messages = await sql<ConversationHistoryRow>`
@@ -334,7 +334,7 @@ export class MessageRepository {
 
     return {
       conversationId,
-      messages: messages.map(m => this.mapToMessage(m)),
+      messages: messages.map((m: ConversationHistoryRow) => this.mapToMessage(m)),
       totalCount,
       hasMore
     };
@@ -347,7 +347,7 @@ export class MessageRepository {
     conversationId: string,
     limit: number = 10
   ): Promise<Message[]> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
     const messages = await sql<MessageRow>`
       SELECT * FROM message_logs
@@ -406,9 +406,9 @@ export class MessageRepository {
     dateFrom?: Date,
     dateTo?: Date
   ): Promise<MessageStats> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
-    const conditions: Sql[] = [];
+    const conditions: Fragment[] = [];
 
     if (conversationId) {
       conditions.push(sql`conversation_id = ${conversationId}::uuid`);
@@ -500,7 +500,7 @@ export class MessageRepository {
    * Delete old messages (cleanup)
    */
   async deleteOldMessages(olderThanDays: number): Promise<number> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
@@ -517,9 +517,9 @@ export class MessageRepository {
    * Count messages with filters
    */
   async count(filters: MessageFilters = {}): Promise<number> {
-    const sql = this.db.getSQL() as any;
+    const sql: Sql = this.db.getSQL();
     
-    const conditions: Sql[] = [];
+    const conditions: Fragment[] = [];
 
     if (filters.conversationId) {
       conditions.push(sql`conversation_id = ${filters.conversationId}::uuid`);
@@ -559,11 +559,11 @@ export class MessageRepository {
       platform: row.platform,
       messageType: row.message_type,
       content: row.content,
-      mediaUrl: row.media_url,
+      mediaUrl: row.media_url ?? undefined,
       platformMessageId: row.platform_message_id,
       aiProcessed: row.ai_processed,
       deliveryStatus: row.delivery_status,
-      aiConfidence: row.ai_confidence,
+      aiConfidence: row.ai_confidence ?? undefined,
       aiIntent: row.ai_intent,
       processingTimeMs: row.processing_time_ms,
       mediaMetadata: row.media_metadata ? 

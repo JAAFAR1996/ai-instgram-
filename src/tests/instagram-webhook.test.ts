@@ -48,7 +48,7 @@ describe('InstagramWebhookHandler.processMessagingEvent', () => {
 
     const ret = await (handler as any).processMessagingEvent(event, 'merchant1', result);
 
-    expect(ret).toBeUndefined();
+    expect(ret).toBe(1);
     expect(result.messagesProcessed).toBe(1);
     expect(logger.error.mock.calls.length).toBe(0);
   });
@@ -63,12 +63,8 @@ describe('InstagramWebhookHandler.processMessagingEvent', () => {
       message: { mid: 'm1', text: 'hello' }
     };
     const result = { success: true, eventsProcessed: 0, conversationsCreated: 0, messagesProcessed: 0, errors: [] };
-
-    // Provide global fallback to avoid ReferenceError inside implementation
-    (globalThis as any).customerId = event.sender.id;
     await expect((handler as any).processMessagingEvent(event, 'merchant1', result)).rejects.toThrow('Failed to create conversation');
     expect(logger.error.mock.calls.length).toBeGreaterThan(0);
-    delete (globalThis as any).customerId;
   });
 });
 
@@ -84,7 +80,7 @@ describe('InstagramWebhookHandler.inviteCommentToDM', () => {
     client = {
       loadMerchantCredentials: mock(async () => ({ token: 't' })),
       validateCredentials: mock(async () => {}),
-      replyToComment: mock(async () => {})
+      replyToComment: mock(async () => ({ success: true }))
     };
 
     mock.module('../services/logger.js', () => ({

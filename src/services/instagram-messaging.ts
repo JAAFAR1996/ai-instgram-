@@ -268,6 +268,7 @@ export class InstagramMessagingService {
     options: {
       conversationId?: string;
       priority?: 'normal' | 'high';
+      attachmentId?: string;
     } = {}
   ): Promise<InstagramMessageResponse> {
     try {
@@ -483,7 +484,7 @@ export class InstagramMessagingService {
     try {
       const sql = this.db.getSQL();
 
-      const result = await sql`
+      const result: any[] = await sql`
         SELECT instagram_token_encrypted, token_expires_at
         FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
@@ -535,7 +536,7 @@ export class InstagramMessagingService {
     try {
       const sql = this.db.getSQL();
 
-      const result = await sql`
+      const result: any[] = await sql`
         SELECT instagram_user_id
         FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
@@ -558,8 +559,8 @@ export class InstagramMessagingService {
       const sql = this.db.getSQL();
 
       // Get the latest incoming message from this recipient
-      const result = await sql`
-        SELECT 
+      const result: any[] = await sql`
+        SELECT
           c.id as conversation_id,
           MAX(ml.created_at) as last_message_time
         FROM conversations c

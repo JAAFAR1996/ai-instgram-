@@ -29,9 +29,9 @@ export function verifySignature(
   rawBody: Buffer,
   appSecret: string
 ): void {
-  const { ok, reason } = verifyHMACRaw(rawBody, signature, appSecret);
-  if (!ok) {
-    throw new Error(`Invalid signature: ${reason}`);
+  const result = verifyHMACRaw(rawBody, signature, appSecret);
+  if (!result.ok) {
+    throw new Error(`Invalid signature: ${result.reason}`);
   }
 }
 
@@ -112,6 +112,12 @@ export interface ProcessedWebhookResult {
   conversationsCreated: number;
   messagesProcessed: number;
   errors: string[];
+}
+
+interface MessageHistoryRow {
+  role: string;
+  content: string;
+  timestamp: Date;
 }
 
 export class InstagramWebhookHandler {
@@ -315,8 +321,9 @@ export class InstagramWebhookHandler {
     merchantId: string,
     result: ProcessedWebhookResult
   ): Promise<number> {
+    let customerId: string;
     try {
-      const customerId = event.sender.id;
+      customerId = event.sender.id;
       const timestamp = new Date(event.timestamp);
 
       // Check if this is a message or postback (story reply)
@@ -702,7 +709,7 @@ export class InstagramWebhookHandler {
       this.logger.info('Generating Instagram AI response', { interactionType });
 
       // Get conversation context
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       const conversationData = await sql`
         SELECT 
           c.*,
@@ -720,7 +727,7 @@ export class InstagramWebhookHandler {
       const conversation = conversationData[0];
       
       // Get recent conversation history
-      const messageHistory = await sql`
+      const messageHistory = await sql<MessageHistoryRow[]>`
         SELECT 
           CASE 
             WHEN direction = 'INCOMING' THEN 'user'
@@ -751,7 +758,7 @@ export class InstagramWebhookHandler {
         stage: conversation.conversation_stage,
         cart: session.cart || [],
         preferences: session.preferences || {},
-        conversationHistory: messageHistory.reverse().map(msg => ({
+        conversationHistory: messageHistory.reverse().map((msg: MessageHistoryRow) => ({
           role: msg.role,
           content: msg.content,
           timestamp: new Date(msg.timestamp)
@@ -879,7 +886,7 @@ export class InstagramWebhookHandler {
       
       // Store fallback response
       try {
-        const sql = this.db.getSQL();
+        const sql = this.db.getSQL() as any;
         const fallbackMessage = interactionType === 'comment' 
           ? 'شكراً للتعليق! راسلنا خاص للمزيد 📱💕'
           : 'اهلاً وسهلاً! كيف أقدر أساعدك؟ 😊';
@@ -924,7 +931,7 @@ export class InstagramWebhookHandler {
     result: ProcessedWebhookResult
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       await sql`
         INSERT INTO audit_logs (
@@ -961,8 +968,9 @@ export class InstagramWebhookHandler {
     event: InstagramMessagingEvent,
     merchantId: string
   ): Promise<number> {
+    let customerId: string | undefined;
     try {
-      const customerId = event.sender.id;
+      customerId = event.sender.id;
       const timestamp = new Date(event.timestamp);
       const content = event.postback?.title || event.postback?.payload || '';
 
@@ -1238,7 +1246,7 @@ export class InstagramWebhookHandler {
         type: attachment.type
       });
 
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       // Store as basic message log
       await sql`
