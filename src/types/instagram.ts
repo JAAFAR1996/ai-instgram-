@@ -54,3 +54,34 @@ export interface IGWebhookPayloadWithMessaging {
   object: 'instagram';
   entry: IGWebhookEntryWithMessaging[];
 }
+
+export interface InstagramAPICredentials {
+  businessAccountId: string;
+  pageAccessToken: string;
+  pageId: string;
+  webhookVerifyToken: string;
+  appSecret: string;
+  scopes?: string[];
+  tokenExpiresAt?: Date;
+}
+
+export interface InstagramOAuthCredentials {
+  accessToken: string;
+  tokenExpiresAt?: Date;
+  refreshToken?: string;
+}
+
+// Shared Instagram messaging types
+export interface QuickReply {
+  content_type: 'text';
+  title: string;
+  payload: string;
+}
+
+export interface SendMessageRequest {
+  recipientId: string;
+  messageType: 'text' | 'image' | 'template';
+  content: string;
+  attachment?: { type: string; payload: any };
+  quickReplies?: QuickReply[];
+}

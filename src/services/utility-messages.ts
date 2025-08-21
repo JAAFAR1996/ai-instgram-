@@ -9,7 +9,7 @@
 import { getInstagramClient } from './instagram-api.js';
 import { getDatabase } from '../database/connection.js';
 import { getConfig } from '../config/environment.js';
-import type { SendMessageRequest } from './instagram-api.js';
+import type { SendMessageRequest } from '../types/instagram.js';
 import crypto from 'crypto';
 
 // Escape special characters for use in RegExp

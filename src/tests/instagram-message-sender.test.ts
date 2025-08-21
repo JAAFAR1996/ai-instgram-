@@ -14,13 +14,16 @@ describe('InstagramAPIClient.uploadMedia', () => {
     const mod = await import('../services/instagram-api.js');
     client = new mod.InstagramAPIClient();
     await fs.mkdir(tmpDir, { recursive: true });
-    (client as any).credentials = {
-      businessAccountId: 'user123',
-      pageAccessToken: 'token123',
-      pageId: 'page',
-      webhookVerifyToken: '',
-      appSecret: ''
-    };
+    client.initialize(
+      {
+        businessAccountId: 'user123',
+        pageAccessToken: 'token123',
+        pageId: 'page',
+        webhookVerifyToken: '',
+        appSecret: ''
+      },
+      'merchant123'
+    );
   });
 
   afterEach(async () => {

@@ -11,18 +11,11 @@ import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { telemetry } from './telemetry.js';
 import { getMetaRateLimiter } from './meta-rate-limiter.js';
 import type { Platform } from '../types/database.js';
-import { telemetry } from './telemetry.js';
 import { createHash } from 'crypto';
-
-export interface InstagramCredentials {
-  businessAccountId: string;
-  pageAccessToken: string;
-  pageId: string;
-  webhookVerifyToken: string;
-  appSecret: string;
-  scopes?: string[]; // OAuth scopes granted
-  tokenExpiresAt?: Date;
-}
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import type { InstagramAPICredentials } from '../types/instagram.js';
+export type { InstagramAPICredentials } from '../types/instagram.js';
 
 export interface InstagramOAuthConfig {
   appId: string;
@@ -79,19 +72,6 @@ export interface InstagramStoryMention {
   timestamp: string;
 }
 
-export interface SendMessageRequest {
-  recipientId: string;
-  messageType: 'text' | 'image' | 'template';
-  content: string;
-  imageUrl?: string;
-  quickReplies?: QuickReply[];
-}
-
-export interface QuickReply {
-  content_type: 'text';
-  title: string;
-  payload: string;
-}
 
 export interface InstagramAPIResponse {
   success: boolean;
@@ -120,7 +100,15 @@ export class InstagramAPIClient {
   private db = getDatabase();
   private rateLimiter = getMetaRateLimiter();
 
+  private credentials: InstagramAPICredentials | null = null;
+  private merchantId: string | null = null;
+
   constructor() {}
+
+  public initialize(credentials: InstagramAPICredentials, merchantId: string): void {
+    this.credentials = credentials;
+    this.merchantId = merchantId;
+  }
 
   /**
    * Unified Graph API request with Redis sliding-window rate limiting
@@ -130,8 +118,25 @@ export class InstagramAPIClient {
     path: string,
     accessToken: string,
     body: Record<string, any> | undefined,
-    merchantId: string
-  ): Promise<T> {
+    merchantId: string,
+    returnResponse?: true
+  ): Promise<Response>;
+  public async graphRequest<T>(
+    method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH',
+    path: string,
+    accessToken: string,
+    body: Record<string, any> | undefined,
+    merchantId: string,
+    returnResponse?: false
+  ): Promise<T>;
+  public async graphRequest<T>(
+    method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH',
+    path: string,
+    accessToken: string,
+    body: Record<string, any> | undefined,
+    merchantId: string,
+    returnResponse: boolean = false
+  ): Promise<T | Response> {
     if (!merchantId) {
       throw Object.assign(new Error('MERCHANT_ID is required'), {
         code: 'MERCHANT_ID_MISSING'
@@ -189,7 +194,7 @@ export class InstagramAPIClient {
         throw e;
       }
 
-      return res.json() as Promise<T>;
+      return returnResponse ? res : (res.json() as Promise<T>);
     } finally {
       clearTimeout(timeout);
     }
@@ -198,26 +203,31 @@ export class InstagramAPIClient {
   /**
    * Send text message to Instagram user
    */
-  public async sendMessage(request: SendMessageRequest): Promise<InstagramAPIResponse> {
+  public async sendMessage(
+    credentials: InstagramAPICredentials,
+    merchantId: string,
+    request: SendMessageRequest
+  ): Promise<InstagramAPIResponse> {
     try {
-      if (!this.credentials || !this.merchantId) {
-        throw new Error('Instagram API not initialized');
-      }
-
       const payload = this.buildMessagePayload(request);
-      
-      const result = await this.graphRequest<any>(
+
+      const response = await this.graphRequest<Response>(
         'POST',
-        `/${this.credentials.businessAccountId}/messages`,
-        this.credentials.pageAccessToken,
+        `/${credentials.businessAccountId}/messages`,
+        credentials.pageAccessToken,
         payload,
-        this.merchantId
+        merchantId,
+        true
       );
+
+      const rateLimitRemaining =
+        this.parseRateLimitHeaders(response) ?? 200;
+      const result = await response.json();
 
       return {
         success: true,
         messageId: result.message_id,
-        rateLimitRemaining: 200 // Default rate limit
+        rateLimitRemaining
       };
     } catch (error) {
       console.error('❌ Instagram message send failed:', error);
@@ -232,653 +242,7 @@ export class InstagramAPIClient {
     }
   }
 
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
 
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
-
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
-
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
-
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
-
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
-
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
-
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
-
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
-
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
-
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
-
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
-
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
-
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
-
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
-
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
-
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
-
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
-
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
-
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
-
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
-
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
-
-  /**
-   * Upload media to Instagram and return media_id
-   */
-  public async uploadMedia(
-    mediaPath: string,
-    mediaType: 'image' | 'video' | 'audio'
-  ): Promise<string> {
-    if (!this.credentials) {
-      throw new Error('Instagram API not initialized');
-    }
-
-    const stats = await fs.stat(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
-
-    const typeConfig: Record<string, { exts: string[]; max: number }> = {
-      image: { exts: ['.jpg', '.jpeg', '.png', '.gif'], max: 8 * 1024 * 1024 },
-      video: { exts: ['.mp4', '.mov'], max: 50 * 1024 * 1024 },
-      audio: { exts: ['.mp3', '.aac', '.wav'], max: 25 * 1024 * 1024 }
-    };
-
-    const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
-      throw new Error(`Unsupported ${mediaType} format: ${ext}`);
-    }
-
-    if (stats.size > config.max) {
-      throw new Error(
-        `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
-      );
-    }
-
-    const fileBuffer = await fs.readFile(mediaPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
-    form.append('media_type', mediaType);
-
-    const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
-    )}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: form
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => response.statusText);
-      throw new Error(errText);
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
-  }
 
   /**
    * Upload media to Instagram and return media_id
@@ -938,17 +302,17 @@ export class InstagramAPIClient {
    * Send image message
    */
   public async sendImageMessage(
-    credentials: InstagramCredentials,
+    credentials: InstagramAPICredentials,
     merchantId: string,
-    recipientId: string, 
-    imageUrl: string, 
+    recipientId: string,
+    imageUrl: string,
     caption?: string
   ): Promise<InstagramAPIResponse> {
     return this.sendMessage(credentials, merchantId, {
       recipientId,
       messageType: 'image',
       content: caption || '',
-      imageUrl
+      attachment: { type: 'image', payload: { url: imageUrl } }
     });
   }
 
@@ -956,7 +320,7 @@ export class InstagramAPIClient {
    * Reply to comment (invites to DM)
    */
   public async replyToComment(
-    credentials: InstagramCredentials,
+    credentials: InstagramAPICredentials,
     merchantId: string,
     commentId: string, 
     message: string
@@ -995,7 +359,7 @@ export class InstagramAPIClient {
    * Get user profile information
    */
   public async getUserProfile(
-    credentials: InstagramCredentials,
+    credentials: InstagramAPICredentials,
     merchantId: string,
     userId: string
   ): Promise<InstagramProfile | null> {
@@ -1055,7 +419,7 @@ export class InstagramAPIClient {
    * Subscribe to webhook events
    */
   public async subscribeToWebhooks(
-    credentials: InstagramCredentials,
+    credentials: InstagramAPICredentials,
     merchantId: string,
     webhookUrl: string
   ): Promise<boolean> {
@@ -1086,7 +450,7 @@ export class InstagramAPIClient {
    * Get Instagram business account info
    */
   public async getBusinessAccountInfo(
-    credentials: InstagramCredentials,
+    credentials: InstagramAPICredentials,
     merchantId: string
   ): Promise<any> {
     try {
@@ -1107,7 +471,7 @@ export class InstagramAPIClient {
    * Check API health and rate limits
    */
   public async healthCheck(
-    credentials: InstagramCredentials | null,
+    credentials: InstagramAPICredentials | null,
     merchantId: string
   ): Promise<{
     status: 'healthy' | 'degraded' | 'unhealthy';
@@ -1146,7 +510,7 @@ export class InstagramAPIClient {
   /**
    * Private: Load merchant credentials from database
    */
-  public async loadMerchantCredentials(merchantId: string): Promise<InstagramCredentials | null> {
+  public async loadMerchantCredentials(merchantId: string): Promise<InstagramAPICredentials | null> {
     try {
       const sql = this.db.getSQL();
       
@@ -1193,7 +557,7 @@ export class InstagramAPIClient {
    * Validate API credentials
    */
   public async validateCredentials(
-    credentials: InstagramCredentials,
+    credentials: InstagramAPICredentials,
     merchantId: string
   ): Promise<void> {
     try {
@@ -1219,49 +583,31 @@ export class InstagramAPIClient {
         ...basePayload,
         message: {
           attachment: request.attachment,
-          text: request.content || undefined
+          text: request.content || undefined,
+          quick_replies: request.quickReplies
         }
       };
     }
 
-    switch (request.messageType) {
-      case 'text':
-        return {
-          ...basePayload,
-          message: {
-            text: request.content,
-            quick_replies: request.quickReplies
+    if (request.messageType === 'template') {
+      return {
+        ...basePayload,
+        message: {
+          attachment: {
+            type: 'template',
+            payload: JSON.parse(request.content)
           }
-        };
-
-      case 'image':
-        return {
-          ...basePayload,
-          message: {
-            attachment: {
-              type: 'image',
-              payload: {
-                url: request.imageUrl
-              }
-            },
-            text: request.content || undefined
-          }
-        };
-
-      case 'template':
-        return {
-          ...basePayload,
-          message: {
-            attachment: {
-              type: 'template',
-              payload: JSON.parse(request.content)
-            }
-          }
-        };
-
-      default:
-        throw new Error(`Unsupported message type: ${request.messageType}`);
+        }
+      };
     }
+
+    return {
+      ...basePayload,
+      message: {
+        text: request.content,
+        quick_replies: request.quickReplies
+      }
+    };
   }
 
   /**
@@ -1284,7 +630,7 @@ export class InstagramAPIClient {
 /**
  * Instagram Credentials Manager
  */
-export class InstagramCredentialsManager {
+export class InstagramAPICredentialsManager {
   private encryptionService = getEncryptionService();
   private db = getDatabase();
 
@@ -1451,7 +797,7 @@ export class InstagramCredentialsManager {
 
 // Singleton instances
 const instagramClients = new Map<string, InstagramAPIClient>();
-let credentialsManagerInstance: InstagramCredentialsManager | null = null;
+let credentialsManagerInstance: InstagramAPICredentialsManager | null = null;
 
 /**
  * Get Instagram API client instance for a merchant
@@ -1472,9 +818,9 @@ export function clearInstagramClient(merchantId: string): void {
 /**
  * Get credentials manager instance
  */
-export function getInstagramCredentialsManager(): InstagramCredentialsManager {
+export function getInstagramAPICredentialsManager(): InstagramAPICredentialsManager {
   if (!credentialsManagerInstance) {
-    credentialsManagerInstance = new InstagramCredentialsManager();
+    credentialsManagerInstance = new InstagramAPICredentialsManager();
   }
   return credentialsManagerInstance;
 }

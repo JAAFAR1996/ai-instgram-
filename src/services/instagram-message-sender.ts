@@ -5,28 +5,16 @@
  * ===============================================
  */
 
-import { getInstagramClient, clearInstagramClient, type InstagramAPIResponse, type InstagramCredentials } from './instagram-api.js';
+import {
+  getInstagramClient,
+  clearInstagramClient,
+  type InstagramAPIResponse,
+  type InstagramAPICredentials
+} from './instagram-api.js';
+import { ExpiringMap } from '../utils/expiring-map.js';
 import { getDatabase } from '../database/connection.js';
 import { getMessageWindowService } from './message-window.js';
-import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-
-export interface SendMessageRequest {
-  recipientId: string;
-  message: string;
-  messageType?: 'text' | 'media' | 'template';
-  mediaUrl?: string;
-  mediaType?: 'image' | 'video' | 'audio';
-  quickReplies?: QuickReply[];
-  template?: MessageTemplate;
-}
-
-export interface QuickReply {
-  content_type: 'text';
-  title: string;
-  payload: string;
-}
+import type { QuickReply, SendMessageRequest } from '../types/instagram.js';
 
 export interface MessageTemplate {
   type: 'generic' | 'button' | 'receipt' | 'list';
@@ -66,7 +54,7 @@ export interface SendResult {
 export class InstagramMessageSender {
   private db = getDatabase();
   private messageWindowService = getMessageWindowService();
-  private credentialsCache = new Map<string, InstagramCredentials>();
+  private credentialsCache = new ExpiringMap<string, InstagramAPICredentials>();
 
   /**
    * Get cached client or create new one
@@ -75,17 +63,24 @@ export class InstagramMessageSender {
     return getInstagramClient(merchantId);
   }
 
-  private async getCredentials(merchantId: string): Promise<InstagramCredentials> {
-    if (this.credentialsCache.has(merchantId)) {
-      return this.credentialsCache.get(merchantId)!;
+  private async getCredentials(merchantId: string): Promise<InstagramAPICredentials> {
+    const cached = this.credentialsCache.get(merchantId);
+    if (cached && (!cached.tokenExpiresAt || cached.tokenExpiresAt > new Date())) {
+      return cached;
     }
+
     const client = this.getClient(merchantId);
     const creds = await client.loadMerchantCredentials(merchantId);
     if (!creds) {
       throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
     }
     await client.validateCredentials(creds, merchantId);
-    this.credentialsCache.set(merchantId, creds);
+
+    // Cache credentials until token expiry (default 1h if unknown)
+    const ttlMs = creds.tokenExpiresAt
+      ? Math.max(creds.tokenExpiresAt.getTime() - Date.now(), 0)
+      : 60 * 60 * 1000;
+    this.credentialsCache.set(merchantId, creds, ttlMs);
     return creds;
   }
 
@@ -229,10 +224,11 @@ export class InstagramMessageSender {
 
       // Upload media first if it's a local file and no attachment is provided
       let finalMediaUrl = mediaUrl;
+      let finalCaption = caption;
       let finalAttachmentId = attachmentId;
-      if (!finalAttachmentId && !mediaUrl.startsWith('http')) {
+      if (!finalAttachmentId && !finalMediaUrl.startsWith('http')) {
         try {
-          finalAttachmentId = await client.uploadMedia(mediaUrl, mediaType);
+          finalAttachmentId = await client.uploadMedia(finalMediaUrl, mediaType);
         } catch (error) {
           return {
             success: false,
@@ -266,7 +262,7 @@ export class InstagramMessageSender {
       await this.logMessageSent(
         merchantId,
         recipientId,
-        `[${mediaType.toUpperCase()}] ${caption || ''}`,
+        `[${mediaType.toUpperCase()}] ${finalCaption || ''}`,
         result,
         conversationId,
         {

@@ -15,11 +15,23 @@ import { getInstagramStoriesManager } from './instagram-stories-manager.js';
 import { getInstagramCommentsManager } from './instagram-comments-manager.js';
 import { getInstagramMediaManager } from './instagram-media-manager.js';
 import { getServiceController } from './service-controller.js';
+import { verifyHMACRaw } from './encryption.js';
 import type { InstagramMessage, InstagramComment, InstagramStoryMention } from './instagram-api.js';
 import type { InstagramContext } from './instagram-ai.js';
 import type { StoryInteraction } from './instagram-stories-manager.js';
 import type { CommentInteraction } from './instagram-comments-manager.js';
 import type { MediaContent } from './instagram-media-manager.js';
+
+export function verifySignature(
+  signature: string,
+  rawBody: Buffer,
+  appSecret: string
+): void {
+  const { ok, reason } = verifyHMACRaw(rawBody, signature, appSecret);
+  if (!ok) {
+    throw new Error(`Invalid signature: ${reason}`);
+  }
+}
 
 export interface InstagramWebhookEvent {
   object: 'instagram';
@@ -108,6 +120,21 @@ export class InstagramWebhookHandler {
   private storiesManager = getInstagramStoriesManager();
   private commentsManager = getInstagramCommentsManager();
   private mediaManager = getInstagramMediaManager();
+
+  /**
+   * Verify signature and process raw webhook payload
+   */
+  public async processRawWebhook(
+    headers: Record<string, string | undefined>,
+    rawBody: Buffer,
+    merchantId: string,
+    appSecret: string
+  ): Promise<ProcessedWebhookResult> {
+    const signature = headers['x-hub-signature-256'] ?? '';
+    verifySignature(signature, rawBody, appSecret);
+    const payload = JSON.parse(rawBody.toString('utf8')) as InstagramWebhookEvent;
+    return this.processWebhook(payload, merchantId);
+  }
 
   /**
    * Process Instagram webhook payload

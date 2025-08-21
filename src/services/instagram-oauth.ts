@@ -16,6 +16,8 @@ import { getMetaRateLimiter } from './meta-rate-limiter.js';
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { requireMerchantId } from '../utils/merchant.js';
 import { telemetry } from './telemetry.js';
+import type { InstagramOAuthCredentials } from '../types/instagram.js';
+export type { InstagramOAuthCredentials } from '../types/instagram.js';
 
 // safe JSON helper for non-typed responses
 const jsonAny = async (r: any): Promise<any> => {
@@ -39,11 +41,6 @@ export interface InstagramUserProfile {
   followsCount: number;
 }
 
-export interface InstagramCredentials {
-  accessToken: string;
-  tokenExpiresAt?: Date;
-  refreshToken?: string;
-}
 
 export class InstagramOAuthService {
   private config = getConfig();
@@ -843,7 +840,7 @@ export class InstagramOAuthService {
   /**
    * التحقق من انتهاء صلاحية التوكن
    */
-  isTokenExpired(credentials: InstagramCredentials): boolean {
+  isTokenExpired(credentials: InstagramOAuthCredentials): boolean {
     if (!credentials.tokenExpiresAt) {
       return false; // إذا لم يكن هناك تاريخ انتهاء، افترض أنه صالح
     }

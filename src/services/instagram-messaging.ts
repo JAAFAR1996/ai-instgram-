@@ -36,6 +36,7 @@ export async function retryFetch(
     }
     attempt++;
     if (attempt >= maxAttempts) break;
+    console.log(`retryFetch: waiting ${delay}ms before attempt ${attempt + 1}`);
     await new Promise(resolve => setTimeout(resolve, delay));
     delay *= 2;
   }
@@ -87,6 +88,7 @@ export class InstagramMessagingService {
     const url = `${GRAPH_API_BASE_URL}/${igUserId}/messages`;
     const rateKey = `ig:${merchantId}:${igUserId}:messages`;
     const maxAttempts = 3;
+    let delay = 500;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       console.log(`🚀 Graph API message attempt ${attempt} for ${merchantId} -> ${igUserId}`);
@@ -116,6 +118,10 @@ export class InstagramMessagingService {
         if (attempt === maxAttempts) {
           throw error;
         }
+
+        console.log(`⏳ Waiting ${delay}ms before retry attempt ${attempt + 1}`);
+        await new Promise(res => setTimeout(res, delay));
+        delay *= 2;
       }
     }
 

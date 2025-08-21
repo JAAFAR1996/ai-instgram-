@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getInstagramClient, getInstagramCredentialsManager, type InstagramCredentials } from './instagram-api.js';
+import { getInstagramClient, getInstagramAPICredentialsManager, type InstagramAPICredentials } from './instagram-api.js';
 import { getEncryptionService } from './encryption.js';
 import { getDatabase } from '../database/connection.js';
 
@@ -69,7 +69,7 @@ export class InstagramSetupService {
 
       // Step 1: Validate provided credentials
       await this.executeStep(result, 'validate_credentials', 'Validating Instagram credentials', async () => {
-        await this.validateInstagramCredentials(config);
+        await this.validateInstagramAPICredentials(config);
       });
 
       // Step 2: Test API connectivity
@@ -82,7 +82,7 @@ export class InstagramSetupService {
 
       // Step 3: Store encrypted credentials
       await this.executeStep(result, 'store_credentials', 'Storing encrypted credentials', async () => {
-        const credManager = getInstagramCredentialsManager();
+        const credManager = getInstagramAPICredentialsManager();
         await credManager.storeCredentials(
           merchantId,
           {
@@ -97,7 +97,7 @@ export class InstagramSetupService {
       });
 
       // Step 4: Initialize Instagram client
-      let credentials: InstagramCredentials | null = null;
+      let credentials: InstagramAPICredentials | null = null;
       await this.executeStep(result, 'initialize_client', 'Initializing Instagram client', async () => {
         const client = getInstagramClient(merchantId);
         credentials = await client.loadMerchantCredentials(merchantId);
@@ -379,7 +379,7 @@ export class InstagramSetupService {
     error?: string;
   }> {
     try {
-      const credManager = getInstagramCredentialsManager();
+      const credManager = getInstagramAPICredentialsManager();
       await credManager.removeCredentials(merchantId);
 
       // Log removal
@@ -429,7 +429,7 @@ export class InstagramSetupService {
   /**
    * Private: Validate Instagram credentials
    */
-  private async validateInstagramCredentials(config: InstagramSetupConfig): Promise<void> {
+  private async validateInstagramAPICredentials(config: InstagramSetupConfig): Promise<void> {
     const required = [
       'pageAccessToken',
       'businessAccountId',

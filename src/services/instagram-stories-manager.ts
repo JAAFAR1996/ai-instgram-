@@ -6,6 +6,7 @@
  */
 
 import { getInstagramClient, clearInstagramClient, type InstagramCredentials } from './instagram-api.js';
+import { ExpiringMap } from '../utils/expiring-map.js';
 import { getDatabase } from '../database/connection.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramContext } from './instagram-ai.js';
@@ -81,23 +82,29 @@ export class InstagramStoriesManager {
   private aiOrchestrator = getConversationAIOrchestrator();
   private redis = getRedisConnectionManager();
 
-  private credentialsCache = new Map<string, InstagramCredentials>();
+  private credentialsCache = new ExpiringMap<string, InstagramCredentials>();
 
   private getClient(merchantId: string) {
     return getInstagramClient(merchantId);
   }
 
   private async getCredentials(merchantId: string): Promise<InstagramCredentials> {
-    if (this.credentialsCache.has(merchantId)) {
-      return this.credentialsCache.get(merchantId)!;
+    const cached = this.credentialsCache.get(merchantId);
+    if (cached && (!cached.tokenExpiresAt || cached.tokenExpiresAt > new Date())) {
+      return cached;
     }
+
     const client = this.getClient(merchantId);
     const creds = await client.loadMerchantCredentials(merchantId);
     if (!creds) {
       throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
     }
     await client.validateCredentials(creds, merchantId);
-    this.credentialsCache.set(merchantId, creds);
+
+    const ttlMs = creds.tokenExpiresAt
+      ? Math.max(creds.tokenExpiresAt.getTime() - Date.now(), 0)
+      : 60 * 60 * 1000;
+    this.credentialsCache.set(merchantId, creds, ttlMs);
     return creds;
   }
 

@@ -5,10 +5,14 @@
  * ===============================================
  */
 
-import { getInstagramClient, clearInstagramClient, type InstagramCredentials } from './instagram-api.js';
+import { getInstagramClient, clearInstagramClient, type InstagramAPICredentials } from './instagram-api.js';
+import { ExpiringMap } from '../utils/expiring-map.js';
 import { getDatabase } from '../database/connection.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramContext } from './instagram-ai.js';
+import { hashMerchantAndBody } from '../middleware/idempotency.js';
+import { getRedisConnectionManager } from './RedisConnectionManager.js';
+import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 
 export interface MediaContent {
   id: string;
@@ -86,23 +90,30 @@ export interface MediaTemplate {
 export class InstagramMediaManager {
   private db = getDatabase();
   private aiOrchestrator = getConversationAIOrchestrator();
-  private credentialsCache = new Map<string, InstagramCredentials>();
+  private redis = getRedisConnectionManager();
+  private credentialsCache = new ExpiringMap<string, InstagramAPICredentials>();
 
   private getClient(merchantId: string) {
     return getInstagramClient(merchantId);
   }
 
-  private async getCredentials(merchantId: string): Promise<InstagramCredentials> {
-    if (this.credentialsCache.has(merchantId)) {
-      return this.credentialsCache.get(merchantId)!;
+  private async getCredentials(merchantId: string): Promise<InstagramAPICredentials> {
+    const cached = this.credentialsCache.get(merchantId);
+    if (cached && (!cached.tokenExpiresAt || cached.tokenExpiresAt > new Date())) {
+      return cached;
     }
+
     const client = this.getClient(merchantId);
     const creds = await client.loadMerchantCredentials(merchantId);
     if (!creds) {
       throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
     }
     await client.validateCredentials(creds, merchantId);
-    this.credentialsCache.set(merchantId, creds);
+
+    const ttlMs = creds.tokenExpiresAt
+      ? Math.max(creds.tokenExpiresAt.getTime() - Date.now(), 0)
+      : 60 * 60 * 1000;
+    this.credentialsCache.set(merchantId, creds, ttlMs);
     return creds;
   }
 
@@ -124,14 +135,32 @@ export class InstagramMediaManager {
     merchantId: string,
     userId: string,
     textContent?: string
-  ): Promise<{ 
-    success: boolean; 
-    analysis?: MediaAnalysisResult; 
-    responseGenerated?: boolean; 
-    error?: string 
+  ): Promise<{
+    success: boolean;
+    analysis?: MediaAnalysisResult;
+    responseGenerated?: boolean;
+    error?: string
   }> {
     try {
       console.log(`📸 Processing incoming ${media.type}: ${media.id}`);
+
+      const bodyForHash = {
+        merchantId,
+        mediaId: media.id,
+        conversationId,
+        userId,
+        textContent,
+        date: new Date().toISOString().slice(0, 10)
+      };
+      const idempotencyKey = `ig:media_process:${hashMerchantAndBody(merchantId, bodyForHash)}`;
+
+      const redis = await this.redis.getConnection(RedisUsageType.IDEMPOTENCY);
+      const existingResult = await redis.get(idempotencyKey);
+
+      if (existingResult) {
+        console.log(`🔒 Idempotent media processing detected: ${idempotencyKey}`);
+        return JSON.parse(existingResult);
+      }
 
       // Store media in database
       await this.storeMedia(media, conversationId, 'incoming', userId, merchantId);
@@ -162,11 +191,17 @@ export class InstagramMediaManager {
 
       console.log(`✅ Media processed: ${media.type} (confidence: ${analysis.confidence}%)`);
 
-      return {
+      const successResult = {
         success: true,
         analysis,
         responseGenerated
       };
+
+      // 💾 Cache successful result for idempotency (24 hours TTL)
+      await redis.setex(idempotencyKey, 86400, JSON.stringify(successResult));
+      console.log(`💾 Cached media processing result: ${idempotencyKey}`);
+
+      return successResult;
     } catch (error) {
       console.error('❌ Media processing failed:', error);
       return {
@@ -192,7 +227,7 @@ export class InstagramMediaManager {
         throw new Error('Merchant ID required for media message');
       }
 
-      let mediaUrl: string;
+      let finalMediaUrl: string;
       let caption: string;
 
       if (templateId) {
@@ -202,11 +237,14 @@ export class InstagramMediaManager {
           throw new Error('Media template not found');
         }
 
-        mediaUrl = template.templateUrl;
+        finalMediaUrl = template.templateUrl;
         caption = customText || this.generateTemplateCaption(template);
-        
+
         // Increment usage count
         await this.incrementTemplateUsage(templateId);
+      } else if (mediaUrl) {
+        finalMediaUrl = mediaUrl;
+        caption = customText || '';
       } else {
         throw new Error('Either template ID or media URL required');
       }
@@ -218,7 +256,7 @@ export class InstagramMediaManager {
         credentials,
         merchantId,
         recipientId,
-        mediaUrl,
+        finalMediaUrl,
         caption
       );
 
