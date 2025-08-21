@@ -75,7 +75,8 @@ export interface Merchant extends TimestampedEntity {
   business_name: string;
   business_category: string;
   business_address?: string;
-  
+  business_description?: string;
+
   // Contact Information
   instagram_username?: string;
   instagram_user_id?: string;

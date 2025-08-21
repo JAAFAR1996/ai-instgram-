@@ -7,7 +7,7 @@
 
 import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
-import { zValidator } from '@hono/zod-validator';
+import { validator } from 'hono/validator';
 import type { BlankEnv } from 'hono/types';
 import { getServiceController } from '../services/service-controller.js';
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
@@ -54,7 +54,16 @@ export class ServiceControlAPI {
     // Toggle specific service
     this.app.post(
       '/api/services/toggle',
-      zValidator('json', ToggleServiceSchema),
+      validator('json', (value, c) => {
+        const parsed = ToggleServiceSchema.safeParse(value);
+        if (!parsed.success) {
+          return c.json(
+            { error: 'Invalid request data', details: parsed.error.issues },
+            400
+          );
+        }
+        return parsed.data;
+      }),
       this.toggleService.bind(this)
     );
 
@@ -80,34 +89,42 @@ export class ServiceControlAPI {
   /**
    * Toggle service on/off
    */
-  private async toggleService(c: any) {
+  private async toggleService(
+    c: Context<BlankEnv, any, { json: ToggleService }>
+  ) {
     try {
-      const data = c.req.valid('json');
-      
-      const result = await this.serviceController.toggleService(data);
-      
+      const payload = c.req.valid('json') as ToggleService;
+
+      const result = await this.serviceController.toggleService(payload);
+
       if (result.success) {
         return c.json({
           success: true,
           message: result.message,
           data: {
-            service: data.service,
-            enabled: data.enabled,
+            service: payload.service,
+            enabled: payload.enabled,
             previousState: result.previousState
           }
         });
       } else {
-        return c.json({
-          success: false,
-          message: result.message
-        }, 400);
+        return c.json(
+          {
+            success: false,
+            message: result.message
+          },
+          400
+        );
       }
     } catch (error) {
       console.error('❌ Toggle service API error:', error);
-      return c.json({
-        success: false,
-        message: 'خطأ في النظام'
-      }, 500);
+      return c.json(
+        {
+          success: false,
+          message: 'خطأ في النظام'
+        },
+        500
+      );
     }
   }
 

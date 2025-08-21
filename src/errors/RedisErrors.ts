@@ -176,7 +176,11 @@ export class RedisErrorFactory {
       );
     }
 
-    if (message.toLowerCase().includes('max requests limit exceeded')) {
+    // Upstash and similar providers return `ERR max requests limit exceeded` when
+    // hitting the hourly quota. Match this pattern (case-insensitive) to convert
+    // it into a dedicated rate limit error so callers can trigger backoff/circuit
+    // breaker logic and allow the application to degrade gracefully.
+    if (/err\s+max\s+requests?\s+limit\s+exceeded/i.test(message)) {
       return new RedisRateLimitError(
         `Rate limit exceeded: ${message}`,
         context,
