@@ -193,16 +193,16 @@ export function loadAndValidateEnvironment(): AppConfig {
   }
 
   // Additional security validations
-  if (env.NODE_ENV === 'production') {
-    // Production-specific validations
-    if (env.REDIRECT_URI && !env.REDIRECT_URI.includes('yourdomain.com')) {
-      console.warn('⚠️ REDIRECT_URI should use your production domain in production');
+    if (env.NODE_ENV === 'production') {
+      // Production-specific validations
+      if (env.REDIRECT_URI && env.BASE_URL && !env.REDIRECT_URI.startsWith(env.BASE_URL)) {
+        console.warn('⚠️ REDIRECT_URI should match BASE_URL in production');
+      }
+
+      if (env.CORS_ORIGINS === '*') {
+        errors.push('CORS_ORIGINS should not be "*" in production');
+      }
     }
-    
-    if (env.CORS_ORIGINS === '*') {
-      errors.push('CORS_ORIGINS should not be "*" in production');
-    }
-  }
 
   // Throw if validation failed
   if (errors.length > 0) {

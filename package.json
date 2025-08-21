@@ -26,6 +26,8 @@
     "test:instagram:all": "node run-instagram-tests.js all",
     "test:instagram:stats": "node run-instagram-tests.js integration stats",
     "test:instagram:report": "node run-instagram-tests.js integration report",
+    "test:all-new": "node run-new-tests.cjs",
+    "test:comprehensive": "bun run run-all-new-tests.ts",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
