@@ -9,7 +9,7 @@
 import { getDatabase } from '../database/connection.js';
 import { getConversationAIOrchestrator, type CrossPlatformContext } from './conversation-ai-orchestrator.js';
 import type { Platform } from '../types/database.js';
-import type { Sql } from 'postgres';
+import type { Sql, Fragment } from 'postgres';
 
 export interface UnifiedCustomerProfile {
   customerId: string;
@@ -111,7 +111,7 @@ export class CrossPlatformConversationManager {
     try {
       const sql: Sql = this.db.getSQL();
 
-      const conditions: Sql[] = [];
+      const conditions: Fragment[] = [];
       if (identifier.phone) {
         conditions.push(sql`c.customer_phone = ${identifier.phone}`);
       }
@@ -326,7 +326,7 @@ export class CrossPlatformConversationManager {
       const sql: Sql = this.db.getSQL();
       const mergeStrategy = options?.mergeStrategy || 'most_complete';
 
-      const conditions: Sql[] = [];
+      const conditions: Fragment[] = [];
       if (customerIdentifiers.phone) {
         conditions.push(sql`c.customer_phone = ${customerIdentifiers.phone}`);
       }
@@ -464,7 +464,7 @@ export class CrossPlatformConversationManager {
       const timeFilter = timeRange ?
         sql`AND ml.created_at BETWEEN ${timeRange.start.toISOString()} AND ${timeRange.end.toISOString()}` :
         sql`AND ml.created_at >= NOW() - INTERVAL '30 days'`;
-      const conditions: Sql[] = [];
+      const conditions: Fragment[] = [];
       if (customerIdentifiers.phone) {
         conditions.push(sql`c.customer_phone = ${customerIdentifiers.phone}`);
       }
@@ -874,7 +874,7 @@ export class CrossPlatformConversationManager {
       const timeFilter = timeRange
         ? sql`AND switch_timestamp BETWEEN ${timeRange.start.toISOString()} AND ${timeRange.end.toISOString()}`
         : sql``;
-      const conditions: Sql[] = [];
+      const conditions: Fragment[] = [];
       if (customerIdentifiers.phone) {
         conditions.push(
           sql`(from_identifier = ${customerIdentifiers.phone} OR to_identifier = ${customerIdentifiers.phone})`

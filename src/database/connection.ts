@@ -225,14 +225,14 @@ export class DatabaseConnection {
    */
   public async query<T extends object = Row>(
     strings: TemplateStringsArray,
-    ...params: unknown[]
+    ...params: any[]
   ): Promise<T[]> {
     try {
       if (!this.sql) {
         throw new Error('Database connection not initialized');
       }
 
-      const result = await this.sql<T[]>(strings, ...params).execute();
+      const result = await this.sql<T[]>(strings, ...params);
       return result;
     } catch (error) {
       console.error('❌ Database query error:', error);
@@ -251,7 +251,7 @@ export class DatabaseConnection {
     }
 
     try {
-      return await this.sql.begin(callback);
+      return this.sql.begin(callback);
     } catch (error) {
       console.error('❌ Database transaction error:', error);
       throw this.formatDatabaseError(error);

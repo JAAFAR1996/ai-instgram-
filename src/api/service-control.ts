@@ -13,17 +13,7 @@ import { getServiceController } from '../services/service-controller.js';
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
 import { z } from 'zod';
 import { getConfig } from '../config/environment.js';
-
-// Validation schemas
-const ToggleServiceSchema = z.object({
-  merchantId: z.string().uuid('معرف التاجر يجب أن يكون UUID صالح'),
-  service: z.enum(['instagram', 'ai_processing', 'auto_reply', 'story_response', 'comment_response', 'dm_processing']),
-  enabled: z.boolean(),
-  reason: z.string().optional(),
-  toggledBy: z.string().optional()
-});
-
-type ToggleService = z.infer<typeof ToggleServiceSchema>;
+import { ToggleService, ToggleServiceSchema } from '../types/service-control.js';
 
 const MerchantIdSchema = z.object({
   merchantId: z.string().uuid('معرف التاجر يجب أن يكون UUID صالح')
@@ -64,7 +54,7 @@ export class ServiceControlAPI {
     // Toggle specific service
     this.app.post(
       '/api/services/toggle',
-      validator('json', (value, c) => ToggleServiceSchema.parse(value)),
+      validator('json', ToggleServiceSchema.parse),
       this.toggleService.bind(this)
     );
 
@@ -94,7 +84,7 @@ export class ServiceControlAPI {
     c: Context<{ Bindings: BlankEnv }, '', { json: ToggleService }>
   ) {
     try {
-      const data = c.req.valid('json');
+      const data = c.req.valid('json') as ToggleService;
       
       const result = await this.serviceController.toggleService(data);
       

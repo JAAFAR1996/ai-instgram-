@@ -228,7 +228,7 @@ export class MerchantRepository {
       return await this.findById(id);
     }
 
-    const [merchant] = await this.db.query`
+    const [merchant] = await this.db.query<MerchantRow>`
       UPDATE merchants
       SET ${(sql as any).join(updateFields, sql`, `)}
       WHERE id = ${id}::uuid
@@ -390,8 +390,8 @@ export class MerchantRepository {
         // Overall totals
         stats.totalMerchants = parseInt(row.total_merchants);
         stats.activeMerchants = parseInt(row.active_merchants);
-        stats.totalMessagesUsed = parseInt(row.total_messages_used) || 0;
-        stats.averageMessagesPerMerchant = parseFloat(row.avg_messages_per_merchant) || 0;
+        stats.totalMessagesUsed = parseInt(row.total_messages_used ?? '0') || 0;
+        stats.averageMessagesPerMerchant = parseFloat(row.avg_messages_per_merchant ?? '0') || 0;
       } else if (row.subscription_tier && !row.business_category) {
         // Subscription tier totals
         stats.bySubscriptionTier[row.subscription_tier] = parseInt(row.total_merchants);
