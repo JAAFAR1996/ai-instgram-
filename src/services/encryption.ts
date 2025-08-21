@@ -39,21 +39,40 @@ export function verifyHMACRaw(payload: Buffer, signature: string, secret: string
 
 /**
  * Read raw body from Hono request (preserves exact bytes)
+ *
+ * Monitors the accumulated payload size while reading. If the size
+ * exceeds `maxBytes` (default 1MB), the reader is cancelled and an
+ * HTTP 413 error is thrown.
  */
-export async function readRawBody(c: any): Promise<Buffer> {
+export async function readRawBody(c: any, maxBytes = 1024 * 1024): Promise<Buffer> {
   const r = c.req.raw.body;
   if (!r) return Buffer.alloc(0);
   const reader = r.getReader();
   const chunks: Uint8Array[] = [];
+  let size = 0;
+
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
-    if (value) chunks.push(value);
+    if (value) {
+      size += value.length;
+      if (size > maxBytes) {
+        try { await reader.cancel(); } catch {}
+        if (typeof c.throw === 'function') {
+          c.throw(413, 'payload too large');
+        }
+        throw Object.assign(new Error('payload too large'), { status: 413 });
+      }
+      chunks.push(value);
+    }
   }
-  const size = chunks.reduce((n, u) => n + u.length, 0);
+
   const out = Buffer.allocUnsafe(size);
   let off = 0;
-  for (const u of chunks) { out.set(u, off); off += u.length; }
+  for (const u of chunks) {
+    out.set(u, off);
+    off += u.length;
+  }
   return out;
 }
 
@@ -126,11 +145,23 @@ export class EncryptionService {
   }
 
   /**
-   * Decrypt platform tokens 
+   * Decrypt platform tokens
    */
   public decryptToken(encryptedPayload: EncryptedData, platform: 'whatsapp' | 'instagram'): { token: string; identifier: string; timestamp: number } {
     const decrypted = this.decrypt(encryptedPayload, `token:${platform}`);
-    return JSON.parse(decrypted);
+    
+    let parsed;
+    try { parsed = JSON.parse(decrypted); }
+    catch { throw new Error('Invalid token payload'); }
+    if (
+      !parsed ||
+      typeof parsed.token !== 'string' ||
+      typeof parsed.identifier !== 'string' ||
+      typeof parsed.timestamp !== 'number'
+    ) {
+      throw new Error('Invalid token payload');
+    }
+    return parsed;
   }
 
   /**

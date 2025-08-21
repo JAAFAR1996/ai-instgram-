@@ -33,25 +33,35 @@ export function setupTimerManagement(): void {
   const originalClearTimeout = global.clearTimeout;
   const originalClearInterval = global.clearInterval;
 
-  global.setTimeout = ((handler: any, timeout?: number, ...args: any[]) => {
-    const timer = originalSetTimeout(handler, timeout, ...args);
-    timerManager.register(timer);
-    return timer;
-  }) as typeof setTimeout;
+  global.setTimeout = (
+    (handler: (...a: any[]) => void, timeout?: number, ...args: any[]) => {
+      const timer = originalSetTimeout(handler, timeout, ...args);
+      timerManager.register(timer);
+      timer.unref?.();
+      return timer;
+    }
+  ) as typeof setTimeout;
 
-  global.setInterval = ((handler: any, timeout?: number, ...args: any[]) => {
-    const timer = originalSetInterval(handler, timeout, ...args);
-    timerManager.register(timer);
-    return timer;
-  }) as typeof setInterval;
+  global.setInterval = (
+    (handler: (...a: any[]) => void, timeout?: number, ...args: any[]) => {
+      const timer = originalSetInterval(handler, timeout, ...args);
+      timerManager.register(timer);
+      timer.unref?.();
+      return timer;
+    }
+  ) as typeof setInterval;
 
-  global.clearTimeout = ((timer: any) => {
-    timerManager.unregister(timer as NodeJS.Timeout);
-    return originalClearTimeout(timer);
-  }) as typeof clearTimeout;
+  global.clearTimeout = (
+    (timer: Parameters<typeof clearTimeout>[0]) => {
+      timerManager.unregister(timer as NodeJS.Timeout);
+      return originalClearTimeout(timer);
+    }
+  ) as typeof clearTimeout;
 
-  global.clearInterval = ((timer: any) => {
-    timerManager.unregister(timer as NodeJS.Timeout);
-    return originalClearInterval(timer);
-  }) as typeof clearInterval;
+  global.clearInterval = (
+    (timer: Parameters<typeof clearInterval>[0]) => {
+      timerManager.unregister(timer as NodeJS.Timeout);
+      return originalClearInterval(timer);
+    }
+  ) as typeof clearInterval;
 }

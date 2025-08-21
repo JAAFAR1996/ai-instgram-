@@ -19,6 +19,7 @@ import { z } from 'zod';
 import crypto from 'node:crypto';
 import { MerchantIdMissingError } from '../utils/merchant.js';
 import { telemetry } from '../services/telemetry.js';
+import { getLogger } from '../services/logger.js';
 
 // Webhook validation schemas
 const InstagramWebhookVerificationSchema = z.object({
@@ -49,6 +50,7 @@ export class WebhookRouter {
   private serviceController = getServiceController();
   private db = getDatabase();
   private config = getConfig();
+  private logger = getLogger({ component: 'WebhookRouter' });
 
   constructor() {
     this.app = new Hono();
@@ -217,6 +219,16 @@ export class WebhookRouter {
       const appId = c.req.header('x-app-id') ?? '';
       const appSecret = (process.env.META_APP_SECRET || '').trim();
       const metaAppId = (process.env.META_APP_ID || '').trim();
+
+      if (!metaAppId) {
+        console.warn('⚠️ META_APP_ID not configured');
+        return c.text('Server configuration error', 500);
+      }
+
+      if (!appSecret) {
+        console.warn('⚠️ META_APP_SECRET not configured');
+        return c.text('Server configuration error', 500);
+      }
       
       // Optional debug dump (only if DEBUG_DUMP=1)
       if (process.env.DEBUG_DUMP === '1') {
@@ -268,11 +280,6 @@ export class WebhookRouter {
         return c.text('Bad signature header', 401);
       }
       
-      if (!appSecret) {
-        console.error('❌ META_APP_SECRET not configured');
-        return c.text('Server configuration error', 500);
-      }
-      
       // 3. Unified HMAC verification with raw Buffer
       const verifyResult = verifyHMACRaw(rawBuf, sigHeader, appSecret);
       if (!verifyResult.ok) {
@@ -287,8 +294,8 @@ export class WebhookRouter {
       try {
         event = JSON.parse(rawBuf.toString('utf8')) as InstagramWebhookEvent;
       } catch (parseError) {
-        console.error('❌ Invalid Instagram webhook JSON:', parseError);
-        return c.text('Invalid JSON payload', 400);
+        this.logger.error('Invalid Instagram webhook JSON', parseError);
+        return c.text('Invalid JSON', 400);
       }
 
       // Validate event structure
@@ -305,7 +312,7 @@ export class WebhookRouter {
       if (!merchantId) {
         const firstPageId = event.entry[0]?.id;
         if (firstPageId) {
-          merchantId = await this.getMerchantIdFromPageId(firstPageId);
+          merchantId = await this.getMerchantIdFromPageId(firstPageId) || undefined;
         }
       }
       if (!merchantId) {
@@ -489,8 +496,8 @@ export class WebhookRouter {
       try {
         event = JSON.parse(rawBody.toString('utf8'));
       } catch (parseError) {
-        console.error('❌ Invalid WhatsApp webhook JSON:', parseError);
-        return c.text('Invalid JSON payload', 400);
+        this.logger.error('Invalid WhatsApp webhook JSON', parseError);
+        return c.text('Invalid JSON', 400);
       }
 
       // Validate event structure
@@ -700,7 +707,10 @@ export class WebhookRouter {
         LIMIT 1
       `;
 
-      return result[0]?.merchant_id || null;
+      interface MerchantResult {
+        merchant_id: string;
+      }
+      return (result[0] as MerchantResult)?.merchant_id || null;
 
     } catch (error) {
       console.error('❌ Failed to get merchant ID from page ID:', error);

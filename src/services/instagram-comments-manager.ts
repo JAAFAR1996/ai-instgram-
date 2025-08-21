@@ -13,6 +13,7 @@ import type { InstagramContext } from './instagram-ai.js';
 import { hashMerchantAndBody } from '../middleware/idempotency.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
+import { createLogger } from './logger.js';
 
 export interface CommentInteraction {
   id: string;
@@ -85,6 +86,7 @@ export interface CommentModerationRule {
 }
 
 export class InstagramCommentsManager {
+  private logger = createLogger({ component: 'InstagramCommentsManager' });
   private db = getDatabase();
   private aiOrchestrator = getConversationAIOrchestrator();
   private redis = getRedisConnectionManager();
@@ -131,7 +133,11 @@ export class InstagramCommentsManager {
     merchantId: string
   ): Promise<{ success: boolean; responseGenerated: boolean; actionTaken?: string; error?: string }> {
     try {
-      console.log(`💬 Processing Instagram comment: @${comment.username} → ${comment.content.substring(0, 50)}...`);
+      this.logger.info('Processing Instagram comment', {
+        username: comment.username,
+        preview: comment.content.substring(0, 50),
+        merchantId
+      });
 
       // 🔒 Idempotency check - prevent duplicate comment processing
       const bodyForHash = {
@@ -140,16 +146,20 @@ export class InstagramCommentsManager {
         postId: comment.postId,
         content: comment.content,
         userId: comment.userId,
-        date: new Date().toISOString().slice(0, 10)
+        timestamp: comment.timestamp.toISOString()
       };
       const idempotencyKey = `ig:comment_process:${hashMerchantAndBody(merchantId, bodyForHash)}`;
       
       const redis = await this.redis.getConnection(RedisUsageType.IDEMPOTENCY);
       const existingResult = await redis.get(idempotencyKey);
-      
+
       if (existingResult) {
-        console.log(`🔒 Idempotent comment processing detected: ${idempotencyKey}`);
-        return JSON.parse(existingResult);
+        this.logger.info('Idempotent comment processing detected', { idempotencyKey });
+        try {
+          return JSON.parse(existingResult);
+        } catch (error) {
+          this.logger.warn('Failed to parse cached comment processing result', error, { idempotencyKey });
+        }
       }
 
       // Store comment in database
@@ -162,7 +172,9 @@ export class InstagramCommentsManager {
       const moderationAction = await this.checkModerationRules(comment, merchantId);
 
       if (moderationAction && moderationAction.action.type === 'hide') {
-        console.log(`🚫 Comment hidden due to moderation rule: ${moderationAction.rule.name}`);
+        this.logger.warn('Comment hidden due to moderation rule', {
+          ruleName: moderationAction.rule.name
+        });
         return {
           success: true,
           responseGenerated: false,
@@ -205,7 +217,10 @@ export class InstagramCommentsManager {
         await this.createSalesOpportunity(comment, merchantId);
       }
 
-      console.log(`✅ Comment processed: ${actionTaken} (confidence: ${response.confidence}%)`);
+      this.logger.info('Comment processed', {
+        actionTaken,
+        confidence: response.confidence
+      });
 
       const successResult = {
         success: true,
@@ -215,11 +230,11 @@ export class InstagramCommentsManager {
 
       // 💾 Cache successful result for idempotency (24 hours TTL)
       await redis.setex(idempotencyKey, 86400, JSON.stringify(successResult));
-      console.log(`💾 Cached comment processing result: ${idempotencyKey}`);
+      this.logger.info('Cached comment processing result', { idempotencyKey });
 
       return successResult;
     } catch (error) {
-      console.error('❌ Comment processing failed:', error);
+      this.logger.error('Comment processing failed', error, { merchantId, commentId: comment.id });
       return {
         success: false,
         responseGenerated: false,
@@ -293,7 +308,7 @@ export class InstagramCommentsManager {
 
       return fallbackAnalysis;
     } catch (error) {
-      console.error('❌ Comment analysis failed:', error);
+      this.logger.error('Comment analysis failed', error, { merchantId, commentId: comment.id });
       return this.performFallbackAnalysis(comment);
     }
   }
@@ -406,7 +421,7 @@ export class InstagramCommentsManager {
         reasoning: 'Default engagement action'
       };
     } catch (error) {
-      console.error('❌ Comment response generation failed:', error);
+      this.logger.error('Comment response generation failed', error, { merchantId, commentId: comment.id });
       return {
         type: 'none',
         confidence: 0,
@@ -514,7 +529,7 @@ export class InstagramCommentsManager {
         }, {} as any)
       };
     } catch (error) {
-      console.error('❌ Comment analytics failed:', error);
+      this.logger.error('Comment analytics failed', error, { merchantId });
       throw error;
     }
   }
@@ -549,10 +564,10 @@ export class InstagramCommentsManager {
       `;
 
       const ruleId = result[0].id;
-      console.log(`✅ Comment moderation rule created: ${rule.name} (${ruleId})`);
+      this.logger.info('Comment moderation rule created', { ruleName: rule.name, ruleId });
       return ruleId;
     } catch (error) {
-      console.error('❌ Moderation rule creation failed:', error);
+      this.logger.error('Moderation rule creation failed', error, { merchantId, rule: rule.name });
       throw error;
     }
   }
@@ -595,7 +610,7 @@ export class InstagramCommentsManager {
           updated_at = NOW()
       `;
     } catch (error) {
-      console.error('❌ Store comment failed:', error);
+      this.logger.error('Store comment failed', error, { merchantId, commentId: comment.id });
       throw error;
     }
   }
@@ -680,7 +695,7 @@ export class InstagramCommentsManager {
       const result = await instagramClient.replyToComment(credentials, merchantId, commentId, replyText);
       return result.success;
     } catch (error) {
-      console.error('❌ Reply to comment failed:', error);
+      this.logger.error('Reply to comment failed', error, { merchantId, commentId });
       return false;
     }
   }
@@ -713,7 +728,7 @@ export class InstagramCommentsManager {
 
       return false;
     } catch (error) {
-      console.error('❌ Invite to DM failed:', error);
+      this.logger.error('Invite to DM failed', error, { merchantId, commentId: comment.id });
       return false;
     }
   }
@@ -743,7 +758,7 @@ export class InstagramCommentsManager {
         AND merchant_id = ${merchantId}::uuid
       `;
     } catch (error) {
-      console.error('❌ Store comment analysis failed:', error);
+      this.logger.error('Store comment analysis failed', error, { merchantId, commentId });
     }
   }
 
@@ -775,7 +790,7 @@ export class InstagramCommentsManager {
         )
       `;
     } catch (error) {
-      console.error('❌ Log comment response failed:', error);
+      this.logger.error('Log comment response failed', error, { merchantId, commentId });
     }
   }
 
@@ -798,11 +813,27 @@ export class InstagramCommentsManager {
       `;
 
       for (const ruleData of rules) {
+        let triggerConfig;
+        try {
+          triggerConfig = JSON.parse(ruleData.trigger_config);
+        } catch (err) {
+          console.error(`❌ Invalid trigger_config for rule ${ruleData.id}:`, err);
+          continue;
+        }
+
+        let actionConfig;
+        try {
+          actionConfig = JSON.parse(ruleData.action_config);
+        } catch (err) {
+          console.error(`❌ Invalid action_config for rule ${ruleData.id}:`, err);
+          continue;
+        }
+
         const rule: CommentModerationRule = {
           id: ruleData.id,
           name: ruleData.name,
-          trigger: JSON.parse(ruleData.trigger_config),
-          action: JSON.parse(ruleData.action_config),
+          trigger: triggerConfig,
+          action: actionConfig,
           isActive: ruleData.is_active
         };
 
@@ -813,7 +844,7 @@ export class InstagramCommentsManager {
 
       return null;
     } catch (error) {
-      console.error('❌ Check moderation rules failed:', error);
+      this.logger.error('Check moderation rules failed', error, { merchantId });
       return null;
     }
   }
@@ -852,7 +883,7 @@ export class InstagramCommentsManager {
 
       return false;
     } catch (error) {
-      console.error('❌ Rule evaluation failed:', error);
+      this.logger.error('Rule evaluation failed', error, { ruleId: rule.id });
       return false;
     }
   }
@@ -892,7 +923,7 @@ export class InstagramCommentsManager {
           updated_at = NOW()
       `;
     } catch (error) {
-      console.error('❌ Update comment analytics failed:', error);
+      this.logger.error('Update comment analytics failed', error, { merchantId });
     }
   }
 
@@ -936,7 +967,7 @@ export class InstagramCommentsManager {
           updated_at = NOW()
       `;
     } catch (error) {
-      console.error('❌ Create sales opportunity failed:', error);
+      this.logger.error('Create sales opportunity failed', error, { merchantId, commentId: comment.id });
     }
   }
 }

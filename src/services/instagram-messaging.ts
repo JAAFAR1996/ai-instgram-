@@ -160,7 +160,14 @@ export class InstagramMessagingService {
       
       if (existingResult) {
         console.log(`🔒 Idempotent message send detected: ${idempotencyKey}`);
-        return JSON.parse(existingResult);
+        try {
+          return JSON.parse(existingResult);
+        } catch (parseError) {
+          console.warn(
+            `⚠️ Failed to parse cached message result for ${idempotencyKey}, proceeding with new send`,
+            parseError
+          );
+        }
       }
 
       // Get merchant access token

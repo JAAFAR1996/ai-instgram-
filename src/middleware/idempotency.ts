@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { Context, Next } from 'hono';
 import { getRedisConnectionManager } from '../services/RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
+import { getLogger } from '../services/logger.js';
 
 export interface IdempotencyConfig {
   ttlSeconds: number;
@@ -18,13 +19,18 @@ export interface IdempotencyConfig {
   skipMethods?: string[];
 }
 
-type IdempotencyResponse = { status: number; body: any; headers?: Record<string, string> };
+export type IdempotencyResponse<T> = {
+  status: number;
+  body: T;
+  headers?: Record<string, string>;
+};
 
 // Constants for context keys
 const K_IDEMPOTENCY_KEY = 'idempotencyKey';
 const K_IDEMPOTENCY_TTL = 'idempotencyTtl';
 const K_CACHE_FLAG = 'cacheIdempotency';
 const K_RESP = 'idempotencyResponse';
+const logger = getLogger({ component: 'IdempotencyMiddleware' });
 
 const DEFAULT_CONFIG: IdempotencyConfig = {
   ttlSeconds: 3600, // 1 hour
@@ -107,9 +113,15 @@ export function createIdempotencyMiddleware(
       const existingResult = await redis.get(idempotencyKey);
       
       if (existingResult) {
-        const parsed = JSON.parse(existingResult);
-        console.log(`🔒 Idempotency hit: ${idempotencyKey}`);
-        
+        let parsed;
+        try {
+          parsed = JSON.parse(existingResult);
+        } catch (err) {
+          logger.error('Invalid cache entry', err);
+          return c.text('Invalid cache entry', 500);
+        }
+        logger.info(`🔒 Idempotency hit: ${idempotencyKey}`);
+
         // Return cached response
         return c.json(parsed.body, parsed.status, parsed.headers || {});
       }
@@ -122,7 +134,7 @@ export function createIdempotencyMiddleware(
       
       // Check if response should be cached (handled in individual endpoints)
       const shouldCache = Boolean(c.get(K_CACHE_FLAG));
-      const responseData = c.get(K_RESP) as IdempotencyResponse;
+      const responseData = c.get(K_RESP) as IdempotencyResponse<unknown>;
       
       if (shouldCache && responseData) {
         await redis.setex(
@@ -130,7 +142,7 @@ export function createIdempotencyMiddleware(
           finalConfig.ttlSeconds,
           JSON.stringify(responseData)
         );
-        console.log(`💾 Cached idempotency result: ${idempotencyKey}`);
+        logger.info(`💾 Cached idempotency result: ${idempotencyKey}`);
       }
       
     } catch (error) {
@@ -140,7 +152,7 @@ export function createIdempotencyMiddleware(
           code: 'MERCHANT_ID_MISSING'
         }, 400);
       }
-      console.error('❌ Idempotency middleware error:', error);
+      logger.error('❌ Idempotency middleware error', error);
       // Continue with normal processing on idempotency errors
       await next();
     }
@@ -150,9 +162,15 @@ export function createIdempotencyMiddleware(
 /**
  * Helper function to mark response as idempotent (called from handlers)
  */
-export function markIdempotent(c: Context, status: number, body: any, headers?: Record<string, string>) {
+export function markIdempotent<T>(
+  c: Context,
+  status: number,
+  body: T,
+  headers?: Record<string, string>
+): void {
   c.set(K_CACHE_FLAG, true);
-  c.set(K_RESP, { status, body, headers });
+  const response: IdempotencyResponse<T> = { status, body, headers };
+  c.set(K_RESP, response);
 }
 
 /**

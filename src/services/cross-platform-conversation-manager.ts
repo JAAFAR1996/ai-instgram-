@@ -126,7 +126,7 @@ export class CrossPlatformConversationManager {
         )
         GROUP BY c.id
         ORDER BY c.updated_at DESC
-      `);
+      `;
 
       if (conversations.length === 0) {
         return null;
@@ -274,7 +274,7 @@ export class CrossPlatformConversationManager {
           ${continuityScore},
           ${timestamp}
         )
-      `);
+      `;
 
       const switchEvent: PlatformSwitchEvent = {
         fromPlatform: fromIdentifier.platform,
@@ -332,7 +332,7 @@ export class CrossPlatformConversationManager {
         )
         GROUP BY c.id
         ORDER BY c.updated_at DESC
-      `);
+      `;
 
       if (conversations.length <= 1) {
         return {
@@ -361,7 +361,7 @@ export class CrossPlatformConversationManager {
           session_data = ${JSON.stringify(mergedContext)},
           updated_at = NOW()
         WHERE id = ${primaryConversation.id}::uuid
-      `);
+      `;
 
       // Transfer messages from secondary conversations
       for (const secondaryConv of secondaryConversations) {
@@ -369,7 +369,7 @@ export class CrossPlatformConversationManager {
           UPDATE message_logs 
           SET conversation_id = ${primaryConversation.id}::uuid
           WHERE conversation_id = ${secondaryConv.id}::uuid
-        `);
+        `;
 
         // Mark secondary conversation as merged
         await sql`
@@ -382,7 +382,7 @@ export class CrossPlatformConversationManager {
               to_jsonb(${primaryConversation.id})
             )
           WHERE id = ${secondaryConv.id}::uuid
-        `);
+        `;
       }
 
       // Log merge operation
@@ -406,7 +406,7 @@ export class CrossPlatformConversationManager {
           })},
           true
         )
-      `);
+      `;
 
       console.log(`✅ Merged ${secondaryConversations.length} conversations into primary conversation`);
 
@@ -473,7 +473,7 @@ export class CrossPlatformConversationManager {
         )
         ${timeFilter}
         ORDER BY ml.created_at ASC
-      `);
+      `;
 
       // Build journey stages
       const stages: JourneyStage[] = journeyData.map(item => ({
@@ -687,7 +687,7 @@ export class CrossPlatformConversationManager {
       )
       ORDER BY updated_at DESC
       LIMIT 1
-    `);
+    `;
 
     return conversations[0] || null;
   }
@@ -725,7 +725,7 @@ export class CrossPlatformConversationManager {
         ${sourceConversation.conversation_stage},
         ${sourceConversation.session_data}
       ) RETURNING *
-    `);
+    `;
 
     return result[0];
   }
@@ -756,7 +756,7 @@ export class CrossPlatformConversationManager {
         UPDATE conversations 
         SET session_data = ${JSON.stringify(mergedContext)}
         WHERE id = ${targetConversation.id}::uuid
-      `);
+      `;
 
       return {
         success: true,
@@ -856,9 +856,9 @@ export class CrossPlatformConversationManager {
     try {
       const sql = this.db.getSQL();
       
-      const timeFilter = timeRange ? 
-        sql`AND switch_timestamp BETWEEN '${timeRange.start.toISOString()}' AND '${timeRange.end.toISOString()}'`) : 
-        sql``;
+      const timeFilter = timeRange
+        ? sql`AND switch_timestamp BETWEEN ${timeRange.start.toISOString()} AND ${timeRange.end.toISOString()}`
+        : sql``;
 
       const switches = await sql`
         SELECT * FROM platform_switches
@@ -871,7 +871,7 @@ export class CrossPlatformConversationManager {
         )
         ${timeFilter}
         ORDER BY switch_timestamp ASC
-      `);
+      `;
 
       return switches.map(s => ({
         fromPlatform: s.from_platform as Platform,

@@ -299,7 +299,16 @@ app.get('/auth/instagram/status/:merchantId', async (c) => {
       });
     }
     
-    const account = integration[0];
+    interface InstagramIntegration {
+      status: string;
+      token_expires_at: string;
+      instagram_business_account_id: string;
+      instagram_page_id: string;
+      instagram_page_name: string;
+      instagram_username: string;
+      instagram_profile_picture_url: string;
+    }
+    const account = integration[0] as InstagramIntegration;
     const isExpired = account.token_expires_at && 
       new Date() >= new Date(account.token_expires_at);
     

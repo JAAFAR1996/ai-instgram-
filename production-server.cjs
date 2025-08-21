@@ -12,29 +12,19 @@ const crypto = require('crypto');
 
 // Environment variables
 const PORT = Number(process.env.PORT) || 10000;
-const IG_VERIFY_TOKEN = process.env.IG_VERIFY_TOKEN || 'test_token_123';
-const META_APP_SECRET = process.env.META_APP_SECRET || 'test_secret_123';
+const IG_VERIFY_TOKEN = process.env.IG_VERIFY_TOKEN;
+if (!IG_VERIFY_TOKEN) throw new Error('IG_VERIFY_TOKEN is required');
+
+const META_APP_SECRET = process.env.META_APP_SECRET;
+if (!META_APP_SECRET) throw new Error('META_APP_SECRET is required');
+
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || 'internal_key_123';
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY;
+if (!INTERNAL_API_KEY) throw new Error('INTERNAL_API_KEY is required');
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
 // Maximum accepted body size for incoming requests (512KB)
 const MAX_BODY_SIZE = 512 * 1024; // 512KB
-
-if (!IG_VERIFY_TOKEN) {
-  console.error('❌ Missing IG_VERIFY_TOKEN environment variable');
-  process.exit(1);
-}
-
-if (!META_APP_SECRET) {
-  console.error('❌ Missing META_APP_SECRET environment variable');
-  process.exit(1);
-}
-
-if (!INTERNAL_API_KEY) {
-  console.error('❌ Missing INTERNAL_API_KEY environment variable');
-  process.exit(1);
-}
 
 // Application logger with JSON output
 const appLogger = winston.createLogger({

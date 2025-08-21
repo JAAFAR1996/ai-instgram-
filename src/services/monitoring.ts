@@ -7,6 +7,9 @@
 
 import { getDatabase } from '../database/connection.js';
 import type { Platform, QualityStatus, QualityMetrics } from '../types/database.js';
+import { getLogger } from './logger.js';
+
+const logger = getLogger({ component: 'MonitoringService' });
 
 export interface QualityCheck {
   merchantId: string;
@@ -84,7 +87,11 @@ export class MonitoringService {
         alerts
       };
     } catch (error) {
-      console.error('❌ WhatsApp quality check failed:', error);
+      logger.error('WhatsApp quality check failed', error, {
+        merchantId,
+        platform: 'whatsapp',
+        event: 'checkWhatsAppQuality'
+      });
       throw new Error('Failed to check WhatsApp quality');
     }
   }
@@ -110,7 +117,11 @@ export class MonitoringService {
         alerts
       };
     } catch (error) {
-      console.error('❌ Instagram quality check failed:', error);
+      logger.error('Instagram quality check failed', error, {
+        merchantId,
+        platform: 'instagram',
+        event: 'checkInstagramQuality'
+      });
       throw new Error('Failed to check Instagram quality');
     }
   }
@@ -147,7 +158,11 @@ export class MonitoringService {
         )
       `;
     } catch (error) {
-      console.error('❌ Performance logging failed:', error);
+      logger.error('Performance logging failed', error, {
+        merchantId: metrics.merchantId,
+        endpoint: metrics.endpoint,
+        event: 'logPerformanceMetrics'
+      });
     }
   }
 
@@ -166,7 +181,11 @@ export class MonitoringService {
         await this.sendQualityAlert(merchantId, platform, criticalAlerts);
       }
     } catch (error) {
-      console.error('❌ Quality alert failed:', error);
+      logger.error('Quality alert failed', error, {
+        merchantId,
+        platform,
+        event: 'alertOnLowQuality'
+      });
     }
   }
 
@@ -216,7 +235,11 @@ export class MonitoringService {
         responseRate: Math.round(trend.response_rate * 100) / 100
       }));
     } catch (error) {
-      console.error('❌ Error getting quality trends:', error);
+      logger.error('Error getting quality trends', error, {
+        merchantId,
+        platform,
+        event: 'getQualityTrends'
+      });
       throw new Error('Failed to get quality trends');
     }
   }
@@ -261,7 +284,9 @@ export class MonitoringService {
         memoryUsage: Math.round((result.avg_memory_usage || 0) * 100) / 100
       };
     } catch (error) {
-      console.error('❌ Error getting system performance:', error);
+      logger.error('Error getting system performance', error, {
+        event: 'getSystemPerformance'
+      });
       throw new Error('Failed to get system performance');
     }
   }
@@ -323,7 +348,11 @@ export class MonitoringService {
         messagingQualityScore: Math.round(messagingQualityScore * 100) / 100
       };
     } catch (error) {
-      console.error('❌ Error calculating quality metrics:', error);
+      logger.error('Error calculating quality metrics', error, {
+        merchantId,
+        platform,
+        event: 'calculateQualityMetrics'
+      });
       throw error;
     }
   }
@@ -468,7 +497,11 @@ export class MonitoringService {
           updated_at = NOW()
       `;
     } catch (error) {
-      console.error('❌ Error storing quality metrics:', error);
+      logger.error('Error storing quality metrics', error, {
+        merchantId,
+        platform,
+        event: 'storeQualityMetrics'
+      });
     }
   }
 
@@ -487,7 +520,12 @@ export class MonitoringService {
       // 3. Send SMS alert for critical issues
       // 4. Log alert in audit system
       
-      console.log(`🚨 Quality Alert for Merchant ${merchantId} on ${platform}:`, alerts);
+      logger.info('Quality alert for merchant', {
+        merchantId,
+        platform,
+        alerts,
+        event: 'sendQualityAlert'
+      });
       
       const sql = this.db.getSQL();
       
@@ -515,7 +553,11 @@ export class MonitoringService {
         `;
       }
     } catch (error) {
-      console.error('❌ Error sending quality alert:', error);
+      logger.error('Error sending quality alert', error, {
+        merchantId,
+        platform,
+        event: 'sendQualityAlert'
+      });
     }
   }
 }

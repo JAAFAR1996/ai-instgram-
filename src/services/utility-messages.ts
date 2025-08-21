@@ -11,6 +11,9 @@ import { getDatabase } from '../database/connection.js';
 import { getConfig } from '../config/environment.js';
 import type { SendMessageRequest } from '../types/instagram.js';
 import crypto from 'crypto';
+import { getLogger } from './logger.js';
+
+const logger = getLogger({ component: 'UtilityMessagesService' });
 
 // Escape special characters for use in RegExp
 function escapeRegex(str: string): string {
@@ -62,7 +65,11 @@ export class UtilityMessagesService {
     payload: UtilityMessagePayload
   ): Promise<UtilityMessageResult> {
     try {
-      console.log('📨 Sending utility message:', payload.message_type);
+      logger.info('Sending utility message', {
+        merchantId,
+        messageType: payload.message_type,
+        event: 'sendUtilityMessage'
+      });
 
       // Validate template exists and is approved
       const template = await this.getApprovedTemplate(merchantId, payload.template_id);
@@ -103,14 +110,22 @@ export class UtilityMessagesService {
         // Log utility message for compliance tracking
         await this.logUtilityMessage(merchantId, payload, response.messageId ?? '');
 
-        console.log('✅ Utility message sent successfully');
+        logger.info('Utility message sent successfully', {
+          merchantId,
+          messageType: payload.message_type,
+          event: 'sendUtilityMessage'
+        });
         return {
           success: true,
           message_id: response.messageId ?? '',
           timestamp: new Date()
         };
       } else {
-        console.error('❌ Failed to send utility message:', response.error);
+        logger.error('Failed to send utility message', response.error, {
+          merchantId,
+          messageType: payload.message_type,
+          event: 'sendUtilityMessage'
+        });
         return {
           success: false,
           error: response.error ? JSON.stringify(response.error) : undefined,
@@ -119,7 +134,10 @@ export class UtilityMessagesService {
       }
 
     } catch (error) {
-      console.error('❌ Utility message service error:', error);
+      logger.error('Utility message service error', error, {
+        merchantId,
+        event: 'sendUtilityMessage'
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -137,7 +155,11 @@ export class UtilityMessagesService {
     template: Omit<UtilityMessageTemplate, 'id' | 'approved' | 'created_at' | 'updated_at'>
   ): Promise<{ success: boolean; template_id?: string; error?: string }> {
     try {
-      console.log('📝 Creating utility message template:', template.name);
+      logger.info('Creating utility message template', {
+        merchantId,
+        templateName: template.name,
+        event: 'createUtilityTemplate'
+      });
 
       // Validate template content (no marketing materials allowed)
       if (this.containsMarketingContent(template.content)) {
@@ -175,7 +197,11 @@ export class UtilityMessagesService {
         )
       `;
 
-      console.log('✅ Utility template created and auto-approved');
+      logger.info('Utility template created and auto-approved', {
+        merchantId,
+        templateName: template.name,
+        event: 'createUtilityTemplate'
+      });
       
       return {
         success: true,
@@ -183,7 +209,11 @@ export class UtilityMessagesService {
       };
 
     } catch (error) {
-      console.error('❌ Failed to create utility template:', error);
+      logger.error('Failed to create utility template', error, {
+        merchantId,
+        templateName: template.name,
+        event: 'createUtilityTemplate'
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Template creation failed'
@@ -223,7 +253,11 @@ export class UtilityMessagesService {
       };
 
     } catch (error) {
-      console.error('❌ Failed to get template:', error);
+      logger.error('Failed to get template', error, {
+        merchantId,
+        templateId,
+        event: 'getTemplate'
+      });
       return null;
     }
   }
@@ -290,7 +324,11 @@ export class UtilityMessagesService {
       `;
 
     } catch (error) {
-      console.error('❌ Failed to log utility message:', error);
+      logger.error('Failed to log utility message', error, {
+        merchantId,
+        messageId,
+        event: 'logUtilityMessage'
+      });
     }
   }
 
@@ -319,7 +357,10 @@ export class UtilityMessagesService {
       }));
 
     } catch (error) {
-      console.error('❌ Failed to get templates:', error);
+      logger.error('Failed to get templates', error, {
+        merchantId,
+        event: 'getTemplates'
+      });
       return [];
     }
   }
@@ -353,7 +394,10 @@ export class UtilityMessagesService {
       await this.createUtilityTemplate(merchantId, template);
     }
 
-    console.log('✅ Default utility templates created');
+    logger.info('Default utility templates created', {
+      merchantId,
+      event: 'createDefaultTemplates'
+    });
   }
 }
 

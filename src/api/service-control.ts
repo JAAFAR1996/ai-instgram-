@@ -5,12 +5,13 @@
  * ===============================================
  */
 
-import { Hono } from 'hono';
+import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
 import { validator } from 'hono/validator';
 import { getServiceController } from '../services/service-controller.js';
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
 import { z } from 'zod';
+import { getConfig } from '../config/environment.js';
 
 // Validation schemas
 const ToggleServiceSchema = z.object({
@@ -94,7 +95,7 @@ export class ServiceControlAPI {
   /**
    * Toggle service on/off
    */
-  private async toggleService(c: any) {
+  private async toggleService(c: Context) {
     try {
       const data = c.req.valid('json');
       
@@ -128,7 +129,7 @@ export class ServiceControlAPI {
   /**
    * Get all services status for merchant
    */
-  private async getServicesStatus(c: any) {
+  private async getServicesStatus(c: Context) {
     try {
       const merchantId = c.req.param('merchantId');
       
@@ -158,7 +159,7 @@ export class ServiceControlAPI {
   /**
    * Get specific service status
    */
-  private async getServiceStatus(c: any) {
+  private async getServiceStatus(c: Context) {
     try {
       const merchantId = c.req.param('merchantId');
       const service = c.req.param('service');
@@ -200,7 +201,7 @@ export class ServiceControlAPI {
   /**
    * Enable all Instagram services
    */
-  private async enableInstagramServices(c: any) {
+  private async enableInstagramServices(c: Context) {
     try {
       const merchantId = c.req.param('merchantId');
       
@@ -238,7 +239,7 @@ export class ServiceControlAPI {
   /**
    * Disable all services (maintenance mode)
    */
-  private async disableAllServices(c: any) {
+  private async disableAllServices(c: Context) {
     try {
       const merchantId = c.req.param('merchantId');
       
@@ -279,7 +280,7 @@ export class ServiceControlAPI {
   /**
    * Get services health status
    */
-  private async getServicesHealth(c: any) {
+  private async getServicesHealth(c: Context) {
     try {
       const merchantId = c.req.param('merchantId');
       
@@ -313,7 +314,7 @@ export class ServiceControlAPI {
   /**
    * Get services overview (admin endpoint)
    */
-  private async getServicesOverview(c: any) {
+  private async getServicesOverview(c: Context) {
     try {
       // This would be protected by admin authentication in production
       const db = this.serviceController['db'];

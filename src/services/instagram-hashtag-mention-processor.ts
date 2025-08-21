@@ -8,6 +8,12 @@
 import { getDatabase } from '../database/connection.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 
+const TIMEFRAME_INTERVALS: Record<'day' | 'week' | 'month', string> = {
+  day: '1 day',
+  week: '7 days',
+  month: '30 days'
+};
+
 export interface HashtagAnalysis {
   hashtag: string;
   frequency: number;
@@ -169,7 +175,7 @@ export class InstagramHashtagMentionProcessor {
     try {
       const sql = this.db.getSQL();
 
-      const timeFilter = this.getTimeFilter(timeframe);
+      const intervalValue = TIMEFRAME_INTERVALS[timeframe] || TIMEFRAME_INTERVALS.week;
 
       const trends = await sql`
         SELECT 
@@ -187,7 +193,7 @@ export class InstagramHashtagMentionProcessor {
         FROM hashtag_mentions hm
         WHERE hm.merchant_id = ${merchantId}::uuid
         AND hm.hashtag IS NOT NULL
-        AND hm.created_at >= NOW() - ${timeFilter}
+        AND hm.created_at >= NOW() - ${intervalValue}::interval
         GROUP BY hashtag
         HAVING COUNT(*) >= 2
         ORDER BY total_usage DESC
@@ -719,30 +725,25 @@ export class InstagramHashtagMentionProcessor {
     }
   }
 
-  private getTimeFilter(timeframe: string): any {
-    switch (timeframe) {
-      case 'day': return `INTERVAL '1 day'`;
-      case 'week': return `INTERVAL '7 days'`;
-      case 'month': return `INTERVAL '30 days'`;
-      default: return `INTERVAL '7 days'`;
-    }
-  }
-
-  private async calculateHashtagGrowth(hashtag: string, merchantId: string, timeframe: string): Promise<number> {
+  private async calculateHashtagGrowth(
+    hashtag: string,
+    merchantId: string,
+    timeframe: 'day' | 'week' | 'month'
+  ): Promise<number> {
     try {
       const sql = this.db.getSQL();
-      const interval = this.getTimeFilter(timeframe);
-      const result = await sql.unsafe(`
+      const intervalValue = TIMEFRAME_INTERVALS[timeframe] || TIMEFRAME_INTERVALS.week;
+      const result = await sql`
         SELECT
-          COUNT(*) FILTER (WHERE created_at >= NOW() - ${interval}) AS current_count,
+          COUNT(*) FILTER (WHERE created_at >= NOW() - ${intervalValue}::interval) AS current_count,
           COUNT(*) FILTER (
-            WHERE created_at >= NOW() - ${interval} * 2
-              AND created_at < NOW() - ${interval}
+            WHERE created_at >= NOW() - ${intervalValue}::interval * 2
+              AND created_at < NOW() - ${intervalValue}::interval
           ) AS previous_count
         FROM hashtag_mentions
-        WHERE hashtag = $1
-          AND merchant_id = $2::uuid
-      `, [hashtag, merchantId]);
+        WHERE hashtag = ${hashtag}
+          AND merchant_id = ${merchantId}::uuid
+      `;
 
       const current = Number(result[0]?.current_count || 0);
       const previous = Number(result[0]?.previous_count || 0);

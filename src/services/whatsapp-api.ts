@@ -5,6 +5,7 @@
  * ===============================================
  */
 
+import { createHash } from 'crypto';
 import { getEncryptionService } from './encryption.js';
 import { getDatabase } from '../database/connection.js';
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';

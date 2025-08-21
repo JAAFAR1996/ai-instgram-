@@ -5,8 +5,9 @@
  * ===============================================
  */
 
-import { AIService, type ConversationContext, type AIResponse, type MessageHistory } from './ai.js';
+import { type ConversationContext, type AIResponse, type MessageHistory } from './ai.js';
 import { getDatabase } from '../database/connection.js';
+import { createLogger } from './logger.js';
 import OpenAI from 'openai';
 
 // Simple merchant configuration interface
@@ -39,7 +40,7 @@ export interface MediaRecommendation {
 type ErrorCode = 'AI_API_ERROR' | 'RATE_LIMIT' | 'NETWORK_ERROR';
 
 export interface InstagramContext extends ConversationContext {
-  interactionType: 'dm' | 'comment' | 'story_reply' | 'story_mention';
+  interactionType: 'dm' | 'comment' | 'story_reply' | 'story_mention' | 'story_reaction';
   mediaContext?: {
     mediaId?: string;
     mediaType?: 'video' | 'carousel' | 'photo';
@@ -54,7 +55,14 @@ export interface InstagramContext extends ConversationContext {
   };
 }
 
-export class InstagramAIService extends AIService {
+export class InstagramAIService {
+  private logger = createLogger({ component: 'InstagramAI' });
+  private openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY!,
+    timeout: parseInt(process.env.OPENAI_TIMEOUT || '30000'),
+  });
+
+  private db = getDatabase();
   /**
    * Get merchant-specific AI configuration
    */
@@ -75,11 +83,14 @@ export class InstagramAIService extends AIService {
           language: result[0].ai_config.language || 'ar'
         };
       }
-      
+
       // Default configuration
+      const maxTokensEnv = parseInt(process.env.OPENAI_MAX_TOKENS || '600', 10);
+      const maxTokens = Number.isFinite(maxTokensEnv) ? maxTokensEnv : 600;
+
       return {
         aiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-        maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '600'),
+        maxTokens,
         temperature: 0.8,
         language: 'ar'
       };
@@ -104,6 +115,16 @@ export class InstagramAIService extends AIService {
         'RATE_LIMIT': 'ستورينا رائعة! 🔥 راح نرد عليك قريباً',
         'NETWORK_ERROR': 'شفت ستورينا! 💕 راسلنا خاص للمزيد'
       },
+      'story_mention': {
+        'AI_API_ERROR': 'شكراً لذكرك لنا في الستوري! 🌟 راسلنا للمساعدة',
+        'RATE_LIMIT': 'ذكرتنا في ستورياتك! 🔔 بنرد عليك قريباً',
+        'NETWORK_ERROR': 'يا سلام على الستوري! 🎉 راسلنا خاص لو محتاج شي'
+      },
+      'story_reaction': {
+        'AI_API_ERROR': 'حبيت تفاعلك مع الستوري! 🙌 تواصل معنا لأي مساعدة',
+        'RATE_LIMIT': 'ردك على الستوري أسعدنا! 😊 بنرد عليك قريباً',
+        'NETWORK_ERROR': 'شكراً لتفاعلك! 💌 حاول راسلنا ثاني لو ما وصل الرد'
+      },
       'comment': {
         'AI_API_ERROR': 'شكراً لتعليقك! 💙 راسلنا خاص للمزيد من التفاصيل',
         'RATE_LIMIT': 'شكراً لتفاعلك! راح نرد عليك قريباً 🌹',
@@ -116,10 +137,11 @@ export class InstagramAIService extends AIService {
       }
     };
 
-    const contextType = context.interactionType === 'story_reply' ? 'story_reply' 
-                       : context.interactionType === 'comment' ? 'comment' 
-                       : 'dm';
-    
+    const contextType = ['story_reply', 'story_mention', 'story_reaction', 'comment', 'dm']
+      .includes(context.interactionType)
+      ? context.interactionType
+      : 'dm';
+
     const fb = fallbacks[contextType as keyof typeof fallbacks] as Record<ErrorCode, string>;
     const code = (errorType as ErrorCode);
     const message = fb[code] ?? fb.AI_API_ERROR;
@@ -134,11 +156,11 @@ export class InstagramAIService extends AIService {
       confidence: 0.1,
       tokens: { prompt: 0, completion: 0, total: 0 },
       responseTime: 0,
-      visualStyle: contextType === 'story_reply' ? 'story' : 'direct',
+      visualStyle: ['story_reply', 'story_mention', 'story_reaction'].includes(contextType) ? 'story' : 'direct',
       engagement: {
-        likelyToShare: contextType === 'story_reply',
-        viralPotential: contextType === 'story_reply' ? 0.7 : 0,
-        userGeneratedContent: contextType === 'story_reply'
+        likelyToShare: ['story_reply', 'story_mention', 'story_reaction'].includes(contextType),
+        viralPotential: ['story_reply', 'story_mention', 'story_reaction'].includes(contextType) ? 0.7 : 0,
+        userGeneratedContent: ['story_reply', 'story_mention', 'story_reaction'].includes(contextType)
       },
       hashtagSuggestions: ['#مساعدة']
     };
@@ -159,14 +181,9 @@ export class InstagramAIService extends AIService {
       
       // Build Instagram-specific prompt
       const prompt = await this.buildInstagramConversationPrompt(customerMessage, context);
-      
-      const openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY!,
-        timeout: parseInt(process.env.OPENAI_TIMEOUT || '30000'),
-      });
 
       // Call OpenAI with merchant-specific settings
-      const completion = await openai.chat.completions.create({
+      const completion = await this.openai.chat.completions.create({
         model: config.aiModel,
         messages: prompt,
         temperature: config.temperature,
@@ -183,9 +200,26 @@ export class InstagramAIService extends AIService {
       if (!response) {
         throw new Error('No response from OpenAI for Instagram');
       }
+      // Parse Instagram AI response with validation
+      let aiResponse: InstagramAIResponse;
+      try {
+        const parsed = JSON.parse(response) as Partial<InstagramAIResponse>;
 
-      // Parse Instagram AI response
-      const aiResponse = JSON.parse(response) as InstagramAIResponse;
+        // Ensure required fields exist before proceeding
+        if (
+          !parsed.message ||
+          !parsed.messageAr ||
+          !parsed.intent ||
+          !Array.isArray(parsed.actions)
+        ) {
+          throw new Error('Missing required AI response fields');
+        }
+
+        aiResponse = parsed as InstagramAIResponse;
+      } catch (parseError) {
+        console.error('❌ Failed to parse Instagram AI response:', parseError);
+        return this.getContextualFallback(context, 'AI_API_ERROR');
+      }
       
       // Add metadata
       aiResponse.tokens = {
@@ -197,7 +231,7 @@ export class InstagramAIService extends AIService {
 
       // Enhance with Instagram-specific features
       aiResponse.hashtagSuggestions = await this.generateRelevantHashtags(
-        customerMessage, 
+        customerMessage,
         context
       );
 
@@ -237,7 +271,12 @@ export class InstagramAIService extends AIService {
       });
 
       const response = completion.choices[0]?.message?.content;
-      const aiResponse = JSON.parse(response || '{}') as InstagramAIResponse;
+      let aiResponse: InstagramAIResponse;
+      try {
+        aiResponse = JSON.parse(response || '{}');
+      } catch {
+        aiResponse = this.getInstagramFallbackResponse(context);
+      }
 
       // Set visual style for story replies
       aiResponse.visualStyle = 'story';
@@ -264,12 +303,8 @@ export class InstagramAIService extends AIService {
   ): Promise<InstagramAIResponse> {
     try {
       const prompt = this.buildCommentReplyPrompt(commentText, postContext, context);
-      
-      const openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY!,
-      });
 
-      const completion = await openai.chat.completions.create({
+      const completion = await this.openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: prompt,
         temperature: 0.7,
@@ -278,7 +313,12 @@ export class InstagramAIService extends AIService {
       });
 
       const response = completion.choices[0]?.message?.content;
-      const aiResponse = JSON.parse(response || '{}') as InstagramAIResponse;
+      let aiResponse: InstagramAIResponse;
+      try {
+        aiResponse = JSON.parse(response || '{}');
+      } catch {
+        aiResponse = this.getInstagramFallbackResponse(context);
+      }
 
       // Set visual style for post comments
       aiResponse.visualStyle = 'post';
@@ -311,11 +351,7 @@ export class InstagramAIService extends AIService {
       const products = await this.getProductsForShowcase(productIds, context.merchantId);
       const prompt = this.buildProductShowcasePrompt(products, context);
       
-      const openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY!,
-      });
-
-      const completion = await openai.chat.completions.create({
+      const completion = await this.openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: prompt,
         temperature: 0.8,
@@ -324,7 +360,23 @@ export class InstagramAIService extends AIService {
       });
 
       const response = completion.choices[0]?.message?.content;
-      return JSON.parse(response || '{}');
+      let showcase: {
+        mediaRecommendations: MediaRecommendation[];
+        caption: string;
+        hashtags: string[];
+        engagementBoosts: string[];
+      };
+      try {
+        showcase = JSON.parse(response || '{}');
+      } catch {
+        showcase = {
+          mediaRecommendations: [],
+          caption: '',
+          hashtags: [],
+          engagementBoosts: []
+        };
+      }
+      return showcase;
     } catch (error) {
       console.error('❌ Product showcase generation failed:', error);
       return {
@@ -351,12 +403,8 @@ export class InstagramAIService extends AIService {
   }> {
     try {
       const prompt = this.buildContentAnalysisPrompt(content, contentType, context);
-      
-      const openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY!,
-      });
 
-      const completion = await openai.chat.completions.create({
+      const completion = await this.openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: prompt,
         temperature: 0.4,
@@ -365,7 +413,23 @@ export class InstagramAIService extends AIService {
       });
 
       const response = completion.choices[0]?.message?.content;
-      return JSON.parse(response || '{}');
+      let analysis: {
+        viralScore: number;
+        engagementPrediction: number;
+        audienceMatch: number;
+        optimizationSuggestions: string[];
+      };
+      try {
+        analysis = JSON.parse(response || '{}');
+      } catch {
+        analysis = {
+          viralScore: 0,
+          engagementPrediction: 0,
+          audienceMatch: 0,
+          optimizationSuggestions: []
+        };
+      }
+      return analysis;
     } catch (error) {
       console.error('❌ Content performance analysis failed:', error);
       return {

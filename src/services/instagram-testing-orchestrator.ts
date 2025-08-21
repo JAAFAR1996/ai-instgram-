@@ -41,7 +41,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 import { getDatabase } from '../database/connection.js';
-import { getInstagramClient, type InstagramCredentials } from './instagram-api.js';
+import { getInstagramClient, type InstagramAPICredentials } from './instagram-api.js';
 import { getInstagramWebhookHandler } from './instagram-webhook.js';
 import { getInstagramStoriesManager } from './instagram-stories-manager.js';
 import { getInstagramCommentsManager } from './instagram-comments-manager.js';
@@ -991,7 +991,7 @@ export class InstagramTestingOrchestrator {
    */
   private async testAPIEndpoints(
     instagramClient: any,
-    credentials: InstagramCredentials,
+    credentials: InstagramAPICredentials,
     merchantId: string
   ): Promise<Array<{
     endpoint: string;

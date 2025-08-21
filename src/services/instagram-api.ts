@@ -165,14 +165,17 @@ export class InstagramAPIClient {
       });
     }
 
-      const url = `${GRAPH_API_BASE_URL}${path}${path.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(accessToken)}`;
+      const url = `${GRAPH_API_BASE_URL}${path}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
     const start = Date.now();
     try {
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal
       });

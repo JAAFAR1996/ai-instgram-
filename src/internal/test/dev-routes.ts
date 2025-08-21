@@ -80,8 +80,7 @@ class MockQueueService {
       } else {
         console.log(` Job retry scheduled: ${jobId}`);
       }
-    }
-  } else {
+    } else {
       this.jobs.delete(jobId);
       console.log(`✅ Job completed: ${jobId}`);
     }

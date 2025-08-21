@@ -22,9 +22,16 @@ interface ConnectionConfig {
   connect_timeout?: number;
 }
 
+// Basic interface for postgres tagged template client
+interface SqlClient {
+  <T = unknown>(strings: TemplateStringsArray, ...params: unknown[]): Promise<T[]>;
+  begin<T>(callback: (sql: SqlClient) => Promise<T>): Promise<T>;
+  end(): Promise<void>;
+}
+
 // Connection pool class
 export class DatabaseConnection {
-  private sql: ReturnType<typeof postgres> | null = null;
+  private sql: SqlClient | null = null;
   private config: ConnectionConfig;
   private isConnected = false;
 
@@ -171,7 +178,7 @@ export class DatabaseConnection {
   /**
    * Get the SQL instance for querying
    */
-  public getSQL(): ReturnType<typeof postgres> {
+  public getSQL(): SqlClient {
     if (!this.sql || !this.isConnected) {
       throw new Error('Database connection not initialized. Call connect() first.');
     }
@@ -182,17 +189,17 @@ export class DatabaseConnection {
    * Execute a parameterized query using tagged templates
    * Provides automatic sanitization via the postgres library
    */
-  public async query<T = any>(
+  public async query<T = unknown, TParams extends unknown[] = unknown[]>(
     strings: TemplateStringsArray,
-    ...params: any[]
+    ...params: TParams
   ): Promise<T[]> {
     try {
       if (!this.sql) {
         throw new Error('Database connection not initialized');
       }
 
-      const result = await (this.sql as any)(strings, ...params);
-      return result as unknown as T[];
+      const result = await this.sql<T>(strings, ...params);
+      return result;
     } catch (error) {
       console.error('❌ Database query error:', error);
       throw this.formatDatabaseError(error);
@@ -203,7 +210,7 @@ export class DatabaseConnection {
    * Execute a transaction
    */
   public async transaction<T>(
-    callback: (sql: ReturnType<typeof postgres>) => Promise<T>
+    callback: (sql: SqlClient) => Promise<T>
   ): Promise<T> {
     if (!this.sql) {
       throw new Error('Database connection not initialized');
@@ -462,9 +469,9 @@ export async function createSecureConnection(merchantId: string) {
 /**
  * Execute query with merchant context
  */
-export async function executeWithMerchantContext<T = any>(
+export async function executeWithMerchantContext<T = unknown>(
   merchantId: string,
-  queryFn: (sql: ReturnType<typeof postgres>) => Promise<T>
+  queryFn: (sql: SqlClient) => Promise<T>
 ): Promise<T> {
   const db = await createSecureConnection(merchantId);
   const sql = db.getSQL();

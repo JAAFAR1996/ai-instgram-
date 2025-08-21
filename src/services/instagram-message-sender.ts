@@ -14,7 +14,14 @@ import {
 import { ExpiringMap } from '../utils/expiring-map.js';
 import { getDatabase } from '../database/connection.js';
 import { getMessageWindowService } from './message-window.js';
+import { getLogger } from './logger.js';
 import type { QuickReply, SendMessageRequest } from '../types/instagram.js';
+
+interface SendMessageWithAttachment extends Omit<SendMessageRequest, 'messageType' | 'content'> {
+  attachment: { type: string; payload: any };
+  content?: string;
+  messageType?: SendMessageRequest['messageType'];
+}
 
 export interface MessageTemplate {
   type: 'generic' | 'button' | 'receipt' | 'list';
@@ -40,6 +47,8 @@ export interface TemplateButton {
   payload?: string;
   phone_number?: string;
 }
+
+const logger = getLogger({ component: 'InstagramMessageSender' });
 
 export interface SendResult {
   success: boolean;
@@ -244,11 +253,11 @@ export class InstagramMessageSender {
         ? { attachment_id: finalAttachmentId }
         : { url: finalMediaUrl };
 
-      const sendReq: SendMessageRequest & any = {
+      const sendReq: SendMessageWithAttachment = {
         recipientId,
         attachment: { type: mediaType, payload }
       };
-      const response = await client.sendMessage(credentials, merchantId, sendReq);
+      const response = await client.sendMessage(credentials, merchantId, sendReq as SendMessageRequest);
 
       const result: SendResult = {
         success: response.success,
@@ -583,8 +592,9 @@ export class InstagramMessageSender {
     let sent = 0;
     let failed = 0;
 
-    const delay = options?.delayBetweenMessages || 1000; // 1 second default
+    const batchDelay = options?.delayBetweenMessages || 1000; // ms between batches
     const maxPerHour = options?.maxPerHour || 100; // Rate limit
+    const batchSize = 5; // concurrency limit
 
     try {
       console.log(`📢 Sending bulk Instagram messages to ${recipients.length} recipients`);
@@ -607,56 +617,70 @@ export class InstagramMessageSender {
         sharedAttachmentId = uploadResult.mediaId;
       }
 
-      // Send to each recipient
-      for (const recipientId of recipients) {
-        try {
-          let result: SendResult;
+      // Send in batches with concurrency
+      for (let i = 0; i < recipients.length; i += batchSize) {
+        const batch = recipients.slice(i, i + batchSize);
 
-          if (options?.mediaUrl && options?.mediaType) {
-            result = await this.sendMediaMessage(
-              merchantId,
-              recipientId,
-              options.mediaUrl,
-              options.mediaType,
-              message,
-              undefined,
-              sharedAttachmentId
-            );
-          } else {
-            result = await this.sendTextMessage(
-              merchantId,
-              recipientId,
-              message
-            );
-          }
+        const batchPromises = batch.map(async recipientId => {
+          try {
+            let result: SendResult;
 
-          results.push(result);
-
-          if (result.success) {
-            sent++;
-          } else {
-            failed++;
-            if (result.error) {
-              errors.push(`${recipientId}: ${result.error}`);
+            if (options?.mediaUrl && options?.mediaType) {
+              result = await this.sendMediaMessage(
+                merchantId,
+                recipientId,
+                options.mediaUrl,
+                options.mediaType,
+                message,
+                undefined,
+                sharedAttachmentId
+              );
+            } else {
+              result = await this.sendTextMessage(
+                merchantId,
+                recipientId,
+                message
+              );
             }
-          }
 
-          // Delay between messages to avoid rate limiting
-          if (delay > 0) {
-            await new Promise(resolve => setTimeout(resolve, delay));
+            return { recipientId, result };
+          } catch (error) {
+            throw { recipientId, error };
           }
+        });
 
-        } catch (error) {
-          failed++;
-          const errorMsg = `${recipientId}: ${error instanceof Error ? error.message : 'Unknown error'}`;
-          errors.push(errorMsg);
-          
-          results.push({
-            success: false,
-            error: errorMsg,
-            deliveryStatus: 'failed',
-            timestamp: new Date()
-          });
+        const settled = await Promise.allSettled(batchPromises);
+
+        for (const item of settled) {
+          if (item.status === 'fulfilled') {
+            const { recipientId, result } = item.value;
+            results.push(result);
+
+            if (result.success) {
+              sent++;
+            } else {
+              failed++;
+              if (result.error) {
+                errors.push(`${recipientId}: ${result.error}`);
+              }
+            }
+          } else {
+            const { recipientId, error } = item.reason;
+            failed++;
+            const errorMsg = `${recipientId}: ${error instanceof Error ? error.message : 'Unknown error'}`;
+            errors.push(errorMsg);
+            results.push({
+              success: false,
+              error: errorMsg,
+              deliveryStatus: 'failed',
+              timestamp: new Date()
+            });
+          }
+        }
+
+        // Delay between batches to avoid rate limiting
+        if (batchDelay > 0 && i + batchSize < recipients.length) {
+          await new Promise(resolve => setTimeout(resolve, batchDelay));
         }
       }
 
@@ -680,11 +704,11 @@ export class InstagramMessageSender {
       console.error('❌ Bulk send failed:', error);
       errors.push(error instanceof Error ? error.message : 'Unknown bulk send error');
       
-      return { 
-        sent, 
-        failed: recipients.length - sent, 
-        results, 
-        errors 
+      return {
+        sent,
+        failed: recipients.length - sent,
+        results,
+        errors
       };
     }
   }
@@ -723,14 +747,14 @@ export class InstagramMessageSender {
   ): Promise<boolean> {
     try {
       const windowStatus = await this.messageWindowService.getWindowStatus(
-        merchantId, 
+        merchantId,
         { instagram: recipientId, platform: 'instagram' }
       );
 
       return windowStatus.canSend;
     } catch (error) {
-      console.error('❌ Message window check failed:', error);
-      return false; // Err on the side of caution
+      logger.error('Message window check failed, proceeding cautiously', { error });
+      return true; // أو إعادة الخطأ ليُعالج أعلى الدالة
     }
   }
 
@@ -886,6 +910,34 @@ export class InstagramMessageSender {
 
     } catch (error) {
       console.error('❌ Bulk send logging failed:', error);
+    }
+  }
+
+  /**
+   * Upload media for reuse in multiple messages
+   */
+  public async uploadMedia(
+    merchantId: string,
+    mediaUrl: string,
+    mediaType: 'image' | 'video' | 'audio'
+  ): Promise<{
+    success: boolean;
+    mediaId?: string;
+    error?: string;
+  }> {
+    try {
+      const client = this.getClient(merchantId);
+      const mediaId = await client.uploadMedia(mediaUrl, mediaType);
+      
+      return {
+        success: true,
+        mediaId
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown upload error'
+      };
     }
   }
 }

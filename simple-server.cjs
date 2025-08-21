@@ -8,7 +8,7 @@ const IG_VERIFY_TOKEN = process.env.IG_VERIFY_TOKEN || 'test_token_123';
 const META_APP_SECRET = process.env.META_APP_SECRET || 'test_secret_123';
 
 console.log('🔧 Environment:');
-console.log('  IG_VERIFY_TOKEN:', IG_VERIFY_TOKEN);
+console.log('  IG_VERIFY_TOKEN:', IG_VERIFY_TOKEN ? '[SET]' : '[NOT SET]');
 console.log('  META_APP_SECRET:', META_APP_SECRET ? '[SET]' : '[NOT SET]');
 
 // Security headers for API-only CSP
@@ -81,7 +81,11 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/webhooks/instagram' && method === 'GET') {
       const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = parsedUrl.query;
       
-      console.log('🔍 Instagram webhook verification:', { mode, token, challenge });
+      console.log('🔍 Instagram webhook verification:', {
+        mode,
+        token: token ? '[REDACTED]' : '[NOT PROVIDED]',
+        challenge: challenge ? '[REDACTED]' : '[NOT PROVIDED]'
+      });
       
       if (mode !== 'subscribe') {
         res.writeHead(400, { 'Content-Type': 'text/plain' });
@@ -95,7 +99,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       
-      console.log('✅ Verification successful, returning challenge:', challenge);
+      console.log('✅ Verification successful, returning challenge');
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       res.end(challenge);
       return;
@@ -107,8 +111,8 @@ const server = http.createServer(async (req, res) => {
       const signature = req.headers['x-hub-signature-256'];
       
       console.log('📨 Instagram webhook event:');
-      console.log('  Body:', body);
-      console.log('  Signature:', signature);
+      console.log('  Body length:', body.length);
+      console.log('  Signature present:', signature ? '[SET]' : '[NOT SET]');
       
       if (!signature) {
         res.writeHead(400, { 'Content-Type': 'text/plain' });

@@ -7,6 +7,8 @@
 
 import { getDatabase } from '../database/connection.js';
 import { createHash } from 'crypto';
+import { getLogger } from '../services/logger.js';
+import { pushDLQ } from './dead-letter.js';
 
 export interface EnhancedQueueJob {
   id: string;
@@ -75,6 +77,7 @@ export class EnhancedQueue {
     lastFailure: Date;
     isOpen: boolean;
   }>();
+  private logger = getLogger({ component: 'EnhancedQueue' });
 
   /**
    * Add job with idempotency check
@@ -94,7 +97,7 @@ export class EnhancedQueue {
       `;
 
       if (existing) {
-        console.log(`🔄 Duplicate job detected, returning existing: ${existing.id}`);
+        this.logger.info('Duplicate job detected', { existingJobId: existing.id });
         return this.mapToEnhancedJob(existing);
       }
 
@@ -120,12 +123,12 @@ export class EnhancedQueue {
         RETURNING *
       `;
 
-      console.log(`📥 Enhanced job added: ${job.type} (${job.id}) [${idempotencyKey}]`);
+      this.logger.info('Enhanced job added', { type: job.type, jobId: job.id, idempotencyKey });
       return this.mapToEnhancedJob(job);
       
     } catch (error: any) {
       if (error.code === '23505') { // Unique constraint violation
-        console.log(`🔄 Idempotency collision detected for key: ${idempotencyKey}`);
+        this.logger.warn('Idempotency collision detected', { idempotencyKey });
         return null;
       }
       throw error;
@@ -160,10 +163,14 @@ export class EnhancedQueue {
     }
 
     const enhancedJob = this.mapToEnhancedJob(job);
+    if (enhancedJob.payload === null) {
+      await this.failJob(enhancedJob, 'Invalid JSON payload');
+      return true;
+    }
 
     // Check circuit breaker
     if (this.isCircuitBreakerOpen(enhancedJob.type)) {
-      console.warn(`⚠️ Circuit breaker open for ${enhancedJob.type}, skipping`);
+      this.logger.warn('Circuit breaker open, skipping job', { type: enhancedJob.type });
       return false;
     }
 
@@ -238,7 +245,7 @@ export class EnhancedQueue {
         WHERE id = ${job.id}
       `;
 
-      console.warn(`🔄 Job retry scheduled: ${job.id} (attempt ${job.attempts + 1}/${job.maxAttempts})`);
+      this.logger.warn('Job retry scheduled', { jobId: job.id, attempt: job.attempts + 1, maxAttempts: job.maxAttempts });
     } else {
       // Send to DLQ
       await this.sendToDLQ(job, error, errorHistory);
@@ -291,7 +298,7 @@ export class EnhancedQueue {
       `;
     });
 
-    console.error(`💀 Job sent to DLQ: ${job.id} - ${lastError}`);
+    this.logger.error('Job sent to DLQ', { jobId: job.id, error: lastError });
   }
 
   /**
@@ -310,7 +317,7 @@ export class EnhancedQueue {
       WHERE id = ${job.id}
     `;
 
-    console.log(`✅ Job completed: ${job.id} (${processingTimeMs}ms)`);
+    this.logger.info('Job completed', { jobId: job.id, processingTimeMs });
   }
 
   /**
@@ -368,7 +375,7 @@ export class EnhancedQueue {
     // Open circuit after 5 failures
     if (state.failures >= 5) {
       state.isOpen = true;
-      console.warn(`⚠️ Circuit breaker opened for ${jobType} after ${state.failures} failures`);
+      this.logger.warn('Circuit breaker opened', { jobType, failures: state.failures });
     }
 
     this.circuitBreakerStates.set(jobType, state);
@@ -408,7 +415,7 @@ export class EnhancedQueue {
    */
   registerProcessor(type: string, processor: JobProcessorEnhanced): void {
     this.processors.set(type, processor);
-    console.log(`🔧 Enhanced processor registered: ${type}`);
+    this.logger.info('Enhanced processor registered', { type });
   }
 
   /**
@@ -416,7 +423,7 @@ export class EnhancedQueue {
    */
   startProcessing(intervalMs: number = 3000): void {
     if (this.isProcessing) {
-      console.warn('⚠️ Enhanced queue already processing');
+      this.logger.warn('Enhanced queue already processing');
       return;
     }
 
@@ -427,11 +434,11 @@ export class EnhancedQueue {
           // Continue processing until no more jobs
         }
       } catch (error: any) {
-        console.error('❌ Enhanced queue processing error:', error);
+        this.logger.error('Enhanced queue processing error', error);
       }
     }, intervalMs);
 
-    console.log('🚀 Enhanced queue processing started');
+    this.logger.info('Enhanced queue processing started');
   }
 
   /**
@@ -443,7 +450,7 @@ export class EnhancedQueue {
       this.processingInterval = undefined;
     }
     this.isProcessing = false;
-    console.log('🛑 Enhanced queue processing stopped');
+    this.logger.info('Enhanced queue processing stopped');
   }
 
   /**
@@ -459,22 +466,40 @@ export class EnhancedQueue {
       LIMIT ${limit}
     `;
 
-    return entries.map(entry => ({
-      id: entry.id,
-      originalJobId: entry.original_job_id,
-      jobType: entry.job_type,
-      payload: JSON.parse(entry.payload),
-      lastError: entry.last_error,
-      errorHistory: JSON.parse(entry.error_history),
-      attempts: entry.attempts,
-      failedAt: new Date(entry.failed_at),
-      requiresManualReview: entry.requires_manual_review,
-      reviewed: entry.reviewed,
-      reviewedBy: entry.reviewed_by,
-      reviewedAt: entry.reviewed_at ? new Date(entry.reviewed_at) : undefined,
-      reviewNotes: entry.review_notes,
-      createdAt: new Date(entry.created_at)
-    }));
+    return entries.map(entry => {
+      let payload: any;
+      try {
+        payload = JSON.parse(entry.payload);
+      } catch {
+        payload = null;
+        this.logger.warn('Invalid JSON in DLQ payload', { entryId: entry.id });
+      }
+
+      let errorHistory: any[];
+      try {
+        errorHistory = JSON.parse(entry.error_history);
+      } catch {
+        errorHistory = [];
+        this.logger.warn('Invalid JSON in DLQ error history', { entryId: entry.id });
+      }
+
+      return {
+        id: entry.id,
+        originalJobId: entry.original_job_id,
+        jobType: entry.job_type,
+        payload,
+        lastError: entry.last_error,
+        errorHistory,
+        attempts: entry.attempts,
+        failedAt: new Date(entry.failed_at),
+        requiresManualReview: entry.requires_manual_review,
+        reviewed: entry.reviewed,
+        reviewedBy: entry.reviewed_by,
+        reviewedAt: entry.reviewed_at ? new Date(entry.reviewed_at) : undefined,
+        reviewNotes: entry.review_notes,
+        createdAt: new Date(entry.created_at)
+      };
+    });
   }
 
   /**
@@ -490,12 +515,24 @@ export class EnhancedQueue {
       `;
 
       if (dlqEntry) {
-        await this.addJob({
-          type: dlqEntry.job_type,
-          payload: JSON.parse(dlqEntry.payload),
-          priority: 'NORMAL',
-          maxAttempts: 3
-        });
+        let payload: any;
+        try {
+          payload = JSON.parse(dlqEntry.payload);
+        } catch {
+          payload = null;
+          this.logger.warn('Invalid JSON in DLQ payload', { entryId });
+        }
+
+        if (payload) {
+          await this.addJob({
+            type: dlqEntry.job_type,
+            payload,
+            priority: 'NORMAL',
+            maxAttempts: 3
+          });
+        } else {
+          pushDLQ({ reason: 'Invalid JSON in DLQ payload during review', payload: { entryId } });
+        }
       }
     }
 
@@ -510,17 +547,42 @@ export class EnhancedQueue {
       WHERE id = ${entryId}
     `;
 
-    console.log(`📋 DLQ entry reviewed: ${entryId} (${action})`);
+    this.logger.info('DLQ entry reviewed', { entryId, action });
   }
 
   /**
    * Map database row to enhanced job
    */
   private mapToEnhancedJob(row: any): EnhancedQueueJob {
+    let payload: any;
+    try {
+      payload = JSON.parse(row.payload);
+    } catch {
+      payload = null;
+      this.logger.warn('Invalid JSON in queue payload', { rowId: row.id });
+      pushDLQ({ reason: 'Invalid JSON in queue payload', payload: { rowId: row.id } });
+    }
+
+    let errorHistory: any[];
+    try {
+      errorHistory = JSON.parse(row.error_history || '[]');
+    } catch {
+      errorHistory = [];
+      this.logger.warn('Invalid JSON in queue error history', { rowId: row.id });
+    }
+
+    let result: any;
+    try {
+      result = row.result ? JSON.parse(row.result) : undefined;
+    } catch {
+      result = undefined;
+      this.logger.warn('Invalid JSON in queue result', { rowId: row.id });
+    }
+
     return {
       id: row.id,
       type: row.type,
-      payload: JSON.parse(row.payload),
+      payload,
       priority: row.priority,
       status: row.status,
       attempts: row.attempts,
@@ -532,8 +594,8 @@ export class EnhancedQueue {
       failedAt: row.failed_at ? new Date(row.failed_at) : undefined,
       dlqAt: row.dlq_at ? new Date(row.dlq_at) : undefined,
       lastError: row.last_error,
-      errorHistory: JSON.parse(row.error_history || '[]'),
-      result: row.result ? JSON.parse(row.result) : undefined,
+      errorHistory,
+      result,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at)
     };

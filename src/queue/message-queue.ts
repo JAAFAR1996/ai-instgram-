@@ -8,6 +8,8 @@
 import { getDatabase } from '../database/connection.js';
 import { getConfig } from '../config/environment.js';
 import { getAnalyticsService } from '../services/analytics-service.js';
+import { getLogger } from '../services/logger.js';
+import { pushDLQ } from './dead-letter.js';
 import type { Sql } from 'postgres';
 
 export interface QueueJob {
@@ -67,6 +69,7 @@ export class MessageQueue {
   private processors = new Map<QueueJobType, JobProcessor>();
   private isProcessing = false;
   private processingInterval?: NodeJS.Timeout;
+  private logger = getLogger({ component: 'MessageQueue' });
 
   constructor() {
     this.setupDefaultProcessors();
@@ -107,8 +110,8 @@ export class MessageQueue {
     
     // Get highest priority job that's ready to process
     const [job] = await sql`
-      UPDATE queue_jobs 
-      SET 
+      UPDATE queue_jobs
+      SET
         status = 'PROCESSING',
         started_at = NOW(),
         updated_at = NOW()
@@ -131,7 +134,18 @@ export class MessageQueue {
       RETURNING *
     `;
 
-    return job ? this.mapToQueueJob(job) : null;
+    if (!job) {
+      return null;
+    }
+
+    const mapped = this.mapToQueueJob(job);
+    if (mapped.payload === null) {
+      pushDLQ({ reason: 'Invalid JSON in queue payload', payload: { jobId: mapped.id } });
+      await this.failJob(mapped.id, 'Invalid JSON payload', false);
+      return null;
+    }
+
+    return mapped;
   }
 
   /**
@@ -462,10 +476,28 @@ export class MessageQueue {
    * Map database row to QueueJob object
    */
   private mapToQueueJob(row: any): QueueJob {
+    let payload: any;
+    try {
+      payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
+    } catch {
+      payload = null;
+      this.logger.warn('Invalid JSON in queue payload', { rowId: row.id });
+    }
+
+    let result: any;
+    try {
+      result = row.result ?
+        (typeof row.result === 'string' ? JSON.parse(row.result) : row.result)
+        : undefined;
+    } catch {
+      result = undefined;
+      this.logger.warn('Invalid JSON in queue result', { rowId: row.id });
+    }
+
     return {
       id: row.id,
       type: row.type,
-      payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload,
+      payload,
       priority: row.priority,
       status: row.status,
       attempts: parseInt(row.attempts) || 0,
@@ -475,9 +507,7 @@ export class MessageQueue {
       completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
       failedAt: row.failed_at ? new Date(row.failed_at) : undefined,
       error: row.error,
-      result: row.result ? 
-        (typeof row.result === 'string' ? JSON.parse(row.result) : row.result) 
-        : undefined,
+      result,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at)
     };

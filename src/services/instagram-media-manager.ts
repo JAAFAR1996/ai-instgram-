@@ -150,7 +150,7 @@ export class InstagramMediaManager {
         conversationId,
         userId,
         textContent,
-        date: new Date().toISOString().slice(0, 10)
+        timestamp: media.createdAt.toISOString()
       };
       const idempotencyKey = `ig:media_process:${hashMerchantAndBody(merchantId, bodyForHash)}`;
 
@@ -159,7 +159,14 @@ export class InstagramMediaManager {
 
       if (existingResult) {
         console.log(`🔒 Idempotent media processing detected: ${idempotencyKey}`);
-        return JSON.parse(existingResult);
+        try {
+          return JSON.parse(existingResult);
+        } catch (error) {
+          console.warn(
+            `⚠️ Failed to parse cached result for ${idempotencyKey}:`,
+            error
+          );
+        }
       }
 
       // Store media in database
@@ -838,6 +845,13 @@ export class InstagramMediaManager {
       }
 
       const template = templates[0];
+      let overlayElements;
+      try {
+        overlayElements = JSON.parse(template.overlay_elements || '{}');
+      } catch (error) {
+        console.warn(`⚠️ Failed to parse overlay elements for template ${template.id}:`, error);
+        overlayElements = {};
+      }
       return {
         id: template.id,
         name: template.name,
@@ -845,7 +859,7 @@ export class InstagramMediaManager {
         mediaType: template.media_type,
         templateUrl: template.template_url,
         attachmentId: template.attachment_id,
-        overlayElements: JSON.parse(template.overlay_elements || '{}'),
+        overlayElements,
         usageCount: template.usage_count,
         isActive: template.is_active
       };

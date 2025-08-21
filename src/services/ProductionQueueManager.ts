@@ -1029,7 +1029,7 @@ export class ProductionQueueManager {
   }
 
   /**
-   * معالجة webhook من WhatsApp (placeholder للمستقبل)
+   * معالجة webhook من WhatsApp
    */
   private async processWhatsAppWebhook(jobData: QueueJob): Promise<ProcessedWebhookResult> {
     this.logger.info('💬 [WHATSAPP-WEBHOOK] معالجة WhatsApp webhook', {
@@ -1037,15 +1037,74 @@ export class ProductionQueueManager {
       merchantId: jobData.merchantId
     });
 
-    // TODO: إضافة معالجة WhatsApp webhook عند الحاجة
-    // حالياً نرجع نتيجة نجاح بسيطة
-    return {
-      success: true,
-      eventsProcessed: 1,
+    const result: ProcessedWebhookResult = {
+      success: false,
+      eventsProcessed: 0,
       conversationsCreated: 0,
       messagesProcessed: 0,
       errors: []
     };
+
+    try {
+      const { rawBody, signature, appSecret, headers } = jobData.payload || {};
+
+      // استخراج التوقيع من الحقول المحتملة
+      const receivedSig: string | undefined =
+        signature || headers?.['x-hub-signature-256'] || headers?.['X-Hub-Signature-256'];
+
+      if (!rawBody || !receivedSig || !appSecret) {
+        throw new Error('Missing webhook payload, signature or app secret');
+      }
+
+      const bodyString = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
+
+      // التحقق من صحة التوقيع
+      const expectedSig = crypto
+        .createHmac('sha256', appSecret)
+        .update(bodyString)
+        .digest('hex');
+
+      const provided = receivedSig.replace('sha256=', '');
+      const expectedBuf = Buffer.from(expectedSig, 'hex');
+      let providedBuf: Buffer;
+      try {
+        providedBuf = Buffer.from(provided, 'hex');
+      } catch {
+        throw new Error('Invalid webhook signature');
+      }
+
+      if (expectedBuf.length !== providedBuf.length) {
+        throw new Error('Invalid webhook signature');
+      }
+
+      const isValid = crypto.timingSafeEqual(expectedBuf, providedBuf);
+
+      if (!isValid) {
+        throw new Error('Invalid webhook signature');
+      }
+
+      // تحليل الحدث
+      const event = JSON.parse(bodyString);
+
+      this.logger.info('📨 [WHATSAPP-WEBHOOK] حدث مستلم', {
+        eventId: jobData.eventId,
+        merchantId: jobData.merchantId,
+        object: event.object
+      });
+
+      result.eventsProcessed = Array.isArray(event.entry) ? event.entry.length : 1;
+      result.success = true;
+      return result;
+    } catch (error) {
+      this.logger.error('❌ [WHATSAPP-WEBHOOK] خطأ في معالجة WhatsApp webhook', {
+        eventId: jobData.eventId,
+        merchantId: jobData.merchantId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      result.errors.push(error instanceof Error ? error.message : String(error));
+      return result;
+    }
   }
 
   private async processAIResponseJob(jobData: any): Promise<any> {

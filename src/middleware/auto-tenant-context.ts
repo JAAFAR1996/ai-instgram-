@@ -29,20 +29,38 @@ export interface TenantContextConfig {
   allowedAlgs?: jwt.Algorithm[]; // default: ['HS256','RS256']
 }
 
-const defaultConfig: TenantContextConfig = {
-  enableAutoContext: true,
-  headerName: 'x-merchant-id',
-  cookieName: 'merchant_id',
-  jwtSecret: process.env.JWT_SECRET || '',
-  jwtIssuer: process.env.JWT_ISSUER || undefined,
-  jwtAudience: process.env.JWT_AUDIENCE || undefined,
-  adminRoles: ['admin', 'super_admin'],
-  skipPaths: ['/health', '/webhooks', '/public', '/metrics'],
-  allowedAlgs: ['HS256', 'RS256'],
-};
+function getDefaultConfig(): TenantContextConfig {
+  return {
+    enableAutoContext: true,
+    headerName: 'x-merchant-id',
+    cookieName: 'merchant_id',
+    jwtSecret:
+      process.env.JWT_SECRET ??
+      (() => {
+        throw new Error('JWT_SECRET is required');
+      })(),
+    jwtIssuer: process.env.JWT_ISSUER || undefined,
+    jwtAudience: process.env.JWT_AUDIENCE || undefined,
+    adminRoles: ['admin', 'super_admin'],
+    skipPaths: ['/health', '/webhooks', '/public', '/metrics'],
+    allowedAlgs: ['HS256', 'RS256'],
+  };
+}
 
 export function autoTenantContext(cfg: TenantContextConfig = {}) {
-  const opts = { ...defaultConfig, ...cfg };
+  let opts: TenantContextConfig;
+  try {
+    opts = { ...getDefaultConfig(), ...cfg };
+  } catch (err) {
+    return async (c: Context, next: Next) =>
+      c.json(
+        {
+          error: 'Failed to initialize tenant context',
+          details: err instanceof Error ? err.message : 'JWT secret missing',
+        },
+        500,
+      );
+  }
 
   return async (c: Context, next: Next) => {
     const path = c.req.path;

@@ -24,6 +24,10 @@ const jsonAny = async (r: any): Promise<any> => {
   try { return await r.json(); } catch { return {}; }
 };
 
+// mask sensitive values for logging
+const mask = (value: string, visible: number = 4): string =>
+  value ? `${value.slice(0, visible)}...` : '';
+
 export interface InstagramOAuthTokens {
   shortLivedToken: string;
   longLivedToken: string;
@@ -120,7 +124,7 @@ export class InstagramOAuthService {
       const appUsage = res.headers.get('x-app-usage');
       const pageUsage = res.headers.get('x-page-usage');
       if (appUsage || pageUsage) {
-        console.log(`📊 OAuth Graph API usage - App: ${appUsage}, Page: ${pageUsage}`);
+        console.debug('📊 OAuth Graph API usage', { appUsage, pageUsage });
       }
 
       if (!res.ok) {
@@ -185,12 +189,12 @@ export class InstagramOAuthService {
     // Store PKCE verifier securely in Redis for later retrieval
     await this.storePKCEInRedis(secureState, codeVerifier);
     
-    console.log('🔗 Instagram Business Login URL built (2025):', oauthUrl);
-    console.log('📋 Enhanced scopes for 2025:', params.get('scope'));
-    console.log('✨ Business Login Mode: Enabled (No Facebook login required)');
-    console.log('🔒 PKCE Security: Enabled (code_challenge generated)');
-    console.log('🛡️ Secure State: Generated with signature verification');
-    console.log('💾 PKCE Verifier: Stored securely in Redis');
+    console.debug('🔗 Instagram Business Login URL built');
+    console.debug('📋 Using enhanced 2025 scopes');
+    console.info('✨ Business Login Mode: Enabled (No Facebook login required)');
+    console.debug('🔒 PKCE Security: Enabled');
+    console.debug('🛡️ Secure State: Generated');
+    console.debug('💾 PKCE Verifier: Stored in Redis');
     
     return {
       oauthUrl,
@@ -217,7 +221,7 @@ export class InstagramOAuthService {
       state: state || this.generateRandomState()
     });
 
-    console.log('🔄 Building Instagram Business reauth URL (2025 standard)');
+    console.debug('🔄 Building Instagram Business reauth URL');
     return `${baseURL}?${params.toString()}`;
   }
 
@@ -232,7 +236,7 @@ export class InstagramOAuthService {
     state?: string
   ): Promise<InstagramOAuthTokens> {
     try {
-      console.log(`🔄 Exchanging code for token - Merchant: ${merchantId}`);
+      console.info('🔄 Exchanging code for token', { merchant: mask(merchantId) });
 
       // Validate state if provided (2025 security)
       if (state && !this.validateState(state)) {
@@ -245,7 +249,7 @@ export class InstagramOAuthService {
         const redisCodeVerifier = await this.retrievePKCEFromRedis(state);
         if (redisCodeVerifier) {
           actualCodeVerifier = redisCodeVerifier;
-          console.log('🔓 Using PKCE verifier from Redis for enhanced security');
+          console.debug('🔓 Using PKCE verifier from Redis');
         }
       }
 
@@ -260,7 +264,7 @@ export class InstagramOAuthService {
       // Add PKCE code verifier if provided (2025 security enhancement)
       if (actualCodeVerifier) {
         formData.append('code_verifier', actualCodeVerifier);
-        console.log('🔒 PKCE verification included in token exchange');
+        console.debug('🔒 PKCE verification included in token exchange');
       }
 
       const response = await fetch('https://api.instagram.com/oauth/access_token', {
@@ -285,7 +289,7 @@ export class InstagramOAuthService {
         throw new Error('Invalid token response from Instagram');
       }
 
-      console.log('✅ Short-lived token obtained successfully');
+      console.info('✅ Short-lived token obtained successfully');
 
       // Convert to long-lived token immediately
       const longLivedToken = await this.exchangeForLongLivedToken(data.access_token);
@@ -319,7 +323,7 @@ export class InstagramOAuthService {
     expires_in: number;
   }> {
     try {
-      console.log('🔄 Converting to long-lived token...');
+      console.debug('🔄 Converting to long-lived token');
 
       const params = {
         grant_type: 'ig_exchange_token',
@@ -332,7 +336,7 @@ export class InstagramOAuthService {
         'https://graph.instagram.com/access_token',
         params
       );
-      console.log('✅ Long-lived token obtained successfully');
+      console.info('✅ Long-lived token obtained successfully');
       
       return data as { access_token: string; token_type: string; expires_in: number; };
 
@@ -352,7 +356,7 @@ export class InstagramOAuthService {
     expires_in: number;
   }> {
     try {
-      console.log('🔄 Refreshing long-lived token...');
+      console.debug('🔄 Refreshing long-lived token');
 
       const params = {
         grant_type: 'ig_refresh_token',
@@ -366,7 +370,7 @@ export class InstagramOAuthService {
         undefined,
         merchantId
       );
-      console.log('✅ Token refreshed successfully');
+      console.info('✅ Token refreshed successfully');
       
       return data as { access_token: string; token_type: string; expires_in: number; };
 
@@ -381,7 +385,7 @@ export class InstagramOAuthService {
    */
   async getUserProfile(accessToken: string): Promise<InstagramUserProfile> {
     try {
-      console.log('🔍 Fetching Instagram user profile...');
+      console.debug('🔍 Fetching Instagram user profile');
 
       const params = {
         fields: 'id,username,account_type,media_count,followers_count,follows_count',
@@ -393,7 +397,7 @@ export class InstagramOAuthService {
         'https://graph.instagram.com/me',
         params
       );
-      console.log('✅ User profile fetched successfully');
+      console.info('✅ User profile fetched successfully');
 
       return {
         id: data.id,
@@ -444,10 +448,11 @@ export class InstagramOAuthService {
 
       const hasMessageAccess = !missingPermissions.includes('instagram_business_manage_messages');
 
-      console.log('🔍 Permission check results:');
-      console.log('  ✅ Granted:', grantedPermissions);
-      console.log('  ❌ Missing:', missingPermissions);
-      console.log('  📱 Message access:', hasMessageAccess);
+      console.debug('🔍 Permission check', {
+        granted: grantedPermissions,
+        missing: missingPermissions,
+        messageAccess: hasMessageAccess
+      });
 
       return {
         hasMessageAccess,
@@ -520,7 +525,7 @@ export class InstagramOAuthService {
               if (accountResponse.ok) {
                 const accountData: any = await jsonAny(accountResponse);
                 
-                console.log('✅ Found Instagram Business Account:', accountData.username);
+                console.info('✅ Found Instagram Business Account', { username: accountData.username });
                 
                 return {
                   id: accountData.id,
@@ -533,7 +538,7 @@ export class InstagramOAuthService {
             }
           }
         } catch (error) {
-          console.log(`ℹ️ Page ${page.name} doesn't have Instagram Business account`);
+          console.debug(`ℹ️ Page ${page.name} missing Instagram Business account`);
           continue;
         }
       }
@@ -612,7 +617,10 @@ export class InstagramOAuthService {
         WHERE id = ${merchantId}::uuid
       `;
 
-      console.log(`✅ Tokens stored for merchant ${merchantId} - Instagram: @${profile.username}`);
+      console.info('✅ Tokens stored for merchant', {
+        merchant: mask(merchantId),
+        username: profile.username
+      });
 
     } catch (error) {
       console.error('❌ Error saving Instagram credentials:', error);
@@ -701,13 +709,27 @@ export class InstagramOAuthService {
     try {
       const redis = await this.redis.getConnection(RedisUsageType.OAUTH);
       const key = `pkce:${state}`;
-      
+
       // Store PKCE verifier with 10-minute TTL for security
       await redis.setex(key, 600, codeVerifier);
-      console.log(`🔒 PKCE verifier stored in Redis with key: ${key}`);
+      console.debug('🔒 PKCE verifier stored in Redis');
     } catch (error) {
       console.error('❌ Failed to store PKCE verifier in Redis:', error);
-      // Don't throw - fallback to database storage
+
+      // Fallback: store the verifier in persistent database storage
+      // This ensures PKCE can still be validated even if Redis is unavailable
+      try {
+        const sql = this.db.getSQL();
+        await sql`
+          INSERT INTO pkce_verifiers (state, code_verifier, expires_at)
+          VALUES (${state}, ${codeVerifier}, NOW() + INTERVAL '10 minutes')
+          ON CONFLICT (state)
+          DO UPDATE SET code_verifier = ${codeVerifier}, expires_at = NOW() + INTERVAL '10 minutes'
+        `;
+        console.log('💾 PKCE verifier stored in database fallback');
+      } catch (dbError) {
+        console.error('❌ Failed to store PKCE verifier in database fallback:', dbError);
+      }
     }
   }
 
@@ -715,22 +737,39 @@ export class InstagramOAuthService {
    * Retrieve PKCE verifier from Redis and delete after use
    */
   private async retrievePKCEFromRedis(state: string): Promise<string | null> {
+    let codeVerifier: string | null = null;
     try {
       const redis = await this.redis.getConnection(RedisUsageType.OAUTH);
       const key = `pkce:${state}`;
-      
+
       // Get and immediately delete for one-time use security
-      const codeVerifier = await redis.get(key);
+      codeVerifier = await redis.get(key);
       if (codeVerifier) {
         await redis.del(key);
-        console.log(`🔓 PKCE verifier retrieved and deleted from Redis`);
+        console.debug('🔓 PKCE verifier retrieved and deleted from Redis');
+        return codeVerifier;
       }
-      
-      return codeVerifier;
     } catch (error) {
       console.error('❌ Failed to retrieve PKCE verifier from Redis:', error);
-      return null;
     }
+
+    // Fallback: attempt to retrieve from persistent database storage
+    try {
+      const sql = this.db.getSQL();
+      const result = await sql`
+        SELECT code_verifier FROM pkce_verifiers
+        WHERE state = ${state} AND expires_at > NOW()
+      `;
+      if (result.length > 0) {
+        await sql`DELETE FROM pkce_verifiers WHERE state = ${state}`;
+        console.log('💾 PKCE verifier retrieved from database fallback');
+        return result[0].code_verifier as string;
+      }
+    } catch (dbError) {
+      console.error('❌ Failed to retrieve PKCE verifier from database fallback:', dbError);
+    }
+
+    return null;
   }
 
   /**
@@ -775,7 +814,7 @@ export class InstagramOAuthService {
           updated_at = NOW()
       `;
 
-      console.log('✅ OAuth session stored securely');
+      console.info('✅ OAuth session stored securely');
     } catch (error) {
       console.error('❌ Failed to store OAuth session:', error);
       throw error;
@@ -894,13 +933,13 @@ export class InstagramOAuthService {
         const merchantId = expiringTokens[index].merchant_id;
         if (result.status === 'fulfilled') {
           refreshedCount++;
-          console.log(`✅ Token refreshed for merchant ${merchantId}`);
+          console.info('✅ Token refreshed for merchant', { merchant: mask(merchantId) });
         } else {
           console.error(`❌ Failed to refresh token for merchant ${merchantId}:`, result.reason);
         }
       });
 
-      console.log(`🔄 Refreshed ${refreshedCount} tokens out of ${expiringTokens.length} expiring`);
+      console.info('🔄 Tokens refreshed', { refreshed: refreshedCount, total: expiringTokens.length });
       return refreshedCount;
 
     } catch (error) {

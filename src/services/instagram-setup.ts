@@ -8,6 +8,7 @@
 import { getInstagramClient, getInstagramAPICredentialsManager, type InstagramAPICredentials } from './instagram-api.js';
 import { getEncryptionService } from './encryption.js';
 import { getDatabase } from '../database/connection.js';
+import { createLogger } from './logger.js';
 
 export interface InstagramSetupConfig {
   pageAccessToken: string;
@@ -48,6 +49,7 @@ export interface BusinessAccountInfo {
 export class InstagramSetupService {
   private encryptionService = getEncryptionService();
   private db = getDatabase();
+  private logger = createLogger({ component: 'InstagramSetupService' });
 
   /**
    * Complete Instagram Business setup for merchant
@@ -65,7 +67,7 @@ export class InstagramSetupService {
     };
 
     try {
-      console.log(`🚀 Starting Instagram setup for merchant: ${merchantId}`);
+      this.logger.info('Starting Instagram setup', { merchantId });
 
       // Step 1: Validate provided credentials
       await this.executeStep(result, 'validate_credentials', 'Validating Instagram credentials', async () => {
@@ -137,10 +139,10 @@ export class InstagramSetupService {
       });
 
       result.success = true;
-      console.log(`✅ Instagram setup completed successfully for merchant: ${merchantId}`);
+      this.logger.info('Instagram setup completed successfully', { merchantId });
 
     } catch (error) {
-      console.error('❌ Instagram setup failed:', error);
+      this.logger.error('Instagram setup failed', error, { merchantId });
       result.errors.push(error instanceof Error ? error.message : 'Unknown setup error');
     }
 
@@ -385,11 +387,11 @@ export class InstagramSetupService {
       // Log removal
       await this.logIntegrationRemoval(merchantId);
 
-      console.log(`✅ Instagram integration removed for merchant: ${merchantId}`);
+      this.logger.info('Instagram integration removed', { merchantId });
       return { success: true };
 
     } catch (error) {
-      console.error('❌ Failed to remove Instagram integration:', error);
+      this.logger.error('Failed to remove Instagram integration', error, { merchantId });
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -417,11 +419,11 @@ export class InstagramSetupService {
     try {
       await action();
       step.status = 'completed';
-      console.log(`✅ ${message}`);
+      this.logger.info(message);
     } catch (error) {
       step.status = 'failed';
       step.details = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`❌ ${message} failed:`, error);
+      this.logger.error(`${message} failed`, error, { step: stepName });
       throw error;
     }
   }
@@ -505,7 +507,7 @@ export class InstagramSetupService {
         )
       `;
     } catch (error) {
-      console.error('❌ Failed to log setup completion:', error);
+      this.logger.error('Failed to log setup completion', error, { merchantId });
     }
   }
 
@@ -534,7 +536,7 @@ export class InstagramSetupService {
         )
       `;
     } catch (error) {
-      console.error('❌ Failed to log integration removal:', error);
+      this.logger.error('Failed to log integration removal', error, { merchantId });
     }
   }
 }

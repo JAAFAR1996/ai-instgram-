@@ -1,4 +1,7 @@
 import type { Context } from 'hono';
+import { getLogger } from '../services/logger.js';
+
+const logger = getLogger();
 
 export class MerchantIdMissingError extends Error {
   constructor() {
@@ -19,6 +22,6 @@ export function requireMerchantId(c?: Context): string {
     throw new MerchantIdMissingError();
   }
 
-  console.log(`Using MERCHANT_ID: ${id}`);
+  logger.debug('Using MERCHANT_ID');
   return id;
 }

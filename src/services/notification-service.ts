@@ -1,7 +1,11 @@
 /**
  * Simple Notification Service
  * Provides minimal notification sending capability (e.g., email or WebSocket)
- */
+*/
+
+import { getLogger } from './logger.js';
+
+const logger = getLogger({ component: 'NotificationService' });
 
 export interface NotificationPayload {
   type: string;
@@ -21,7 +25,11 @@ export class NotificationService {
   async send(payload: NotificationPayload): Promise<NotificationResult> {
     try {
       // In a real implementation, integrate with email, SMS, or WebSocket services
-      console.log(`🔔 Sending notification to ${payload.recipient} [${payload.type}]`);
+      logger.info('Sending notification', {
+        recipient: payload.recipient,
+        type: payload.type,
+        event: 'sendNotification'
+      });
       return { success: true };
     } catch (error) {
       return {

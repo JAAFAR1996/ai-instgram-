@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getInstagramClient, clearInstagramClient, type InstagramCredentials } from './instagram-api.js';
+import { getInstagramClient, clearInstagramClient, type InstagramAPICredentials } from './instagram-api.js';
 import { ExpiringMap } from '../utils/expiring-map.js';
 import { getDatabase } from '../database/connection.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
@@ -13,6 +13,7 @@ import type { InstagramContext } from './instagram-ai.js';
 import { hashMerchantAndBody } from '../middleware/idempotency.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
+import { createLogger } from './logger.js';
 
 export interface StoryInteraction {
   id: string;
@@ -78,17 +79,18 @@ export interface StoryTemplate {
 }
 
 export class InstagramStoriesManager {
+  private logger = createLogger({ component: 'InstagramStoriesManager' });
   private db = getDatabase();
   private aiOrchestrator = getConversationAIOrchestrator();
   private redis = getRedisConnectionManager();
 
-  private credentialsCache = new ExpiringMap<string, InstagramCredentials>();
+  private credentialsCache = new ExpiringMap<string, InstagramAPICredentials>();
 
   private getClient(merchantId: string) {
     return getInstagramClient(merchantId);
   }
 
-  private async getCredentials(merchantId: string): Promise<InstagramCredentials> {
+  private async getCredentials(merchantId: string): Promise<InstagramAPICredentials> {
     const cached = this.credentialsCache.get(merchantId);
     if (cached && (!cached.tokenExpiresAt || cached.tokenExpiresAt > new Date())) {
       return cached;
@@ -121,7 +123,11 @@ export class InstagramStoriesManager {
     merchantId: string
   ): Promise<{ success: boolean; responseGenerated: boolean; error?: string }> {
     try {
-      console.log(`📱 Processing Instagram story ${interaction.type}: ${interaction.id}`);
+      this.logger.info('Processing Instagram story interaction', {
+        type: interaction.type,
+        id: interaction.id,
+        merchantId
+      });
 
       // 🔒 Idempotency check - prevent duplicate story processing
       const bodyForHash = {
@@ -131,16 +137,20 @@ export class InstagramStoriesManager {
         type: interaction.type,
         userId: interaction.userId,
         content: interaction.content,
-        date: new Date().toISOString().slice(0, 10)
+        timestamp: interaction.timestamp.toISOString()
       };
       const idempotencyKey = `ig:story_process:${hashMerchantAndBody(merchantId, bodyForHash)}`;
       
       const redis = await this.redis.getConnection(RedisUsageType.IDEMPOTENCY);
       const existingResult = await redis.get(idempotencyKey);
-      
+
       if (existingResult) {
-        console.log(`🔒 Idempotent story processing detected: ${idempotencyKey}`);
-        return JSON.parse(existingResult);
+        this.logger.info('Idempotent story processing detected', { idempotencyKey });
+        try {
+          return JSON.parse(existingResult);
+        } catch (error) {
+          this.logger.warn('Failed to parse cached story result, continuing processing', error, { idempotencyKey });
+        }
       }
 
       // Store the interaction
@@ -159,22 +169,22 @@ export class InstagramStoriesManager {
       const responseGenerated =
         responseResult.status === 'fulfilled' ? responseResult.value : false;
       if (responseResult.status === 'rejected') {
-        console.error(
-          'Failed to generate story response:',
-          responseResult.reason
-        );
+        this.logger.error('Failed to generate story response', responseResult.reason, {
+          merchantId,
+          interactionId: interaction.id
+        });
       }
       if (analyticsResult.status === 'rejected') {
-        console.error(
-          'Failed to update story analytics:',
-          analyticsResult.reason
-        );
+        this.logger.error('Failed to update story analytics', analyticsResult.reason, {
+          merchantId,
+          interactionId: interaction.id
+        });
       }
       if (interaction.content && salesResult.status === 'rejected') {
-        console.error(
-          'Failed to analyze sales opportunity:',
-          salesResult.reason
-        );
+        this.logger.error('Failed to analyze sales opportunity', salesResult.reason, {
+          merchantId,
+          interactionId: interaction.id
+        });
       }
 
       const successResult = {
@@ -184,11 +194,14 @@ export class InstagramStoriesManager {
 
       // 💾 Cache successful result for idempotency (24 hours TTL)
       await redis.setex(idempotencyKey, 86400, JSON.stringify(successResult));
-      console.log(`💾 Cached story processing result: ${idempotencyKey}`);
+      this.logger.info('Cached story processing result', { idempotencyKey });
 
       return successResult;
     } catch (error) {
-      console.error('❌ Story interaction processing failed:', error);
+      this.logger.error('Story interaction processing failed', error, {
+        merchantId,
+        interactionId: interaction.id
+      });
       return {
         success: false,
         responseGenerated: false,
@@ -207,7 +220,7 @@ export class InstagramStoriesManager {
     try {
       // Skip automatic responses for certain interaction types
       if (interaction.type === 'story_view') {
-        console.log('📊 Story view recorded - no response needed');
+        this.logger.info('Story view recorded - no response needed');
         return false;
       }
 
@@ -242,7 +255,9 @@ export class InstagramStoriesManager {
           prompt = this.buildStoryReactionPrompt(interaction);
           break;
         default:
-          console.log(`⚠️ Unsupported story interaction type: ${interaction.type}`);
+          this.logger.warn('Unsupported story interaction type', {
+            type: interaction.type
+          });
           return false;
       }
 
@@ -283,14 +298,22 @@ export class InstagramStoriesManager {
           sendResult.messageId
         );
 
-        console.log(`✅ Story response sent: ${personalizedResponse.substring(0, 50)}...`);
+        this.logger.info('Story response sent', {
+          preview: personalizedResponse.substring(0, 50)
+        });
         return true;
       } else {
-        console.error('❌ Failed to send story response:', sendResult.error);
+        this.logger.error('Failed to send story response', sendResult.error, {
+          merchantId,
+          interactionId: interaction.id
+        });
         return false;
       }
     } catch (error) {
-      console.error('❌ Story response generation failed:', error);
+      this.logger.error('Story response generation failed', error, {
+        merchantId,
+        interactionId: interaction.id
+      });
       return false;
     }
   }
@@ -314,7 +337,9 @@ export class InstagramStoriesManager {
       const isSalesInquiry = salesKeywords.some(keyword => text.includes(keyword));
 
       if (isSalesInquiry) {
-        console.log(`💰 Sales opportunity detected in story ${interaction.type}`);
+        this.logger.info('Sales opportunity detected in story', {
+          interactionType: interaction.type
+        });
 
         // Tag conversation as sales opportunity
         await this.tagSalesOpportunity(merchantId, interaction.userId, interaction.type);
@@ -323,7 +348,10 @@ export class InstagramStoriesManager {
         await this.sendSalesAssistance(merchantId, interaction);
       }
     } catch (error) {
-      console.error('❌ Sales opportunity analysis failed:', error);
+      this.logger.error('Sales opportunity analysis failed', error, {
+        merchantId,
+        interactionId: interaction.id
+      });
     }
   }
 
@@ -408,7 +436,7 @@ export class InstagramStoriesManager {
         userEngagementScore
       };
     } catch (error) {
-      console.error('❌ Story analytics failed:', error);
+      this.logger.error('Story analytics failed', error, { merchantId });
       throw error;
     }
   }
@@ -443,10 +471,10 @@ export class InstagramStoriesManager {
       `;
 
       const templateId = result[0].id;
-      console.log(`✅ Story template created: ${template.name} (${templateId})`);
+      this.logger.info('Story template created', { name: template.name, templateId });
       return templateId;
     } catch (error) {
-      console.error('❌ Story template creation failed:', error);
+      this.logger.error('Story template creation failed', error, { merchantId, name: template.name });
       throw error;
     }
   }
@@ -483,7 +511,7 @@ export class InstagramStoriesManager {
           : undefined
       }));
     } catch (error) {
-      console.error('❌ Get story templates failed:', error);
+      this.logger.error('Get story templates failed', error, { merchantId });
       return [];
     }
   }
@@ -525,7 +553,10 @@ export class InstagramStoriesManager {
         ON CONFLICT (id) DO NOTHING
       `;
     } catch (error) {
-      console.error('❌ Store story interaction failed:', error);
+      this.logger.error('Store story interaction failed', error, {
+        merchantId,
+        interactionId: interaction.id
+      });
       throw error;
     }
   }
@@ -583,7 +614,10 @@ export class InstagramStoriesManager {
 
       return { id: newConversation[0].id, isNew: true };
     } catch (error) {
-      console.error('❌ Failed to find/create story conversation:', error);
+      this.logger.error('Failed to find/create story conversation', error, {
+        merchantId,
+        userId
+      });
       return null;
     }
   }
@@ -633,7 +667,7 @@ export class InstagramStoriesManager {
             ? JSON.parse(conversation.session_data)
             : conversation.session_data || {};
         } catch (error) {
-          console.error('❌ Failed to parse session data for conversation', conversationId, error);
+          this.logger.error('Failed to parse session data for conversation', error, { conversationId });
         }
 
         return {
@@ -660,7 +694,7 @@ export class InstagramStoriesManager {
         }
       };
     } catch (error) {
-      console.error('❌ Build story context failed:', error);
+      this.logger.error('Build story context failed', error, { merchantId, conversationId });
       throw error;
     }
   }
@@ -777,7 +811,11 @@ export class InstagramStoriesManager {
         WHERE id = ${conversationId}::uuid
       `;
     } catch (error) {
-      console.error('❌ Store story response failed:', error);
+      this.logger.error('Store story response failed', error, {
+        merchantId,
+        conversationId,
+        interactionType
+      });
       throw error;
     }
   }
@@ -824,7 +862,7 @@ export class InstagramStoriesManager {
           updated_at = NOW()
       `;
     } catch (error) {
-      console.error('❌ Update story analytics failed:', error);
+      this.logger.error('Update story analytics failed', error, { merchantId });
     }
   }
 
@@ -864,7 +902,7 @@ export class InstagramStoriesManager {
           updated_at = NOW()
       `;
     } catch (error) {
-      console.error('❌ Tag sales opportunity failed:', error);
+      this.logger.error('Tag sales opportunity failed', error, { merchantId, userId });
     }
   }
 
@@ -892,9 +930,14 @@ export class InstagramStoriesManager {
         ]
       });
 
-      console.log(`💼 Sales assistance sent for story interaction: ${interaction.type}`);
+      this.logger.info('Sales assistance sent for story interaction', {
+        interactionType: interaction.type
+      });
     } catch (error) {
-      console.error('❌ Send sales assistance failed:', error);
+      this.logger.error('Send sales assistance failed', error, {
+        merchantId,
+        interactionId: interaction.id
+      });
     }
   }
 }
