@@ -219,10 +219,14 @@ export class AIProcessor implements JobProcessor {
     message: string
   ): Promise<{ success: boolean; platformMessageId?: string; error?: string }> {
     try {
-      const instagramClient = getInstagramClient();
-      await instagramClient.initialize(payload.merchantId);
+      const instagramClient = getInstagramClient(payload.merchantId);
+      const credentials = await instagramClient.loadMerchantCredentials(payload.merchantId);
+      if (!credentials) {
+        throw new Error('Instagram credentials not found');
+      }
+      await instagramClient.validateCredentials(credentials, payload.merchantId);
 
-      const result = await instagramClient.sendMessage({
+      const result = await instagramClient.sendMessage(credentials, payload.merchantId, {
         recipientId: payload.customerId,
         messageType: 'text',
         content: message

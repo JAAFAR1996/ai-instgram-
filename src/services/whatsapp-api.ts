@@ -423,11 +423,12 @@ export class WhatsAppAPIClient {
       const sql = this.db.getSQL();
       
       const credentials = await sql`
-        SELECT 
+        SELECT
           whatsapp_token_encrypted,
           whatsapp_phone_number_id,
           webhook_verify_token,
-          whatsapp_business_account_id
+          COALESCE(business_account_id, whatsapp_business_account_id) AS business_account_id,
+          app_secret
         FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
       `;
@@ -447,18 +448,12 @@ export class WhatsAppAPIClient {
         JSON.parse(cred.whatsapp_token_encrypted)
       );
 
-      const appSecret = process.env.WHATSAPP_APP_SECRET;
-      if (!appSecret) {
-        console.error('❌ WHATSAPP_APP_SECRET is not configured');
-        return null;
-      }
-
       return {
         phoneNumberId: cred.whatsapp_phone_number_id || '',
         accessToken: decryptedToken,
-        businessAccountId: cred.whatsapp_business_account_id || '',
+        businessAccountId: cred.business_account_id || '',
         webhookVerifyToken: cred.webhook_verify_token || '',
-        appSecret
+        appSecret: cred.app_secret || ''
       };
     } catch (error) {
       console.error('❌ Failed to load merchant credentials:', error);
@@ -546,6 +541,7 @@ export class WhatsAppCredentialsManager {
       accessToken: string;
       phoneNumberId: string;
       businessAccountId: string;
+      appSecret: string;
       webhookVerifyToken: string;
     },
     ipAddress?: string
@@ -558,13 +554,20 @@ export class WhatsAppCredentialsManager {
 
       const sql = this.db.getSQL();
       
+      const hashedToken = createHash('sha256')
+        .update(credentials.webhookVerifyToken)
+        .digest('hex');
+
       await sql`
         INSERT INTO merchant_credentials (
           merchant_id,
           whatsapp_token_encrypted,
           whatsapp_phone_number_id,
+          business_account_id,
+          app_secret,
           whatsapp_business_account_id,
           webhook_verify_token,
+          platform,
           token_created_ip,
           last_access_ip,
           last_access_at
@@ -573,17 +576,23 @@ export class WhatsAppCredentialsManager {
           ${JSON.stringify(encryptedToken)},
           ${credentials.phoneNumberId},
           ${credentials.businessAccountId},
-          ${credentials.webhookVerifyToken},
+          ${credentials.appSecret},
+          ${credentials.businessAccountId},
+          ${hashedToken},
+          'whatsapp',
           ${ipAddress || null}::inet,
           ${ipAddress || null}::inet,
           NOW()
         )
-        ON CONFLICT (merchant_id)
+        ON CONFLICT (merchant_id, platform)
         DO UPDATE SET
           whatsapp_token_encrypted = EXCLUDED.whatsapp_token_encrypted,
           whatsapp_phone_number_id = EXCLUDED.whatsapp_phone_number_id,
+          business_account_id = EXCLUDED.business_account_id,
+          app_secret = EXCLUDED.app_secret,
           whatsapp_business_account_id = EXCLUDED.whatsapp_business_account_id,
           webhook_verify_token = EXCLUDED.webhook_verify_token,
+          platform = EXCLUDED.platform,
           last_access_ip = EXCLUDED.last_access_ip,
           last_access_at = NOW(),
           updated_at = NOW()
@@ -605,10 +614,12 @@ export class WhatsAppCredentialsManager {
       
       await sql`
         UPDATE merchant_credentials
-        SET 
+        SET
           whatsapp_token_encrypted = NULL,
           whatsapp_phone_number_id = NULL,
           whatsapp_business_account_id = NULL,
+          business_account_id = NULL,
+          app_secret = NULL,
           updated_at = NOW()
         WHERE merchant_id = ${merchantId}::uuid
       `;
@@ -654,10 +665,10 @@ export class WhatsAppCredentialsManager {
       const sql = this.db.getSQL();
       
       const result = await sql`
-        SELECT 
+        SELECT
           whatsapp_token_encrypted,
           whatsapp_phone_number_id,
-          whatsapp_business_account_id,
+          COALESCE(business_account_id, whatsapp_business_account_id) AS business_account_id,
           last_access_at
         FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
@@ -673,7 +684,7 @@ export class WhatsAppCredentialsManager {
         hasCredentials: !!cred.whatsapp_token_encrypted,
         lastAccess: cred.last_access_at,
         phoneNumberId: cred.whatsapp_phone_number_id,
-        businessAccountId: cred.whatsapp_business_account_id
+        businessAccountId: cred.business_account_id
       };
     } catch (error) {
       console.error('❌ Failed to get credentials info:', error);

@@ -99,14 +99,30 @@ export class InstagramHashtagMentionProcessor {
       const allHashtags = [...new Set([...data.hashtags, ...extractedHashtags])];
       const allMentions = [...new Set([...data.mentions, ...extractedMentions])];
 
+      // Limit processing to prevent excessive concurrency
+      const MAX_ITEMS = 5;
+      const limitedHashtags = allHashtags.slice(0, MAX_ITEMS);
+      if (allHashtags.length > MAX_ITEMS) {
+        console.warn(
+          `⚠️ Received ${allHashtags.length} hashtags, processing first ${MAX_ITEMS} only`
+        );
+      }
+
+      const limitedMentions = allMentions.slice(0, MAX_ITEMS);
+      if (allMentions.length > MAX_ITEMS) {
+        console.warn(
+          `⚠️ Received ${allMentions.length} mentions, processing first ${MAX_ITEMS} only`
+        );
+      }
+
       // Analyze hashtags
       const hashtagAnalyses = await Promise.all(
-        allHashtags.map(hashtag => this.analyzeHashtag(hashtag, data))
+        limitedHashtags.map(hashtag => this.analyzeHashtag(hashtag, data))
       );
 
       // Analyze mentions
       const mentionAnalyses = await Promise.all(
-        allMentions.map(mention => this.analyzeMention(mention, data))
+        limitedMentions.map(mention => this.analyzeMention(mention, data))
       );
 
       // Store the analysis results
@@ -116,12 +132,14 @@ export class InstagramHashtagMentionProcessor {
       const suggestedActions = this.generateSuggestedActions(hashtagAnalyses, mentionAnalyses, data);
 
       // Update trending data
-      await this.updateTrendingData(allHashtags, data.merchantId);
+      await this.updateTrendingData(limitedHashtags, data.merchantId);
 
       // Check for marketing opportunities
       await this.checkMarketingOpportunities(hashtagAnalyses, mentionAnalyses, data);
 
-      console.log(`✅ Processed ${allHashtags.length} hashtags and ${allMentions.length} mentions`);
+      console.log(
+        `✅ Processed ${limitedHashtags.length} hashtags and ${limitedMentions.length} mentions`
+      );
 
       return {
         success: true,
@@ -563,77 +581,75 @@ export class InstagramHashtagMentionProcessor {
     try {
       const sql = this.db.getSQL();
 
-      // Store hashtag data
-      for (const analysis of hashtagAnalyses) {
-        await sql`
-          INSERT INTO hashtag_mentions (
-            message_id,
-            merchant_id,
-            hashtag,
-            mentioned_user,
-            content,
-            source,
-            sentiment,
-            category,
-            marketing_value,
-            engagement_score,
-            user_id,
-            created_at
-          ) VALUES (
-            ${data.messageId},
-            ${data.merchantId}::uuid,
-            ${analysis.hashtag},
-            NULL,
-            ${data.content},
-            ${data.source},
-            ${analysis.sentiment},
-            ${analysis.category},
-            ${analysis.marketingValue},
-            ${this.calculateEngagementScore(analysis)},
-            ${data.userId},
-            ${data.timestamp}
-          )
-          ON CONFLICT (message_id, hashtag) DO UPDATE SET
-            sentiment = EXCLUDED.sentiment,
-            updated_at = NOW()
-        `;
-      }
+      // Store hashtag data concurrently
+      const hashtagInsertPromises = hashtagAnalyses.map(analysis => sql`
+        INSERT INTO hashtag_mentions (
+          message_id,
+          merchant_id,
+          hashtag,
+          mentioned_user,
+          content,
+          source,
+          sentiment,
+          category,
+          marketing_value,
+          engagement_score,
+          user_id,
+          created_at
+        ) VALUES (
+          ${data.messageId},
+          ${data.merchantId}::uuid,
+          ${analysis.hashtag},
+          NULL,
+          ${data.content},
+          ${data.source},
+          ${analysis.sentiment},
+          ${analysis.category},
+          ${analysis.marketingValue},
+          ${this.calculateEngagementScore(analysis)},
+          ${data.userId},
+          ${data.timestamp}
+        )
+        ON CONFLICT (message_id, hashtag) DO UPDATE SET
+          sentiment = EXCLUDED.sentiment,
+          updated_at = NOW()
+      `);
+      await Promise.all(hashtagInsertPromises);
 
-      // Store mention data
-      for (const analysis of mentionAnalyses) {
-        await sql`
-          INSERT INTO hashtag_mentions (
-            message_id,
-            merchant_id,
-            hashtag,
-            mentioned_user,
-            content,
-            source,
-            sentiment,
-            mention_type,
-            engagement_potential,
-            engagement_score,
-            user_id,
-            created_at
-          ) VALUES (
-            ${data.messageId},
-            ${data.merchantId}::uuid,
-            NULL,
-            ${analysis.mentionedUser},
-            ${data.content},
-            ${data.source},
-            ${analysis.sentiment},
-            ${analysis.mentionType},
-            ${analysis.engagementPotential},
-            ${this.calculateMentionEngagementScore(analysis)},
-            ${data.userId},
-            ${data.timestamp}
-          )
-          ON CONFLICT (message_id, mentioned_user) DO UPDATE SET
-            sentiment = EXCLUDED.sentiment,
-            updated_at = NOW()
-        `;
-      }
+      // Store mention data concurrently
+      const mentionInsertPromises = mentionAnalyses.map(analysis => sql`
+        INSERT INTO hashtag_mentions (
+          message_id,
+          merchant_id,
+          hashtag,
+          mentioned_user,
+          content,
+          source,
+          sentiment,
+          mention_type,
+          engagement_potential,
+          engagement_score,
+          user_id,
+          created_at
+        ) VALUES (
+          ${data.messageId},
+          ${data.merchantId}::uuid,
+          NULL,
+          ${analysis.mentionedUser},
+          ${data.content},
+          ${data.source},
+          ${analysis.sentiment},
+          ${analysis.mentionType},
+          ${analysis.engagementPotential},
+          ${this.calculateMentionEngagementScore(analysis)},
+          ${data.userId},
+          ${data.timestamp}
+        )
+        ON CONFLICT (message_id, mentioned_user) DO UPDATE SET
+          sentiment = EXCLUDED.sentiment,
+          updated_at = NOW()
+      `);
+      await Promise.all(mentionInsertPromises);
     } catch (error) {
       console.error('❌ Store hashtag/mention data failed:', error);
     }

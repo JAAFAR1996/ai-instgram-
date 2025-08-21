@@ -18,6 +18,7 @@ import { pushDLQ } from '../queue/dead-letter.js';
 import { z } from 'zod';
 import crypto from 'node:crypto';
 import { MerchantIdMissingError } from '../utils/merchant.js';
+import { telemetry } from '../services/telemetry.js';
 
 // Webhook validation schemas
 const InstagramWebhookVerificationSchema = z.object({
@@ -320,7 +321,16 @@ export class WebhookRouter {
       const rateLimitKey = `webhook:instagram:${merchantId}`;
       const windowMs = 60000; // 1 minute window
       const maxRequests = 100; // 100 requests per minute per merchant
-      const rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
+      let rateCheck: { allowed: boolean; remaining: number; resetTime: number };
+      let skipRateLimitCheck = false;
+      try {
+        rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
+      } catch (error) {
+        skipRateLimitCheck = true;
+        console.warn(`⚠️ Failed to check Redis rate limit for merchant ${merchantId}:`, error);
+        telemetry.recordRateLimitStoreFailure('instagram', 'webhook');
+        rateCheck = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
+      }
 
       if (!rateCheck.allowed) {
         console.warn(`🚫 Instagram webhook rate limit exceeded for merchant: ${merchantId}`);
@@ -433,8 +443,17 @@ export class WebhookRouter {
       const { getMetaRateLimiter } = await import('../services/meta-rate-limiter.js');
       const rateLimiter = getMetaRateLimiter();
       
-      const rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
-      
+      let rateCheck: { allowed: boolean; remaining: number; resetTime: number };
+      let skipRateLimitCheck = false;
+      try {
+        rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
+      } catch (error) {
+        skipRateLimitCheck = true;
+        console.warn(`⚠️ Failed to check Redis rate limit for merchant ${whatsappMerchantId}:`, error);
+        telemetry.recordRateLimitStoreFailure('whatsapp', 'webhook');
+        rateCheck = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
+      }
+
       if (!rateCheck.allowed) {
         console.warn(`🚫 WhatsApp webhook rate limit exceeded for merchant: ${whatsappMerchantId}`);
         return c.json({
@@ -594,13 +613,15 @@ export class WebhookRouter {
   private async verifyWebhookToken(token: string, platform: 'instagram' | 'whatsapp'): Promise<boolean> {
     try {
       const sql = this.db.getSQL();
-      
+      const hashed = crypto.createHash('sha256').update(token).digest('hex');
+
       const result = await sql`
-        SELECT mc.webhook_verify_token
+        SELECT 1
         FROM merchant_credentials mc
         JOIN merchants m ON mc.merchant_id = m.id
-        WHERE mc.webhook_verify_token = ${token}
-        AND m.subscription_status = 'ACTIVE'
+        WHERE mc.webhook_verify_token = ${hashed}
+          AND mc.platform = ${platform}
+          AND m.subscription_status = 'ACTIVE'
         LIMIT 1
       `;
 

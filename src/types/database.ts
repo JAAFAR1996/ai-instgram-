@@ -458,6 +458,7 @@ export interface DatabaseError extends Error {
 // Security and compliance types
 export interface MerchantCredentials extends TimestampedEntity {
   merchant_id: string;
+  platform: Platform;
   whatsapp_token_encrypted?: string;
   whatsapp_phone_number_id?: string;
   instagram_token_encrypted?: string;

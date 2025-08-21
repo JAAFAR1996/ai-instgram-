@@ -73,6 +73,8 @@ export interface MerchantCredentials {
   whatsappTokenEncrypted?: string;
   instagramTokenEncrypted?: string;
   instagramPageId?: string;
+  businessAccountId?: string;
+  appSecret?: string;
   webhookVerifyToken?: string;
   tokenCreatedIp?: string;
   lastAccessIp?: string;

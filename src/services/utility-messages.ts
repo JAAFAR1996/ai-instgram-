@@ -74,9 +74,17 @@ export class UtilityMessagesService {
         };
       }
 
-      // Get Instagram client
-      const instagramClient = getInstagramClient();
-      await instagramClient.initialize(merchantId);
+      // Get Instagram client and credentials
+      const instagramClient = getInstagramClient(merchantId);
+      const credentials = await instagramClient.loadMerchantCredentials(merchantId);
+      if (!credentials) {
+        return {
+          success: false,
+          error: 'Instagram credentials not found',
+          timestamp: new Date()
+        };
+      }
+      await instagramClient.validateCredentials(credentials, merchantId);
 
       // Prepare message content with variables
       const messageContent = this.interpolateTemplate(template.content, payload.variables);
@@ -89,7 +97,7 @@ export class UtilityMessagesService {
       };
 
       
-      const response = await instagramClient.sendMessage(req);
+      const response = await instagramClient.sendMessage(credentials, merchantId, req);
 
       if (response.success) {
         // Log utility message for compliance tracking

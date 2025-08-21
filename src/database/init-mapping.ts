@@ -29,15 +29,18 @@ export async function ensurePageMapping(): Promise<void> {
         merchant_id TEXT NOT NULL,
         instagram_page_id TEXT PRIMARY KEY,
         page_access_token TEXT,
+        business_account_id TEXT,
+        app_secret TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
 
     await pool.query(`
-      INSERT INTO merchant_credentials (merchant_id, instagram_page_id)
-      VALUES ($1, $2)
+      INSERT INTO merchant_credentials (merchant_id, instagram_page_id, platform)
+      VALUES ($1, $2, 'instagram')
       ON CONFLICT (instagram_page_id) DO UPDATE
-      SET merchant_id = EXCLUDED.merchant_id
+      SET merchant_id = EXCLUDED.merchant_id,
+          platform = 'instagram'
     `, [merchantId, pageId]);
 
     console.log(`✅ mapped ${pageId} -> ${merchantId}`);

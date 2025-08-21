@@ -41,7 +41,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 import { getDatabase } from '../database/connection.js';
-import { getInstagramClient } from './instagram-api.js';
+import { getInstagramClient, type InstagramCredentials } from './instagram-api.js';
 import { getInstagramWebhookHandler } from './instagram-webhook.js';
 import { getInstagramStoriesManager } from './instagram-stories-manager.js';
 import { getInstagramCommentsManager } from './instagram-comments-manager.js';
@@ -353,11 +353,15 @@ export class InstagramTestingOrchestrator {
     try {
       console.log(`🔍 Validating Instagram API integration...`);
 
-      const instagramClient = getInstagramClient();
-      await instagramClient.initialize(merchantId);
+      const instagramClient = getInstagramClient(merchantId);
+      const credentials = await instagramClient.loadMerchantCredentials(merchantId);
+      if (!credentials) {
+        throw new Error('Instagram credentials not found');
+      }
+      await instagramClient.validateCredentials(credentials, merchantId);
 
       // Test core API endpoints
-      const endpointTests = await this.testAPIEndpoints(instagramClient);
+      const endpointTests = await this.testAPIEndpoints(instagramClient, credentials, merchantId);
 
       // Check webhook status
       const webhookValidation = await this.validateWebhooks(merchantId);
@@ -985,15 +989,19 @@ export class InstagramTestingOrchestrator {
   /**
    * Private: Test API endpoints
    */
-  private async testAPIEndpoints(instagramClient: any): Promise<Array<{
+  private async testAPIEndpoints(
+    instagramClient: any,
+    credentials: InstagramCredentials,
+    merchantId: string
+  ): Promise<Array<{
     endpoint: string;
     status: 'passed' | 'failed';
     responseTime: number;
     error?: string;
   }>> {
     const endpoints = [
-      { name: 'Business Account Info', test: () => instagramClient.getBusinessAccountInfo() },
-      { name: 'Health Check', test: () => instagramClient.healthCheck() }
+      { name: 'Business Account Info', test: () => instagramClient.getBusinessAccountInfo(credentials, merchantId) },
+      { name: 'Health Check', test: () => instagramClient.healthCheck(credentials, merchantId) }
     ];
 
     const results = [];

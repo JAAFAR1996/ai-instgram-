@@ -233,7 +233,7 @@ export class CredentialsRepository {
   /**
    * Record access for audit trail
    */
-  private async recordAccess(merchantId: string, ip?: string): Promise<void> {
+  private async recordAccess(merchantId: string, platform: Platform, ip?: string): Promise<void> {
     const sql = this.db.getSQL();
     
     await sql`
@@ -243,6 +243,7 @@ export class CredentialsRepository {
         last_access_ip = ${ip || null},
         updated_at = NOW()
       WHERE merchant_id = ${merchantId}::uuid
+        AND platform = ${platform}
     `;
   }
 

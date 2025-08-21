@@ -10,7 +10,38 @@ import { getConfig } from '../config/environment.js';
 import { getDatabase } from '../database/connection.js';
 import { hashMerchantAndBody } from '../middleware/idempotency.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
+import { getEncryptionService } from './encryption.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
+import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
+import { getMetaRateLimiter } from './meta-rate-limiter.js';
+import { InstagramOAuthService } from './instagram-oauth.js';
+import { getNotificationService } from './notification-service.js';
+
+export async function retryFetch(
+  fetchFn: () => Promise<Response>,
+  maxAttempts = 3,
+  initialDelayMs = 500
+): Promise<Response> {
+  let attempt = 0;
+  let delay = initialDelayMs;
+  while (attempt < maxAttempts) {
+    try {
+      const res = await fetchFn();
+      if (res.status !== 429) {
+        return res;
+      }
+      console.warn(`retryFetch: attempt ${attempt + 1} received 429`);
+    } catch (err) {
+      console.warn(`retryFetch: attempt ${attempt + 1} failed with ${(err as Error).message}`);
+    }
+    attempt++;
+    if (attempt >= maxAttempts) break;
+    await new Promise(resolve => setTimeout(resolve, delay));
+    delay *= 2;
+  }
+  console.error(`retryFetch: exhausted ${maxAttempts} attempts`);
+  throw new Error(`Network request failed after ${maxAttempts} attempts`);
+}
 
 export interface InstagramMessage {
   id: string;
@@ -39,7 +70,57 @@ export class InstagramMessagingService {
   private config = getConfig();
   private db = getDatabase();
   private redis = getRedisConnectionManager();
+  private encryptionService = getEncryptionService();
+  private rateLimiter = getMetaRateLimiter();
+  private notification = getNotificationService();
   private readonly MESSAGING_WINDOW_HOURS = 24;
+
+  /**
+   * Execute Graph API request with rate limiting and logging
+   */
+  private async sendGraphMessage(
+    merchantId: string,
+    igUserId: string,
+    accessToken: string,
+    messagePayload: any
+  ): Promise<any> {
+    const url = `${GRAPH_API_BASE_URL}/${igUserId}/messages`;
+    const rateKey = `ig:${merchantId}:${igUserId}:messages`;
+    const maxAttempts = 3;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      console.log(`🚀 Graph API message attempt ${attempt} for ${merchantId} -> ${igUserId}`);
+      try {
+        const response = await this.rateLimiter.graphRequest(
+          url,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`
+            },
+            body: JSON.stringify(messagePayload)
+          },
+          rateKey
+        );
+
+        const data: any = await response.json();
+        if (!response.ok) {
+          console.error('❌ Instagram message send failed:', data);
+          throw new Error(data.error?.message || 'Unknown error');
+        }
+
+        return data;
+      } catch (error) {
+        console.error(`⚠️ Graph API attempt ${attempt} failed`, error);
+        if (attempt === maxAttempts) {
+          throw error;
+        }
+      }
+    }
+
+    throw new Error('Message send failed after maximum attempts');
+  }
 
   /**
    * Send text message to Instagram user
@@ -79,6 +160,11 @@ export class InstagramMessagingService {
       // Get merchant access token
       const accessToken = await this.getMerchantAccessToken(merchantId);
       if (!accessToken) {
+        await this.notification.send({
+          type: 'instagram_token_missing',
+          recipient: merchantId,
+          content: { message: 'Instagram access token missing or expired' }
+        });
         throw new Error('Merchant not authorized for Instagram messaging');
       }
 
@@ -104,25 +190,13 @@ export class InstagramMessagingService {
         }
       };
 
-      // Send message via Instagram Graph API
-      const response = await fetch(
-        `https://graph.instagram.com/${this.config.instagram.apiVersion}/${igUserId}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`
-          },
-          body: JSON.stringify(messagePayload)
-        }
+      // Send message via Instagram Graph API with rate limiter
+      const responseData: any = await this.sendGraphMessage(
+        merchantId,
+        igUserId,
+        accessToken,
+        messagePayload
       );
-
-      const responseData: any = await response.json();
-
-      if (!response.ok) {
-        console.error('❌ Instagram message send failed:', responseData);
-        throw new Error(`Message send failed: ${responseData.error?.message || 'Unknown error'}`);
-      }
 
       console.log('✅ Instagram message sent successfully');
 
@@ -185,6 +259,11 @@ export class InstagramMessagingService {
 
       const accessToken = await this.getMerchantAccessToken(merchantId);
       if (!accessToken) {
+        await this.notification.send({
+          type: 'instagram_token_missing',
+          recipient: merchantId,
+          content: { message: 'Instagram access token missing or expired' }
+        });
         throw new Error('Merchant not authorized for Instagram messaging');
       }
 
@@ -201,38 +280,27 @@ export class InstagramMessagingService {
 
       // Prepare image message payload with optional caption
       const messagePayload = {
-        recipient: {
-          id: recipientId
-        },
-        message: {
-          attachment: {
-            type: 'image',
-            payload: {
-              url: imageUrl
-            }
+          recipient: {
+            id: recipientId
           },
-          ...(caption ? { text: caption } : {})
-        }
-      };
+          message: {
+            attachment: {
+              type: 'image',
+              payload: options.attachmentId
+                ? { attachment_id: options.attachmentId }
+                : { url: imageUrl }
+            },
+            ...(caption ? { text: caption } : {})
+          }
+        };
 
-      const response = await fetch(
-        `https://graph.instagram.com/${this.config.instagram.apiVersion}/${igUserId}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`
-          },
-          body: JSON.stringify(messagePayload)
-        }
+      // Send message via Instagram Graph API with rate limiter
+      const responseData: any = await this.sendGraphMessage(
+        merchantId,
+        igUserId,
+        accessToken,
+        messagePayload
       );
-
-      const responseData: any = await response.json();
-
-      if (!response.ok) {
-        console.error('❌ Instagram image send failed:', responseData);
-        throw new Error(`Image send failed: ${responseData.error?.message || 'Unknown error'}`);
-      }
 
       console.log('✅ Instagram image sent successfully');
 
@@ -342,24 +410,13 @@ export class InstagramMessagingService {
         }
       };
 
-      const response = await fetch(
-        `https://graph.instagram.com/${this.config.instagram.apiVersion}/${igUserId}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`
-          },
-          body: JSON.stringify(messagePayload)
-        }
+      // Send message via Instagram Graph API with rate limiter
+      const responseData: any = await this.sendGraphMessage(
+        merchantId,
+        igUserId,
+        accessToken,
+        messagePayload
       );
-
-      const responseData: any = await response.json();
-
-      if (!response.ok) {
-        console.error('❌ Instagram template send failed:', responseData);
-        throw new Error(`Template send failed: ${responseData.error?.message || 'Unknown error'}`);
-      }
 
       console.log('✅ Instagram template sent successfully');
 
@@ -422,14 +479,32 @@ export class InstagramMessagingService {
       }
 
       const record = result[0];
-      
+      const currentToken = this.encryptionService.decryptInstagramToken(record.instagram_token_encrypted);
+
       // Check if token is expired
       if (record.token_expires_at && new Date(record.token_expires_at) <= new Date()) {
         console.warn(`⚠️ Instagram token expired for merchant ${merchantId}`);
-        return null;
+        try {
+          const oauth = new InstagramOAuthService();
+          const refreshed = await oauth.refreshLongLivedToken(currentToken, merchantId);
+          const encrypted = this.encryptionService.encryptInstagramToken(refreshed.access_token);
+          const expiresAt = new Date(Date.now() + refreshed.expires_in * 1000);
+
+          await sql`
+            UPDATE merchant_credentials
+            SET instagram_token_encrypted = ${encrypted},
+                token_expires_at = ${expiresAt}
+            WHERE merchant_id = ${merchantId}::uuid
+          `;
+
+          return refreshed.access_token;
+        } catch (err) {
+          console.error('❌ Failed to refresh Instagram token:', err);
+          return null;
+        }
       }
 
-      return this.encryption.decryptInstagramToken(record.instagram_token_encrypted);
+      return currentToken;
 
     } catch (error) {
       console.error('❌ Failed to get merchant access token:', error);

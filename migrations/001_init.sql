@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS merchant_credentials (
   merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
   instagram_page_id VARCHAR(100) PRIMARY KEY,
   instagram_business_account_id VARCHAR(100),
+  business_account_id TEXT,
+  app_secret TEXT,
   page_access_token TEXT,
   webhook_verify_token VARCHAR(255),
   created_at TIMESTAMPTZ DEFAULT NOW(),

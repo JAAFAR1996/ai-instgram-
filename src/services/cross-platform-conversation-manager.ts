@@ -819,21 +819,29 @@ export class CrossPlatformConversationManager {
     };
 
     for (const conversation of conversations) {
-      const sessionData = JSON.parse(conversation.session_data || '{}');
-      
+      let session;
+      try {
+        session = typeof conversation.session_data === 'string'
+          ? JSON.parse(conversation.session_data)
+          : conversation.session_data || {};
+      } catch (error) {
+        console.error('❌ Failed to parse session data for conversation', conversation.id, error);
+        session = {};
+      }
+
       // Merge cart items
-      if (sessionData.cart) {
-        mergedContext.cart.push(...sessionData.cart);
+      if (session.cart) {
+        mergedContext.cart.push(...session.cart);
       }
 
       // Merge preferences (later conversations override earlier ones)
-      if (sessionData.preferences) {
-        mergedContext.preferences = { ...mergedContext.preferences, ...sessionData.preferences };
+      if (session.preferences) {
+        mergedContext.preferences = { ...mergedContext.preferences, ...session.preferences };
       }
 
       // Merge other context
-      if (sessionData.context) {
-        mergedContext.context = { ...mergedContext.context, ...sessionData.context };
+      if (session.context) {
+        mergedContext.context = { ...mergedContext.context, ...session.context };
       }
     }
 

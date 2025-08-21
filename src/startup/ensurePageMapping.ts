@@ -28,6 +28,8 @@ export async function ensurePageMapping(pool: Pool, pageId: string, igBusinessAc
         merchant_id UUID NOT NULL,
         instagram_page_id TEXT UNIQUE,
         instagram_business_account_id TEXT,
+        business_account_id TEXT,
+        app_secret TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -43,12 +45,14 @@ export async function ensurePageMapping(pool: Pool, pageId: string, igBusinessAc
     // upsert للربط - ON CONFLICT على merchant_id لأنه الـ PK الفعلي
     await client.query(`
       INSERT INTO merchant_credentials
-        (merchant_id, instagram_page_id, instagram_business_account_id, created_at, updated_at)
-      VALUES ($1, $2, $3, NOW(), NOW())
-      ON CONFLICT (merchant_id) DO UPDATE
+        (merchant_id, instagram_page_id, instagram_business_account_id, business_account_id, platform, created_at, updated_at)
+      VALUES ($1, $2, $3, $3, 'instagram', NOW(), NOW())
+      ON CONFLICT (merchant_id, platform) DO UPDATE
       SET
         instagram_page_id = EXCLUDED.instagram_page_id,
         instagram_business_account_id = COALESCE(EXCLUDED.instagram_business_account_id, merchant_credentials.instagram_business_account_id),
+        business_account_id = COALESCE(EXCLUDED.business_account_id, merchant_credentials.business_account_id),
+        platform = 'instagram',
         updated_at = NOW()
     `, [merchantId, pageId, igBusinessAccountId ?? null]);
 

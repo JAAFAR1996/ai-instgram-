@@ -150,13 +150,15 @@ async function seedInitialData(client: any): Promise<void> {
       INSERT INTO merchant_credentials (
         merchant_id,
         instagram_page_id,
-        instagram_business_account_id
+        instagram_business_account_id,
+        platform
       )
-      VALUES ($1::uuid, $2, $3)
+      VALUES ($1::uuid, $2, $3, 'instagram')
       ON CONFLICT (instagram_page_id) DO UPDATE
-      SET 
+      SET
         merchant_id = EXCLUDED.merchant_id,
         instagram_business_account_id = EXCLUDED.instagram_business_account_id,
+        platform = 'instagram',
         updated_at = NOW()
     `, [merchantId, igPageId, igBusinessId]);
     

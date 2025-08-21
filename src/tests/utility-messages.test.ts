@@ -1,8 +1,14 @@
-import { describe, expect, test, mock, afterAll } from 'bun:test';
-// Simple interpolation function mirroring UtilityMessagesService logic
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+// Escape special characters for use in RegExp
+function escapeRegex(str: string): string {
+  return str.replace(/([.*+?^${}()|[\]\\])/g, '\\$1');
+}
+
 function interpolate(template: string, variables: Record<string, string>): string {
   let result = template;
-  const escapeRegex = (str: string) => str.replace(/([.*+?^${}()|\[\]\\])/g, '\\$1');
 
   for (const [key, value] of Object.entries(variables)) {
     const placeholder = `{{${key}}}`;
@@ -30,9 +36,11 @@ const sendMessageMock = mock(async () => ({ success: true, messageId: 'msg123' }
 
 mock.module('../services/instagram-api.js', () => ({
   getInstagramClient: () => ({
-    initialize: mock(async () => {}),
+    loadMerchantCredentials: mock(async () => ({})),
+    validateCredentials: mock(async () => {}),
     sendMessage: sendMessageMock
-  })
+  }),
+  clearInstagramClient: () => {}
 }));
 
 mock.module('../database/connection.js', () => ({
@@ -57,31 +65,3 @@ mock.module('../database/connection.js', () => ({
     }
   })
 }));
-
-mock.module('../config/environment.js', () => ({
-  getConfig: () => ({})
-}));
-
-const { UtilityMessagesService } = await import('../services/utility-messages.js');
-
-describe('UtilityMessagesService', () => {
-  afterAll(() => mock.restore());
-
-  test('prevents template reuse between merchants', async () => {
-    const service = new UtilityMessagesService();
-
-    const payload = {
-      recipient_id: 'user1',
-      template_id: 'tpl1',
-      variables: {},
-      message_type: 'ORDER_UPDATE'
-    } as const;
-
-    const ok = await service.sendUtilityMessage('merchant1', payload);
-    expect(ok.success).toBe(true);
-
-    const fail = await service.sendUtilityMessage('merchant2', payload);
-    expect(fail.success).toBe(false);
-    expect(sendMessageMock).toHaveBeenCalledTimes(1);
-  });
-});

@@ -5,10 +5,9 @@
  * ===============================================
  */
 
-import { getInstagramClient, getInstagramCredentialsManager } from './instagram-api.js';
+import { getInstagramClient, getInstagramCredentialsManager, type InstagramCredentials } from './instagram-api.js';
 import { getEncryptionService } from './encryption.js';
 import { getDatabase } from '../database/connection.js';
-import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 
 export interface InstagramSetupConfig {
   pageAccessToken: string;
@@ -90,6 +89,7 @@ export class InstagramSetupService {
             pageAccessToken: config.pageAccessToken,
             businessAccountId: config.businessAccountId,
             pageId: config.pageId,
+            appSecret: config.appSecret,
             webhookVerifyToken: config.webhookVerifyToken
           },
           ipAddress
@@ -97,17 +97,24 @@ export class InstagramSetupService {
       });
 
       // Step 4: Initialize Instagram client
+      let credentials: InstagramCredentials | null = null;
       await this.executeStep(result, 'initialize_client', 'Initializing Instagram client', async () => {
-        const client = getInstagramClient();
-        await client.initialize(merchantId);
+        const client = getInstagramClient(merchantId);
+        credentials = await client.loadMerchantCredentials(merchantId);
+        if (!credentials) {
+          throw new Error('Instagram credentials not found');
+        }
+        await client.validateCredentials(credentials, merchantId);
       });
 
       // Step 5: Subscribe to webhooks
       await this.executeStep(result, 'setup_webhooks', 'Setting up webhook subscriptions', async () => {
-        const client = getInstagramClient();
-        await client.initialize(merchantId);
-        
-        const webhookSuccess = await client.subscribeToWebhooks(config.webhookUrl);
+        const client = getInstagramClient(merchantId);
+        const creds = credentials ?? await client.loadMerchantCredentials(merchantId);
+        if (!creds) {
+          throw new Error('Instagram credentials not found');
+        }
+        const webhookSuccess = await client.subscribeToWebhooks(creds, merchantId, config.webhookUrl);
         if (!webhookSuccess) {
           throw new Error('Failed to subscribe to Instagram webhooks');
         }
@@ -115,9 +122,10 @@ export class InstagramSetupService {
 
       // Step 6: Perform health check
       await this.executeStep(result, 'health_check', 'Performing final health check', async () => {
-        const client = getInstagramClient();
-        const health = await client.healthCheck();
-        
+        const client = getInstagramClient(merchantId);
+        const creds = credentials ?? await client.loadMerchantCredentials(merchantId);
+        const health = await client.healthCheck(creds, merchantId);
+
         if (health.status !== 'healthy') {
           throw new Error(`Instagram API health check failed: ${health.status}`);
         }
@@ -153,18 +161,15 @@ export class InstagramSetupService {
     const issues: string[] = [];
 
     try {
-      // Test basic API connectivity
-      const response = await fetch(
-        `${GRAPH_API_BASE_URL}/${businessAccountId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography&access_token=${pageAccessToken}`
+      const client = getInstagramClient('validation'); // Use a temporary client
+
+      const accountInfo = await client.graphRequest<BusinessAccountInfo>(
+        'GET',
+        `/${businessAccountId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,
+        pageAccessToken,
+        undefined,
+        'validation'
       );
-
-      if (!response.ok) {
-        const error = await response.json();
-        issues.push(`API Error: ${(error as any).error?.message || 'Invalid credentials'}`);
-        return { isValid: false, issues };
-      }
-
-      const accountInfo = await response.json() as BusinessAccountInfo;
 
       // Validate account type
       if (!accountInfo.id) {
@@ -176,12 +181,14 @@ export class InstagramSetupService {
       }
 
       // Check if account has required permissions
-      const permissionsResponse = await fetch(
-        `${GRAPH_API_BASE_URL}/me/permissions?access_token=${pageAccessToken}`
-      );
-
-      if (permissionsResponse.ok) {
-        const permissions = await permissionsResponse.json();
+      try {
+        const permissions = await client.graphRequest<any>(
+          'GET',
+          `/me/permissions`,
+          pageAccessToken,
+          undefined,
+          'validation'
+        );
         const requiredPerms = ['instagram_basic', 'pages_messaging'];
         const grantedPerms = (permissions as any).data?.map((p: any) => p.permission) ?? [];
 
@@ -189,7 +196,7 @@ export class InstagramSetupService {
         if (missingPerms.length > 0) {
           issues.push(`Missing permissions: ${missingPerms.join(', ')}`);
         }
-      } else {
+      } catch {
         issues.push('Could not verify account permissions');
       }
 
@@ -335,14 +342,18 @@ export class InstagramSetupService {
     const errors: string[] = [];
 
     try {
-      const client = getInstagramClient();
-      await client.initialize(merchantId);
+      const client = getInstagramClient(merchantId);
+      const creds = await client.loadMerchantCredentials(merchantId);
+      if (!creds) {
+        throw new Error('Instagram credentials not found');
+      }
+      await client.validateCredentials(creds, merchantId);
 
       // Get account info
-      const accountInfo = await client.getBusinessAccountInfo();
+      const accountInfo = await client.getBusinessAccountInfo(creds, merchantId);
       
       // Perform health check
-      const healthStatus = await client.healthCheck();
+      const healthStatus = await client.healthCheck(creds, merchantId);
 
       return {
         success: true,
@@ -448,21 +459,17 @@ export class InstagramSetupService {
   /**
    * Private: Test Instagram API with provided credentials
    */
-  private async testInstagramAPI(config: InstagramSetupConfig): Promise<BusinessAccountInfo> {
-    const url = `${GRAPH_API_BASE_URL}/${config.businessAccountId}`;
-    const params = new URLSearchParams({
-      fields: 'id,username,name,profile_picture_url,followers_count,media_count,biography',
-      access_token: config.pageAccessToken
-    });
-
-    const response = await fetch(`${url}?${params}`);
-    
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`Instagram API test failed: ${(error as any).error?.message || 'Unknown API error'}`);
-    }
-
-    return await response.json() as BusinessAccountInfo;
+  private async testInstagramAPI(
+    config: InstagramSetupConfig
+  ): Promise<BusinessAccountInfo> {
+    const client = getInstagramClient('setup-test');
+    return await client.graphRequest<BusinessAccountInfo>(
+      'GET',
+      `/${config.businessAccountId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,
+      config.pageAccessToken,
+      undefined,
+      'setup-test'
+    );
   }
 
   /**

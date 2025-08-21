@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getInstagramClient } from './instagram-api.js';
+import { getInstagramClient, clearInstagramClient, type InstagramCredentials } from './instagram-api.js';
 import { getDatabase } from '../database/connection.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramContext } from './instagram-ai.js';
@@ -87,20 +87,32 @@ export class InstagramCommentsManager {
   private db = getDatabase();
   private aiOrchestrator = getConversationAIOrchestrator();
   private redis = getRedisConnectionManager();
-  private instagramClient = getInstagramClient();
-  private initializedMerchantId: string | null = null;
+  private credentialsCache = new Map<string, InstagramCredentials>();
 
-  private async getClient(merchantId: string) {
-    if (this.initializedMerchantId !== merchantId) {
-      await this.instagramClient.initialize(merchantId);
-      this.initializedMerchantId = merchantId;
+  private getClient(merchantId: string) {
+    return getInstagramClient(merchantId);
+  }
+
+  private async getCredentials(merchantId: string): Promise<InstagramCredentials> {
+    if (this.credentialsCache.has(merchantId)) {
+      return this.credentialsCache.get(merchantId)!;
     }
-    return this.instagramClient;
+    const client = this.getClient(merchantId);
+    const creds = await client.loadMerchantCredentials(merchantId);
+    if (!creds) {
+      throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
+    }
+    await client.validateCredentials(creds, merchantId);
+    this.credentialsCache.set(merchantId, creds);
+    return creds;
   }
 
   public clearClient(merchantId?: string) {
-    if (!merchantId || this.initializedMerchantId === merchantId) {
-      this.initializedMerchantId = null;
+    if (merchantId) {
+      this.credentialsCache.delete(merchantId);
+      clearInstagramClient(merchantId);
+    } else {
+      this.credentialsCache.clear();
     }
   }
 
@@ -655,9 +667,10 @@ export class InstagramCommentsManager {
     merchantId: string
   ): Promise<boolean> {
     try {
-      const instagramClient = await this.getClient(merchantId);
+      const instagramClient = this.getClient(merchantId);
+      const credentials = await this.getCredentials(merchantId);
 
-      const result = await instagramClient.replyToComment(commentId, replyText);
+      const result = await instagramClient.replyToComment(credentials, merchantId, commentId, replyText);
       return result.success;
     } catch (error) {
       console.error('❌ Reply to comment failed:', error);
@@ -674,14 +687,15 @@ export class InstagramCommentsManager {
     merchantId: string
   ): Promise<boolean> {
     try {
-      const instagramClient = await this.getClient(merchantId);
+      const instagramClient = this.getClient(merchantId);
+      const credentials = await this.getCredentials(merchantId);
 
       // Reply to comment with DM invitation
-      const replyResult = await instagramClient.replyToComment(comment.id, inviteMessage);
+      const replyResult = await instagramClient.replyToComment(credentials, merchantId, comment.id, inviteMessage);
       
       if (replyResult.success) {
         // Send DM to user
-        const dmResult = await instagramClient.sendMessage({
+        const dmResult = await instagramClient.sendMessage(credentials, merchantId, {
           recipientId: comment.userId,
           messageType: 'text',
           content: `مرحباً ${comment.username}! شكراً لتعليقك 🌹 كيف أقدر أساعدك؟`

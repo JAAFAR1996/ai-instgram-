@@ -14,13 +14,20 @@ import { getConfig } from '../config/environment.js';
 
 const config = getConfig();
 
-function isTrustedRedirectUrl(url: string): boolean {
+function isTrustedRedirectUrl(url: string): string | undefined {
   const allowed = config.security.trustedRedirectDomains;
   try {
-    const hostname = new URL(url).hostname;
-    return allowed.some(domain => hostname === domain || hostname.endsWith('.' + domain));
+    const parsedUrl = new URL(url);
+    if (parsedUrl.protocol !== 'https:') {
+      return 'redirectUrl must use HTTPS';
+    }
+    const hostname = parsedUrl.hostname;
+    const isAllowed = allowed.some(domain => hostname === domain || hostname.endsWith('.' + domain));
+    return isAllowed
+      ? undefined
+      : `redirectUrl must belong to trusted domains: ${allowed.join(', ') || 'none'}`;
   } catch {
-    return false;
+    return 'Invalid redirect URL';
   }
 }
 
@@ -49,11 +56,14 @@ app.post('/auth/instagram/initiate',
     if (!parsed.success) {
       return c.json({ error: 'Invalid request data', details: parsed.error.issues }, 400);
     }
-    if (parsed.data.redirectUrl && !isTrustedRedirectUrl(parsed.data.redirectUrl)) {
-      return c.json({
-        error: 'Untrusted redirect URL',
-        details: `redirectUrl must belong to trusted domains: ${config.security.trustedRedirectDomains.join(', ') || 'none'}`
-      }, 400);
+    if (parsed.data.redirectUrl) {
+      const redirectError = isTrustedRedirectUrl(parsed.data.redirectUrl);
+      if (redirectError) {
+        return c.json({
+          error: 'Untrusted redirect URL',
+          details: redirectError
+        }, 400);
+      }
     }
     return parsed.data;
   }),

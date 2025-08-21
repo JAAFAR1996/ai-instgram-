@@ -27,12 +27,15 @@ describe('Instagram encrypted token retrieval', () => {
     mock.module('../services/meta-rate-limiter.js', () => ({
       getMetaRateLimiter: () => ({ checkRedisRateLimit: async () => ({ allowed: true }) })
     }));
+    mock.module('../database/connection.js', () => ({
+      getDatabase: () => ({ getSQL: () => mock(async () => []) })
+    }));
     (globalThis as any).requireMerchantId = () => 'merchant1';
 
     const { getInstagramClient } = await import('../services/instagram-api.js');
     const token = 'token123';
     const encrypted = encryption.encryptInstagramToken(token);
-    const client = getInstagramClient();
+    const client = getInstagramClient('merchant1');
     (client as any).db = { getSQL: () => mock(async () => [{
       instagram_token_encrypted: encrypted,
       instagram_page_id: 'page1',
@@ -47,8 +50,8 @@ describe('Instagram encrypted token retrieval', () => {
     }));
     (globalThis as any).fetch = fetchMock;
 
-    await client.initialize('merchant1');
-    expect((client as any).credentials?.pageAccessToken).toBe(token);
+    const creds = await client.loadMerchantCredentials('merchant1');
+    expect(creds?.pageAccessToken).toBe(token);
   });
 
   test('sendTextMessage uses decrypted token', async () => {

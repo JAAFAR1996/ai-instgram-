@@ -28,6 +28,7 @@ export interface MetricsCollector {
   metaRequestsTotal: Counter;
   metaLatency: Histogram;
   metaRateLimited: Counter;
+  rateLimitStoreFailures: Counter;
 
   // WhatsApp/Instagram metrics
   messagesTotal: Counter;
@@ -99,6 +100,11 @@ export class TelemetryService {
       
       metaRateLimited: this.meter!.createCounter('meta_rate_limited_total', {
         description: 'Meta API rate limit hits',
+        unit: '1'
+      }),
+
+      rateLimitStoreFailures: this.meter!.createCounter('rate_limit_store_failures_total', {
+        description: 'Redis rate limit store failures',
         unit: '1'
       }),
 
@@ -206,6 +212,16 @@ export class TelemetryService {
     if (rateLimited) {
       this.metrics.metaRateLimited.add(1, { platform, endpoint });
     }
+  }
+
+  /**
+   * Record rate limit store failures
+   */
+  recordRateLimitStoreFailure(
+    platform: 'instagram' | 'whatsapp',
+    endpoint: string
+  ): void {
+    this.metrics.rateLimitStoreFailures.add(1, { platform, endpoint });
   }
 
   /**

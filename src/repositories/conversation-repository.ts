@@ -68,10 +68,12 @@ export class ConversationRepository {
   /**
    * Create new conversation
    */
-  async create(data: CreateConversationRequest): Promise<Conversation> {
+  async create(
+    data: CreateConversationRequest
+  ): Promise<{ conversation: Conversation; isNew: boolean }> {
     const sql = this.db.getSQL();
-    
-    const [conversation] = await sql`
+
+    const inserted = await sql`
       INSERT INTO conversations (
         merchant_id,
         customer_whatsapp,
@@ -91,10 +93,24 @@ export class ConversationRepository {
         ${JSON.stringify(data.sessionData || {})},
         NOW()
       )
+      ON CONFLICT (merchant_id, customer_instagram, platform)
+      DO NOTHING
       RETURNING *
     `;
 
-    return this.mapToConversation(conversation);
+    if (inserted.length > 0) {
+      return { conversation: this.mapToConversation(inserted[0]), isNew: true };
+    }
+
+    const [existing] = await sql`
+      SELECT * FROM conversations
+      WHERE merchant_id = ${data.merchantId}::uuid
+        AND customer_instagram = ${data.customerInstagram || null}
+        AND platform = ${data.platform}
+      LIMIT 1
+    `;
+
+    return { conversation: this.mapToConversation(existing), isNew: false };
   }
 
   /**

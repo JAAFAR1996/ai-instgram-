@@ -207,25 +207,55 @@ export class InstagramWebhookHandler {
 
     // Process messaging events (DMs and story replies)
     if (entry.messaging) {
-      for (const messagingEvent of entry.messaging) {
-        await this.processMessagingEvent(messagingEvent, merchantId, result);
+      const messagingPromises = entry.messaging.map(event =>
+        this.processMessagingEvent(event, merchantId, result)
+      );
+      const settled = await Promise.allSettled(messagingPromises);
+      for (const s of settled) {
         result.eventsProcessed++;
+        if (s.status === 'fulfilled') {
+          result.messagesProcessed += s.value;
+        } else {
+          const msg = s.reason instanceof Error ? s.reason.message : String(s.reason);
+          result.errors.push(msg);
+          console.error('❌ Messaging event failed:', msg);
+        }
       }
     }
 
     // Process comment events
     if (entry.comments) {
-      for (const commentEvent of entry.comments) {
-        await this.processCommentEvent(commentEvent, merchantId, result);
+      const commentPromises = entry.comments.map(event =>
+        this.processCommentEvent(event, merchantId)
+      );
+      const settled = await Promise.allSettled(commentPromises);
+      for (const s of settled) {
         result.eventsProcessed++;
+        if (s.status === 'fulfilled') {
+          result.messagesProcessed += s.value;
+        } else {
+          const msg = s.reason instanceof Error ? s.reason.message : String(s.reason);
+          result.errors.push(msg);
+          console.error('❌ Comment event failed:', msg);
+        }
       }
     }
 
     // Process mention events (story mentions)
     if (entry.mentions) {
-      for (const mentionEvent of entry.mentions) {
-        await this.processMentionEvent(mentionEvent, merchantId, result);
+      const mentionPromises = entry.mentions.map(event =>
+        this.processMentionEvent(event, merchantId)
+      );
+      const settled = await Promise.allSettled(mentionPromises);
+      for (const s of settled) {
         result.eventsProcessed++;
+        if (s.status === 'fulfilled') {
+          result.messagesProcessed += s.value;
+        } else {
+          const msg = s.reason instanceof Error ? s.reason.message : String(s.reason);
+          result.errors.push(msg);
+          console.error('❌ Mention event failed:', msg);
+        }
       }
     }
 
@@ -239,7 +269,7 @@ export class InstagramWebhookHandler {
     event: InstagramMessagingEvent,
     merchantId: string,
     result: ProcessedWebhookResult
-  ): Promise<void> {
+  ): Promise<number> {
     try {
       const customerId = event.sender.id;
       const timestamp = new Date(event.timestamp);
@@ -250,7 +280,7 @@ export class InstagramWebhookHandler {
 
       if (!isMessage && !isPostback) {
         console.log('⚠️ Skipping unknown messaging event type');
-        return;
+        return 0;
       }
 
       // Find or create conversation
@@ -265,6 +295,7 @@ export class InstagramWebhookHandler {
       }
 
       if (conversation.isNew) {
+        // count conversation creation separately
         result.conversationsCreated++;
       }
 
@@ -285,12 +316,13 @@ export class InstagramWebhookHandler {
         
         // Handle attachments with Media Manager
         if (event.message.attachments && event.message.attachments.length > 0) {
+          let processed = 0;
           for (const attachment of event.message.attachments) {
             const attachmentType = attachment.type.toUpperCase();
             const content = messageContent || `[${attachmentType}]`;
 
             // Process media with Media Manager
-            await this.processMediaAttachment(
+            processed += await this.processMediaAttachment(
               attachment,
               conversation.id,
               merchantId,
@@ -298,19 +330,16 @@ export class InstagramWebhookHandler {
               content,
               timestamp
             );
-
-            result.messagesProcessed++;
           }
 
-          return; // Early return as Media Manager handles the full flow
+          return processed; // Early return as Media Manager handles the full flow
         }
       } else if (isPostback && event.postback) {
         messageContent = event.postback.title || event.postback.payload;
         messageType = 'STORY_REPLY';
         
         // Handle story reply with Stories Manager
-        await this.processStoryReply(event, merchantId, result);
-        return; // Early return as Stories Manager handles the full flow
+        return await this.processStoryReply(event, merchantId);
       }
 
       // Store the message
@@ -349,9 +378,8 @@ export class InstagramWebhookHandler {
    */
   private async processCommentEvent(
     event: InstagramCommentEvent,
-    merchantId: string,
-    result: ProcessedWebhookResult
-  ): Promise<void> {
+    merchantId: string
+  ): Promise<number> {
     try {
       const customerId = event.value.from.id;
       const customerUsername = event.value.from.username;
@@ -386,12 +414,12 @@ export class InstagramWebhookHandler {
       );
 
       if (commentResult.success) {
-        result.messagesProcessed++;
         console.log(`✅ Comment processed with advanced Comments Manager: ${commentResult.actionTaken}`);
+        return 1;
       } else {
         console.error('❌ Comments Manager failed:', commentResult.error);
         // Fallback to legacy processing if needed
-        await this.legacyProcessCommentEvent(event, merchantId, result);
+        return await this.legacyProcessCommentEvent(event, merchantId);
       }
 
     } catch (error) {
@@ -405,9 +433,8 @@ export class InstagramWebhookHandler {
    */
   private async processMentionEvent(
     event: InstagramMentionEvent,
-    merchantId: string,
-    result: ProcessedWebhookResult
-  ): Promise<void> {
+    merchantId: string
+  ): Promise<number> {
     try {
       const customerId = event.value.from.id;
       const customerUsername = event.value.from.username;
@@ -439,12 +466,12 @@ export class InstagramWebhookHandler {
       );
 
       if (storyResult.success) {
-        result.messagesProcessed++;
         console.log(`✅ Story mention processed with advanced Stories Manager`);
+        return 1;
       } else {
         console.error('❌ Stories Manager failed:', storyResult.error);
         // Fallback to legacy processing if needed
-        await this.legacyProcessMentionEvent(event, merchantId, result);
+        return await this.legacyProcessMentionEvent(event, merchantId);
       }
 
     } catch (error) {
@@ -463,19 +490,7 @@ export class InstagramWebhookHandler {
     username?: string
   ): Promise<{ id: string; isNew: boolean } | null> {
     try {
-      // Try to find existing conversation using repository
-      const existingConversation = await this.repositories.conversation.findActiveByCustomer(
-        merchantId,
-        customerId,
-        platform
-      );
-
-      if (existingConversation) {
-        return { id: existingConversation.id, isNew: false };
-      }
-
-      // Create new conversation using repository
-      const newConversation = await this.repositories.conversation.create({
+      const { conversation, isNew } = await this.repositories.conversation.create({
         merchantId,
         customerInstagram: customerId,
         customerName: username,
@@ -489,7 +504,7 @@ export class InstagramWebhookHandler {
         }
       });
 
-      return { id: newConversation.id, isNew: true };
+      return { id: conversation.id, isNew };
     } catch (error) {
       console.error('❌ Failed to find/create conversation:', error);
       return null;
@@ -554,13 +569,17 @@ export class InstagramWebhookHandler {
     username: string
   ): Promise<void> {
     try {
-      const instagramClient = getInstagramClient();
-      await instagramClient.initialize(merchantId);
+      const instagramClient = getInstagramClient(merchantId);
+      const credentials = await instagramClient.loadMerchantCredentials(merchantId);
+      if (!credentials) {
+        throw new Error('Instagram credentials not found');
+      }
+      await instagramClient.validateCredentials(credentials, merchantId);
 
       const inviteMessage = `مرحباً @${username}! 👋 راح أرسلك رسالة خاصة عشان أقدر أساعدك أكثر ✨`;
-      
-      await instagramClient.replyToComment(commentId, inviteMessage);
-      
+
+      await instagramClient.replyToComment(credentials, merchantId, commentId, inviteMessage);
+
       console.log(`✅ DM invitation sent to @${username}`);
     } catch (error) {
       console.error('❌ Failed to invite to DM:', error);
@@ -616,13 +635,22 @@ export class InstagramWebhookHandler {
       `;
 
       // Build Instagram context
+      let session: any = {};
+      try {
+        session = typeof conversation.session_data === 'string'
+          ? JSON.parse(conversation.session_data)
+          : conversation.session_data || {};
+      } catch (error) {
+        console.error('❌ Failed to parse session data for conversation', conversationId, error);
+      }
+
       const instagramContext: InstagramContext = {
         merchantId,
         customerId,
         platform: 'instagram',
         stage: conversation.conversation_stage,
-        cart: JSON.parse(conversation.session_data || '{}').cart || [],
-        preferences: JSON.parse(conversation.session_data || '{}').preferences || {},
+        cart: session.cart || [],
+        preferences: session.preferences || {},
         conversationHistory: messageHistory.reverse().map(msg => ({
           role: msg.role,
           content: msg.content,
@@ -784,9 +812,8 @@ export class InstagramWebhookHandler {
    */
   private async processStoryReply(
     event: InstagramMessagingEvent,
-    merchantId: string,
-    result: ProcessedWebhookResult
-  ): Promise<void> {
+    merchantId: string
+  ): Promise<number> {
     try {
       const customerId = event.sender.id;
       const timestamp = new Date(event.timestamp);
@@ -815,10 +842,10 @@ export class InstagramWebhookHandler {
       );
 
       if (storyResult.success) {
-        result.messagesProcessed++;
         if (storyResult.responseGenerated) {
           console.log(`✅ Story reply processed with AI response generated`);
         }
+        return 1;
       } else {
         console.error('❌ Stories Manager failed for story reply:', storyResult.error);
         throw new Error(`Story reply processing failed: ${storyResult.error}`);
@@ -835,9 +862,8 @@ export class InstagramWebhookHandler {
    */
   private async legacyProcessMentionEvent(
     event: InstagramMentionEvent,
-    merchantId: string,
-    result: ProcessedWebhookResult
-  ): Promise<void> {
+    merchantId: string
+  ): Promise<number> {
     try {
       const customerId = event.value.from.id;
       const customerUsername = event.value.from.username;
@@ -870,7 +896,7 @@ export class InstagramWebhookHandler {
         { mediaId, isStoryMention: true }
       );
 
-      result.messagesProcessed++;
+      return 1;
 
     } catch (error) {
       console.error('❌ Legacy mention event processing failed:', error);
@@ -883,9 +909,8 @@ export class InstagramWebhookHandler {
    */
   private async legacyProcessCommentEvent(
     event: InstagramCommentEvent,
-    merchantId: string,
-    result: ProcessedWebhookResult
-  ): Promise<void> {
+    merchantId: string
+  ): Promise<number> {
     try {
       const customerId = event.value.from.id;
       const customerUsername = event.value.from.username;
@@ -919,8 +944,6 @@ export class InstagramWebhookHandler {
         { mediaId, isPublic: true }
       );
 
-      result.messagesProcessed++;
-
       // Generate AI response for the comment
       await this.generateAIResponse(
         conversation.id,
@@ -940,6 +963,8 @@ export class InstagramWebhookHandler {
         await this.inviteCommentToDM(merchantId, commentId, customerUsername);
       }
 
+      return 1;
+
     } catch (error) {
       console.error('❌ Legacy comment event processing failed:', error);
       throw error;
@@ -956,7 +981,7 @@ export class InstagramWebhookHandler {
     userId: string,
     textContent: string,
     timestamp: Date
-  ): Promise<void> {
+  ): Promise<number> {
     try {
       console.log(`📎 Processing media attachment: ${attachment.type}`);
 
@@ -988,10 +1013,12 @@ export class InstagramWebhookHandler {
         if (mediaResult.analysis?.isProductInquiry) {
           console.log(`💰 Product inquiry detected from media attachment`);
         }
+        return 1;
       } else {
         console.error('❌ Media Manager failed:', mediaResult.error);
         // Fallback to legacy processing
         await this.legacyProcessMediaAttachment(attachment, conversationId, textContent);
+        return 1;
       }
 
     } catch (error) {

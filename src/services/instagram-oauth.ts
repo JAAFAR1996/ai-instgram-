@@ -15,6 +15,7 @@ import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { getMetaRateLimiter } from './meta-rate-limiter.js';
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { requireMerchantId } from '../utils/merchant.js';
+import { telemetry } from './telemetry.js';
 
 // safe JSON helper for non-typed responses
 const jsonAny = async (r: any): Promise<any> => {
@@ -76,7 +77,16 @@ export class InstagramOAuthService {
     const maxRequests = 90;
     const rateKey = `ig-oauth:${resolvedMerchantId}:${method}:${path}`;
 
-    const check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
+    let check: { allowed: boolean; remaining: number; resetTime: number };
+    let rateLimitCheckSkipped = false;
+    try {
+      check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
+    } catch (error) {
+      rateLimitCheckSkipped = true;
+      console.warn(`⚠️ Redis rate limit check failed for ${rateKey}:`, error);
+      telemetry.recordRateLimitStoreFailure('instagram', path);
+      check = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
+    }
     if (!check.allowed) {
       throw Object.assign(new Error('RATE_LIMIT_EXCEEDED'), {
         resetTime: check.resetTime,
@@ -97,26 +107,40 @@ export class InstagramOAuthService {
       url += (url.includes('?') ? '&' : '?') + paramString;
     }
 
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
 
-    const appUsage = res.headers.get('x-app-usage');
-    const pageUsage = res.headers.get('x-page-usage');
-    if (appUsage || pageUsage) {
-      console.log(`📊 OAuth Graph API usage - App: ${appUsage}, Page: ${pageUsage}`);
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal
+      });
+
+      clearTimeout(timeout);
+
+      const appUsage = res.headers.get('x-app-usage');
+      const pageUsage = res.headers.get('x-page-usage');
+      if (appUsage || pageUsage) {
+        console.log(`📊 OAuth Graph API usage - App: ${appUsage}, Page: ${pageUsage}`);
+      }
+
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        const e = new Error(`Instagram OAuth Graph error ${res.status}: ${errBody}`);
+        (e as any).status = res.status;
+        throw e;
+      }
+
+      return res.json() as Promise<T>;
+    } catch (err: any) {
+      clearTimeout(timeout);
+      if (err?.name === 'AbortError') {
+        throw new Error('Instagram OAuth Graph request timed out');
+      }
+      throw new Error(`Instagram OAuth Graph request failed: ${err?.message || err}`);
     }
-
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      const e = new Error(`Instagram OAuth Graph error ${res.status}: ${errBody}`);
-      (e as any).status = res.status;
-      throw e;
-    }
-
-    return res.json() as Promise<T>;
   }
 
   /**
@@ -576,6 +600,7 @@ export class InstagramOAuthService {
             ${expiresAt},
             ${now},
             ${now},
+            'instagram',
             ${now}
           )
         `;

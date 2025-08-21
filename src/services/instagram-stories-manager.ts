@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getInstagramClient } from './instagram-api.js';
+import { getInstagramClient, clearInstagramClient, type InstagramCredentials } from './instagram-api.js';
 import { getDatabase } from '../database/connection.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramContext } from './instagram-ai.js';
@@ -81,6 +81,31 @@ export class InstagramStoriesManager {
   private aiOrchestrator = getConversationAIOrchestrator();
   private redis = getRedisConnectionManager();
 
+  private credentialsCache = new Map<string, InstagramCredentials>();
+
+  private getClient(merchantId: string) {
+    return getInstagramClient(merchantId);
+  }
+
+  private async getCredentials(merchantId: string): Promise<InstagramCredentials> {
+    if (this.credentialsCache.has(merchantId)) {
+      return this.credentialsCache.get(merchantId)!;
+    }
+    const client = this.getClient(merchantId);
+    const creds = await client.loadMerchantCredentials(merchantId);
+    if (!creds) {
+      throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
+    }
+    await client.validateCredentials(creds, merchantId);
+    this.credentialsCache.set(merchantId, creds);
+    return creds;
+  }
+
+  public clearMerchantClient(merchantId: string) {
+    this.credentialsCache.delete(merchantId);
+    clearInstagramClient(merchantId);
+  }
+
   /**
    * Process story interaction (reply, mention, etc.)
    */
@@ -114,18 +139,35 @@ export class InstagramStoriesManager {
       // Store the interaction
       await this.storeStoryInteraction(interaction, merchantId);
 
-      // Generate personalized response based on interaction type
-      const responseGenerated = await this.generateStoryResponse(
-        interaction,
-        merchantId
-      );
+      // Run post-processing tasks concurrently
+      const [responseResult, analyticsResult, salesResult] =
+        await Promise.allSettled([
+          this.generateStoryResponse(interaction, merchantId),
+          this.updateStoryAnalytics(merchantId, interaction),
+          interaction.content
+            ? this.analyzeSalesOpportunity(interaction, merchantId)
+            : Promise.resolve()
+        ]);
 
-      // Update analytics
-      await this.updateStoryAnalytics(merchantId, interaction);
-
-      // Check for sales opportunities
-      if (interaction.content) {
-        await this.analyzeSalesOpportunity(interaction, merchantId);
+      const responseGenerated =
+        responseResult.status === 'fulfilled' ? responseResult.value : false;
+      if (responseResult.status === 'rejected') {
+        console.error(
+          'Failed to generate story response:',
+          responseResult.reason
+        );
+      }
+      if (analyticsResult.status === 'rejected') {
+        console.error(
+          'Failed to update story analytics:',
+          analyticsResult.reason
+        );
+      }
+      if (interaction.content && salesResult.status === 'rejected') {
+        console.error(
+          'Failed to analyze sales opportunity:',
+          salesResult.reason
+        );
       }
 
       const successResult = {
@@ -215,9 +257,10 @@ export class InstagramStoriesManager {
       );
 
       // Send response via Instagram API
-      const instagramClient = await this.getClient(merchantId);
+      const instagramClient = this.getClient(merchantId);
+      const credentials = await this.getCredentials(merchantId);
 
-      const sendResult = await instagramClient.sendMessage({
+      const sendResult = await instagramClient.sendMessage(credentials, merchantId, {
         recipientId: interaction.userId,
         messageType: 'text',
         content: personalizedResponse,
@@ -562,8 +605,8 @@ export class InstagramStoriesManager {
 
       const conversation = data[0];
 
-      // Get recent conversation history
-      const messageHistory = await sql`
+        // Get recent conversation history
+        const messageHistory = await sql`
         SELECT 
           CASE 
             WHEN direction = 'INCOMING' THEN 'user'
@@ -575,15 +618,24 @@ export class InstagramStoriesManager {
         WHERE conversation_id = ${conversationId}::uuid
         ORDER BY created_at DESC
         LIMIT 5
-      `;
+        `;
 
-      return {
+        let session: any = {};
+        try {
+          session = typeof conversation.session_data === 'string'
+            ? JSON.parse(conversation.session_data)
+            : conversation.session_data || {};
+        } catch (error) {
+          console.error('❌ Failed to parse session data for conversation', conversationId, error);
+        }
+
+        return {
         merchantId,
         customerId: interaction.userId,
         platform: 'instagram',
         stage: conversation.conversation_stage,
-        cart: JSON.parse(conversation.session_data || '{}').cart || [],
-        preferences: JSON.parse(conversation.session_data || '{}').preferences || {},
+        cart: session.cart || [],
+        preferences: session.preferences || {},
         conversationHistory: messageHistory.reverse().map(msg => ({
           role: msg.role,
           content: msg.content,
@@ -817,11 +869,12 @@ export class InstagramStoriesManager {
     interaction: StoryInteraction
   ): Promise<void> {
     try {
-      const instagramClient = await this.getClient(merchantId);
+      const instagramClient = this.getClient(merchantId);
+      const credentials = await this.getCredentials(merchantId);
 
       const assistanceMessage = `شكراً لاهتمامك! 🛍️ يسعدني أساعدك في اختيار المنتج المناسب. راسلني هنا وراح أرسلك كل التفاصيل والأسعار ✨`;
 
-      await instagramClient.sendMessage({
+      await instagramClient.sendMessage(credentials, merchantId, {
         recipientId: interaction.userId,
         messageType: 'text',
         content: assistanceMessage,

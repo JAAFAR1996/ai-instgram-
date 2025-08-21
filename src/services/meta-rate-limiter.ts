@@ -209,8 +209,8 @@ export class MetaRateLimiter {
    * Redis-based sliding window rate limiter
    */
   async checkRedisRateLimit(
-    key: string, 
-    windowMs: number, 
+    key: string,
+    windowMs: number,
     maxRequests: number
   ): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
     try {
@@ -239,6 +239,46 @@ export class MetaRateLimiter {
       // Fail open - allow request on Redis errors
       return { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
     }
+  }
+
+  /**
+   * Unified Graph API request handler with rate limiting and backoff
+   */
+  async graphRequest(
+    url: string,
+    options: RequestInit,
+    rateKey: string,
+    windowMs: number = 60_000,
+    maxRequests: number = 90,
+    retries: number = 3
+  ): Promise<Response> {
+    let attempt = 0;
+    while (attempt < retries) {
+      attempt++;
+      try {
+        const check = await this.checkRedisRateLimit(rateKey, windowMs, maxRequests);
+        if (!check.allowed) {
+          console.error(
+            `🚫 Meta rate limiter blocked request: ${rateKey} (remaining: ${check.remaining})`
+          );
+          const err: any = new Error('RATE_LIMIT_EXCEEDED');
+          err.code = 'RATE_LIMIT_EXCEEDED';
+          err.resetTime = check.resetTime;
+          throw err;
+        }
+
+        // Use enhanced fetch that respects Meta backoff headers
+        return await fetchWithRateLimit(url, options, retries - attempt);
+      } catch (error) {
+        console.error(`❌ graphRequest attempt ${attempt} failed:`, error);
+        if (attempt >= retries) {
+          throw error;
+        }
+      }
+    }
+
+    // Should never reach here
+    throw new Error('Graph request failed after maximum retries');
   }
 }
 

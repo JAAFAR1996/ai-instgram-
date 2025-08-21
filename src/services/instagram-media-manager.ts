@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getInstagramClient } from './instagram-api.js';
+import { getInstagramClient, clearInstagramClient, type InstagramCredentials } from './instagram-api.js';
 import { getDatabase } from '../database/connection.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramContext } from './instagram-ai.js';
@@ -86,20 +86,32 @@ export interface MediaTemplate {
 export class InstagramMediaManager {
   private db = getDatabase();
   private aiOrchestrator = getConversationAIOrchestrator();
-  private instagramClient = getInstagramClient();
-  private initializedMerchantId: string | null = null;
+  private credentialsCache = new Map<string, InstagramCredentials>();
 
-  private async getClient(merchantId: string) {
-    if (this.initializedMerchantId !== merchantId) {
-      await this.instagramClient.initialize(merchantId);
-      this.initializedMerchantId = merchantId;
+  private getClient(merchantId: string) {
+    return getInstagramClient(merchantId);
+  }
+
+  private async getCredentials(merchantId: string): Promise<InstagramCredentials> {
+    if (this.credentialsCache.has(merchantId)) {
+      return this.credentialsCache.get(merchantId)!;
     }
-    return this.instagramClient;
+    const client = this.getClient(merchantId);
+    const creds = await client.loadMerchantCredentials(merchantId);
+    if (!creds) {
+      throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
+    }
+    await client.validateCredentials(creds, merchantId);
+    this.credentialsCache.set(merchantId, creds);
+    return creds;
   }
 
   public clearClient(merchantId?: string) {
-    if (!merchantId || this.initializedMerchantId === merchantId) {
-      this.initializedMerchantId = null;
+    if (merchantId) {
+      this.credentialsCache.delete(merchantId);
+      clearInstagramClient(merchantId);
+    } else {
+      this.credentialsCache.clear();
     }
   }
 
@@ -170,9 +182,10 @@ export class InstagramMediaManager {
   public async sendMediaMessage(
     recipientId: string,
     mediaType: 'image' | 'video' | 'gif',
+    merchantId: string,
     templateId?: string,
-    customText?: string,
-    merchantId?: string
+    mediaUrl?: string,
+    customText?: string
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
       if (!merchantId) {
@@ -199,8 +212,15 @@ export class InstagramMediaManager {
       }
 
       // Send via Instagram API
-      const instagramClient = await this.getClient(merchantId);
-      const result = await instagramClient.sendImageMessage(recipientId, mediaUrl, caption);
+      const instagramClient = this.getClient(merchantId);
+      const credentials = await this.getCredentials(merchantId);
+      const result = await instagramClient.sendImageMessage(
+        credentials,
+        merchantId,
+        recipientId,
+        mediaUrl,
+        caption
+      );
 
       if (result.success) {
         console.log(`✅ Media message sent: ${mediaType} to ${recipientId}`);
@@ -531,7 +551,8 @@ export class InstagramMediaManager {
       );
 
       // Send response via Instagram API
-      const instagramClient = await this.getClient(merchantId);
+      const instagramClient = this.getClient(merchantId);
+      const credentials = await this.getCredentials(merchantId);
       let responseContent = aiResult.response.message;
 
       // Enhance response based on analysis
@@ -539,7 +560,7 @@ export class InstagramMediaManager {
         responseContent = analysis.suggestedResponse.content;
       }
 
-      const sendResult = await instagramClient.sendMessage({
+      const sendResult = await instagramClient.sendMessage(credentials, merchantId, {
         recipientId: userId,
         messageType: 'text',
         content: responseContent
@@ -681,13 +702,22 @@ export class InstagramMediaManager {
 
       const conversation = data[0];
 
+      let session: any = {};
+      try {
+        session = typeof conversation.session_data === 'string'
+          ? JSON.parse(conversation.session_data)
+          : conversation.session_data || {};
+      } catch (error) {
+        console.error('❌ Failed to parse session data for conversation', conversationId, error);
+      }
+
       return {
         merchantId,
         customerId: userId,
         platform: 'instagram',
         stage: conversation.conversation_stage,
-        cart: JSON.parse(conversation.session_data || '{}').cart || [],
-        preferences: JSON.parse(conversation.session_data || '{}').preferences || {},
+        cart: session.cart || [],
+        preferences: session.preferences || {},
         conversationHistory: [],
         interactionType: 'dm',
         mediaContext: {
@@ -776,6 +806,7 @@ export class InstagramMediaManager {
         category: template.category,
         mediaType: template.media_type,
         templateUrl: template.template_url,
+        attachmentId: template.attachment_id,
         overlayElements: JSON.parse(template.overlay_elements || '{}'),
         usageCount: template.usage_count,
         isActive: template.is_active
