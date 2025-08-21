@@ -161,7 +161,7 @@ export class QueueManager {
    * Add webhook processing job
    */
   async addWebhookJob(
-    platform: 'instagram' | 'whatsapp',
+    platform: 'instagram',
     merchantId: string,
     webhookData: any,
     priority: 'LOW' | 'NORMAL' | 'HIGH' | 'CRITICAL' = 'NORMAL'
@@ -187,7 +187,7 @@ export class QueueManager {
     merchantId: string,
     customerId: string,
     messageContent: string,
-    platform: 'instagram' | 'whatsapp',
+    platform: 'instagram',
     interactionType: 'dm' | 'comment' | 'story_reply' | 'story_mention',
     options: {
       messageId?: string;

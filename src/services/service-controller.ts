@@ -18,7 +18,6 @@ export interface ServiceStatus {
 export interface MerchantServices {
   merchantId: string;
   instagram: ServiceStatus;
-  whatsapp: ServiceStatus;
   aiProcessing: ServiceStatus;
   autoReply: ServiceStatus;
   storyResponse: ServiceStatus;
@@ -28,7 +27,7 @@ export interface MerchantServices {
 
 export interface ServiceToggleRequest {
   merchantId: string;
-  service: 'instagram' | 'whatsapp' | 'ai_processing' | 'auto_reply' | 'story_response' | 'comment_response' | 'dm_processing';
+  service: 'instagram' | 'ai_processing' | 'auto_reply' | 'story_response' | 'comment_response' | 'dm_processing';
   enabled: boolean;
   reason?: string;
   toggledBy?: string;
@@ -170,7 +169,6 @@ export class ServiceController {
       return {
         merchantId,
         instagram: services.instagram || defaultStatus,
-        whatsapp: services.whatsapp || { ...defaultStatus, enabled: false },
         aiProcessing: services.ai_processing || defaultStatus,
         autoReply: services.auto_reply || defaultStatus,
         storyResponse: services.story_response || defaultStatus,
@@ -192,7 +190,6 @@ export class ServiceController {
       return {
         merchantId,
         instagram: defaultStatus,
-        whatsapp: defaultStatus,
         aiProcessing: defaultStatus,
         autoReply: defaultStatus,
         storyResponse: defaultStatus,
@@ -211,7 +208,7 @@ export class ServiceController {
   ): Promise<boolean> {
     try {
       // First check if Instagram integration is enabled
-      if (service !== 'instagram' && service !== 'whatsapp') {
+      if (service !== 'instagram') {
         const platformEnabled = await this.getServiceStatus(merchantId, 'instagram');
         if (!platformEnabled) {
           return false;
@@ -271,7 +268,6 @@ export class ServiceController {
     try {
       const allServices = [
         'instagram',
-        'whatsapp',
         'ai_processing',
         'auto_reply', 
         'story_response',
@@ -455,7 +451,7 @@ export class ServiceController {
    */
   private getServiceDisplayName(service: string): string {
     const names: Record<string, string> = {
-      instagram: 'انستغرام', whatsapp: 'واتساب', ai_processing: 'معالجة الذكاء الاصطناعي',
+      instagram: 'انستغرام', ai_processing: 'معالجة الذكاء الاصطناعي',
       auto_reply: 'الرد التلقائي', story_response: 'الرد على الستوريز', comment_response: 'الرد على التعليقات',
       dm_processing: 'معالجة الرسائل المباشرة'
     };

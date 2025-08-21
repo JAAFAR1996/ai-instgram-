@@ -16,14 +16,13 @@ import { getInstagramCommentsManager } from './instagram-comments-manager.js';
 import { getInstagramMediaManager } from './instagram-media-manager.js';
 import { getServiceController } from './service-controller.js';
 import { verifyHMACRaw } from './encryption.js';
-import { getLogger } from './logger.js';
+import { createLogger } from './logger.js';
 import type { InstagramMessage, InstagramComment, InstagramStoryMention } from './instagram-api.js';
 import type { InstagramContext } from './instagram-ai.js';
 import type { StoryInteraction } from './instagram-stories-manager.js';
 import type { CommentInteraction } from './instagram-comments-manager.js';
 import type { MediaContent } from './instagram-media-manager.js';
 
-const logger = getLogger();
 
 export function verifySignature(
   signature: string,
@@ -140,7 +139,7 @@ export class InstagramWebhookHandler {
     try {
       payload = JSON.parse(rawBody.toString('utf8')) as InstagramWebhookEvent;
     } catch (error) {
-      logger.error('Failed to parse Instagram webhook payload', error, { merchantId });
+      this.logger.error('Failed to parse Instagram webhook payload', error, { merchantId });
       return {
         success: false,
         eventsProcessed: 0,
@@ -416,6 +415,8 @@ export class InstagramWebhookHandler {
         customerId,
         preview: messageContent.substring(0, 50)
       });
+
+      return 1;
     } catch (error) {
       this.logger.error('Messaging event processing failed', error, {
         merchantId,
@@ -645,7 +646,7 @@ export class InstagramWebhookHandler {
     merchantId: string,
     commentId: string,
     username: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const instagramClient = getInstagramClient(merchantId);
       const credentials = await instagramClient.loadMerchantCredentials(merchantId);
@@ -656,15 +657,31 @@ export class InstagramWebhookHandler {
 
       const inviteMessage = `مرحباً @${username}! 👋 راح أرسلك رسالة خاصة عشان أقدر أساعدك أكثر ✨`;
 
-      await instagramClient.replyToComment(credentials, merchantId, commentId, inviteMessage);
+      const replyResult = await instagramClient.replyToComment(
+        credentials,
+        merchantId,
+        commentId,
+        inviteMessage
+      );
+
+      if (!replyResult.success) {
+        this.logger.error('Failed to invite to DM', replyResult.error, {
+          merchantId,
+          commentId,
+          username
+        });
+        return false;
+      }
 
       this.logger.info('DM invitation sent', { username });
+      return true;
     } catch (error) {
       this.logger.error('Failed to invite to DM', error, {
         merchantId,
         commentId,
         username
       });
+      return false;
     }
   }
 
@@ -760,6 +777,7 @@ export class InstagramWebhookHandler {
       const aiResponse = aiResult.response;
 
       // Store AI response as outgoing message
+      const platformMessageId = 'ai_generated_' + Date.now();
       await sql`
         INSERT INTO message_logs (
           conversation_id,
@@ -779,7 +797,7 @@ export class InstagramWebhookHandler {
           'instagram',
           'TEXT',
           ${aiResponse.message},
-          'ai_generated_' + ${Date.now()},
+          ${platformMessageId},
           true,
           'PENDING',
           ${aiResponse.confidence},
@@ -788,16 +806,51 @@ export class InstagramWebhookHandler {
         )
       `;
 
+      // Send the message via Instagram API
+      try {
+        const instagramClient = getInstagramClient(merchantId);
+        const credentials = await instagramClient.loadMerchantCredentials(merchantId);
+        if (!credentials) {
+          throw new Error('Instagram credentials not found');
+        }
+        await instagramClient.validateCredentials(credentials, merchantId);
+
+        const sendResult = await instagramClient.sendMessage(credentials, merchantId, {
+          recipientId: customerId,
+          messageType: 'text',
+          content: aiResponse.message
+        });
+
+        if (sendResult.success) {
+          await sql`
+            UPDATE message_logs
+            SET delivery_status = 'SENT', platform_message_id = ${sendResult.messageId}
+            WHERE conversation_id = ${conversationId}::uuid AND platform_message_id = ${platformMessageId}
+          `;
+        } else {
+          this.logger.error('Failed to send Instagram message', sendResult.error, {
+            conversationId,
+            merchantId,
+            customerId
+          });
+        }
+      } catch (sendError) {
+        this.logger.error('Error sending Instagram message', sendError, {
+          conversationId,
+          merchantId,
+          customerId
+        });
+      }
+
       // Update conversation stage if changed
       if (aiResponse.stage !== conversation.conversation_stage) {
         await sql`
-          UPDATE conversations 
+          UPDATE conversations
           SET conversation_stage = ${aiResponse.stage}
           WHERE id = ${conversationId}::uuid
         `;
       }
 
-      // Send the message via Instagram API (will be implemented in STEP 4)
       this.logger.info('AI response generated', {
         interactionType,
         message: aiResponse.message

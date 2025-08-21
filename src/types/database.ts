@@ -24,8 +24,8 @@ export type ProductStatus = 'ACTIVE' | 'INACTIVE' | 'DRAFT' | 'OUT_OF_STOCK' | '
 export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'REFUNDED';
 export type PaymentMethod = 'COD' | 'ZAIN_CASH' | 'ASIA_HAWALA' | 'BANK_TRANSFER';
 export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
-export type OrderSource = 'whatsapp' | 'instagram' | 'MANUAL' | 'WEBSITE';
-export type Platform = 'whatsapp' | 'instagram';
+export type OrderSource = 'instagram' | 'MANUAL' | 'WEBSITE';
+export type Platform = 'instagram';
 export type MessageDirection = 'INCOMING' | 'OUTGOING';
 export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'STICKER' | 'LOCATION' | 'CONTACT';
 export type DeliveryStatus = 'PENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
@@ -77,8 +77,6 @@ export interface Merchant extends TimestampedEntity {
   business_address?: string;
   
   // Contact Information
-  whatsapp_number: string;
-  whatsapp_number_id?: string;
   instagram_username?: string;
   instagram_user_id?: string;
   email?: string;
@@ -230,7 +228,6 @@ export interface Conversation extends TimestampedEntity {
   merchant_id: string;
   
   // Customer Identification
-  customer_phone?: string;
   customer_instagram?: string;
   customer_name?: string;
   
@@ -459,8 +456,6 @@ export interface DatabaseError extends Error {
 export interface MerchantCredentials extends TimestampedEntity {
   merchant_id: string;
   platform: Platform;
-  whatsapp_token_encrypted?: string;
-  whatsapp_phone_number_id?: string;
   instagram_token_encrypted?: string;
   instagram_page_id?: string;
   webhook_verify_token?: string;
@@ -474,7 +469,6 @@ export interface MerchantCredentials extends TimestampedEntity {
 
 export interface MessageWindow extends TimestampedEntity {
   merchant_id: string;
-  customer_phone?: string;
   customer_instagram?: string;
   platform: Platform;
   last_customer_message_at: Date;

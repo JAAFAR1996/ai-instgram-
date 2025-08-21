@@ -172,7 +172,7 @@ export function inputSanitizationMiddleware() {
 /**
  * Webhook signature validation
  */
-export function webhookSignatureMiddleware(platform: 'instagram' | 'whatsapp') {
+export function webhookSignatureMiddleware(platform: 'instagram') {
   return async (c: Context, next: Next) => {
     const config = getConfig();
     const signature = c.req.header('X-Hub-Signature-256');
@@ -191,9 +191,7 @@ export function webhookSignatureMiddleware(platform: 'instagram' | 'whatsapp') {
     // Reattach body so downstream handlers can access it
     c.req.raw = new Request(c.req.raw, { body: rawBody });
 
-    const secret = platform === 'instagram'
-      ? config.instagram.metaAppSecret
-      : config.instagram.metaAppSecret; // Same secret for both
+    const secret = config.instagram.metaAppSecret;
 
     // Verify HMAC-SHA256 signature
     const crypto = await import('crypto');

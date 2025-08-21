@@ -16,6 +16,7 @@ import { getMetaRateLimiter } from './meta-rate-limiter.js';
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { requireMerchantId } from '../utils/merchant.js';
 import { telemetry } from './telemetry.js';
+import { createLogger } from './logger.js';
 import type { InstagramOAuthCredentials } from '../types/instagram.js';
 export type { InstagramOAuthCredentials } from '../types/instagram.js';
 
@@ -51,6 +52,7 @@ export class InstagramOAuthService {
   private db = getDatabase();
   private redis = getRedisConnectionManager();
   private rateLimiter = getMetaRateLimiter();
+  private logger = createLogger({ component: 'InstagramOAuthService' });
 
   constructor() {
     if (!this.config.instagram.appId || !this.config.instagram.appSecret) {
@@ -84,7 +86,7 @@ export class InstagramOAuthService {
       check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
     } catch (error) {
       rateLimitCheckSkipped = true;
-      console.warn(`⚠️ Redis rate limit check failed for ${rateKey}:`, error);
+      this.logger.warn(`⚠️ Redis rate limit check failed for ${rateKey}:`, error);
       telemetry.recordRateLimitStoreFailure('instagram', path);
       check = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
     }
@@ -124,7 +126,7 @@ export class InstagramOAuthService {
       const appUsage = res.headers.get('x-app-usage');
       const pageUsage = res.headers.get('x-page-usage');
       if (appUsage || pageUsage) {
-        console.debug('📊 OAuth Graph API usage', { appUsage, pageUsage });
+        this.logger.debug('📊 OAuth Graph API usage', { appUsage, pageUsage });
       }
 
       if (!res.ok) {
@@ -189,12 +191,12 @@ export class InstagramOAuthService {
     // Store PKCE verifier securely in Redis for later retrieval
     await this.storePKCEInRedis(secureState, codeVerifier);
     
-    console.debug('🔗 Instagram Business Login URL built');
-    console.debug('📋 Using enhanced 2025 scopes');
-    console.info('✨ Business Login Mode: Enabled (No Facebook login required)');
-    console.debug('🔒 PKCE Security: Enabled');
-    console.debug('🛡️ Secure State: Generated');
-    console.debug('💾 PKCE Verifier: Stored in Redis');
+    this.logger.debug('🔗 Instagram Business Login URL built');
+    this.logger.debug('📋 Using enhanced 2025 scopes');
+    this.logger.info('✨ Business Login Mode: Enabled (No Facebook login required)');
+    this.logger.debug('🔒 PKCE Security: Enabled');
+    this.logger.debug('🛡️ Secure State: Generated');
+    this.logger.debug('💾 PKCE Verifier: Stored in Redis');
     
     return {
       oauthUrl,
@@ -221,7 +223,7 @@ export class InstagramOAuthService {
       state: state || this.generateRandomState()
     });
 
-    console.debug('🔄 Building Instagram Business reauth URL');
+    this.logger.debug('🔄 Building Instagram Business reauth URL');
     return `${baseURL}?${params.toString()}`;
   }
 
@@ -236,7 +238,7 @@ export class InstagramOAuthService {
     state?: string
   ): Promise<InstagramOAuthTokens> {
     try {
-      console.info('🔄 Exchanging code for token', { merchant: mask(merchantId) });
+      this.logger.info('🔄 Exchanging code for token', { merchant: mask(merchantId) });
 
       // Validate state if provided (2025 security)
       if (state && !this.validateState(state)) {
@@ -249,7 +251,7 @@ export class InstagramOAuthService {
         const redisCodeVerifier = await this.retrievePKCEFromRedis(state);
         if (redisCodeVerifier) {
           actualCodeVerifier = redisCodeVerifier;
-          console.debug('🔓 Using PKCE verifier from Redis');
+          this.logger.debug('🔓 Using PKCE verifier from Redis');
         }
       }
 
@@ -264,7 +266,7 @@ export class InstagramOAuthService {
       // Add PKCE code verifier if provided (2025 security enhancement)
       if (actualCodeVerifier) {
         formData.append('code_verifier', actualCodeVerifier);
-        console.debug('🔒 PKCE verification included in token exchange');
+        this.logger.debug('🔒 PKCE verification included in token exchange');
       }
 
       const response = await fetch('https://api.instagram.com/oauth/access_token', {
@@ -277,7 +279,7 @@ export class InstagramOAuthService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ Token exchange failed:', errorText);
+        this.logger.error('❌ Token exchange failed:', errorText);
         throw new Error(`Token exchange failed: ${response.status} ${errorText}`);
       }
 
@@ -285,11 +287,11 @@ export class InstagramOAuthService {
       const data: any = await jsonAny(response);
       
       if (!data.access_token || !data.user_id) {
-        console.error('❌ Invalid token response:', data);
+        this.logger.error('❌ Invalid token response:', data);
         throw new Error('Invalid token response from Instagram');
       }
 
-      console.info('✅ Short-lived token obtained successfully');
+      this.logger.info('✅ Short-lived token obtained successfully');
 
       // Convert to long-lived token immediately
       const longLivedToken = await this.exchangeForLongLivedToken(data.access_token);
@@ -308,7 +310,7 @@ export class InstagramOAuthService {
       };
 
     } catch (error) {
-      console.error('❌ Instagram OAuth code exchange failed:', error);
+      this.logger.error('❌ Instagram OAuth code exchange failed:', error);
       throw error;
     }
   }
@@ -323,7 +325,7 @@ export class InstagramOAuthService {
     expires_in: number;
   }> {
     try {
-      console.debug('🔄 Converting to long-lived token');
+      this.logger.debug('🔄 Converting to long-lived token');
 
       const params = {
         grant_type: 'ig_exchange_token',
@@ -336,12 +338,12 @@ export class InstagramOAuthService {
         'https://graph.instagram.com/access_token',
         params
       );
-      console.info('✅ Long-lived token obtained successfully');
+      this.logger.info('✅ Long-lived token obtained successfully');
       
       return data as { access_token: string; token_type: string; expires_in: number; };
 
     } catch (error) {
-      console.error('❌ Long-lived token conversion failed:', error);
+      this.logger.error('❌ Long-lived token conversion failed:', error);
       throw error;
     }
   }
@@ -356,7 +358,7 @@ export class InstagramOAuthService {
     expires_in: number;
   }> {
     try {
-      console.debug('🔄 Refreshing long-lived token');
+      this.logger.debug('🔄 Refreshing long-lived token');
 
       const params = {
         grant_type: 'ig_refresh_token',
@@ -370,12 +372,12 @@ export class InstagramOAuthService {
         undefined,
         merchantId
       );
-      console.info('✅ Token refreshed successfully');
+      this.logger.info('✅ Token refreshed successfully');
       
       return data as { access_token: string; token_type: string; expires_in: number; };
 
     } catch (error) {
-      console.error('❌ Token refresh failed:', error);
+      this.logger.error('❌ Token refresh failed:', error);
       throw error;
     }
   }
@@ -385,7 +387,7 @@ export class InstagramOAuthService {
    */
   async getUserProfile(accessToken: string): Promise<InstagramUserProfile> {
     try {
-      console.debug('🔍 Fetching Instagram user profile');
+      this.logger.debug('🔍 Fetching Instagram user profile');
 
       const params = {
         fields: 'id,username,account_type,media_count,followers_count,follows_count',
@@ -397,7 +399,7 @@ export class InstagramOAuthService {
         'https://graph.instagram.com/me',
         params
       );
-      console.info('✅ User profile fetched successfully');
+      this.logger.info('✅ User profile fetched successfully');
 
       return {
         id: data.id,
@@ -409,7 +411,7 @@ export class InstagramOAuthService {
       };
 
     } catch (error) {
-      console.error('❌ Failed to fetch Instagram user profile:', error);
+      this.logger.error('❌ Failed to fetch Instagram user profile:', error);
       throw error;
     }
   }
@@ -448,7 +450,7 @@ export class InstagramOAuthService {
 
       const hasMessageAccess = !missingPermissions.includes('instagram_business_manage_messages');
 
-      console.debug('🔍 Permission check', {
+      this.logger.debug('🔍 Permission check', {
         granted: grantedPermissions,
         missing: missingPermissions,
         messageAccess: hasMessageAccess
@@ -462,7 +464,7 @@ export class InstagramOAuthService {
       };
 
     } catch (error) {
-      console.error('❌ Error checking permissions:', error);
+      this.logger.error('❌ Error checking permissions:', error);
       return {
         hasMessageAccess: false,
         grantedPermissions: [],
@@ -525,7 +527,7 @@ export class InstagramOAuthService {
               if (accountResponse.ok) {
                 const accountData: any = await jsonAny(accountResponse);
                 
-                console.info('✅ Found Instagram Business Account', { username: accountData.username });
+                this.logger.info('✅ Found Instagram Business Account', { username: accountData.username });
                 
                 return {
                   id: accountData.id,
@@ -538,7 +540,7 @@ export class InstagramOAuthService {
             }
           }
         } catch (error) {
-          console.debug(`ℹ️ Page ${page.name} missing Instagram Business account`);
+          this.logger.debug(`ℹ️ Page ${page.name} missing Instagram Business account`);
           continue;
         }
       }
@@ -546,7 +548,7 @@ export class InstagramOAuthService {
       throw new Error('No Instagram Business account found. Please ensure your Facebook page is connected to an Instagram Business account.');
 
     } catch (error) {
-      console.error('❌ Error fetching Instagram Business account:', error);
+      this.logger.error('❌ Error fetching Instagram Business account:', error);
       throw error;
     }
   }
@@ -617,13 +619,13 @@ export class InstagramOAuthService {
         WHERE id = ${merchantId}::uuid
       `;
 
-      console.info('✅ Tokens stored for merchant', {
+      this.logger.info('✅ Tokens stored for merchant', {
         merchant: mask(merchantId),
         username: profile.username
       });
 
     } catch (error) {
-      console.error('❌ Error saving Instagram credentials:', error);
+      this.logger.error('❌ Error saving Instagram credentials:', error);
       throw error;
     }
   }
@@ -649,7 +651,7 @@ export class InstagramOAuthService {
     try {
       const parts = state.split('.');
       if (parts.length !== 3) {
-        console.error('❌ Invalid state format');
+        this.logger.error('❌ Invalid state format');
         return false;
       }
 
@@ -660,7 +662,7 @@ export class InstagramOAuthService {
       const oneHourAgo = Date.now() - (60 * 60 * 1000);
       
       if (stateTimestamp < oneHourAgo) {
-        console.error('❌ State expired (older than 1 hour)');
+        this.logger.error('❌ State expired (older than 1 hour)');
         return false;
       }
 
@@ -671,18 +673,18 @@ export class InstagramOAuthService {
         .substring(0, 16);
 
       if (signature.length !== expectedSignature.length) {
-        console.error('❌ State signature length mismatch');
+        this.logger.error('❌ State signature length mismatch');
         return false;
       }
 
       if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
-        console.error('❌ State signature verification failed');
+        this.logger.error('❌ State signature verification failed');
         return false;
       }
 
       return true;
     } catch (error) {
-      console.error('❌ State validation error:', error);
+      this.logger.error('❌ State validation error:', error);
       return false;
     }
   }
@@ -712,9 +714,9 @@ export class InstagramOAuthService {
 
       // Store PKCE verifier with 10-minute TTL for security
       await redis.setex(key, 600, codeVerifier);
-      console.debug('🔒 PKCE verifier stored in Redis');
+      this.logger.debug('🔒 PKCE verifier stored in Redis');
     } catch (error) {
-      console.error('❌ Failed to store PKCE verifier in Redis:', error);
+      this.logger.error('❌ Failed to store PKCE verifier in Redis:', error);
 
       // Fallback: store the verifier in persistent database storage
       // This ensures PKCE can still be validated even if Redis is unavailable
@@ -726,9 +728,9 @@ export class InstagramOAuthService {
           ON CONFLICT (state)
           DO UPDATE SET code_verifier = ${codeVerifier}, expires_at = NOW() + INTERVAL '10 minutes'
         `;
-        console.log('💾 PKCE verifier stored in database fallback');
+        this.logger.info('💾 PKCE verifier stored in database fallback');
       } catch (dbError) {
-        console.error('❌ Failed to store PKCE verifier in database fallback:', dbError);
+        this.logger.error('❌ Failed to store PKCE verifier in database fallback:', dbError);
       }
     }
   }
@@ -746,11 +748,11 @@ export class InstagramOAuthService {
       codeVerifier = await redis.get(key);
       if (codeVerifier) {
         await redis.del(key);
-        console.debug('🔓 PKCE verifier retrieved and deleted from Redis');
+        this.logger.debug('🔓 PKCE verifier retrieved and deleted from Redis');
         return codeVerifier;
       }
     } catch (error) {
-      console.error('❌ Failed to retrieve PKCE verifier from Redis:', error);
+      this.logger.error('❌ Failed to retrieve PKCE verifier from Redis:', error);
     }
 
     // Fallback: attempt to retrieve from persistent database storage
@@ -762,11 +764,11 @@ export class InstagramOAuthService {
       `;
       if (result.length > 0) {
         await sql`DELETE FROM pkce_verifiers WHERE state = ${state}`;
-        console.log('💾 PKCE verifier retrieved from database fallback');
+        this.logger.info('💾 PKCE verifier retrieved from database fallback');
         return result[0].code_verifier as string;
       }
     } catch (dbError) {
-      console.error('❌ Failed to retrieve PKCE verifier from database fallback:', dbError);
+      this.logger.error('❌ Failed to retrieve PKCE verifier from database fallback:', dbError);
     }
 
     return null;
@@ -814,9 +816,9 @@ export class InstagramOAuthService {
           updated_at = NOW()
       `;
 
-      console.info('✅ OAuth session stored securely');
+      this.logger.info('✅ OAuth session stored securely');
     } catch (error) {
-      console.error('❌ Failed to store OAuth session:', error);
+      this.logger.error('❌ Failed to store OAuth session:', error);
       throw error;
     }
   }
@@ -864,7 +866,7 @@ export class InstagramOAuthService {
         scopes: session.scopes || []
       };
     } catch (error) {
-      console.error('❌ Failed to retrieve OAuth session:', error);
+      this.logger.error('❌ Failed to retrieve OAuth session:', error);
       return null;
     }
   }
@@ -933,17 +935,17 @@ export class InstagramOAuthService {
         const merchantId = expiringTokens[index].merchant_id;
         if (result.status === 'fulfilled') {
           refreshedCount++;
-          console.info('✅ Token refreshed for merchant', { merchant: mask(merchantId) });
+          this.logger.info('✅ Token refreshed for merchant', { merchant: mask(merchantId) });
         } else {
-          console.error(`❌ Failed to refresh token for merchant ${merchantId}:`, result.reason);
+          this.logger.error(`❌ Failed to refresh token for merchant ${merchantId}:`, result.reason);
         }
       });
 
-      console.info('🔄 Tokens refreshed', { refreshed: refreshedCount, total: expiringTokens.length });
+      this.logger.info('🔄 Tokens refreshed', { refreshed: refreshedCount, total: expiringTokens.length });
       return refreshedCount;
 
     } catch (error) {
-      console.error('❌ Failed to refresh expiring tokens:', error);
+      this.logger.error('❌ Failed to refresh expiring tokens:', error);
       return 0;
     }
   }
@@ -962,7 +964,7 @@ export class InstagramOAuthService {
       return true;
 
     } catch (error) {
-      console.error('❌ Token validation failed:', error);
+      this.logger.error('❌ Token validation failed:', error);
       return false;
     }
   }
@@ -1014,7 +1016,7 @@ export class InstagramOAuthService {
       };
 
     } catch (error) {
-      console.error('❌ Failed to get authorization status:', error);
+      this.logger.error('❌ Failed to get authorization status:', error);
       return { isAuthorized: false };
     }
   }

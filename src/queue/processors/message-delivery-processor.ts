@@ -15,7 +15,7 @@ export interface MessageDeliveryJobPayload {
   merchantId: string;
   customerId: string;
   content: string;
-  platform: 'instagram' | 'whatsapp';
+  platform: 'instagram';
 }
 
 export class MessageDeliveryProcessor implements JobProcessor {
@@ -42,8 +42,6 @@ export class MessageDeliveryProcessor implements JobProcessor {
           );
           break;
 
-        case 'whatsapp':
-          return { success: false, error: 'WhatsApp delivery not supported' };
 
         default:
           return { success: false, error: `Unsupported platform: ${payload.platform}` };

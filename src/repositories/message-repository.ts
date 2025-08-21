@@ -12,7 +12,7 @@ export interface Message {
   id: string;
   conversationId: string;
   direction: 'INCOMING' | 'OUTGOING';
-  platform: 'whatsapp' | 'instagram';
+  platform: 'instagram';
   messageType: string;
   content: string;
   mediaUrl?: string;
@@ -30,7 +30,7 @@ export interface Message {
 export interface CreateMessageRequest {
   conversationId: string;
   direction: 'INCOMING' | 'OUTGOING';
-  platform: 'whatsapp' | 'instagram';
+  platform: 'instagram';
   messageType: string;
   content: string;
   mediaUrl?: string;
@@ -55,7 +55,7 @@ export interface UpdateMessageRequest {
 export interface MessageFilters {
   conversationId?: string;
   direction?: 'INCOMING' | 'OUTGOING';
-  platform?: 'whatsapp' | 'instagram';
+  platform?: 'instagram';
   messageType?: string;
   aiProcessed?: boolean;
   deliveryStatus?: 'PENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';

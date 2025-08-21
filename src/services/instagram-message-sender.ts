@@ -97,7 +97,7 @@ export class InstagramMessageSender {
    * Reload merchant credentials (clears cache)
    */
   public async reloadMerchant(merchantId: string): Promise<void> {
-    console.log(`🔄 Reloading Instagram credentials for merchant: ${merchantId}`);
+    logger.info(`🔄 Reloading Instagram credentials for merchant: ${merchantId}`);
 
     // Clear caches
     this.credentialsCache.delete(merchantId);
@@ -106,9 +106,9 @@ export class InstagramMessageSender {
     // Pre-warm the cache
     try {
       await this.getCredentials(merchantId);
-      console.log(`✅ Instagram credentials reloaded for merchant: ${merchantId}`);
+      logger.info(`✅ Instagram credentials reloaded for merchant: ${merchantId}`);
     } catch (error) {
-      console.error(`❌ Failed to reload Instagram credentials for merchant ${merchantId}:`, error);
+      logger.error(`❌ Failed to reload Instagram credentials for merchant ${merchantId}:`, error);
       throw error;
     }
   }
@@ -123,7 +123,7 @@ export class InstagramMessageSender {
     conversationId?: string
   ): Promise<SendResult> {
     try {
-      console.log(`📤 Sending Instagram message to ${recipientId}: ${message.substring(0, 50)}...`);
+      logger.info(`📤 Sending Instagram message to ${recipientId}: ${message.substring(0, 50)}...`);
 
       // Check message window if available
       if (conversationId) {
@@ -173,7 +173,7 @@ export class InstagramMessageSender {
       return result;
 
     } catch (error) {
-      console.error('❌ Instagram message sending failed:', error);
+      logger.error('❌ Instagram message sending failed:', error);
       
       // Try reloading merchant credentials on auth errors
       if (error instanceof Error && 
@@ -183,7 +183,7 @@ export class InstagramMessageSender {
         try {
           await this.reloadMerchant(merchantId);
         } catch (reloadError) {
-          console.error('❌ Failed to reload merchant credentials:', reloadError);
+          logger.error('❌ Failed to reload merchant credentials:', reloadError);
         }
       }
       
@@ -212,7 +212,7 @@ export class InstagramMessageSender {
     attachmentId?: string
   ): Promise<SendResult> {
     try {
-      console.log(`📷 Sending Instagram ${mediaType} to ${recipientId}`);
+      logger.info(`📷 Sending Instagram ${mediaType} to ${recipientId}`);
 
       // Check message window
       if (conversationId) {
@@ -294,7 +294,7 @@ export class InstagramMessageSender {
       return result;
 
     } catch (error) {
-      console.error('❌ Instagram media sending failed:', error);
+      logger.error('❌ Instagram media sending failed:', error);
       
       // Try reloading merchant credentials on auth errors
       if (error instanceof Error && 
@@ -304,7 +304,7 @@ export class InstagramMessageSender {
         try {
           await this.reloadMerchant(merchantId);
         } catch (reloadError) {
-          console.error('❌ Failed to reload merchant credentials:', reloadError);
+          logger.error('❌ Failed to reload merchant credentials:', reloadError);
         }
       }
       
@@ -330,7 +330,7 @@ export class InstagramMessageSender {
     conversationId?: string
   ): Promise<SendResult> {
     try {
-      console.log(`📋 Sending Instagram template to ${recipientId}`);
+      logger.info(`📋 Sending Instagram template to ${recipientId}`);
 
       // Check message window
       if (conversationId) {
@@ -390,7 +390,7 @@ export class InstagramMessageSender {
       return result;
 
     } catch (error) {
-      console.error('❌ Instagram template sending failed:', error);
+      logger.error('❌ Instagram template sending failed:', error);
       
       // Try reloading merchant credentials on auth errors
       if (error instanceof Error && 
@@ -400,7 +400,7 @@ export class InstagramMessageSender {
         try {
           await this.reloadMerchant(merchantId);
         } catch (reloadError) {
-          console.error('❌ Failed to reload merchant credentials:', reloadError);
+          logger.error('❌ Failed to reload merchant credentials:', reloadError);
         }
       }
       
@@ -425,7 +425,7 @@ export class InstagramMessageSender {
     replyText: string
   ): Promise<SendResult> {
     try {
-      console.log(`💬 Replying to Instagram comment ${commentId}: ${replyText}`);
+      logger.info(`💬 Replying to Instagram comment ${commentId}: ${replyText}`);
 
       // Get Instagram client and credentials
       const client = this.getClient(merchantId);
@@ -448,7 +448,7 @@ export class InstagramMessageSender {
       return result;
 
     } catch (error) {
-      console.error('❌ Instagram comment reply failed:', error);
+      logger.error('❌ Instagram comment reply failed:', error);
       
       // Try reloading merchant credentials on auth errors
       if (error instanceof Error && 
@@ -458,7 +458,7 @@ export class InstagramMessageSender {
         try {
           await this.reloadMerchant(merchantId);
         } catch (reloadError) {
-          console.error('❌ Failed to reload merchant credentials:', reloadError);
+          logger.error('❌ Failed to reload merchant credentials:', reloadError);
         }
       }
       
@@ -485,7 +485,7 @@ export class InstagramMessageSender {
     conversationId?: string
   ): Promise<SendResult> {
     try {
-      console.log(`⚡ Sending Instagram message with quick replies to ${recipientId}`);
+      logger.info(`⚡ Sending Instagram message with quick replies to ${recipientId}`);
 
       // Check message window
       if (conversationId) {
@@ -542,7 +542,7 @@ export class InstagramMessageSender {
       return result;
 
     } catch (error) {
-      console.error('❌ Instagram quick replies sending failed:', error);
+      logger.error('❌ Instagram quick replies sending failed:', error);
       
       // Try reloading merchant credentials on auth errors
       if (error instanceof Error && 
@@ -552,7 +552,7 @@ export class InstagramMessageSender {
         try {
           await this.reloadMerchant(merchantId);
         } catch (reloadError) {
-          console.error('❌ Failed to reload merchant credentials:', reloadError);
+          logger.error('❌ Failed to reload merchant credentials:', reloadError);
         }
       }
       
@@ -597,7 +597,7 @@ export class InstagramMessageSender {
     const batchSize = 5; // concurrency limit
 
     try {
-      console.log(`📢 Sending bulk Instagram messages to ${recipients.length} recipients`);
+      logger.info(`📢 Sending bulk Instagram messages to ${recipients.length} recipients`);
 
       // Rate limiting check
       if (recipients.length > maxPerHour) {
@@ -696,12 +696,12 @@ export class InstagramMessageSender {
           : undefined
       );
 
-      console.log(`✅ Bulk send completed: ${sent} sent, ${failed} failed`);
+      logger.info(`✅ Bulk send completed: ${sent} sent, ${failed} failed`);
 
       return { sent, failed, results, errors };
 
     } catch (error) {
-      console.error('❌ Bulk send failed:', error);
+      logger.error('❌ Bulk send failed:', error);
       errors.push(error instanceof Error ? error.message : 'Unknown bulk send error');
       
       return {
@@ -826,7 +826,7 @@ export class InstagramMessageSender {
       `;
 
     } catch (error) {
-      console.error('❌ Message logging failed:', error);
+      logger.error('❌ Message logging failed:', error);
     }
   }
 
@@ -866,7 +866,7 @@ export class InstagramMessageSender {
       `;
 
     } catch (error) {
-      console.error('❌ Comment reply logging failed:', error);
+      logger.error('❌ Comment reply logging failed:', error);
     }
   }
 
@@ -909,7 +909,7 @@ export class InstagramMessageSender {
       `;
 
     } catch (error) {
-      console.error('❌ Bulk send logging failed:', error);
+      logger.error('❌ Bulk send logging failed:', error);
     }
   }
 

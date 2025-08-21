@@ -15,6 +15,7 @@ import { createHash } from 'crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { InstagramAPICredentials } from '../types/instagram.js';
+import { getLogger } from './logger.js';
 export type { InstagramAPICredentials } from '../types/instagram.js';
 
 export interface InstagramOAuthConfig {
@@ -99,6 +100,7 @@ export class InstagramAPIClient {
   private encryptionService = getEncryptionService();
   private db = getDatabase();
   private rateLimiter = getMetaRateLimiter();
+  private logger = getLogger({ component: 'InstagramAPIClient' });
 
   private credentials: InstagramAPICredentials | null = null;
   private merchantId: string | null = null;
@@ -148,12 +150,10 @@ export class InstagramAPIClient {
 
     // ✅ فحص المعدّل قبل الإرسال
     let check: { allowed: boolean; remaining: number; resetTime: number };
-    let rateLimitCheckSkipped = false;
     try {
       check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
     } catch (error) {
-      rateLimitCheckSkipped = true;
-      console.warn(`⚠️ Redis rate limit check failed for ${rateKey}:`, error);
+      this.logger.warn(`⚠️ Redis rate limit check failed for ${rateKey}:`, error);
       telemetry.recordRateLimitStoreFailure('instagram', path);
       check = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
     }
@@ -187,7 +187,7 @@ export class InstagramAPIClient {
       const appUsage = res.headers.get('x-app-usage');
       const pageUsage = res.headers.get('x-page-usage');
       if (appUsage || pageUsage) {
-        console.log(`📊 Graph API usage - App: ${appUsage}, Page: ${pageUsage}`);
+        this.logger.info(`📊 Graph API usage - App: ${appUsage}, Page: ${pageUsage}`);
       }
 
       if (!res.ok) {
@@ -233,13 +233,19 @@ export class InstagramAPIClient {
         rateLimitRemaining
       };
     } catch (error) {
-      console.error('❌ Instagram message send failed:', error);
+      this.logger.error('❌ Instagram message send failed:', error);
+      const status = typeof (error as any)?.status === 'number'
+        ? (error as any).status
+        : 500;
+      const message = typeof (error as any)?.message === 'string'
+        ? (error as any).message
+        : 'Unknown error';
       return {
         success: false,
         error: {
-          code: 500,
-          message: error instanceof Error ? error.message : 'Unknown error',
-          type: 'NETWORK_ERROR'
+          code: status,
+          message,
+          type: status >= 400 && status < 500 ? 'API_ERROR' : 'NETWORK_ERROR'
         }
       };
     }
@@ -346,7 +352,7 @@ export class InstagramAPIClient {
         messageId: result.id
       };
     } catch (error) {
-      console.error('❌ Instagram comment reply failed:', error);
+      this.logger.error('❌ Instagram comment reply failed:', error);
       return {
         success: false,
         error: {
@@ -377,7 +383,7 @@ export class InstagramAPIClient {
       
       return result;
     } catch (error) {
-      console.error('❌ Get user profile failed:', error);
+      this.logger.error('❌ Get user profile failed:', error);
       return null;
     }
   }
@@ -404,7 +410,7 @@ export class InstagramAPIClient {
         !isHex.test(receivedSignature) ||
         !isHex.test(expectedSignature)
       ) {
-        console.warn('⚠️ Invalid webhook signature length or format');
+        this.logger.warn('⚠️ Invalid webhook signature length or format');
         return false;
       }
 
@@ -413,7 +419,7 @@ export class InstagramAPIClient {
         Buffer.from(receivedSignature, 'hex')
       );
     } catch (error) {
-      console.error('❌ Webhook signature validation failed:', error);
+      this.logger.error('❌ Webhook signature validation failed:', error);
       return false;
     }
   }
@@ -441,10 +447,10 @@ export class InstagramAPIClient {
         merchantId
       );
 
-      console.log('✅ Instagram webhook subscribed successfully');
+      this.logger.info('✅ Instagram webhook subscribed successfully');
       return true;
     } catch (error) {
-      console.error('❌ Webhook subscription error:', error);
+      this.logger.error('❌ Webhook subscription error:', error);
       return false;
     }
   }
@@ -465,7 +471,7 @@ export class InstagramAPIClient {
         merchantId
       );
     } catch (error) {
-      console.error('❌ Get business account info failed:', error);
+      this.logger.error('❌ Get business account info failed:', error);
       throw error;
     }
   }
@@ -551,7 +557,7 @@ export class InstagramAPIClient {
         appSecret: cred.app_secret || ''
       };
     } catch (error) {
-      console.error('❌ Failed to load merchant credentials:', error);
+      this.logger.error('❌ Failed to load merchant credentials:', error);
       return null;
     }
   }
@@ -636,6 +642,7 @@ export class InstagramAPIClient {
 export class InstagramAPICredentialsManager {
   private encryptionService = getEncryptionService();
   private db = getDatabase();
+  private logger = getLogger({ component: 'InstagramAPICredentialsManager' });
 
   /**
    * Store encrypted Instagram credentials for merchant
@@ -703,9 +710,9 @@ export class InstagramAPICredentialsManager {
           updated_at = NOW()
       `;
 
-      console.log(`✅ Instagram credentials stored for merchant: ${merchantId}`);
+      this.logger.info(`✅ Instagram credentials stored for merchant: ${merchantId}`);
     } catch (error) {
-      console.error('❌ Failed to store Instagram credentials:', error);
+      this.logger.error('❌ Failed to store Instagram credentials:', error);
       throw error;
     }
   }
@@ -729,12 +736,12 @@ export class InstagramAPICredentialsManager {
         WHERE merchant_id = ${merchantId}::uuid
       `;
 
-      console.log(`✅ Instagram credentials removed for merchant: ${merchantId}`);
+      this.logger.info(`✅ Instagram credentials removed for merchant: ${merchantId}`);
       const { getInstagramStoriesManager } = await import('./instagram-stories-manager.js');
       getInstagramStoriesManager().clearMerchantClient(merchantId);
       clearInstagramClient(merchantId);
     } catch (error) {
-      console.error('❌ Failed to remove Instagram credentials:', error);
+      this.logger.error('❌ Failed to remove Instagram credentials:', error);
       throw error;
     }
   }
@@ -755,7 +762,7 @@ export class InstagramAPICredentialsManager {
 
       return result.length > 0;
     } catch (error) {
-      console.error('❌ Failed to check Instagram credentials:', error);
+      this.logger.error('❌ Failed to check Instagram credentials:', error);
       return false;
     }
   }
@@ -792,7 +799,7 @@ export class InstagramAPICredentialsManager {
         pageId: cred.instagram_page_id
       };
     } catch (error) {
-      console.error('❌ Failed to get credentials info:', error);
+      this.logger.error('❌ Failed to get credentials info:', error);
       return { hasCredentials: false };
     }
   }

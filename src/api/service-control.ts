@@ -16,7 +16,7 @@ import { getConfig } from '../config/environment.js';
 // Validation schemas
 const ToggleServiceSchema = z.object({
   merchantId: z.string().uuid('معرف التاجر يجب أن يكون UUID صالح'),
-  service: z.enum(['instagram', 'whatsapp', 'ai_processing', 'auto_reply', 'story_response', 'comment_response', 'dm_processing']),
+  service: z.enum(['instagram', 'ai_processing', 'auto_reply', 'story_response', 'comment_response', 'dm_processing']),
   enabled: z.boolean(),
   reason: z.string().optional(),
   toggledBy: z.string().optional()
@@ -172,7 +172,7 @@ export class ServiceControlAPI {
         }, 400);
       }
 
-      const serviceValidation = z.enum(['instagram', 'whatsapp', 'ai_processing', 'auto_reply', 'story_response', 'comment_response', 'dm_processing']).safeParse(service);
+      const serviceValidation = z.enum(['instagram', 'ai_processing', 'auto_reply', 'story_response', 'comment_response', 'dm_processing']).safeParse(service);
       if (!serviceValidation.success) {
         return c.json({
           error: 'اسم الخدمة غير صحيح'

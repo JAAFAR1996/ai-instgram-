@@ -28,11 +28,6 @@ const InstagramWebhookVerificationSchema = z.object({
   'hub.challenge': z.string()
 });
 
-const WhatsAppWebhookVerificationSchema = z.object({
-  'hub.mode': z.string(),
-  'hub.verify_token': z.string(),
-  'hub.challenge': z.string()
-});
 
 const WebhookEventSchema = z.object({
   object: z.string(),
@@ -43,6 +38,16 @@ const WebhookEventSchema = z.object({
     changes: z.array(z.any()).optional()
   }))
 });
+
+const WhatsAppWebhookVerificationSchema = z.object({
+  'hub.mode': z.string(),
+  'hub.verify_token': z.string(),
+  'hub.challenge': z.string()
+});
+
+// In-memory cache for mapping Instagram page IDs to merchant IDs
+const pageMerchantCache = new Map<string, { merchantId: string; expiresAt: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 export class WebhookRouter {
   private app: Hono;
@@ -140,7 +145,7 @@ export class WebhookRouter {
             len: raw.length
           });
         } catch (error) {
-          console.error('Debug endpoint error:', error);
+          this.logger.error('Debug endpoint error', error);
           return c.text('Error reading dumps', 500);
         }
       });
@@ -152,7 +157,7 @@ export class WebhookRouter {
         const stats = await this.getWebhookStats();
         return c.json(stats);
       } catch (error) {
-        console.error('❌ Failed to get webhook stats:', error);
+        this.logger.error('Failed to get webhook stats', error);
         return c.json({ error: 'Failed to get webhook statistics' }, 500);
       }
     });
@@ -163,20 +168,20 @@ export class WebhookRouter {
    */
   private async handleInstagramVerification(c: any) {
     try {
-      console.log('🔍 Instagram webhook verification request received');
+      this.logger.info('Instagram webhook verification request received');
       
       const query = c.req.query();
       const validation = InstagramWebhookVerificationSchema.safeParse(query);
       
       if (!validation.success) {
-        console.error('❌ Invalid Instagram verification parameters:', validation.error);
+        this.logger.error('Invalid Instagram verification parameters', validation.error);
         return c.text('Invalid verification parameters', 400);
       }
 
       const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = validation.data;
       
       if (mode !== 'subscribe') {
-        console.error('❌ Invalid hub mode:', mode);
+        this.logger.error('Invalid hub mode', undefined, { mode });
         return c.text('Invalid hub mode', 400);
       }
 
@@ -184,15 +189,15 @@ export class WebhookRouter {
       const isValidToken = await this.verifyWebhookToken(token, 'instagram');
       
       if (!isValidToken) {
-        console.error('❌ Invalid Instagram webhook verify token');
+        this.logger.error('Invalid Instagram webhook verify token');
         return c.text('Invalid verify token', 403);
       }
 
-      console.log('✅ Instagram webhook verification successful');
+      this.logger.info('Instagram webhook verification successful');
       return c.text(challenge);
 
     } catch (error) {
-      console.error('❌ Instagram webhook verification failed:', error);
+      this.logger.error('Instagram webhook verification failed', error);
       return c.text('Verification failed', 500);
     }
   }
@@ -203,7 +208,7 @@ export class WebhookRouter {
   private async handleInstagramWebhook(c: any) {
     let merchantId: string | undefined;
     try {
-      console.log('📨 Instagram webhook event received');
+      this.logger.info('Instagram webhook event received');
 
       // Get raw buffer - CRITICAL: do this before any other body parsing
       const rawAB = await c.req.arrayBuffer();
@@ -221,12 +226,12 @@ export class WebhookRouter {
       const metaAppId = (process.env.META_APP_ID || '').trim();
 
       if (!metaAppId) {
-        console.warn('⚠️ META_APP_ID not configured');
+        this.logger.warn('META_APP_ID not configured');
         return c.text('Server configuration error', 500);
       }
 
       if (!appSecret) {
-        console.warn('⚠️ META_APP_SECRET not configured');
+        this.logger.warn('META_APP_SECRET not configured');
         return c.text('Server configuration error', 500);
       }
       
@@ -236,7 +241,7 @@ export class WebhookRouter {
         try {
           const fs = await import('fs');
           await fs.promises.writeFile(dump, rawBuf);
-          console.log('Debug dump saved:', dump);
+          this.logger.info('Debug dump saved', { dump });
 
           // Keep debug dumps from growing without bound
           const dir = '/var/tmp';
@@ -258,36 +263,36 @@ export class WebhookRouter {
               await Promise.all(toDelete.map(s => fs.promises.unlink(p.join(dir, s.f))));
             }
           } catch (pruneError) {
-            console.error('❌ Could not prune debug dumps:', pruneError);
+            this.logger.error('Could not prune debug dumps', pruneError);
           }
         } catch (writeError) {
-          console.error('❌ Could not write debug file:', writeError);
+          this.logger.error('Could not write debug file', writeError);
         }
       }
       
       // Log critical headers (without sensitive data)
-      console.log('X-App-Id:', appId, 'Sig256 length:', sigHeader.length, 'Body length:', rawBuf.length);
+      this.logger.info('Webhook headers', { appId, sig256Length: sigHeader.length, bodyLength: rawBuf.length });
       
       // 1. Verify App ID matches
       if (!appId || appId !== metaAppId) {
-        console.error('APP_ID_MISMATCH', { appId, expect: metaAppId });
+        this.logger.error('APP_ID_MISMATCH', undefined, { appId, expect: metaAppId });
         return c.text('App mismatch', 401);
       }
       
       // 2. Require proper signature header format
       if (!sigHeader || !sigHeader.startsWith('sha256=')) {
-        console.error('❌ Bad signature header format');
+        this.logger.error('Bad signature header format');
         return c.text('Bad signature header', 401);
       }
       
       // 3. Unified HMAC verification with raw Buffer
       const verifyResult = verifyHMACRaw(rawBuf, sigHeader, appSecret);
       if (!verifyResult.ok) {
-        console.error(`❌ Instagram webhook signature verification failed: ${verifyResult.reason}`);
+        this.logger.error('Instagram webhook signature verification failed', undefined, { reason: verifyResult.reason });
         return c.text('Invalid signature', 401);
       }
       
-      console.log('✅ Instagram webhook signature verified successfully');
+      this.logger.info('Instagram webhook signature verified successfully');
       
       // Parse JSON only after successful verification
       let event: InstagramWebhookEvent;
@@ -301,7 +306,7 @@ export class WebhookRouter {
       // Validate event structure
       const validation = WebhookEventSchema.safeParse(event);
       if (!validation.success) {
-        console.error('❌ Invalid Instagram event structure:', validation.error);
+        this.logger.error('Invalid Instagram event structure', validation.error);
         return c.text('Invalid event structure', 400);
       }
 
@@ -334,13 +339,13 @@ export class WebhookRouter {
         rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
       } catch (error) {
         skipRateLimitCheck = true;
-        console.warn(`⚠️ Failed to check Redis rate limit for merchant ${merchantId}:`, error);
+        this.logger.warn('Failed to check Redis rate limit', error, { merchantId });
         telemetry.recordRateLimitStoreFailure('instagram', 'webhook');
         rateCheck = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
       }
 
       if (!rateCheck.allowed) {
-        console.warn(`🚫 Instagram webhook rate limit exceeded for merchant: ${merchantId}`);
+        this.logger.warn('Instagram webhook rate limit exceeded', undefined, { merchantId });
         return c.json({
           error: 'Rate limit exceeded',
           resetTime: rateCheck.resetTime,
@@ -348,13 +353,13 @@ export class WebhookRouter {
         }, 429);
       }
 
-      console.log(`✅ Rate limit check passed: ${rateCheck.remaining} remaining`);
+      this.logger.info('Rate limit check passed', { remaining: rateCheck.remaining });
 
       // Check for idempotency using merchant and body hash
       const idempotencyCheck = await this.checkWebhookIdempotency(merchantId, event, 'instagram');
 
       if (idempotencyCheck.isDuplicate) {
-        console.log(`🔁 Duplicate Instagram webhook: ${idempotencyCheck.eventId}`);
+        this.logger.info('Duplicate Instagram webhook detected', { eventId: idempotencyCheck.eventId });
         return c.text('EVENT_RECEIVED', 200);
       }
 
@@ -372,7 +377,7 @@ export class WebhookRouter {
           code: 'MERCHANT_ID_MISSING'
         }, 400);
       }
-      console.error('❌ Instagram webhook processing failed:', error);
+      this.logger.error('Instagram webhook processing failed', error);
 
       pushDLQ({
         ts: Date.now(),
@@ -389,155 +394,7 @@ export class WebhookRouter {
     }
   }
 
-  /**
-   * Handle WhatsApp webhook verification (GET request)
-   */
-  private async handleWhatsAppVerification(c: any) {
-    try {
-      console.log('🔍 WhatsApp webhook verification request received');
 
-      const query = c.req.query();
-      const validation = WhatsAppWebhookVerificationSchema.safeParse(query);
-
-      if (!validation.success) {
-        console.error('❌ Invalid WhatsApp verification parameters:', validation.error);
-        return c.text('Invalid verification parameters', 400);
-      }
-
-      const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = validation.data;
-
-      if (mode !== 'subscribe') {
-        console.error('❌ Invalid hub mode:', mode);
-        return c.text('Invalid hub mode', 400);
-      }
-
-      // Verify token against stored webhook verify tokens
-      const isValidToken = await this.verifyWebhookToken(token, 'whatsapp');
-
-      if (!isValidToken) {
-        console.error('❌ Invalid WhatsApp webhook verify token');
-        return c.text('Invalid verify token', 403);
-      }
-
-      console.log('✅ WhatsApp webhook verification successful');
-      return c.text(challenge);
-
-    } catch (error) {
-      console.error('❌ WhatsApp webhook verification failed:', error);
-      return c.text('Verification failed', 500);
-    }
-  }
-
-  /**
-   * Handle WhatsApp webhook events (POST request)
-   */
-  private async handleWhatsAppWebhook(c: any) {
-    try {
-      console.log('📨 WhatsApp webhook event received');
-      
-      // Apply Redis sliding window rate limiting
-      const whatsappMerchantId = process.env.MERCHANT_ID || c.req.header('x-merchant-id');
-      if (!whatsappMerchantId) {
-        return c.json({
-          error: 'Merchant ID required',
-          code: 'MERCHANT_ID_MISSING'
-        }, 400);
-      }
-      const rateLimitKey = `webhook:whatsapp:${whatsappMerchantId}`;
-      const windowMs = 60000; // 1 minute window
-      const maxRequests = 200; // 200 requests per minute per merchant (WhatsApp has higher volume)
-      
-      const { getMetaRateLimiter } = await import('../services/meta-rate-limiter.js');
-      const rateLimiter = getMetaRateLimiter();
-      
-      let rateCheck: { allowed: boolean; remaining: number; resetTime: number };
-      let skipRateLimitCheck = false;
-      try {
-        rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
-      } catch (error) {
-        skipRateLimitCheck = true;
-        console.warn(`⚠️ Failed to check Redis rate limit for merchant ${whatsappMerchantId}:`, error);
-        telemetry.recordRateLimitStoreFailure('whatsapp', 'webhook');
-        rateCheck = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
-      }
-
-      if (!rateCheck.allowed) {
-        console.warn(`🚫 WhatsApp webhook rate limit exceeded for merchant: ${whatsappMerchantId}`);
-        return c.json({
-          error: 'Rate limit exceeded',
-          resetTime: rateCheck.resetTime,
-          remaining: rateCheck.remaining
-        }, 429);
-      }
-      
-      console.log(`✅ WhatsApp rate limit check passed: ${rateCheck.remaining} remaining`);
-      
-      const rawBody = Buffer.from(await c.req.arrayBuffer()); // RAW
-      const signature = (c.req.header('X-Hub-Signature-256') || c.req.header('X-Hub-Signature') || '').trim();
-      if (!signature) {
-        console.error('❌ Missing WhatsApp webhook signature');
-        return c.text('Missing signature', 400);
-      }
-      // Check payload size to prevent server overload
-      if (rawBody.byteLength > 512 * 1024) {
-        return c.text('Payload Too Large', 413);
-      }
-      
-      // ✅ Unified HMAC verification with raw Buffer
-      const appSecret = this.getAppSecret();
-      const verifyResult = verifyHMACRaw(rawBody, signature, appSecret);
-      if (!verifyResult.ok) {
-        console.error(`❌ WhatsApp webhook signature verification failed: ${verifyResult.reason}`);
-        return c.text('Invalid signature', 401);
-      }
-
-      // Parse after verification
-      let event;
-      try {
-        event = JSON.parse(rawBody.toString('utf8'));
-      } catch (parseError) {
-        this.logger.error('Invalid WhatsApp webhook JSON', parseError);
-        return c.text('Invalid JSON', 400);
-      }
-
-      // Validate event structure
-      const validation = WebhookEventSchema.safeParse(event);
-      if (!validation.success) {
-        console.error('❌ Invalid WhatsApp event structure:', validation.error);
-        return c.text('Invalid event structure', 400);
-      }
-
-      if (event.object !== 'whatsapp_business_account') return c.text('Wrong object', 400);
-
-      for (const entry of event.entry) {
-        await this.processWhatsAppEntry(entry);
-      }
-
-      return c.text('EVENT_RECEIVED', 200);
-
-    } catch (error) {
-        if (error instanceof MerchantIdMissingError) {
-          return c.json({
-            error: 'Merchant ID required',
-            code: 'MERCHANT_ID_MISSING'
-          }, 400);
-        }
-        console.error('❌ WhatsApp webhook processing failed:', error);
-
-        pushDLQ({
-          ts: Date.now(),
-          reason: 'whatsapp-webhook-processing-failed',
-          payload: {
-            error: error instanceof Error ? error.message : String(error),
-            stack: error instanceof Error ? error.stack : undefined
-          },
-          platform: 'whatsapp',
-          merchantId: merchantId ?? 'unknown'
-        });
-
-        return c.text('Webhook processing failed', 500);
-      }
-  }
 
   /**
    * Process Instagram webhook entry
@@ -549,14 +406,14 @@ export class WebhookRouter {
       const merchantId = await this.getMerchantIdFromPageId(pageId);
       
       if (!merchantId) {
-    console.error(`❌ No merchant found for Instagram Page ID: ${String(pageId).replace(/[\r\n]/g, '')}`);
+        this.logger.error('No merchant found for Instagram Page ID', undefined, { pageId: String(pageId).replace(/[\r\n]/g, '') });
         return;
       }
 
       // Check if Instagram service is enabled
       const isInstagramEnabled = await this.serviceController.isServiceEnabled(merchantId, 'instagram');
       if (!isInstagramEnabled) {
-        console.log(`🛑 Instagram service disabled for merchant: ${merchantId}`);
+        this.logger.info('Instagram service disabled', { merchantId });
         await this.logWebhookEvent('instagram', merchantId, 'ERROR', {
           pageId,
           reason: 'Service disabled'
@@ -570,7 +427,8 @@ export class WebhookRouter {
         merchantId
       );
 
-      console.log(`✅ Instagram webhook processed for merchant ${merchantId}:`, {
+      this.logger.info('Instagram webhook processed successfully', {
+        merchantId,
         messagesProcessed: result.messagesProcessed,
         conversationsCreated: result.conversationsCreated,
         errors: result.errors.length,
@@ -585,7 +443,7 @@ export class WebhookRouter {
       });
 
     } catch (error) {
-      console.error('❌ Failed to process Instagram entry:', error);
+      this.logger.error('Failed to process Instagram entry', error);
       
       // Push to DLQ for analysis
       pushDLQ({
@@ -608,7 +466,7 @@ export class WebhookRouter {
    * Process WhatsApp webhook entry - DISABLED
    */
   private async processWhatsAppEntry(entry: any): Promise<void> {
-    console.log('❌ WhatsApp processing disabled - entry ignored');
+    this.logger.info('WhatsApp processing disabled - entry ignored');
     await this.logWebhookEvent('whatsapp', 'disabled', 'ERROR', {
       error: 'WhatsApp features are disabled'
     });
@@ -635,70 +493,27 @@ export class WebhookRouter {
       return result.length > 0;
 
     } catch (error) {
-      console.error('❌ Failed to verify webhook token:', error);
+      this.logger.error('Failed to verify webhook token', error);
       return false;
     }
   }
 
   
-  /**
-   * Verify WhatsApp webhook signature using META_APP_SECRET (2025 Enhanced Security)
-   * Implements timing-safe comparison and enforces SHA-256 only
-   */
-  private async verifyWhatsAppSignature(rawBody: Buffer, signature: string): Promise<boolean> {
-    try {
-      const metaAppSecret = this.config.instagram.metaAppSecret.trim();
-      if (!metaAppSecret) { 
-        console.error('❌ META_APP_SECRET not configured'); 
-        return false; 
-      }
-
-      // 2025 Security: Enforce SHA-256 only (prevent downgrade attacks)
-      if (!signature.startsWith('sha256=')) {
-        console.error('❌ Invalid WhatsApp signature format - SHA-256 required (2025 security standard)');
-        return false;
-      }
-
-      const provided = signature.replace('sha256=', '').toLowerCase();
-      
-      // Validate signature format (must be 64 hex characters for SHA-256)
-      if (!/^[a-f0-9]{64}$/.test(provided)) {
-        console.error('❌ Invalid WhatsApp signature format - must be 64 hex characters');
-        return false;
-      }
-
-      const expected = crypto.createHmac('sha256', metaAppSecret).update(rawBody).digest('hex').toLowerCase();
-      
-      // 2025 Security: Use timing-safe comparison to prevent timing attacks
-      const providedBuffer = Buffer.from(provided, 'hex');
-      const expectedBuffer = Buffer.from(expected, 'hex');
-      
-      if (providedBuffer.length !== expectedBuffer.length) {
-        console.error('❌ WhatsApp signature length mismatch');
-        return false;
-      }
-
-      const isValid = crypto.timingSafeEqual(providedBuffer, expectedBuffer);
-      
-      if (isValid) {
-        console.log('✅ WhatsApp webhook signature verified successfully (SHA-256)');
-      } else {
-        console.error('❌ WhatsApp webhook signature verification failed');
-      }
-      return isValid;
-    } catch (error) {
-      console.error('❌ Failed to verify WhatsApp signature:', error);
-      return false;
-    }
-  }
 
   /**
    * Get merchant ID from Instagram Page ID
    */
   private async getMerchantIdFromPageId(pageId: string): Promise<string | null> {
     try {
+      // Check cache first
+      const cached = pageMerchantCache.get(pageId);
+      const now = Date.now();
+      if (cached && cached.expiresAt > now) {
+        return cached.merchantId;
+      }
+
       const sql = this.db.getSQL();
-      
+
       const result = await sql`
         SELECT merchant_id
         FROM merchant_credentials
@@ -710,10 +525,15 @@ export class WebhookRouter {
       interface MerchantResult {
         merchant_id: string;
       }
-      return (result[0] as MerchantResult)?.merchant_id || null;
+      const merchantId = (result[0] as MerchantResult)?.merchant_id || null;
 
+      if (merchantId) {
+        pageMerchantCache.set(pageId, { merchantId, expiresAt: now + CACHE_TTL_MS });
+      }
+
+      return merchantId;
     } catch (error) {
-      console.error('❌ Failed to get merchant ID from page ID:', error);
+      this.logger.error('Failed to get merchant ID from page ID', error);
       return null;
     }
   }
@@ -749,7 +569,7 @@ export class WebhookRouter {
       `;
 
     } catch (error) {
-      console.error('❌ Failed to log webhook event:', error);
+      this.logger.error('Failed to log webhook event', error);
     }
   }
 
@@ -797,14 +617,14 @@ export class WebhookRouter {
       `;
       
       const isFirstTime = result.length > 0;
-      console.log(`🔒 Webhook idempotency check: ${eventId} - ${isFirstTime ? 'First time' : 'Duplicate'}`);
+      this.logger.info('Webhook idempotency check completed', { eventId, isFirstTime });
       
       return {
         isDuplicate: !isFirstTime,
         eventId
       };
     } catch (error) {
-      console.error('❌ Idempotency check failed:', error);
+      this.logger.error('Idempotency check failed', error);
       // Fail open - allow processing on error
       return { isDuplicate: false, eventId };
     }
@@ -821,9 +641,9 @@ export class WebhookRouter {
         SET processed_at = NOW()
         WHERE event_id = ${eventId}
       `;
-      console.log(`✅ Webhook marked as processed: ${eventId}`);
+      this.logger.info('Webhook marked as processed', { eventId });
     } catch (error) {
-      console.error('❌ Failed to mark webhook as processed:', error);
+      this.logger.error('Failed to mark webhook as processed', error);
     }
   }
 
@@ -868,7 +688,7 @@ export class WebhookRouter {
       };
 
     } catch (error) {
-      console.error('❌ Failed to get webhook stats:', error);
+      this.logger.error('Failed to get webhook stats', error);
       throw error;
     }
   }

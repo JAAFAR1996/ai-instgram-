@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterAll, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -67,14 +67,15 @@ describe('InstagramAPIClient.uploadMedia', () => {
 
 describe('InstagramMessageSender client caching', () => {
   let sender: any;
-  let initializeMock: any;
+  let loadCredsMock: any;
 
   beforeEach(async () => {
-    initializeMock = mock(async () => {});
+    loadCredsMock = mock(async () => ({ tokenExpiresAt: new Date(Date.now() + 3600_000) }));
     const client = {
-      initialize: initializeMock,
       uploadMedia: mock(async () => 'media123'),
-      sendMessage: mock(async () => ({ success: true, messageId: 'msg1' }))
+      sendMessage: mock(async () => ({ success: true, messageId: 'msg1' })),
+      loadMerchantCredentials: loadCredsMock,
+      validateCredentials: mock(async () => {})
     };
 
     mock.module('../services/instagram-api.js', () => ({ getInstagramClient: () => client }));
@@ -94,11 +95,11 @@ describe('InstagramMessageSender client caching', () => {
     mock.restore();
   });
 
-  test('caches initialization per merchant', async () => {
+  test('caches credentials per merchant', async () => {
     await sender.sendMediaMessage('merchant1', 'user1', 'image.jpg', 'image');
     await sender.sendMediaMessage('merchant1', 'user2', 'image.jpg', 'image');
 
-    expect(initializeMock.mock.calls.length).toBe(1);
+    expect(loadCredsMock.mock.calls.length).toBe(1);
   });
 
   test('reloads credentials when requested', async () => {
@@ -106,6 +107,69 @@ describe('InstagramMessageSender client caching', () => {
     await sender.reloadMerchant('merchant1');
     await sender.sendMediaMessage('merchant1', 'user1', 'image.jpg', 'image');
 
-    expect(initializeMock.mock.calls.length).toBe(2);
+    expect(loadCredsMock.mock.calls.length).toBe(2);
+  });
+});
+
+describe('InstagramMessageSender error logging', () => {
+  let sender: any;
+  let errorMock: any;
+
+  beforeEach(async () => {
+    errorMock = mock(() => {});
+
+    const client = {
+      loadMerchantCredentials: mock(async () => ({ token: 'x', tokenExpiresAt: new Date(Date.now() + 3600_000) })),
+      validateCredentials: mock(async () => {}),
+      sendMessage: mock(async (_cred: any, _merchant: string, { recipientId }: any) => {
+        if (recipientId === 'user2') {
+          return { success: false, error: 'fail' };
+        }
+        return { success: true, messageId: `msg-${recipientId}` };
+      })
+    };
+
+    mock.module('../services/logger.js', () => ({
+      getLogger: () => ({
+        error: errorMock,
+        info: () => {},
+        warn: () => {},
+        debug: () => {},
+        child: () => ({ error: errorMock, info: () => {}, warn: () => {}, debug: () => {} })
+      })
+    }));
+
+    mock.module('../services/instagram-api.js', () => ({ getInstagramClient: () => client }));
+    mock.module('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
+    mock.module('../services/message-window.js', () => ({
+      getMessageWindowService: () => ({
+        getWindowStatus: mock(async (_merchantId: string, recipient: any) => {
+          if (recipient.instagram === 'user2') {
+            throw new Error('window fail');
+          }
+          return { canSend: true };
+        }),
+        recordMerchantResponse: mock(async () => {})
+      })
+    }));
+
+    const mod = await import(`../services/instagram-message-sender.js?test=${Date.now()}`);
+    sender = new mod.InstagramMessageSender();
+  });
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  test('counts successes and logger errors', async () => {
+    const recipients = ['user1', 'user2', 'user3'];
+    const results = [];
+    for (const r of recipients) {
+      results.push(await sender.sendTextMessage('merchant1', r, 'hi', 'conv1'));
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    expect(successCount).toBe(2);
+    expect(errorMock.mock.calls.length).toBe(1);
   });
 });

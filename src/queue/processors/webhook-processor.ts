@@ -8,9 +8,10 @@
 import type { QueueJob, JobProcessor } from '../message-queue.js';
 import { getInstagramWebhookHandler } from '../../services/instagram-webhook.js';
 import { getRepositories } from '../../repositories/index.js';
+import { getLogger } from '../../services/logger.js';
 
 export interface WebhookJobPayload {
-  platform: 'instagram' | 'whatsapp';
+  platform: 'instagram';
   merchantId: string;
   webhookData: any;
   signature?: string;
@@ -19,12 +20,13 @@ export interface WebhookJobPayload {
 
 export class WebhookProcessor implements JobProcessor {
   private repositories = getRepositories();
+  private logger = getLogger({ component: 'WebhookProcessor' });
 
   async process(job: QueueJob): Promise<{ success: boolean; result?: any; error?: string }> {
     const payload = job.payload as WebhookJobPayload;
     
     try {
-      console.log(`🎣 Processing webhook job: ${payload.platform} for merchant ${payload.merchantId}`);
+      this.logger.info('Processing webhook job', { platform: payload.platform, merchantId: payload.merchantId });
       
       // Validate merchant exists and is active
       const merchant = await this.repositories.merchant.findById(payload.merchantId);
@@ -52,8 +54,6 @@ export class WebhookProcessor implements JobProcessor {
           result = await this.processInstagramWebhook(payload);
           break;
           
-        case 'whatsapp':
-          return { success: false, error: 'WhatsApp processing is disabled' };
           
         default:
           return { success: false, error: `Unsupported platform: ${payload.platform}` };
@@ -65,7 +65,7 @@ export class WebhookProcessor implements JobProcessor {
       return { success: true, result };
       
     } catch (error) {
-      console.error('❌ Webhook processing error:', error);
+      this.logger.error('Webhook processing error', error);
       return { 
         success: false, 
         error: error instanceof Error ? error.message : 'Unknown webhook processing error' 
@@ -105,13 +105,6 @@ export class WebhookProcessor implements JobProcessor {
     };
   }
 
-  /**
-   * Process WhatsApp webhook - DISABLED
-   */
-  private async processWhatsAppWebhook(payload: WebhookJobPayload): Promise<any> {
-    console.log('❌ WhatsApp webhook processing disabled');
-    throw new Error('WhatsApp processing is disabled');
-  }
 }
 
 // Export processor instance

@@ -14,7 +14,7 @@ export interface Conversation {
   customerWhatsapp?: string;
   customerInstagram?: string;
   customerName?: string;
-  platform: 'whatsapp' | 'instagram';
+  platform: 'instagram';
   conversationStage: string;
   sessionData: Record<string, any>;
   messageCount: number;
@@ -29,7 +29,7 @@ export interface CreateConversationRequest {
   customerWhatsapp?: string;
   customerInstagram?: string;
   customerName?: string;
-  platform: 'whatsapp' | 'instagram';
+  platform: 'instagram';
   conversationStage?: string;
   sessionData?: Record<string, any>;
 }
@@ -43,7 +43,7 @@ export interface UpdateConversationRequest {
 
 export interface ConversationFilters {
   merchantId?: string;
-  platform?: 'whatsapp' | 'instagram';
+  platform?: 'instagram';
   conversationStage?: string;
   isActive?: boolean;
   customerQuery?: string;

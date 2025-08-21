@@ -16,6 +16,9 @@ import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { getMetaRateLimiter } from './meta-rate-limiter.js';
 import { InstagramOAuthService } from './instagram-oauth.js';
 import { getNotificationService } from './notification-service.js';
+import { getLogger } from './logger.js';
+
+const logger = getLogger({ component: 'InstagramMessagingService' });
 
 export async function retryFetch(
   fetchFn: () => Promise<Response>,
@@ -30,17 +33,17 @@ export async function retryFetch(
       if (res.status !== 429) {
         return res;
       }
-      console.warn(`retryFetch: attempt ${attempt + 1} received 429`);
+      logger.warn(`retryFetch: attempt ${attempt + 1} received 429`);
     } catch (err) {
-      console.warn(`retryFetch: attempt ${attempt + 1} failed with ${(err as Error).message}`);
+      logger.warn(`retryFetch: attempt ${attempt + 1} failed with ${(err as Error).message}`);
     }
     attempt++;
     if (attempt >= maxAttempts) break;
-    console.log(`retryFetch: waiting ${delay}ms before attempt ${attempt + 1}`);
+    logger.debug(`retryFetch: waiting ${delay}ms before attempt ${attempt + 1}`);
     await new Promise(resolve => setTimeout(resolve, delay));
     delay *= 2;
   }
-  console.error(`retryFetch: exhausted ${maxAttempts} attempts`);
+  logger.error(`retryFetch: exhausted ${maxAttempts} attempts`);
   throw new Error(`Network request failed after ${maxAttempts} attempts`);
 }
 
@@ -91,7 +94,7 @@ export class InstagramMessagingService {
     let delay = 500;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      console.log(`🚀 Graph API message attempt ${attempt} for ${merchantId} -> ${igUserId}`);
+      logger.debug(`🚀 Graph API message attempt ${attempt} for ${merchantId} -> ${igUserId}`);
       try {
         const response = await this.rateLimiter.graphRequest(
           url,
@@ -108,18 +111,18 @@ export class InstagramMessagingService {
 
         const data: any = await response.json();
         if (!response.ok) {
-          console.error('❌ Instagram message send failed:', data);
+          logger.error('❌ Instagram message send failed', data);
           throw new Error(data.error?.message || 'Unknown error');
         }
 
         return data;
       } catch (error) {
-        console.error(`⚠️ Graph API attempt ${attempt} failed`, error);
+        logger.error(`⚠️ Graph API attempt ${attempt} failed`, error);
         if (attempt === maxAttempts) {
           throw error;
         }
 
-        console.log(`⏳ Waiting ${delay}ms before retry attempt ${attempt + 1}`);
+        logger.debug(`⏳ Waiting ${delay}ms before retry attempt ${attempt + 1}`);
         await new Promise(res => setTimeout(res, delay));
         delay *= 2;
       }
@@ -143,7 +146,7 @@ export class InstagramMessagingService {
     } = {}
   ): Promise<InstagramMessageResponse> {
     try {
-      console.log(`📤 Sending Instagram message from ${merchantId} to ${recipientId}`);
+      logger.info(`📤 Sending Instagram message from ${merchantId} to ${recipientId}`);
 
       // 🔒 Idempotency check - prevent duplicate message sends
       const messageBody = {
@@ -159,11 +162,11 @@ export class InstagramMessagingService {
       const existingResult = await redis.get(idempotencyKey);
       
       if (existingResult) {
-        console.log(`🔒 Idempotent message send detected: ${idempotencyKey}`);
+        logger.debug(`🔒 Idempotent message send detected: ${idempotencyKey}`);
         try {
           return JSON.parse(existingResult);
         } catch (parseError) {
-          console.warn(
+          logger.warn(
             `⚠️ Failed to parse cached message result for ${idempotencyKey}, proceeding with new send`,
             parseError
           );
@@ -211,7 +214,7 @@ export class InstagramMessagingService {
         messagePayload
       );
 
-      console.log('✅ Instagram message sent successfully');
+      logger.info('✅ Instagram message sent successfully');
 
       // Log the sent message
       await this.logSentMessage(merchantId, recipientId, messageText, responseData.message_id, options);
@@ -224,12 +227,12 @@ export class InstagramMessagingService {
 
       // 💾 Cache successful result for idempotency (24 hours TTL)
       await redis.setex(idempotencyKey, 86400, JSON.stringify(successResult));
-      console.log(`💾 Cached message send result: ${idempotencyKey}`);
+      logger.debug(`💾 Cached message send result: ${idempotencyKey}`);
 
       return successResult;
 
     } catch (error) {
-      console.error('❌ Instagram messaging failed:', error);
+      logger.error('❌ Instagram messaging failed', error);
 
       const failureResult = {
         messageId: '',
@@ -247,7 +250,7 @@ export class InstagramMessagingService {
           options
         );
       } catch (logError) {
-        console.warn('⚠️ Failed to log failed Instagram message', logError);
+        logger.warn('⚠️ Failed to log failed Instagram message', logError);
       }
 
       return failureResult;
@@ -268,7 +271,7 @@ export class InstagramMessagingService {
     } = {}
   ): Promise<InstagramMessageResponse> {
     try {
-      console.log(`📷 Sending Instagram image from ${merchantId} to ${recipientId}`);
+      logger.info(`📷 Sending Instagram image from ${merchantId} to ${recipientId}`);
 
       const accessToken = await this.getMerchantAccessToken(merchantId);
       if (!accessToken) {
@@ -315,7 +318,7 @@ export class InstagramMessagingService {
         messagePayload
       );
 
-      console.log('✅ Instagram image sent successfully');
+      logger.info('✅ Instagram image sent successfully');
 
       await this.logSentMessage(
         merchantId, 
@@ -332,7 +335,7 @@ export class InstagramMessagingService {
       };
 
     } catch (error) {
-      console.error('❌ Instagram image messaging failed:', error);
+      logger.error('❌ Instagram image messaging failed', error);
 
       const failureResult = {
         messageId: '',
@@ -350,7 +353,7 @@ export class InstagramMessagingService {
           options
         );
       } catch (logError) {
-        console.warn('⚠️ Failed to log failed Instagram message', logError);
+        logger.warn('⚠️ Failed to log failed Instagram message', logError);
       }
 
       return failureResult;
@@ -379,7 +382,7 @@ export class InstagramMessagingService {
     } = {}
   ): Promise<InstagramMessageResponse> {
     try {
-      console.log(`📋 Sending Instagram template from ${merchantId} to ${recipientId}`);
+      logger.info(`📋 Sending Instagram template from ${merchantId} to ${recipientId}`);
 
       const accessToken = await this.getMerchantAccessToken(merchantId);
       if (!accessToken) {
@@ -431,7 +434,7 @@ export class InstagramMessagingService {
         messagePayload
       );
 
-      console.log('✅ Instagram template sent successfully');
+      logger.info('✅ Instagram template sent successfully');
 
       await this.logSentMessage(
         merchantId, 
@@ -448,7 +451,7 @@ export class InstagramMessagingService {
       };
 
     } catch (error) {
-      console.error('❌ Instagram template messaging failed:', error);
+      logger.error('❌ Instagram template messaging failed', error);
 
       const failureResult = {
         messageId: '',
@@ -466,7 +469,7 @@ export class InstagramMessagingService {
           options
         );
       } catch (logError) {
-        console.warn('⚠️ Failed to log failed Instagram message', logError);
+        logger.warn('⚠️ Failed to log failed Instagram message', logError);
       }
 
       return failureResult;
@@ -496,7 +499,7 @@ export class InstagramMessagingService {
 
       // Check if token is expired
       if (record.token_expires_at && new Date(record.token_expires_at) <= new Date()) {
-        console.warn(`⚠️ Instagram token expired for merchant ${merchantId}`);
+        logger.warn(`⚠️ Instagram token expired for merchant ${merchantId}`);
         try {
           const oauth = new InstagramOAuthService();
           const refreshed = await oauth.refreshLongLivedToken(currentToken, merchantId);
@@ -512,7 +515,7 @@ export class InstagramMessagingService {
 
           return refreshed.access_token;
         } catch (err) {
-          console.error('❌ Failed to refresh Instagram token:', err);
+          logger.error('❌ Failed to refresh Instagram token', err);
           return null;
         }
       }
@@ -520,7 +523,7 @@ export class InstagramMessagingService {
       return currentToken;
 
     } catch (error) {
-      console.error('❌ Failed to get merchant access token:', error);
+      logger.error('❌ Failed to get merchant access token', error);
       return null;
     }
   }
@@ -542,7 +545,7 @@ export class InstagramMessagingService {
       return result[0]?.instagram_user_id || null;
 
     } catch (error) {
-      console.error('❌ Failed to get merchant Instagram user ID:', error);
+      logger.error('❌ Failed to get merchant Instagram user ID', error);
       return null;
     }
   }
@@ -592,7 +595,7 @@ export class InstagramMessagingService {
       };
 
     } catch (error) {
-      console.error('❌ Failed to get message context:', error);
+      logger.error('❌ Failed to get message context', error);
       return {
         conversationId: '',
         withinWindow: false
@@ -647,7 +650,7 @@ export class InstagramMessagingService {
       }
 
     } catch (error) {
-      console.error('❌ Failed to log sent message:', error);
+      logger.error('❌ Failed to log sent message', error);
     }
   }
 
@@ -687,7 +690,7 @@ export class InstagramMessagingService {
       `;
 
     } catch (error) {
-      console.error('❌ Failed to log failed message:', error);
+      logger.error('❌ Failed to log failed message', error);
     }
   }
 
@@ -724,7 +727,7 @@ export class InstagramMessagingService {
       };
 
     } catch (error) {
-      console.error('❌ Failed to check messaging availability:', error);
+      logger.error('❌ Failed to check messaging availability', error);
       return {
         available: false,
         reason: 'Error checking messaging availability'
@@ -772,7 +775,7 @@ export class InstagramMessagingService {
       };
 
     } catch (error) {
-      console.error('❌ Failed to get messaging stats:', error);
+      logger.error('❌ Failed to get messaging stats', error);
       return {
         totalSent: 0,
         totalFailed: 0,

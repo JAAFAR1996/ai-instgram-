@@ -95,7 +95,7 @@ export class InstagramAIService {
         language: 'ar'
       };
     } catch (error) {
-      console.error('❌ Error loading merchant config:', error);
+      this.logger.error('❌ Error loading merchant config:', error);
       return {
         aiModel: 'gpt-4o-mini',
         maxTokens: 600,
@@ -217,7 +217,7 @@ export class InstagramAIService {
 
         aiResponse = parsed as InstagramAIResponse;
       } catch (parseError) {
-        console.error('❌ Failed to parse Instagram AI response:', parseError);
+        this.logger.error('❌ Failed to parse Instagram AI response:', parseError);
         return this.getContextualFallback(context, 'AI_API_ERROR');
       }
       
@@ -240,7 +240,7 @@ export class InstagramAIService {
 
       return aiResponse;
     } catch (error) {
-      console.error('❌ Instagram AI response generation failed:', error);
+      this.logger.error('❌ Instagram AI response generation failed:', error);
       
       // ✅ 2. Error Handling: Use contextual fallback
       const errorType = error.message?.includes('rate limit') ? 'RATE_LIMIT'
@@ -288,7 +288,7 @@ export class InstagramAIService {
 
       return aiResponse;
     } catch (error) {
-      console.error('❌ Story reply generation failed:', error);
+      this.logger.error('❌ Story reply generation failed:', error);
       return this.getInstagramFallbackResponse(context);
     }
   }
@@ -330,7 +330,7 @@ export class InstagramAIService {
 
       return aiResponse;
     } catch (error) {
-      console.error('❌ Comment response generation failed:', error);
+      this.logger.error('❌ Comment response generation failed:', error);
       return this.getInstagramFallbackResponse(context);
     }
   }
@@ -378,7 +378,7 @@ export class InstagramAIService {
       }
       return showcase;
     } catch (error) {
-      console.error('❌ Product showcase generation failed:', error);
+      this.logger.error('❌ Product showcase generation failed:', error);
       return {
         mediaRecommendations: [],
         caption: '',
@@ -431,7 +431,7 @@ export class InstagramAIService {
       }
       return analysis;
     } catch (error) {
-      console.error('❌ Content performance analysis failed:', error);
+      this.logger.error('❌ Content performance analysis failed:', error);
       return {
         viralScore: 0,
         engagementPrediction: 0,
@@ -698,7 +698,7 @@ ${productsText}
 
       return [...baseHashtags, ...relevantHashtags, ...trendingHashtags].slice(0, 8);
     } catch (error) {
-      console.error('❌ Hashtag generation failed:', error);
+      this.logger.error('❌ Hashtag generation failed:', error);
       return ['#عراق', '#تسوق', '#جديد'];
     }
   }
@@ -738,7 +738,7 @@ ${productsText}
       
       return allProducts;
     } catch (error) {
-      console.error('❌ Error fetching showcase products:', error);
+      this.logger.error('❌ Error fetching showcase products:', error);
       return [];
     }
   }
@@ -751,7 +751,7 @@ ${productsText}
       // Execute operations in parallel for better performance
       return await Promise.all(operations);
     } catch (error) {
-      console.error('❌ Batch processing failed:', error);
+      this.logger.error('❌ Batch processing failed:', error);
       return [];
     }
   }
@@ -827,7 +827,7 @@ ${productsText}
       await this.processCommentBatch(operations);
       
     } catch (error) {
-      console.error('❌ Instagram AI interaction logging failed:', error);
+      this.logger.error('❌ Instagram AI interaction logging failed:', error);
     }
   }
 

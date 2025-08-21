@@ -5,12 +5,39 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll, beforeEach, mock } from 'bun:test';
+import { RateLimiterMemory } from 'rate-limiter-flexible';
 import { getInstagramAIService } from '../services/instagram-ai.js';
 import { getInstagramClient } from '../services/instagram-api.js';
 import { getServiceController } from '../services/service-controller.js';
 import { getConversationAIOrchestrator } from '../services/conversation-ai-orchestrator.js';
 import { getDatabase, initializeDatabase } from '../database/connection.js';
+
+// Mock security middleware to use in-memory rate limiter and no-op headers
+mock.module('../middleware/security.js', () => {
+  const limiter = new RateLimiterMemory({ points: 3, duration: 60 });
+  return {
+    securityHeaders: async (_c: any, next: any) => {
+      await next();
+    },
+    rateLimiter: async (c: any, next: any) => {
+      const key = c.req.header('x-rate-key') || 'default';
+      try {
+        await limiter.consume(key);
+        await next();
+      } catch {
+        return c.json({ error: 'Rate limit exceeded' }, 429);
+      }
+    }
+  };
+});
+
+// Stub meta rate limiter to always allow
+mock.module('../services/meta-rate-limiter.js', () => ({
+  getMetaRateLimiter: () => ({
+    checkRedisRateLimit: async () => ({ allowed: true, remaining: 1, resetTime: Date.now() + 1000 })
+  })
+}));
 
 // Test configuration
 const TEST_MERCHANT_ID = 'test-merchant-uuid-12345';
@@ -50,6 +77,7 @@ describe('Instagram Integration Tests', () => {
     await sql`DELETE FROM merchants WHERE id = ${TEST_MERCHANT_ID}::uuid`;
     await sql`DELETE FROM merchant_service_status WHERE merchant_id = ${TEST_MERCHANT_ID}::uuid`;
     await sql`DELETE FROM conversations WHERE merchant_id = ${TEST_MERCHANT_ID}::uuid`;
+    await sql`DELETE FROM webhook_events WHERE merchant_id = ${TEST_MERCHANT_ID}::uuid`;
   });
 
   describe('Service Control Tests', () => {
@@ -430,6 +458,73 @@ describe('Instagram Integration Tests', () => {
       
       // Cleanup
       await sql`DELETE FROM merchants WHERE id = ${otherMerchantId}::uuid`;
+    });
+  });
+
+  describe('Webhook Router Tests', () => {
+    beforeEach(async () => {
+      await sql`DELETE FROM webhook_events WHERE merchant_id = ${TEST_MERCHANT_ID}::uuid`;
+    });
+
+    test('should prevent duplicate Instagram webhook processing', async () => {
+      const { getWebhookRouter } = await import('../api/webhooks.js');
+      const router = getWebhookRouter();
+      let processed = 0;
+      (router as any).processInstagramEntry = async () => { processed++; };
+      const app = router.getApp();
+      const event = { object: 'instagram', entry: [{ id: 'page_1', time: 123, messaging: [] }] };
+      const headers = {
+        'x-merchant-id': TEST_MERCHANT_ID,
+        'x-rate-key': 'dup',
+        'content-type': 'application/json'
+      };
+
+      const res1 = await app.request('/webhooks/instagram', {
+        method: 'POST',
+        body: JSON.stringify(event),
+        headers
+      });
+      expect(res1.status).toBe(200);
+
+      const res2 = await app.request('/webhooks/instagram', {
+        method: 'POST',
+        body: JSON.stringify(event),
+        headers
+      });
+      expect(res2.status).toBe(200);
+
+      const events = await sql`SELECT COUNT(*) FROM webhook_events WHERE merchant_id = ${TEST_MERCHANT_ID}::uuid`;
+      expect(Number(events[0].count)).toBe(1);
+      expect(processed).toBe(1);
+    });
+
+    test('should respond with 429 when rate limit exceeded', async () => {
+      const { getWebhookRouter } = await import('../api/webhooks.js');
+      const router = getWebhookRouter();
+      (router as any).processInstagramEntry = async () => {};
+      const app = router.getApp();
+      const event = { object: 'instagram', entry: [{ id: 'page_1', time: 456, messaging: [] }] };
+      const headers = {
+        'x-merchant-id': TEST_MERCHANT_ID,
+        'x-rate-key': 'rate',
+        'content-type': 'application/json'
+      };
+
+      for (let i = 0; i < 3; i++) {
+        const res = await app.request('/webhooks/instagram', {
+          method: 'POST',
+          body: JSON.stringify(event),
+          headers
+        });
+        expect(res.status).toBe(200);
+      }
+
+      const res4 = await app.request('/webhooks/instagram', {
+        method: 'POST',
+        body: JSON.stringify(event),
+        headers
+      });
+      expect(res4.status).toBe(429);
     });
   });
 

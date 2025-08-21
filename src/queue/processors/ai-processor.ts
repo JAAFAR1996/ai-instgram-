@@ -15,7 +15,7 @@ export interface AIJobPayload {
   merchantId: string;
   customerId: string;
   messageContent: string;
-  platform: 'instagram' | 'whatsapp';
+  platform: 'instagram';
   interactionType: 'dm' | 'comment' | 'story_reply' | 'story_mention';
   messageId?: string;
   mediaContext?: {
@@ -171,15 +171,6 @@ export class AIProcessor implements JobProcessor {
         storyFeatures: merchant.settings?.storyFeatures || false,
         commerceEnabled: merchant.settings?.instagramCommerce || false
       };
-    } else if (payload.platform === 'whatsapp') {
-      return {
-        ...baseContext,
-        // WhatsApp-specific context
-        businessPhone: merchant.contactPhone,
-        catalogEnabled: merchant.settings?.whatsappCatalog || false,
-        paymentEnabled: merchant.settings?.whatsappPayments || false
-      };
-    }
 
     return baseContext;
   }
@@ -196,8 +187,6 @@ export class AIProcessor implements JobProcessor {
         case 'instagram':
           return await this.deliverInstagramMessage(payload, message);
           
-        case 'whatsapp':
-          return await this.deliverWhatsAppMessage(payload, message);
           
         default:
           return { success: false, error: `Unsupported platform: ${payload.platform}` };
@@ -245,20 +234,6 @@ export class AIProcessor implements JobProcessor {
     }
   }
 
-  /**
-   * Deliver WhatsApp message - DISABLED
-   */
-  private async deliverWhatsAppMessage(
-    payload: AIJobPayload,
-    message: string
-  ): Promise<{ success: boolean; platformMessageId?: string; error?: string }> {
-    console.log('❌ WhatsApp message delivery disabled');
-    
-    return {
-      success: false,
-      error: 'WhatsApp features are disabled'
-    };
-  }
 }
 
 // Export processor instance

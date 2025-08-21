@@ -157,7 +157,7 @@ export function merchantRateLimitMiddleware() {
 export function windowEnforcementMiddleware() {
   return async (c: Context, next: Next) => {
     const merchantId = c.get('merchantId') || c.req.query('merchantId');
-    const platform = (c.req.query('platform') || 'whatsapp') as Platform;
+    const platform = (c.req.query('platform') || 'instagram') as Platform;
     
     const body = await c.req.json().catch(() => ({}));
     const customerPhone = body.customer_phone || c.req.query('customer_phone');
