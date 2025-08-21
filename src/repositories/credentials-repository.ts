@@ -22,6 +22,7 @@ interface CredentialRow {
   merchant_id: string;
   whatsapp_phone_number_id: string | null;
   instagram_page_id: string | null;
+  business_account_id: string | null;
   webhook_verify_token: string | null;
   token_expires_at: string | null;
   last_token_refresh: string | null;
@@ -39,6 +40,7 @@ export interface StoredCredentials {
   merchantId: string;
   whatsappPhoneNumberId?: string;
   instagramPageId?: string;
+  businessAccountId?: string;
   webhookVerifyToken?: string;
   tokenExpiresAt?: Date;
   lastTokenRefresh?: Date;
@@ -223,10 +225,11 @@ export class CredentialsRepository {
     const sql: Sql = this.db.getSQL();
     
     const [row] = await sql<CredentialRow[]>`
-      SELECT 
+      SELECT
         merchant_id,
         whatsapp_phone_number_id,
         instagram_page_id,
+        business_account_id,
         webhook_verify_token,
         token_expires_at,
         last_token_refresh,
@@ -246,6 +249,7 @@ export class CredentialsRepository {
       merchantId: row.merchant_id,
       whatsappPhoneNumberId: row.whatsapp_phone_number_id ?? undefined,
       instagramPageId: row.instagram_page_id ?? undefined,
+      businessAccountId: row.business_account_id ?? undefined,
       webhookVerifyToken: row.webhook_verify_token ?? undefined,
       tokenExpiresAt: row.token_expires_at ? new Date(row.token_expires_at) : undefined,
       lastTokenRefresh: row.last_token_refresh ? new Date(row.last_token_refresh) : undefined,

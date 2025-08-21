@@ -195,10 +195,12 @@ export class RedisConnectionManager {
         info.status = 'error';
         info.lastError = redisError.message;
         info.healthScore = 0;
-        this.logger?.error('Redis rate limit exceeded, reconnection paused', {
+        this.logger?.warn('Redis rate limit exceeded, reconnection paused', {
           usageType,
           retryAt
         });
+        // schedule reconnection after the rate limit resets
+        this.scheduleReconnection(usageType, info);
         throw redisError;
       }
 
@@ -259,11 +261,13 @@ export class RedisConnectionManager {
 
       if (redisError instanceof RedisRateLimitError) {
         const retryAt = this.setRateLimitReset();
-        this.logger?.error('Redis rate limit exceeded, disconnecting', {
+        this.logger?.warn('Redis rate limit exceeded, disconnecting', {
           usageType,
           retryAt
         });
         connection.disconnect();
+        // pause reconnection until the limit resets
+        this.scheduleReconnection(usageType, info);
         return;
       }
 

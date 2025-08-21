@@ -107,7 +107,7 @@ export interface MerchantCredentials {
   whatsappTokenEncrypted?: string;
   instagramTokenEncrypted?: string;
   instagramPageId?: string;
-  businessAccountId?: string;
+  businessAccountId?: string; // corresponds to merchant_credentials.business_account_id
   appSecret?: string;
   webhookVerifyToken?: string;
   tokenCreatedIp?: string;
@@ -238,13 +238,15 @@ export class MerchantRepository {
       return await this.findById(id);
     }
 
-    const [merchant] = await this.db.query<MerchantRow>`
+    const rows = await this.db.query<MerchantRow>`
       UPDATE merchants
       SET ${(sql as any).join(updateFields, sql`, `)}
       WHERE id = ${id}::uuid
       RETURNING *
     `;
-    return merchant ? this.mapToMerchant(merchant) : null;
+    const row = rows[0];
+
+    return row ? this.mapToMerchant(row) : null;
   }
 
   /**
@@ -398,13 +400,13 @@ export class MerchantRepository {
     for (const row of results as MerchantStatsRow[]) {
       if (!row.subscription_tier && !row.business_category) {
         // Overall totals
-        stats.totalMerchants = parseInt(row.total_merchants);
-        stats.activeMerchants = parseInt(row.active_merchants);
-        stats.totalMessagesUsed = parseInt(row.total_messages_used ?? '0') || 0;
-        stats.averageMessagesPerMerchant = parseFloat(row.avg_messages_per_merchant ?? '0') || 0;
+        stats.totalMerchants = parseInt(row.total_merchants || '0');
+        stats.activeMerchants = parseInt(row.active_merchants || '0');
+        stats.totalMessagesUsed = parseInt(row.total_messages_used || '0');
+        stats.averageMessagesPerMerchant = parseFloat(row.avg_messages_per_merchant || '0');
       } else if (row.subscription_tier && !row.business_category) {
         // Subscription tier totals
-        stats.bySubscriptionTier[row.subscription_tier] = parseInt(row.total_merchants);
+        stats.bySubscriptionTier[row.subscription_tier] = parseInt(row.total_merchants || '0');
       } else if (row.subscription_tier && row.business_category) {
         // Business category totals
         if (!stats.byBusinessCategory[row.business_category]) {

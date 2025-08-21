@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import postgres, { Sql, Row } from 'postgres';
+import postgres, { Sql } from 'postgres';
 import type { DatabaseError } from '../types/database.js';
 import { getConfig } from '../config/environment.js';
 
@@ -206,7 +206,7 @@ export class DatabaseConnection {
    * Execute a parameterized query using tagged templates
    * Provides automatic sanitization via the postgres library
    */
-  public async query<T extends object = Row>(
+  public async query<T>(
     strings: TemplateStringsArray,
     ...params: any[]
   ): Promise<T[]> {
@@ -215,8 +215,7 @@ export class DatabaseConnection {
         throw new Error('Database connection not initialized');
       }
 
-      const result = await this.sql<T[]>(strings, ...params);
-      return result;
+      return this.sql<T[]>(strings, ...params);
     } catch (error) {
       console.error('❌ Database query error:', error);
       throw this.formatDatabaseError(error);

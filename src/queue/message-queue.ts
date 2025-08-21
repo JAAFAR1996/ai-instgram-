@@ -10,7 +10,7 @@ import { getConfig } from '../config/environment.js';
 import { getAnalyticsService } from '../services/analytics-service.js';
 import { getLogger } from '../services/logger.js';
 import { pushDLQ } from './dead-letter.js';
-import type { Sql, Fragment } from 'postgres';
+import { type Sql, type Fragment } from 'postgres';
 
 export interface QueueJob {
   id: string;

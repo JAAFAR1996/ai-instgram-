@@ -458,6 +458,7 @@ export interface MerchantCredentials extends TimestampedEntity {
   platform: Platform;
   instagram_token_encrypted?: string;
   instagram_page_id?: string;
+  business_account_id?: string;
   webhook_verify_token?: string;
   token_expires_at?: Date;
   last_token_refresh?: Date;

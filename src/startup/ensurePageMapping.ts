@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 
-export async function ensurePageMapping(pool: Pool, pageId: string, igBusinessAccountId?: string) {
+export async function ensurePageMapping(pool: Pool, pageId: string, businessAccountId?: string) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -54,7 +54,7 @@ export async function ensurePageMapping(pool: Pool, pageId: string, igBusinessAc
         business_account_id = COALESCE(EXCLUDED.business_account_id, merchant_credentials.business_account_id),
         platform = 'instagram',
         updated_at = NOW()
-    `, [merchantId, pageId, igBusinessAccountId ?? null]);
+    `, [merchantId, pageId, businessAccountId ?? null]);
 
     await client.query('COMMIT');
     console.log('✅ ensurePageMapping: ok for page', pageId, 'merchant', merchantId);

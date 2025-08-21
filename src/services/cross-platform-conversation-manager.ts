@@ -9,7 +9,7 @@
 import { getDatabase } from '../database/connection.js';
 import { getConversationAIOrchestrator, type CrossPlatformContext } from './conversation-ai-orchestrator.js';
 import type { Platform } from '../types/database.js';
-import type { Sql, Fragment } from 'postgres';
+import { type Sql, type Fragment } from 'postgres';
 
 export interface UnifiedCustomerProfile {
   customerId: string;

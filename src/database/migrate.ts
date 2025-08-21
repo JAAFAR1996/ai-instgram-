@@ -413,6 +413,7 @@ async function runCLI() {
   try {
     switch (command) {
       case 'migrate':
+      case 'up':
         await runMigrations();
         break;
       case 'rollback':
@@ -459,6 +460,6 @@ async function runCLI() {
 }
 
 // Check if this file is being run directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   runCLI().catch(console.error);
 }
