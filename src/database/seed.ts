@@ -48,7 +48,7 @@ export class DatabaseSeeder {
   public async clearData(): Promise<void> {
     console.log('🗑️ Clearing existing test data...');
     
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     await sql.begin(async (sql) => {
       await sql`DELETE FROM message_logs WHERE 1=1`;
@@ -67,7 +67,7 @@ export class DatabaseSeeder {
   private async seedMerchants(): Promise<string[]> {
     console.log('👥 Seeding merchants...');
     
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const merchantsData = [
       {
@@ -111,7 +111,7 @@ export class DatabaseSeeder {
       }
     ];
 
-    const merchants = await sql<{ id: string }[]>`
+    const merchants = await sql<{ id: string }>`
       INSERT INTO merchants (
         business_name, business_category, business_address,
         whatsapp_number, whatsapp_number_id, instagram_username, 
@@ -137,7 +137,7 @@ export class DatabaseSeeder {
   private async seedProducts(merchantIds: string[]): Promise<void> {
     console.log('📱 Seeding products...');
     
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     // Products for Ahmed's Mobile Shop
     const ahmedProducts = [
@@ -319,7 +319,7 @@ export class DatabaseSeeder {
   private async seedConversations(merchantIds: string[]): Promise<string[]> {
     console.log('💬 Seeding conversations...');
     
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const conversationsData = [
       {
@@ -389,7 +389,7 @@ export class DatabaseSeeder {
       }
     ];
 
-    const conversations = await sql<{ id: string }[]>`
+    const conversations = await sql<{ id: string }>`
       INSERT INTO conversations (
         merchant_id, customer_phone, customer_name, customer_instagram,
         platform, conversation_stage, session_data, message_count,
@@ -413,7 +413,7 @@ export class DatabaseSeeder {
   private async seedOrders(merchantIds: string[], conversationIds: string[]): Promise<void> {
     console.log('📦 Seeding orders...');
     
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const ordersData = [
       {
@@ -521,7 +521,7 @@ export class DatabaseSeeder {
   private async seedMessageLogs(conversationIds: string[]): Promise<void> {
     console.log('📨 Seeding message logs...');
     
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     // Sample messages for conversations
     const messagesData = [

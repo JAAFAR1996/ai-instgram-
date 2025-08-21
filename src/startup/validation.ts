@@ -227,7 +227,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
   
   try {
     const db = getDatabase();
-    const sql = db.getSQL();
+    const sql = db.getSQL() as any;
 
     // Check required tables exist
     const requiredTables = [
@@ -238,7 +238,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
       'audit_logs'
     ];
 
-    const existingTables = await sql<{ table_name: string }>`
+    const existingTables: { table_name: string }[] = await sql<{ table_name: string }>`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public' 
@@ -255,7 +255,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
 
     // Check required extensions
     const requiredExtensions = ['uuid-ossp'];
-    const extensions = await sql<{ extname: string }>`
+    const extensions: { extname: string }[] = await sql<{ extname: string }>`
       SELECT extname 
       FROM pg_extension 
       WHERE extname = ANY(${requiredExtensions})
@@ -461,7 +461,7 @@ function logValidationReport(report: StartupValidationReport): void {
 export async function validateMerchantConfig(merchantId: string): Promise<boolean> {
   try {
     const db = getDatabase();
-    const sql = db.getSQL();
+    const sql = db.getSQL() as any;
 
     // Check if merchant exists and is active
     const [merchant] = await sql<{ id: string; is_active: boolean; business_name: string }>`

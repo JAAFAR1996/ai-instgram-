@@ -109,9 +109,9 @@ export class MerchantRepository {
    * Create new merchant
    */
   async create(data: CreateMerchantRequest): Promise<Merchant> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
-    const [merchant] = await sql<MerchantRow[]>`
+    const [merchant] = await sql<MerchantRow>`
       INSERT INTO merchants (
         business_name,
         business_category,
@@ -141,9 +141,9 @@ export class MerchantRepository {
    * Find merchant by ID
    */
   async findById(id: string): Promise<Merchant | null> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
-    const [merchant] = await sql<MerchantRow[]>`
+    const [merchant] = await sql<MerchantRow>`
       SELECT * FROM merchants
       WHERE id = ${id}::uuid
     `;
@@ -155,9 +155,9 @@ export class MerchantRepository {
    * Find merchant by email
    */
   async findByEmail(email: string): Promise<Merchant | null> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
-    const [merchant] = await sql<MerchantRow[]>`
+    const [merchant] = await sql<MerchantRow>`
       SELECT * FROM merchants
       WHERE contact_email = ${email}
     `;
@@ -169,7 +169,7 @@ export class MerchantRepository {
    * Update merchant
    */
   async update(id: string, data: UpdateMerchantRequest): Promise<Merchant | null> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const updateFields: Sql[] = [];
 
@@ -232,7 +232,7 @@ export class MerchantRepository {
    * Update last active time
    */
   async updateLastActive(id: string): Promise<void> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     await sql`
       UPDATE merchants
@@ -247,7 +247,7 @@ export class MerchantRepository {
    * Increment message usage
    */
   async incrementMessageUsage(id: string, count: number = 1): Promise<boolean> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const result = await sql`
       UPDATE merchants
@@ -266,7 +266,7 @@ export class MerchantRepository {
    * Reset monthly message usage (for new billing cycle)
    */
   async resetMonthlyUsage(id: string): Promise<void> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     await sql`
       UPDATE merchants
@@ -301,7 +301,7 @@ export class MerchantRepository {
    * Find merchants with filters
    */
   async findMany(filters: MerchantFilters = {}): Promise<Merchant[]> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const conditions: Sql[] = [];
 
@@ -352,7 +352,7 @@ export class MerchantRepository {
    * Get merchant statistics
    */
   async getStats(): Promise<MerchantStats> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const results = await this.db.query`
       SELECT 
@@ -418,9 +418,9 @@ export class MerchantRepository {
    * Get merchants approaching message limit
    */
   async getMerchantsApproachingLimit(threshold: number = 0.8): Promise<Merchant[]> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
-    const merchants = await sql<MerchantRow[]>`
+    const merchants = await sql<MerchantRow>`
       SELECT * FROM merchants
       WHERE is_active = true
       AND monthly_messages_used >= (monthly_message_limit * ${threshold})
@@ -435,9 +435,9 @@ export class MerchantRepository {
    * Get merchants over message limit
    */
   async getMerchantsOverLimit(): Promise<Merchant[]> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
-    const merchants = await sql<MerchantRow[]>`
+    const merchants = await sql<MerchantRow>`
       SELECT * FROM merchants
       WHERE is_active = true
       AND monthly_messages_used >= monthly_message_limit
@@ -451,7 +451,7 @@ export class MerchantRepository {
    * Count merchants with filters
    */
   async count(filters: MerchantFilters = {}): Promise<number> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const conditions: Sql[] = [];
 

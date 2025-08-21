@@ -51,6 +51,35 @@ export interface PerformanceMetrics {
   errorMessage?: string;
 }
 
+interface SystemPerformanceRow {
+  avg_response_time: number | null;
+  error_rate: number | null;
+  total_requests: number | null;
+  avg_memory_usage: number | null;
+}
+
+interface ActiveConnectionsRow {
+  active_connections: string;
+}
+
+interface QualityStatsRow {
+  messages_sent_24h: number;
+  messages_delivered_24h: number;
+  messages_read_24h: number;
+  user_initiated_conversations_24h: number;
+  business_initiated_conversations_24h: number;
+  avg_response_time_minutes: number | null;
+}
+
+interface QualityTrendRow {
+  date: string;
+  quality_rating: number | null;
+  status: QualityStatus;
+  messages_sent_24h: number;
+  delivery_rate: number;
+  response_rate: number;
+}
+
 export class MonitoringService {
   private db = getDatabase();
 
@@ -59,7 +88,7 @@ export class MonitoringService {
    */
   public async checkWhatsAppQuality(merchantId: string): Promise<QualityCheck> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       
       // Get recent metrics for the merchant
       const metrics = await this.calculateQualityMetrics(merchantId, 'whatsapp');
@@ -131,7 +160,7 @@ export class MonitoringService {
    */
   public async logPerformanceMetrics(metrics: PerformanceMetrics): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       
       await sql`
         INSERT INTO audit_logs (
@@ -205,16 +234,9 @@ export class MonitoringService {
     responseRate: number;
   }>> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       
-      const trends = await sql<{
-        date: string;
-        quality_rating: number | null;
-        status: QualityStatus;
-        messages_sent_24h: number;
-        delivery_rate: number;
-        response_rate: number;
-      }[]>
+      const trends = await sql<QualityTrendRow>
       `
         SELECT
           DATE(created_at) as date,
@@ -236,7 +258,7 @@ export class MonitoringService {
       
       return trends.map(trend => ({
         date: trend.date,
-        qualityRating: trend.quality_rating,
+        qualityRating: trend.quality_rating ?? undefined,
         status: trend.status,
         messagesSent: trend.messages_sent_24h,
         deliveryRate: Math.round(trend.delivery_rate * 100) / 100,
@@ -263,14 +285,9 @@ export class MonitoringService {
     memoryUsage: number;
   }> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       
-      const performance = await sql<{
-        avg_response_time: number | null;
-        error_rate: number | null;
-        total_requests: number | null;
-        avg_memory_usage: number | null;
-      }[]>
+      const performance = await sql<SystemPerformanceRow>
       `
         SELECT
           AVG(execution_time_ms) as avg_response_time,
@@ -282,9 +299,7 @@ export class MonitoringService {
         AND action LIKE '%API_%'
       `;
 
-      const connections = await sql<{
-        active_connections: string;
-      }[]>
+      const connections = await sql<ActiveConnectionsRow>
       `
         SELECT count(*) as active_connections
         FROM pg_stat_activity
@@ -313,16 +328,9 @@ export class MonitoringService {
    */
   private async calculateQualityMetrics(merchantId: string, platform: Platform): Promise<any> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       
-      const stats = await sql<{
-        messages_sent_24h: number;
-        messages_delivered_24h: number;
-        messages_read_24h: number;
-        user_initiated_conversations_24h: number;
-        business_initiated_conversations_24h: number;
-        avg_response_time_minutes: number | null;
-      }[]>
+      const stats = await sql<QualityStatsRow>
       `
         SELECT
           COUNT(*) FILTER (WHERE direction = 'OUTGOING') as messages_sent_24h,
@@ -467,7 +475,7 @@ export class MonitoringService {
     status: QualityStatus
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       
       await sql`
         INSERT INTO quality_metrics (
@@ -552,7 +560,7 @@ export class MonitoringService {
         event: 'sendQualityAlert'
       });
       
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       
       for (const alert of alerts) {
         await sql`

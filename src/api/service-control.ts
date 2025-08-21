@@ -97,7 +97,8 @@ export class ServiceControlAPI {
    */
   private async toggleService(c: Context) {
     try {
-      const data = c.req.valid('json');
+      // Cast the validated request body to the ToggleServiceSchema type
+      const data = c.req.valid('json') as z.infer<typeof ToggleServiceSchema>;
       
       const result = await this.serviceController.toggleService(data);
       

@@ -263,7 +263,7 @@ INSERT INTO migrations (name, filename) VALUES ('${name}', '${filename}');
    * Create migrations table if it doesn't exist
    */
   private async createMigrationsTable(): Promise<void> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     await sql`
       CREATE TABLE IF NOT EXISTS migrations (
@@ -294,10 +294,10 @@ INSERT INTO migrations (name, filename) VALUES ('${name}', '${filename}');
    * Get executed migrations from database
    */
   private async getExecutedMigrations(): Promise<Migration[]> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     try {
-      const migrations = await sql<Migration[]>`
+      const migrations = await sql<Migration>`
         SELECT id, name, filename, executed_at 
         FROM migrations 
         ORDER BY id ASC

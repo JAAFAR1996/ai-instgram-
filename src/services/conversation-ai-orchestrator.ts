@@ -220,10 +220,10 @@ export class ConversationAIOrchestrator {
     recommendations: string[];
   }> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       // Get customer interactions across platforms
-      const interactions = await sql<InteractionRow[]>`
+      const interactions = await sql<InteractionRow>`
         SELECT 
           c.platform,
           c.conversation_stage,
@@ -276,9 +276,9 @@ export class ConversationAIOrchestrator {
     merchantId: string
   ): Promise<CrossPlatformContext> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
-      const platformHistory = await sql<PlatformHistoryRow[]>`
+      const platformHistory = await sql<PlatformHistoryRow>`
         SELECT 
           platform,
           COUNT(*) as interaction_count,
@@ -302,7 +302,7 @@ export class ConversationAIOrchestrator {
       );
 
       // Get customer journey stages
-      const journeyStages = await sql<JourneyStageRow[]>`
+      const journeyStages = await sql<JourneyStageRow>`
         SELECT 
           platform,
           conversation_stage,
@@ -617,7 +617,7 @@ export class ConversationAIOrchestrator {
     adaptations: PlatformAdaptation[]
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       
       await sql`
         INSERT INTO audit_logs (

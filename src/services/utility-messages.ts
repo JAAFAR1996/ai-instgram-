@@ -180,7 +180,7 @@ export class UtilityMessagesService {
         };
       }
 
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       const templateId = crypto.randomUUID();
 
       // Store template in database
@@ -240,7 +240,7 @@ export class UtilityMessagesService {
     templateId: string
   ): Promise<UtilityMessageTemplate | null> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
 
       const result = await sql<UtilityMessageTemplateRow>`
         SELECT * FROM utility_message_templates
@@ -310,7 +310,7 @@ export class UtilityMessagesService {
     messageId: string
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       
       await sql`
         INSERT INTO utility_message_logs (
@@ -348,7 +348,7 @@ export class UtilityMessagesService {
    */
   async getTemplates(merchantId: string): Promise<UtilityMessageTemplate[]> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       
       const result = await sql<UtilityMessageTemplateRow>`
         SELECT * FROM utility_message_templates

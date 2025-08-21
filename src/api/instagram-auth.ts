@@ -199,7 +199,7 @@ app.get('/auth/instagram/callback', async (c) => {
     const businessAccountInfo = await oauthService.getBusinessAccountInfo(tokenData.longLivedToken);
     
     // الحصول على معلومات المستخدم
-    const userProfile = await oauthService.getUserProfile(tokenData.longLivedToken, merchantId);
+    const userProfile = await oauthService.getUserProfile(tokenData.longLivedToken);
     
     // حفظ البيانات في قاعدة البيانات
     console.log('💾 Saving credentials...');
@@ -273,9 +273,19 @@ app.get('/auth/instagram/status/:merchantId', async (c) => {
     // البحث عن بيانات Instagram في قاعدة البيانات
     const db = getDatabase();
     const sql = db.getSQL();
-    
-    const integration = await sql`
-      SELECT 
+
+    interface InstagramIntegration {
+      business_account_id: string;
+      business_account_name: string;
+      status: string;
+      scopes: string[] | null;
+      token_expires_at: string | null;
+      created_at: string;
+      updated_at: string;
+    }
+
+    const integration = await sql<InstagramIntegration[]>`
+      SELECT
         business_account_id,
         business_account_name,
         status,
@@ -283,8 +293,8 @@ app.get('/auth/instagram/status/:merchantId', async (c) => {
         token_expires_at,
         created_at,
         updated_at
-      FROM merchant_integrations 
-      WHERE merchant_id = ${merchantId}::uuid 
+      FROM merchant_integrations
+      WHERE merchant_id = ${merchantId}::uuid
       AND platform = 'instagram'
     `;
     
@@ -299,16 +309,7 @@ app.get('/auth/instagram/status/:merchantId', async (c) => {
       });
     }
     
-    interface InstagramIntegration {
-      status: string;
-      token_expires_at: string;
-      instagram_business_account_id: string;
-      instagram_page_id: string;
-      instagram_page_name: string;
-      instagram_username: string;
-      instagram_profile_picture_url: string;
-    }
-    const account = integration[0] as InstagramIntegration;
+    const account = integration[0];
     const isExpired = account.token_expires_at && 
       new Date() >= new Date(account.token_expires_at);
     
@@ -398,7 +399,12 @@ app.post('/auth/instagram/refresh/:merchantId', async (c) => {
 
     const db = getDatabase();
     const sql = db.getSQL();
-    const result = await sql`
+
+    interface TokenRow {
+      instagram_access_token: string;
+    }
+
+    const result = await sql<TokenRow[]>`
       SELECT instagram_access_token
       FROM merchant_credentials
       WHERE merchant_id = ${merchantId}::uuid
@@ -452,7 +458,13 @@ app.post('/auth/instagram/validate/:merchantId', async (c) => {
 
     const db = getDatabase();
     const sql = db.getSQL();
-    const result = await sql`
+
+    interface TokenValidationRow {
+      instagram_access_token: string;
+      token_expires_at: string;
+    }
+
+    const result = await sql<TokenValidationRow[]>`
       SELECT instagram_access_token, token_expires_at
       FROM merchant_credentials
       WHERE merchant_id = ${merchantId}::uuid
@@ -481,7 +493,7 @@ app.post('/auth/instagram/validate/:merchantId', async (c) => {
     }
 
     const oauthService = getInstagramOAuthService();
-    const isValid = await oauthService.validateToken(record.instagram_access_token, merchantId);
+    const isValid = await oauthService.validateToken(record.instagram_access_token);
 
     return c.json({
       success: true,

@@ -74,7 +74,7 @@ export class CredentialsRepository {
     const encryptedData = this.encryption.encryptToken(token, platform, identifier);
     const encryptedJson = JSON.stringify(encryptedData);
 
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     if (platform === 'whatsapp') {
       await sql`
@@ -135,11 +135,11 @@ export class CredentialsRepository {
    * Retrieve and decrypt platform token
    */
   async getToken(merchantId: string, platform: Platform): Promise<string | null> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const field = platform === 'whatsapp' ? 'whatsapp_token_encrypted' : 'instagram_token_encrypted';
     
-    const [row] = await sql<TokenRow[]>`
+    const [row] = await sql<TokenRow>`
       SELECT ${sql(field)} as token_encrypted
       FROM merchant_credentials 
       WHERE merchant_id = ${merchantId}::uuid
@@ -167,9 +167,9 @@ export class CredentialsRepository {
    * Check if token exists and is not expired
    */
   async isTokenValid(merchantId: string, platform: Platform): Promise<boolean> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
-    const [row] = await sql<TokenExpiryRow[]>`
+    const [row] = await sql<TokenExpiryRow>`
       SELECT token_expires_at
       FROM merchant_credentials 
       WHERE merchant_id = ${merchantId}::uuid
@@ -192,7 +192,7 @@ export class CredentialsRepository {
    * Remove platform token (secure deletion)
    */
   async removeToken(merchantId: string, platform: Platform): Promise<void> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     if (platform === 'whatsapp') {
       await sql`
@@ -219,9 +219,9 @@ export class CredentialsRepository {
    * Get all stored credentials (for merchant)
    */
   async getCredentials(merchantId: string): Promise<StoredCredentials | null> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
-    const [row] = await sql<CredentialRow[]>`
+    const [row] = await sql<CredentialRow>`
       SELECT 
         merchant_id,
         whatsapp_phone_number_id,
@@ -259,7 +259,7 @@ export class CredentialsRepository {
    * Record access for audit trail
    */
   private async recordAccess(merchantId: string, ip?: string): Promise<void> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     await sql`
       UPDATE merchant_credentials 
@@ -288,9 +288,9 @@ export class CredentialsRepository {
    * Get expired tokens for cleanup
    */
   async getExpiredTokens(): Promise<string[]> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
-    const rows = await sql<MerchantIdRow[]>`
+    const rows = await sql<MerchantIdRow>`
       SELECT DISTINCT merchant_id
       FROM merchant_credentials 
       WHERE token_expires_at IS NOT NULL 

@@ -11,6 +11,7 @@ import { Context, Next } from 'hono';
 import { getRedisConnectionManager } from '../services/RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { getLogger } from '../services/logger.js';
+import { MerchantIdMissingError } from '../utils/merchant.js';
 
 export interface IdempotencyConfig {
   ttlSeconds: number;

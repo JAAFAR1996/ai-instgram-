@@ -224,6 +224,30 @@ export class RLSDatabase {
   }
 
   /**
+   * Internal helper to log security-related actions
+   */
+  private async logAudit(action: string, userId?: string, details?: any): Promise<void> {
+    try {
+      const sql = this.db.getSQL();
+      await sql`
+        INSERT INTO audit_logs (
+          action,
+          entity_type,
+          details,
+          performed_by
+        ) VALUES (
+          ${action},
+          'RLS_CONTEXT',
+          ${details ? JSON.stringify(details) : null},
+          ${userId ?? null}
+        )
+      `;
+    } catch (error) {
+      console.error('❌ Failed to log audit event:', error);
+    }
+  }
+
+  /**
    * Get raw database connection (dangerous - bypasses RLS)
    */
   getRawDatabase() {

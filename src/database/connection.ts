@@ -6,6 +6,7 @@
  */
 
 import postgres from 'postgres';
+import type { Sql } from 'postgres';
 import type { DatabaseError } from '../types/database.js';
 import { getConfig, getEnvVar } from '../config/environment.js';
 
@@ -22,12 +23,45 @@ interface ConnectionConfig {
   connect_timeout?: number;
 }
 
-// Basic interface for postgres tagged template client
-interface SqlClient {
-  <T = unknown>(strings: TemplateStringsArray, ...params: unknown[]): Promise<T[]>;
-  begin<T>(callback: (sql: SqlClient) => Promise<T>): Promise<T>;
-  end(): Promise<void>;
+// Interfaces for query results
+interface TestResult {
+  current_time: Date;
+  db_version: string;
 }
+
+interface ExtensionRow {
+  extname: string;
+}
+
+interface StatsRow {
+  active_connections: string;
+  database_size: string;
+}
+
+interface TableCountRow {
+  count: string;
+}
+
+interface DbSizeRow {
+  size: string;
+}
+
+interface LargestTableRow {
+  table_name: string;
+  row_count: number;
+  size: string;
+}
+
+interface TableStatsRow {
+  table_name: string;
+  row_count: number;
+  size: string;
+}
+
+
+
+// Postgres client type
+type SqlClient = Sql<{}>;
 
 // Connection pool class
 export class DatabaseConnection {
@@ -79,27 +113,28 @@ export class DatabaseConnection {
 
       console.log('🔗 Connecting to PostgreSQL database...');
       
-      this.sql = postgres(this.config.host, {
+      this.sql = postgres({
+        host: this.config.host,
         port: this.config.port,
         database: this.config.database,
-        username: this.config.username,
+        user: this.config.username,
         password: this.config.password,
         ssl: this.config.ssl ? 'require' : false,
         max: this.config.max_connections,
         idle_timeout: this.config.idle_timeout,
         connect_timeout: this.config.connect_timeout,
-        
+
         // Additional performance settings
         transform: {
           // Transform undefined to null for PostgreSQL compatibility
           undefined: null
         },
-        
+
         // Error handling
         onnotice: (notice: any) => {
           console.warn('📝 PostgreSQL Notice:', notice);
         },
-        
+
         // Debugging in development
         debug: process.env.NODE_ENV === 'development'
       });
@@ -127,7 +162,7 @@ export class DatabaseConnection {
       }
 
       // Test basic connectivity
-      const result = await this.sql`SELECT NOW() as current_time, version() as db_version`;
+      const result = await this.sql<TestResult>`SELECT NOW() as current_time, version() as db_version`;
       
       if (result.length === 0) {
         throw new Error('No response from database');
@@ -155,13 +190,13 @@ export class DatabaseConnection {
     try {
       if (!this.sql) throw new Error('Database not connected');
 
-      const extensions = await this.sql`
-        SELECT extname 
-        FROM pg_extension 
+      const extensions = await this.sql<ExtensionRow>`
+        SELECT extname
+        FROM pg_extension
         WHERE extname = ANY(${requiredExtensions})
       `;
 
-      const installedExtensions = extensions.map(ext => ext.extname);
+      const installedExtensions = extensions.map((ext) => ext.extname);
       const missingExtensions = requiredExtensions.filter(ext => !installedExtensions.includes(ext));
 
       if (missingExtensions.length > 0) {
@@ -178,7 +213,7 @@ export class DatabaseConnection {
   /**
    * Get the SQL instance for querying
    */
-  public getSQL(): SqlClient {
+  public getSQL(): Sql {
     if (!this.sql || !this.isConnected) {
       throw new Error('Database connection not initialized. Call connect() first.');
     }
@@ -210,7 +245,7 @@ export class DatabaseConnection {
    * Execute a transaction
    */
   public async transaction<T>(
-    callback: (sql: SqlClient) => Promise<T>
+    callback: (sql: Sql) => Promise<T>
   ): Promise<T> {
     if (!this.sql) {
       throw new Error('Database connection not initialized');
@@ -219,7 +254,7 @@ export class DatabaseConnection {
     try {
       return await this.sql.begin(async (sql) => {
         return await callback(sql);
-      }) as T;
+      });
     } catch (error) {
       console.error('❌ Database transaction error:', error);
       throw this.formatDatabaseError(error);
@@ -247,11 +282,11 @@ export class DatabaseConnection {
       }
 
       // Get connection stats
-      const stats = await this.sql`
-        SELECT 
+      const stats = await this.sql<StatsRow>`
+        SELECT
           count(*) as active_connections,
           pg_size_pretty(pg_database_size(current_database())) as database_size
-        FROM pg_stat_activity 
+        FROM pg_stat_activity
         WHERE state = 'active'
       `;
 
@@ -263,7 +298,7 @@ export class DatabaseConnection {
         details: {
           connected: this.isConnected,
           response_time_ms: responseTime,
-          active_connections: parseInt(stats[0].active_connections),
+          active_connections: parseInt(stats[0].active_connections, 10),
           database_size: stats[0].database_size
         }
       };
@@ -298,35 +333,35 @@ export class DatabaseConnection {
       if (!this.sql) throw new Error('Database not connected');
 
       // Get table count
-      const tableCount = await this.sql`
-        SELECT count(*) as count 
-        FROM information_schema.tables 
+      const tableCount = await this.sql<TableCountRow>`
+        SELECT count(*) as count
+        FROM information_schema.tables
         WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
       `;
 
       // Get database size
-      const dbSize = await this.sql`
+      const dbSize = await this.sql<DbSizeRow>`
         SELECT pg_size_pretty(pg_database_size(current_database())) as size
       `;
 
       // Get largest tables
-      const largestTables = await this.sql`
-        SELECT 
+      const largestTables = await this.sql<LargestTableRow>`
+        SELECT
           schemaname||'.'||tablename as table_name,
           n_tup_ins + n_tup_upd + n_tup_del as row_count,
           pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size
-        FROM pg_stat_user_tables 
-        ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC 
+        FROM pg_stat_user_tables
+        ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
         LIMIT 10
       `;
 
-      const totalRecords = largestTables.reduce((sum, table) => sum + table.row_count, 0);
+      const totalRecords = largestTables.reduce<number>((sum, table) => sum + table.row_count, 0);
 
       return {
-        total_tables: parseInt(tableCount[0].count),
+        total_tables: parseInt(tableCount[0].count, 10),
         total_records: totalRecords,
         database_size: dbSize[0].size,
-        largest_tables: largestTables.map(table => ({
+        largest_tables: largestTables.map((table) => ({
           table_name: table.table_name,
           row_count: table.row_count,
           size: table.size
@@ -471,7 +506,7 @@ export async function createSecureConnection(merchantId: string) {
  */
 export async function executeWithMerchantContext<T = unknown>(
   merchantId: string,
-  queryFn: (sql: SqlClient) => Promise<T>
+  queryFn: (sql: Sql) => Promise<T>
 ): Promise<T> {
   const db = await createSecureConnection(merchantId);
   const sql = db.getSQL();

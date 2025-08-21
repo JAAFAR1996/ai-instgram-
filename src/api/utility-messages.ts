@@ -312,7 +312,7 @@ app.get('/api/utility-messages/:merchantId/stats',
     try {
       const { merchantId } = c.req.valid('param');
       const db = getDatabase();
-      const sql = db.getSQL();
+      const sql = db.getSQL() as any;
 
       try {
         const [counts] = await sql<{

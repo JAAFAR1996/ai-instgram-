@@ -144,9 +144,9 @@ export class MessageRepository {
    * Create new message
    */
   async create(data: CreateMessageRequest): Promise<Message> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
-    const [message] = await sql<MessageRow[]>`
+    const [message] = await sql<MessageRow>`
       INSERT INTO message_logs (
         conversation_id,
         direction,
@@ -186,9 +186,9 @@ export class MessageRepository {
    * Find message by ID
    */
   async findById(id: string): Promise<Message | null> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
-    const [message] = await sql<MessageRow[]>`
+    const [message] = await sql<MessageRow>`
       SELECT * FROM message_logs
       WHERE id = ${id}::uuid
     `;
@@ -200,7 +200,7 @@ export class MessageRepository {
    * Update message
    */
   async update(id: string, data: UpdateMessageRequest): Promise<Message | null> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const updateFields: Sql[] = [];
 
@@ -247,7 +247,7 @@ export class MessageRepository {
    * Find messages with filters
    */
   async findMany(filters: MessageFilters = {}): Promise<Message[]> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const conditions: Sql[] = [];
 
@@ -312,10 +312,10 @@ export class MessageRepository {
     limit: number = 50,
     offset: number = 0
   ): Promise<ConversationHistory> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     // Get messages
-    const messages = await sql<ConversationHistoryRow[]>`
+    const messages = await sql<ConversationHistoryRow>`
       SELECT * FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
       ORDER BY created_at ASC
@@ -324,7 +324,7 @@ export class MessageRepository {
     `;
 
     // Get total count
-    const [countResult] = await sql<CountRow[]>`
+    const [countResult] = await sql<CountRow>`
       SELECT COUNT(*) as count FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
     `;
@@ -347,9 +347,9 @@ export class MessageRepository {
     conversationId: string,
     limit: number = 10
   ): Promise<Message[]> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
-    const messages = await sql<MessageRow[]>`
+    const messages = await sql<MessageRow>`
       SELECT * FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
       ORDER BY created_at DESC
@@ -406,7 +406,7 @@ export class MessageRepository {
     dateFrom?: Date,
     dateTo?: Date
   ): Promise<MessageStats> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const conditions: Sql[] = [];
 
@@ -500,7 +500,7 @@ export class MessageRepository {
    * Delete old messages (cleanup)
    */
   async deleteOldMessages(olderThanDays: number): Promise<number> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
@@ -517,7 +517,7 @@ export class MessageRepository {
    * Count messages with filters
    */
   async count(filters: MessageFilters = {}): Promise<number> {
-    const sql = this.db.getSQL();
+    const sql = this.db.getSQL() as any;
     
     const conditions: Sql[] = [];
 
