@@ -315,7 +315,13 @@ app.get('/api/utility-messages/:merchantId/stats',
       const sql = db.getSQL();
 
       try {
-        const [counts] = await sql`
+        const [counts] = await sql<{
+          total_sent: number;
+          sent_today: number;
+          sent_this_week: number;
+          sent_this_month: number;
+          last_sent: Date | null;
+        }>`
           SELECT 
             COUNT(*) AS total_sent,
             COUNT(*) FILTER (WHERE sent_at >= DATE_TRUNC('day', NOW())) AS sent_today,
@@ -326,7 +332,7 @@ app.get('/api/utility-messages/:merchantId/stats',
           WHERE merchant_id = ${merchantId}::uuid
         `;
 
-        const typeRows = await sql`
+        const typeRows = await sql<{ message_type: string; count: number }>`
           SELECT message_type, COUNT(*) AS count
           FROM utility_message_logs
           WHERE merchant_id = ${merchantId}::uuid

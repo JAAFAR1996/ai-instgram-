@@ -242,7 +242,7 @@ export class UtilityMessagesService {
     try {
       const sql = this.db.getSQL();
 
-      const result = await sql<UtilityMessageTemplateRow[]>`
+      const result = await sql<UtilityMessageTemplateRow>`
         SELECT * FROM utility_message_templates
         WHERE id = ${templateId} AND merchant_id = ${merchantId}::uuid AND approved = true
       `;
@@ -251,7 +251,7 @@ export class UtilityMessagesService {
         return null;
       }
 
-      const row = result[0];
+      const row: UtilityMessageTemplateRow = result[0];
       return {
         id: row.id,
         name: row.name,
@@ -259,8 +259,8 @@ export class UtilityMessagesService {
         content: row.content,
         variables: JSON.parse(row.variables || '[]'),
         approved: row.approved,
-        created_at: row.created_at,
-        updated_at: row.updated_at
+        created_at: new Date(row.created_at),
+        updated_at: new Date(row.updated_at)
       };
 
     } catch (error) {
@@ -350,21 +350,21 @@ export class UtilityMessagesService {
     try {
       const sql = this.db.getSQL();
       
-      const result = await sql<UtilityMessageTemplateRow[]>`
-        SELECT * FROM utility_message_templates 
+      const result = await sql<UtilityMessageTemplateRow>`
+        SELECT * FROM utility_message_templates
         WHERE merchant_id = ${merchantId}::uuid
         ORDER BY created_at DESC
       `;
 
-      return result.map(row => ({
+      return result.map((row: UtilityMessageTemplateRow) => ({
         id: row.id,
         name: row.name,
         type: row.type as UtilityMessageType,
         content: row.content,
         variables: JSON.parse(row.variables || '[]'),
         approved: row.approved,
-        created_at: row.created_at,
-        updated_at: row.updated_at
+        created_at: new Date(row.created_at),
+        updated_at: new Date(row.updated_at)
       }));
 
     } catch (error) {

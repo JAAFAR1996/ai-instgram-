@@ -6,7 +6,6 @@
  */
 
 import { getDatabase } from '../database/connection.js';
-import type postgres from 'postgres';
 
 export interface MessageWindowStatus {
   canSendMessage: boolean;
@@ -27,6 +26,49 @@ export interface CustomerIdentifier {
   phone?: string;
   instagram?: string;
   platform: 'whatsapp' | 'instagram';
+}
+
+interface MessageWindowRow {
+  can_send_message: boolean;
+  window_expires_at: Date;
+  time_remaining_minutes: number;
+  message_count_in_window: number;
+  merchant_response_count: number;
+}
+
+interface MessageWindowRecord {
+  id: string;
+  window_expires_at: Date;
+  message_count_in_window: number;
+  merchant_response_count: number;
+  platform: string;
+  customer_phone: string | null;
+  customer_instagram: string | null;
+}
+
+interface ActiveWindowRow {
+  id: string;
+  customer_id: string;
+  platform: string;
+  expires_at: Date;
+  message_count: number;
+  merchant_response_count: number;
+}
+
+interface WindowStatsRow {
+  total_windows: string;
+  active_windows: string;
+  expired_windows: string;
+  avg_duration_hours: string | null;
+  total_customer_messages: string;
+  total_merchant_responses: string;
+}
+
+interface ExpiringWindowRow {
+  customer_id: string;
+  platform: string;
+  expires_at: Date;
+  minutes_remaining: number;
 }
 
 export class MessageWindowService {

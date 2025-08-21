@@ -207,16 +207,24 @@ export class MonitoringService {
     try {
       const sql = this.db.getSQL();
       
-      const trends = await sql`
-        SELECT 
+      const trends = await sql<{
+        date: string;
+        quality_rating: number | null;
+        status: QualityStatus;
+        messages_sent_24h: number;
+        delivery_rate: number;
+        response_rate: number;
+      }[]>
+      `
+        SELECT
           DATE(created_at) as date,
           quality_rating,
           status,
           messages_sent_24h,
-          CASE 
-            WHEN messages_sent_24h > 0 
+          CASE
+            WHEN messages_sent_24h > 0
             THEN (messages_delivered_24h::float / messages_sent_24h * 100)
-            ELSE 0 
+            ELSE 0
           END as delivery_rate,
           response_rate_24h * 100 as response_rate
         FROM quality_metrics
@@ -257,8 +265,14 @@ export class MonitoringService {
     try {
       const sql = this.db.getSQL();
       
-      const performance = await sql`
-        SELECT 
+      const performance = await sql<{
+        avg_response_time: number | null;
+        error_rate: number | null;
+        total_requests: number | null;
+        avg_memory_usage: number | null;
+      }[]>
+      `
+        SELECT
           AVG(execution_time_ms) as avg_response_time,
           (COUNT(*) FILTER (WHERE success = false)::float / COUNT(*) * 100) as error_rate,
           COUNT(*) as total_requests,
@@ -267,10 +281,13 @@ export class MonitoringService {
         WHERE created_at >= NOW() - INTERVAL '5 minutes'
         AND action LIKE '%API_%'
       `;
-      
-      const connections = await sql`
+
+      const connections = await sql<{
+        active_connections: string;
+      }[]>
+      `
         SELECT count(*) as active_connections
-        FROM pg_stat_activity 
+        FROM pg_stat_activity
         WHERE state = 'active'
       `;
       
@@ -298,8 +315,16 @@ export class MonitoringService {
     try {
       const sql = this.db.getSQL();
       
-      const stats = await sql`
-        SELECT 
+      const stats = await sql<{
+        messages_sent_24h: number;
+        messages_delivered_24h: number;
+        messages_read_24h: number;
+        user_initiated_conversations_24h: number;
+        business_initiated_conversations_24h: number;
+        avg_response_time_minutes: number | null;
+      }[]>
+      `
+        SELECT
           COUNT(*) FILTER (WHERE direction = 'OUTGOING') as messages_sent_24h,
           COUNT(*) FILTER (WHERE direction = 'OUTGOING' AND delivery_status = 'DELIVERED') as messages_delivered_24h,
           COUNT(*) FILTER (WHERE direction = 'OUTGOING' AND delivery_status = 'READ') as messages_read_24h,

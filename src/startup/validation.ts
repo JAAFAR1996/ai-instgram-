@@ -238,7 +238,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
       'audit_logs'
     ];
 
-    const existingTables = await sql`
+    const existingTables = await sql<{ table_name: string }>`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public' 
@@ -255,7 +255,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
 
     // Check required extensions
     const requiredExtensions = ['uuid-ossp'];
-    const extensions = await sql`
+    const extensions = await sql<{ extname: string }>`
       SELECT extname 
       FROM pg_extension 
       WHERE extname = ANY(${requiredExtensions})
@@ -464,23 +464,23 @@ export async function validateMerchantConfig(merchantId: string): Promise<boolea
     const sql = db.getSQL();
 
     // Check if merchant exists and is active
-    const merchant = await sql`
+    const [merchant] = await sql<{ id: string; is_active: boolean; business_name: string }>`
       SELECT id, is_active, business_name
       FROM merchants
       WHERE id = ${merchantId}::uuid
     `;
 
-    if (merchant.length === 0) {
+    if (!merchant) {
       console.error(`❌ Merchant not found: ${merchantId}`);
       return false;
     }
 
-    if (!merchant[0].is_active) {
+    if (!merchant.is_active) {
       console.error(`❌ Merchant is inactive: ${merchantId}`);
       return false;
     }
 
-    console.log(`✅ Merchant validation passed: ${merchant[0].business_name}`);
+    console.log(`✅ Merchant validation passed: ${merchant.business_name}`);
     return true;
   } catch (error) {
     console.error(`❌ Merchant validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);

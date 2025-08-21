@@ -433,12 +433,13 @@ export class InstagramWebhookHandler {
     event: InstagramCommentEvent,
     merchantId: string
   ): Promise<number> {
+    let commentId: string | undefined;
     try {
       const customerId = event.value.from.id;
       const customerUsername = event.value.from.username;
       const commentText = event.value.text;
       const mediaId = event.value.media.id;
-      const commentId = event.value.id;
+      commentId = event.value.id;
       const timestamp = new Date(event.value.created_time);
 
       this.logger.info('Instagram comment received', {
@@ -448,7 +449,7 @@ export class InstagramWebhookHandler {
 
       // Create comment interaction for Comments Manager
       const commentInteraction: CommentInteraction = {
-        id: commentId,
+        id: commentId!,
         postId: mediaId,
         userId: customerId,
         username: customerUsername,
@@ -486,7 +487,7 @@ export class InstagramWebhookHandler {
     } catch (error) {
       this.logger.error('Comment event processing failed', error, {
         merchantId,
-        commentId: event.value.id
+        commentId
       });
       throw error;
     }
@@ -1063,12 +1064,13 @@ export class InstagramWebhookHandler {
     event: InstagramCommentEvent,
     merchantId: string
   ): Promise<number> {
+    let commentId: string | undefined;
     try {
       const customerId = event.value.from.id;
       const customerUsername = event.value.from.username;
       const commentText = event.value.text;
       const mediaId = event.value.media.id;
-      const commentId = event.value.id;
+      commentId = event.value.id;
       const timestamp = new Date(event.value.created_time);
 
       this.logger.info('Using legacy processing for comment', {
@@ -1094,7 +1096,7 @@ export class InstagramWebhookHandler {
         commentText,
         'COMMENT',
         undefined,
-        commentId,
+        commentId!,
         timestamp,
         { mediaId, isPublic: true }
       );
