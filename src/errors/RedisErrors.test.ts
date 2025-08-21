@@ -310,16 +310,16 @@ describe('Redis Errors - أخطاء Redis', () => {
       expect(redisError).toBeInstanceOf(RedisMemoryError);
     });
 
-      test('should create rate limit error from limit message', () => {
-        const originalError = {
-          message: 'ERR max requests limit exceeded'
-        };
+    test('should create rate limit error from limit message', () => {
+      const originalError = {
+        message: 'max requests limit exceeded'
+      };
 
-        const redisError = RedisErrorFactory.createFromIORedisError(originalError);
+      const redisError = RedisErrorFactory.createFromIORedisError(originalError);
 
-        expect(redisError).toBeInstanceOf(RedisRateLimitError);
-        expect(redisError.message).toContain('Rate limit exceeded');
-      });
+      expect(redisError).toBeInstanceOf(RedisRateLimitError);
+      expect(redisError.message).toContain('Rate limit exceeded');
+    });
 
     test('should create default connection error for unknown errors', () => {
       const originalError = {

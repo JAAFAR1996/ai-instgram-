@@ -11,7 +11,6 @@ import { getAnalyticsService } from '../services/analytics-service.js';
 import { getLogger } from '../services/logger.js';
 import { pushDLQ } from './dead-letter.js';
 import { type Sql, type Fragment } from 'postgres';
-import { TimeoutError } from '../utils/timeout.js';
 
 export interface QueueJob {
   id: string;
@@ -291,9 +290,8 @@ export class MessageQueue {
     const startTime = Date.now();
 
     try {
-      const timeoutMs = parseInt(process.env.QUEUE_JOB_TIMEOUT_MS || '30000');
-      const result = await this.runWithTimeout(processor.process(job), timeoutMs);
-
+      const result = await processor.process(job);
+      
       if (result.success) {
         await this.completeJob(job.id, result.result);
         const duration = Date.now() - startTime;
@@ -306,37 +304,6 @@ export class MessageQueue {
       await this.failJob(job.id, errorMessage);
       console.error(`❌ Job processing failed: ${job.id}`, error);
     }
-  }
-
-  /**
-   * Run a promise with timeout protection to avoid multiple resolves
-   */
-  private runWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      let completed = false;
-      const timer = setTimeout(() => {
-        if (completed) return;
-        completed = true;
-        reject(new TimeoutError(`Job timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-
-      (async () => {
-        try {
-          const result = await promise;
-          if (!completed) {
-            completed = true;
-            resolve(result);
-          }
-        } catch (error) {
-          if (!completed) {
-            completed = true;
-            reject(error);
-          }
-        } finally {
-          clearTimeout(timer);
-        }
-      })();
-    });
   }
 
   /**

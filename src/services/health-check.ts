@@ -47,22 +47,12 @@ export function registerHealthRoute(app: any) {
   app.get('/health', (c: any) => {
     if (process.env.HEALTH_FORCE_OK === '1') {
       return c.json(
-        {
-          ...getHealthSnapshot(),
-          ready: true,
-          status: 'ok',
-          details: { forced: true },
-          redis: 'up',
-        },
+        { ...getHealthSnapshot(), ready: true, status: 'ok', details: { forced: true } },
         200
       );
     }
     const snap = getHealthSnapshot();
-    const redisStatus = (snap.details as any)?.redis ? 'up' : 'down';
-    if (redisStatus === 'down') {
-      console.error('Redis health check failed');
-    }
-    return c.json({ ...snap, redis: redisStatus }, 200);
+    return c.json(snap, snap.ready ? 200 : 503);
   });
 }
 

@@ -680,25 +680,16 @@ app.get('/health', async (c) => {
   getHealthCached().catch(() => { /* لا شيء */ });
 
   if (last && last.ok) {
-    const redisStatus = last.redisResponseTime === null ? 'down' : 'up';
-    if (redisStatus === 'down') {
-      console.error('Redis health check failed');
-    }
     c.header('Cache-Control', 'no-store');
-    return c.json({ status: 'ok', redis: redisStatus, ...last }, 200);
+    return c.json({ status: 'ok', ...last }, 200);
   }
 
   // إن لم توجد لقطة أو آخر لقطة فاشلة: انتظر نتيجة واحدة فقط لكن بدون تكرار الحسم
   const snap = await getHealthCached();
-  const redisStatus = snap.redisResponseTime === null ? 'down' : 'up';
-  if (redisStatus === 'down') {
-    console.error('Redis health check failed');
-  }
   c.header('Cache-Control', 'no-store');
-  return c.json({
-    status: snap.ok ? 'ok' : 'degraded',
-    redis: redisStatus,
-    ...snap
+  return c.json({ 
+    status: snap.ok ? 'ok' : 'degraded', 
+    ...snap 
   }, 200); // دائماً 200
 });
 

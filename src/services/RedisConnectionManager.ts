@@ -85,21 +85,18 @@ export class RedisConnectionManager {
     return reset;
   }
 
-  private isConnectionBlocked(): boolean {
-    const now = new Date();
-    return (
-      (this.rateLimitResetAt && this.rateLimitResetAt > now) ||
-      (this.pauseReconnectionsUntil && this.pauseReconnectionsUntil > now)
-    );
+  private isRateLimited(): boolean {
+    return !!this.rateLimitResetAt && this.rateLimitResetAt > new Date();
   }
 
   async getConnection(usageType: RedisUsageType): Promise<RedisType> {
-    if (this.isConnectionBlocked()) {
-      const retryAt = this.rateLimitResetAt || this.pauseReconnectionsUntil;
-      const error = new RedisRateLimitError('Rate limit exceeded', { retryAt });
+    if (this.isRateLimited()) {
+      const error = new RedisRateLimitError('Rate limit exceeded', {
+        retryAt: this.rateLimitResetAt
+      });
       this.logger?.warn('Redis rate limit active - connection blocked', {
         usageType,
-        retryAt
+        retryAt: this.rateLimitResetAt
       });
       throw error;
     }
@@ -205,8 +202,7 @@ export class RedisConnectionManager {
         
         this.logger?.warn('Redis rate limit exceeded, disconnecting', {
           usageType,
-          retryAt: retryAt.toISOString(),
-          recommendation: 'Review Upstash plan or reduce Redis usage'
+          retryAt: retryAt.toISOString()
         });
         
         // قطع الاتصال فوراً لتوفير الطلبات
@@ -286,11 +282,9 @@ export class RedisConnectionManager {
 
       if (redisError instanceof RedisRateLimitError) {
         const retryAt = this.setRateLimitReset();
-        this.pauseReconnectionsUntil = retryAt;
         this.logger?.warn('Redis rate limit exceeded, disconnecting', {
           usageType,
-          retryAt,
-          recommendation: 'Review Upstash plan or reduce Redis usage'
+          retryAt
         });
         connection.disconnect();
         // pause reconnection until the limit resets
@@ -335,13 +329,11 @@ export class RedisConnectionManager {
   }
 
   private async scheduleReconnection(usageType: RedisUsageType, info: ConnectionInfo): Promise<void> {
-    if (this.isConnectionBlocked()) {
-      const retryAt = this.rateLimitResetAt || this.pauseReconnectionsUntil!;
-      const delay = retryAt.getTime() - Date.now();
+    if (this.isRateLimited()) {
+      const delay = this.rateLimitResetAt!.getTime() - Date.now();
       this.logger?.warn('Reconnection paused due to rate limit', {
         usageType,
-        retryAt,
-        recommendation: 'Review Upstash plan or reduce Redis usage'
+        retryAt: this.rateLimitResetAt
       });
       setTimeout(() => {
         info.reconnectAttempts = 0;
