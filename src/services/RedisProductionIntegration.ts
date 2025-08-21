@@ -114,9 +114,8 @@ export class RedisProductionIntegration {
 
           // إيقاف الطوابير فعلياً عند الحصة
           if (this.queueManager) {
-            await this.queueManager.pauseAll();
-            this.queueManager.disableRegistration();
-            this.logger.info('Queue manager paused and registration disabled');
+            await this.queueManager.gracefulShutdown();
+            this.logger.info('Queue manager shutdown due to rate limit');
           }
 
           // إغلاق جميع اتصالات Redis لتوفير الطلبات
@@ -155,6 +154,7 @@ export class RedisProductionIntegration {
 
         return {
           success: false,
+          mode: 'disabled',
           error: error.message,
           diagnostics: {
             circuitBreakerStats: this.circuitBreaker.getStats(),
@@ -198,6 +198,7 @@ export class RedisProductionIntegration {
 
         return {
           success: false,
+          mode: 'disabled',
           error: error.message,
           diagnostics: {
             redisHealth: healthResult,
@@ -229,6 +230,7 @@ export class RedisProductionIntegration {
 
       return {
         success: true,
+        mode: 'active',
         queueManager: this.queueManager,
         diagnostics: finalDiagnostics
       };
@@ -250,6 +252,8 @@ export class RedisProductionIntegration {
 
         return {
           success: false,
+          mode: 'fallback',
+          reason: 'rate_limit',
           error: redisError.message,
           diagnostics: {
             circuitBreakerStats: this.circuitBreaker.getStats(),
@@ -272,6 +276,7 @@ export class RedisProductionIntegration {
 
       return {
         success: false,
+        mode: 'disabled',
         error: redisError.message,
         diagnostics: {
           circuitBreakerStats: this.circuitBreaker.getStats(),

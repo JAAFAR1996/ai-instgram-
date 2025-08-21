@@ -7,7 +7,8 @@
     "moduleResolution": "Bundler",
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "downlevelIteration": true
   },
   "exclude": [
     "src/database/migrations/**",
