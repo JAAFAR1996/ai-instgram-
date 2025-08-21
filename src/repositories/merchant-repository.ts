@@ -8,6 +8,27 @@
 import { getDatabase } from '../database/connection.js';
 import type { Sql } from 'postgres';
 
+interface MerchantRow {
+  id: string;
+  business_name: string;
+  business_category: string;
+  business_description: string | null;
+  contact_email: string;
+  contact_phone: string | null;
+  is_active: boolean;
+  subscription_tier: 'FREE' | 'BASIC' | 'PREMIUM' | 'ENTERPRISE';
+  monthly_message_limit: string;
+  monthly_messages_used: string;
+  settings: string;
+  created_at: string;
+  updated_at: string;
+  last_active_at: string | null;
+}
+
+interface CountRow {
+  count: string;
+}
+
 export interface Merchant {
   id: string;
   businessName: string;
@@ -90,7 +111,7 @@ export class MerchantRepository {
   async create(data: CreateMerchantRequest): Promise<Merchant> {
     const sql = this.db.getSQL();
     
-    const [merchant] = await sql`
+    const [merchant] = await sql<MerchantRow[]>`
       INSERT INTO merchants (
         business_name,
         business_category,
@@ -122,7 +143,7 @@ export class MerchantRepository {
   async findById(id: string): Promise<Merchant | null> {
     const sql = this.db.getSQL();
     
-    const [merchant] = await sql`
+    const [merchant] = await sql<MerchantRow[]>`
       SELECT * FROM merchants
       WHERE id = ${id}::uuid
     `;
@@ -136,7 +157,7 @@ export class MerchantRepository {
   async findByEmail(email: string): Promise<Merchant | null> {
     const sql = this.db.getSQL();
     
-    const [merchant] = await sql`
+    const [merchant] = await sql<MerchantRow[]>`
       SELECT * FROM merchants
       WHERE contact_email = ${email}
     `;
@@ -399,7 +420,7 @@ export class MerchantRepository {
   async getMerchantsApproachingLimit(threshold: number = 0.8): Promise<Merchant[]> {
     const sql = this.db.getSQL();
     
-    const merchants = await sql`
+    const merchants = await sql<MerchantRow[]>`
       SELECT * FROM merchants
       WHERE is_active = true
       AND monthly_messages_used >= (monthly_message_limit * ${threshold})
@@ -416,7 +437,7 @@ export class MerchantRepository {
   async getMerchantsOverLimit(): Promise<Merchant[]> {
     const sql = this.db.getSQL();
     
-    const merchants = await sql`
+    const merchants = await sql<MerchantRow[]>`
       SELECT * FROM merchants
       WHERE is_active = true
       AND monthly_messages_used >= monthly_message_limit
@@ -450,7 +471,7 @@ export class MerchantRepository {
       ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
       : sql``;
 
-    const [result] = await this.db.query`
+    const [result] = await this.db.query<CountRow>`
       SELECT COUNT(*) as count FROM merchants ${whereClause}
     `;
     
@@ -474,7 +495,7 @@ export class MerchantRepository {
   /**
    * Map database row to Merchant object
    */
-  private mapToMerchant(row: any): Merchant {
+  private mapToMerchant(row: MerchantRow): Merchant {
     return {
       id: row.id,
       businessName: row.business_name,

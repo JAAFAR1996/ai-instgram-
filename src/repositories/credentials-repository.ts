@@ -9,6 +9,31 @@ import { getDatabase } from '../database/connection.js';
 import { getEncryptionService } from '../services/encryption.js';
 import type { MerchantCredentials, Platform } from '../types/database.js';
 
+interface TokenRow {
+  token_encrypted: string | null;
+}
+
+interface TokenExpiryRow {
+  token_expires_at: string | null;
+}
+
+interface CredentialRow {
+  merchant_id: string;
+  whatsapp_phone_number_id: string | null;
+  instagram_page_id: string | null;
+  webhook_verify_token: string | null;
+  token_expires_at: string | null;
+  last_token_refresh: string | null;
+  token_refresh_count: string;
+  token_created_ip: string | null;
+  last_access_ip: string | null;
+  last_access_at: string | null;
+}
+
+interface MerchantIdRow {
+  merchant_id: string;
+}
+
 export interface StoredCredentials {
   merchantId: string;
   whatsappPhoneNumberId?: string;
@@ -114,7 +139,7 @@ export class CredentialsRepository {
     
     const field = platform === 'whatsapp' ? 'whatsapp_token_encrypted' : 'instagram_token_encrypted';
     
-    const [row] = await sql`
+    const [row] = await sql<TokenRow[]>`
       SELECT ${sql(field)} as token_encrypted
       FROM merchant_credentials 
       WHERE merchant_id = ${merchantId}::uuid
@@ -144,7 +169,7 @@ export class CredentialsRepository {
   async isTokenValid(merchantId: string, platform: Platform): Promise<boolean> {
     const sql = this.db.getSQL();
     
-    const [row] = await sql`
+    const [row] = await sql<TokenExpiryRow[]>`
       SELECT token_expires_at
       FROM merchant_credentials 
       WHERE merchant_id = ${merchantId}::uuid
@@ -196,7 +221,7 @@ export class CredentialsRepository {
   async getCredentials(merchantId: string): Promise<StoredCredentials | null> {
     const sql = this.db.getSQL();
     
-    const [row] = await sql`
+    const [row] = await sql<CredentialRow[]>`
       SELECT 
         merchant_id,
         whatsapp_phone_number_id,
@@ -233,7 +258,7 @@ export class CredentialsRepository {
   /**
    * Record access for audit trail
    */
-  private async recordAccess(merchantId: string, platform: Platform, ip?: string): Promise<void> {
+  private async recordAccess(merchantId: string, ip?: string): Promise<void> {
     const sql = this.db.getSQL();
     
     await sql`
@@ -243,7 +268,6 @@ export class CredentialsRepository {
         last_access_ip = ${ip || null},
         updated_at = NOW()
       WHERE merchant_id = ${merchantId}::uuid
-        AND platform = ${platform}
     `;
   }
 
@@ -266,7 +290,7 @@ export class CredentialsRepository {
   async getExpiredTokens(): Promise<string[]> {
     const sql = this.db.getSQL();
     
-    const rows = await sql`
+    const rows = await sql<MerchantIdRow[]>`
       SELECT DISTINCT merchant_id
       FROM merchant_credentials 
       WHERE token_expires_at IS NOT NULL 

@@ -11,6 +11,30 @@ import { getInstagramAIService, type InstagramContext, type InstagramAIResponse 
 import { getDatabase } from '../database/connection.js';
 import type { Platform } from '../types/database.js';
 
+interface InteractionRow {
+  platform: string;
+  conversation_stage: string;
+  message_type: string;
+  content: string;
+  direction: string;
+  created_at: string;
+  ai_processed: boolean;
+}
+
+interface PlatformHistoryRow {
+  platform: string;
+  interaction_count: string;
+  last_interaction: string;
+  stages: string[];
+}
+
+interface JourneyStageRow {
+  platform: string;
+  conversation_stage: string;
+  created_at: string;
+  intent: string;
+}
+
 export interface PlatformAIResponse {
   response: AIResponse | InstagramAIResponse;
   platformOptimized: boolean;
@@ -199,7 +223,7 @@ export class ConversationAIOrchestrator {
       const sql = this.db.getSQL();
 
       // Get customer interactions across platforms
-      const interactions = await sql`
+      const interactions = await sql<InteractionRow[]>`
         SELECT 
           c.platform,
           c.conversation_stage,
@@ -254,7 +278,7 @@ export class ConversationAIOrchestrator {
     try {
       const sql = this.db.getSQL();
 
-      const platformHistory = await sql`
+      const platformHistory = await sql<PlatformHistoryRow[]>`
         SELECT 
           platform,
           COUNT(*) as interaction_count,
@@ -278,7 +302,7 @@ export class ConversationAIOrchestrator {
       );
 
       // Get customer journey stages
-      const journeyStages = await sql`
+      const journeyStages = await sql<JourneyStageRow[]>`
         SELECT 
           platform,
           conversation_stage,
@@ -513,7 +537,7 @@ export class ConversationAIOrchestrator {
   /**
    * Private: Analyze customer profile across platforms
    */
-  private async analyzeCustomerProfile(interactions: any[]): Promise<EnhancedCustomerProfile> {
+  private async analyzeCustomerProfile(interactions: InteractionRow[]): Promise<EnhancedCustomerProfile> {
     // Analyze customer behavior patterns across platforms
     const whatsappInteractions = interactions.filter(i => i.platform === 'whatsapp');
     const instagramInteractions = interactions.filter(i => i.platform === 'instagram');
@@ -531,7 +555,7 @@ export class ConversationAIOrchestrator {
   /**
    * Private: Analyze platform preferences
    */
-  private analyzePlatformPreferences(interactions: any[]): PlatformPreferences {
+  private analyzePlatformPreferences(interactions: InteractionRow[]): PlatformPreferences {
     const platforms = interactions.reduce((acc, interaction) => {
       acc[interaction.platform] = (acc[interaction.platform] || 0) + 1;
       return acc;
@@ -549,27 +573,27 @@ export class ConversationAIOrchestrator {
   /**
    * Private: Additional helper methods would be implemented here
    */
-  private analyzeTimePreferences(interactions: any[]): string {
+  private analyzeTimePreferences(interactions: InteractionRow[]): string {
     // Implementation for time preference analysis
     return 'evening';
   }
 
-  private analyzeResponsePatterns(interactions: any[]): any {
+  private analyzeResponsePatterns(interactions: InteractionRow[]): any {
     // Implementation for response pattern analysis
     return {};
   }
 
-  private analyzePurchaseIntent(interactions: any[]): number {
+  private analyzePurchaseIntent(interactions: InteractionRow[]): number {
     // Implementation for purchase intent analysis
     return 0.7;
   }
 
-  private analyzeConversationTrends(interactions: any[]): ConversationTrend[] {
+  private analyzeConversationTrends(interactions: InteractionRow[]): ConversationTrend[] {
     // Implementation for conversation trend analysis
     return [];
   }
 
-  private calculateSwitchingFrequency(interactions: any[]): number {
+  private calculateSwitchingFrequency(interactions: InteractionRow[]): number {
     // Implementation for platform switching frequency calculation
     return 0.3;
   }

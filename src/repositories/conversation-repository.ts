@@ -8,6 +8,35 @@
 import { getDatabase } from '../database/connection.js';
 import type { Sql } from 'postgres';
 
+interface ConversationRow {
+  id: string;
+  merchant_id: string;
+  customer_whatsapp: string | null;
+  customer_instagram: string | null;
+  customer_name: string | null;
+  platform: 'instagram';
+  conversation_stage: string;
+  session_data: string;
+  message_count: string;
+  last_message_at: string;
+  created_at: string;
+  updated_at: string;
+  ended_at: string | null;
+}
+
+interface ConversationStatsRow {
+  total: string;
+  active: string;
+  platform: string | null;
+  conversation_stage: string | null;
+  avg_messages: string;
+  avg_duration_minutes: string;
+}
+
+interface CountRow {
+  count: string;
+}
+
 export interface Conversation {
   id: string;
   merchantId: string;
@@ -73,7 +102,7 @@ export class ConversationRepository {
   ): Promise<{ conversation: Conversation; isNew: boolean }> {
     const sql = this.db.getSQL();
 
-    const inserted = await sql`
+    const inserted = await sql<ConversationRow[]>`
       INSERT INTO conversations (
         merchant_id,
         customer_whatsapp,
@@ -102,7 +131,7 @@ export class ConversationRepository {
       return { conversation: this.mapToConversation(inserted[0]), isNew: true };
     }
 
-    const [existing] = await sql`
+    const [existing] = await sql<ConversationRow[]>`
       SELECT * FROM conversations
       WHERE merchant_id = ${data.merchantId}::uuid
         AND customer_instagram = ${data.customerInstagram || null}
@@ -119,7 +148,7 @@ export class ConversationRepository {
   async findById(id: string): Promise<Conversation | null> {
     const sql = this.db.getSQL();
     
-    const [conversation] = await sql`
+    const [conversation] = await sql<ConversationRow[]>`
       SELECT * FROM conversations
       WHERE id = ${id}::uuid
     `;
@@ -139,7 +168,7 @@ export class ConversationRepository {
     
     const whereField = platform === 'whatsapp' ? 'customer_whatsapp' : 'customer_instagram';
     
-    const [conversation] = await sql`
+    const [conversation] = await sql<ConversationRow[]>`
       SELECT * FROM conversations
       WHERE merchant_id = ${merchantId}::uuid
       AND ${sql(whereField)} = ${customerIdentifier}
@@ -197,7 +226,7 @@ export class ConversationRepository {
     
     updateValues.push(id);
     
-    const [conversation] = await this.db.query(query, updateValues);
+    const [conversation] = await this.db.query<ConversationRow>(query, updateValues);
     return conversation ? this.mapToConversation(conversation) : null;
   }
 
@@ -282,7 +311,7 @@ export class ConversationRepository {
       ${offsetClause}
     `;
 
-    const conversations = await this.db.query(query, params);
+    const conversations = await this.db.query<ConversationRow>(query, params);
     return conversations.map(c => this.mapToConversation(c));
   }
 
@@ -327,7 +356,7 @@ export class ConversationRepository {
       ORDER BY platform, conversation_stage
     `;
 
-    const results = await this.db.query(statsQuery, params);
+    const results = await this.db.query<ConversationStatsRow>(statsQuery, params);
     
     const stats: ConversationStats = {
       total: 0,
@@ -404,7 +433,7 @@ export class ConversationRepository {
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
     
     const query = `SELECT COUNT(*) as count FROM conversations ${whereClause}`;
-    const [result] = await this.db.query(query, params);
+    const [result] = await this.db.query<CountRow>(query, params);
     
     return parseInt(result.count);
   }
@@ -424,7 +453,7 @@ export class ConversationRepository {
   /**
    * Map database row to Conversation object
    */
-  private mapToConversation(row: any): Conversation {
+  private mapToConversation(row: ConversationRow): Conversation {
     return {
       id: row.id,
       merchantId: row.merchant_id,

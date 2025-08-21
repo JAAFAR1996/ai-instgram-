@@ -8,6 +8,59 @@
 import { getDatabase } from '../database/connection.js';
 import type { Sql } from 'postgres';
 
+interface MessageRow {
+  id: string;
+  conversation_id: string;
+  direction: 'INCOMING' | 'OUTGOING';
+  platform: 'instagram';
+  message_type: string;
+  content: string;
+  media_url: string | null;
+  platform_message_id: string | null;
+  ai_processed: boolean;
+  delivery_status: 'PENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
+  ai_confidence: number | null;
+  ai_intent: string | null;
+  processing_time_ms: number | null;
+  media_metadata: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface CountRow {
+  count: string;
+}
+
+interface MessageStatsRow {
+  total: string;
+  incoming: string;
+  outgoing: string;
+  platform: string | null;
+  message_type: string | null;
+  delivery_status: string | null;
+  avg_processing_time: string;
+  avg_ai_confidence: string;
+}
+
+interface ConversationHistoryRow {
+  id: string;
+  conversation_id: string;
+  direction: 'INCOMING' | 'OUTGOING';
+  platform: 'instagram';
+  message_type: string;
+  content: string;
+  media_url: string | null;
+  platform_message_id: string | null;
+  ai_processed: boolean;
+  delivery_status: 'PENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
+  ai_confidence: number | null;
+  ai_intent: string | null;
+  processing_time_ms: number | null;
+  media_metadata: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -93,7 +146,7 @@ export class MessageRepository {
   async create(data: CreateMessageRequest): Promise<Message> {
     const sql = this.db.getSQL();
     
-    const [message] = await sql`
+    const [message] = await sql<MessageRow[]>`
       INSERT INTO message_logs (
         conversation_id,
         direction,
@@ -135,7 +188,7 @@ export class MessageRepository {
   async findById(id: string): Promise<Message | null> {
     const sql = this.db.getSQL();
     
-    const [message] = await sql`
+    const [message] = await sql<MessageRow[]>`
       SELECT * FROM message_logs
       WHERE id = ${id}::uuid
     `;
@@ -262,7 +315,7 @@ export class MessageRepository {
     const sql = this.db.getSQL();
     
     // Get messages
-    const messages = await sql`
+    const messages = await sql<ConversationHistoryRow[]>`
       SELECT * FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
       ORDER BY created_at ASC
@@ -271,7 +324,7 @@ export class MessageRepository {
     `;
 
     // Get total count
-    const [countResult] = await sql`
+    const [countResult] = await sql<CountRow[]>`
       SELECT COUNT(*) as count FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
     `;
@@ -296,7 +349,7 @@ export class MessageRepository {
   ): Promise<Message[]> {
     const sql = this.db.getSQL();
     
-    const messages = await sql`
+    const messages = await sql<MessageRow[]>`
       SELECT * FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
       ORDER BY created_at DESC
@@ -373,7 +426,7 @@ export class MessageRepository {
       ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
       : sql``;
 
-    const results = await this.db.query`
+    const results = await this.db.query<MessageStatsRow>`
       SELECT 
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE direction = 'INCOMING') as incoming,
@@ -488,7 +541,7 @@ export class MessageRepository {
       ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
       : sql``;
 
-    const [result] = await this.db.query`
+    const [result] = await this.db.query<CountRow>`
       SELECT COUNT(*) as count FROM message_logs ${whereClause}
     `;
     
@@ -498,7 +551,7 @@ export class MessageRepository {
   /**
    * Map database row to Message object
    */
-  private mapToMessage(row: any): Message {
+  private mapToMessage(row: MessageRow | ConversationHistoryRow): Message {
     return {
       id: row.id,
       conversationId: row.conversation_id,

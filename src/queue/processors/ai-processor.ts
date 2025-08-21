@@ -171,6 +171,7 @@ export class AIProcessor implements JobProcessor {
         storyFeatures: merchant.settings?.storyFeatures || false,
         commerceEnabled: merchant.settings?.instagramCommerce || false
       };
+    }
 
     return baseContext;
   }

@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { requireMerchantId } from '../utils/merchant.js';
 
 /**
  * Production-grade migration and seeding system

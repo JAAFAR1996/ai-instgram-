@@ -13,7 +13,7 @@ import { getDatabase } from '../database/connection.js';
 import type { Platform } from '../types/database.js';
 import { getRedisConnectionManager } from '../services/RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
-import { getEnvVar } from '../config/environment.js';
+import { getEnvVar, getConfig } from '../config/environment.js';
 
 // Redis connection for distributed rate limiting
 const redisUrl = getEnvVar('REDIS_URL');

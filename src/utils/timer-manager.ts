@@ -16,7 +16,7 @@ class TimerManager {
   clearAll(): void {
     for (const timer of this.timers) {
       clearTimeout(timer);
-      clearInterval(timer as unknown as NodeJS.Timer);
+      clearInterval(timer);
     }
     this.timers.clear();
   }

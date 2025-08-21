@@ -13,6 +13,17 @@ import type { SendMessageRequest } from '../types/instagram.js';
 import crypto from 'crypto';
 import { getLogger } from './logger.js';
 
+interface UtilityMessageTemplateRow {
+  id: string;
+  name: string;
+  type: string;
+  content: string;
+  variables: string;
+  approved: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 const logger = getLogger({ component: 'UtilityMessagesService' });
 
 // Escape special characters for use in RegExp
@@ -231,7 +242,7 @@ export class UtilityMessagesService {
     try {
       const sql = this.db.getSQL();
 
-      const result = await sql`
+      const result = await sql<UtilityMessageTemplateRow[]>`
         SELECT * FROM utility_message_templates
         WHERE id = ${templateId} AND merchant_id = ${merchantId}::uuid AND approved = true
       `;
@@ -339,7 +350,7 @@ export class UtilityMessagesService {
     try {
       const sql = this.db.getSQL();
       
-      const result = await sql`
+      const result = await sql<UtilityMessageTemplateRow[]>`
         SELECT * FROM utility_message_templates 
         WHERE merchant_id = ${merchantId}::uuid
         ORDER BY created_at DESC
