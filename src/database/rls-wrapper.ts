@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getDatabase } from './connection';
+import { getDatabase } from './connection.js';
 import type postgres from 'postgres';
 import crypto from 'crypto';
 
