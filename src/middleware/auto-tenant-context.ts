@@ -71,15 +71,19 @@ export function autoTenantContext(cfg: TenantContextConfig = {}) {
 
       await next();
     } catch (err) {
-      await rlsDb.clearContext().catch(() => {});
+        await rlsDb.clearContext().catch((e) => {
+          console.error('Failed to clear tenant context:', e);
+        });
       return c.json({
         error: 'Failed to establish tenant context',
         details: err instanceof Error ? err.message : 'Unknown error',
       }, 500);
     } finally {
       if (contextSet) {
-        await rlsDb.clearContext().catch(() => {}); // critical: prevent tenant bleed with pooled connections
-      }
+          await rlsDb.clearContext().catch((e) => {
+            console.error('Failed to clear tenant context:', e);
+          }); // critical: prevent tenant bleed with pooled connections
+        }
     }
   };
 }

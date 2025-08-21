@@ -105,6 +105,8 @@ export class ProductionQueueManager {
   private completedJobs = 0;
   private failedJobs = 0;
   private monitoringInterval?: NodeJS.Timeout;
+  private manualPollingInterval?: NodeJS.Timeout;
+  private workerHealthInterval?: NodeJS.Timeout;
   
   // Real processing services
   private webhookHandler = getInstagramWebhookHandler();
@@ -500,20 +502,25 @@ export class ProductionQueueManager {
       total: 9
     });
     
-    // 🔍 تحقق فوري من أن القائمة يمكنها إرسال إشعارات
-    setTimeout(async () => {
-      try {
-        this.logger.info('🔍 [BULL-TEST] اختبار إضافة job تجريبي فوري...');
-        const testJob = await this.queue!.add('test-notification', { test: true }, { 
-          priority: 1,
-          delay: 0,
-          attempts: 1
-        });
-        this.logger.info('🔍 [BULL-TEST] تم إضافة test job:', testJob.id);
-      } catch (error) {
-        this.logger.error('🔍 [BULL-TEST] فشل في إضافة test job:', error);
-      }
-    }, 1000);
+    // 🔍 تحقق فوري من أن القائمة يمكنها إرسال إشعارات عند تفعيل الاختبارات صراحة
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      process.env.ENABLE_QUEUE_TESTS === 'true'
+    ) {
+      setTimeout(async () => {
+        try {
+          this.logger.info('🔍 [BULL-TEST] اختبار إضافة job تجريبي فوري...');
+          const testJob = await this.queue!.add('test-notification', { test: true }, {
+            priority: 1,
+            delay: 0,
+            attempts: 1
+          });
+          this.logger.info('🔍 [BULL-TEST] تم إضافة test job:', testJob.id);
+        } catch (error) {
+          this.logger.error('🔍 [BULL-TEST] فشل في إضافة test job:', error);
+        }
+      }, 1000);
+    }
     
     // 🚨 Manual Polling Fallback - للتعامل مع مشاكل Upstash notification
     this.startManualPolling();
@@ -523,7 +530,7 @@ export class ProductionQueueManager {
     this.logger.info('🔄 [MANUAL-POLLING] بدء Manual Polling كـ fallback للإشعارات');
     
     // فحص الطابور كل 5 ثوانٍ للبحث عن jobs منتظرة
-    setInterval(async () => {
+    this.manualPollingInterval = setInterval(async () => {
       try {
         this.logger.debug('🔍 [MANUAL-POLLING] فحص دوري...');
         
@@ -1207,7 +1214,7 @@ export class ProductionQueueManager {
 
   private startWorkerHealthMonitoring(): void {
     // مراقبة صحة Workers كل دقيقة
-    setInterval(async () => {
+    this.workerHealthInterval = setInterval(async () => {
       try {
         await this.checkWorkerHealth();
       } catch (error) {
@@ -1438,6 +1445,14 @@ export class ProductionQueueManager {
     if (this.monitoringInterval) {
       clearInterval(this.monitoringInterval);
       this.monitoringInterval = undefined;
+    }
+    if (this.manualPollingInterval) {
+      clearInterval(this.manualPollingInterval);
+      this.manualPollingInterval = undefined;
+    }
+    if (this.workerHealthInterval) {
+      clearInterval(this.workerHealthInterval);
+      this.workerHealthInterval = undefined;
     }
 
     if (this.queue) {

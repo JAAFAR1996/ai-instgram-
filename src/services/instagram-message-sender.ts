@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getInstagramClient, type InstagramAPIResponse } from './instagram-api.js';
+import { getInstagramClient, type InstagramAPIResponse, type InstagramCredentials } from './instagram-api.js';
 import { getDatabase } from '../database/connection.js';
 import { getMessageWindowService } from './message-window.js';
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
@@ -72,6 +72,52 @@ export interface MediaUploadResult {
 export class InstagramMessageSender {
   private db = getDatabase();
   private messageWindowService = getMessageWindowService();
+  private credentialsCache = new Map<string, InstagramCredentials>();
+  private clientCache = new Map<string, any>();
+
+  /**
+   * Get cached client or create new one
+   */
+  private async getClient(merchantId: string): Promise<any> {
+    try {
+      // Check if we have a cached client
+      if (this.clientCache.has(merchantId)) {
+        return this.clientCache.get(merchantId);
+      }
+
+      // Create new client
+      const client = getInstagramClient();
+      await client.initialize(merchantId);
+      
+      // Cache the client
+      this.clientCache.set(merchantId, client);
+      
+      return client;
+    } catch (error) {
+      console.error(`❌ Failed to get Instagram client for merchant ${merchantId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Reload merchant credentials (clears cache)
+   */
+  public async reloadMerchant(merchantId: string): Promise<void> {
+    console.log(`🔄 Reloading Instagram credentials for merchant: ${merchantId}`);
+    
+    // Clear caches
+    this.credentialsCache.delete(merchantId);
+    this.clientCache.delete(merchantId);
+    
+    // Pre-warm the cache
+    try {
+      await this.getClient(merchantId);
+      console.log(`✅ Instagram credentials reloaded for merchant: ${merchantId}`);
+    } catch (error) {
+      console.error(`❌ Failed to reload Instagram credentials for merchant ${merchantId}:`, error);
+      throw error;
+    }
+  }
 
   /**
    * Send text message to Instagram user
@@ -99,8 +145,7 @@ export class InstagramMessageSender {
       }
 
       // Get Instagram client
-      const client = getInstagramClient();
-      await client.initialize(merchantId);
+      const client = await this.getClient(merchantId);
 
       // Send message via Instagram API
       const response = await client.sendMessage({
@@ -135,6 +180,18 @@ export class InstagramMessageSender {
     } catch (error) {
       console.error('❌ Instagram message sending failed:', error);
       
+      // Try reloading merchant credentials on auth errors
+      if (error instanceof Error && 
+          (error.message.includes('Invalid') || 
+           error.message.includes('Expired') ||
+           error.message.includes('Authentication'))) {
+        try {
+          await this.reloadMerchant(merchantId);
+        } catch (reloadError) {
+          console.error('❌ Failed to reload merchant credentials:', reloadError);
+        }
+      }
+      
       const result: SendResult = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -156,7 +213,8 @@ export class InstagramMessageSender {
     mediaUrl: string,
     mediaType: 'image' | 'video' | 'audio',
     caption?: string,
-    conversationId?: string
+    conversationId?: string,
+    attachmentId?: string
   ): Promise<SendResult> {
     try {
       console.log(`📷 Sending Instagram ${mediaType} to ${recipientId}`);
@@ -175,12 +233,12 @@ export class InstagramMessageSender {
       }
 
       // Get Instagram client
-      const client = getInstagramClient();
-      await client.initialize(merchantId);
+      const client = await this.getClient(merchantId);
 
-      // Upload media first if it's a local file
+      // Upload media first if it's a local file and no attachment is provided
       let finalMediaUrl = mediaUrl;
-      if (!mediaUrl.startsWith('http')) {
+      let finalAttachmentId = attachmentId;
+      if (!finalAttachmentId && !mediaUrl.startsWith('http')) {
         const uploadResult = await this.uploadMedia(merchantId, mediaUrl, mediaType);
         if (!uploadResult.success) {
           return {
@@ -190,13 +248,17 @@ export class InstagramMessageSender {
             timestamp: new Date()
           };
         }
-        finalMediaUrl = uploadResult.mediaId!;
+        finalAttachmentId = uploadResult.mediaId!;
       }
 
       // Send media message
+      const payload = finalAttachmentId
+        ? { attachment_id: finalAttachmentId }
+        : { url: finalMediaUrl };
+
       const sendReq: SendMessageRequest & any = {
         recipientId,
-        attachment: { type: mediaType, payload: { url: finalMediaUrl } }
+        attachment: { type: mediaType, payload }
       };
       const response = await client.sendMessage(sendReq);
 
@@ -210,12 +272,17 @@ export class InstagramMessageSender {
 
       // Log media message
       await this.logMessageSent(
-        merchantId, 
-        recipientId, 
-        `[${mediaType.toUpperCase()}] ${caption || ''}`, 
-        result, 
+        merchantId,
+        recipientId,
+        `[${mediaType.toUpperCase()}] ${caption || ''}`,
+        result,
         conversationId,
-        { mediaUrl: finalMediaUrl, mediaType }
+        {
+          mediaUrl: finalAttachmentId ? undefined : finalMediaUrl,
+          mediaType,
+          attachmentId: finalAttachmentId,
+          reusedAttachment: Boolean(attachmentId)
+        }
       );
 
       // Update message window
@@ -231,6 +298,18 @@ export class InstagramMessageSender {
 
     } catch (error) {
       console.error('❌ Instagram media sending failed:', error);
+      
+      // Try reloading merchant credentials on auth errors
+      if (error instanceof Error && 
+          (error.message.includes('Invalid') || 
+           error.message.includes('Expired') ||
+           error.message.includes('Authentication'))) {
+        try {
+          await this.reloadMerchant(merchantId);
+        } catch (reloadError) {
+          console.error('❌ Failed to reload merchant credentials:', reloadError);
+        }
+      }
       
       const result: SendResult = {
         success: false,
@@ -270,16 +349,16 @@ export class InstagramMessageSender {
       }
 
       // Get Instagram client
-      const client = getInstagramClient();
-      await client.initialize(merchantId);
+      const client = await this.getClient(merchantId);
 
       // Convert template to Instagram format
       const instagramTemplate = this.convertToInstagramTemplate(template);
 
       // Send template message
-      const tplReq: SendMessageRequest & any = {
+      const tplReq = {
         recipientId,
-        template: instagramTemplate
+        messageType: 'template',
+        content: JSON.stringify(instagramTemplate)
       };
       const response = await client.sendMessage(tplReq);
 
@@ -315,6 +394,18 @@ export class InstagramMessageSender {
     } catch (error) {
       console.error('❌ Instagram template sending failed:', error);
       
+      // Try reloading merchant credentials on auth errors
+      if (error instanceof Error && 
+          (error.message.includes('Invalid') || 
+           error.message.includes('Expired') ||
+           error.message.includes('Authentication'))) {
+        try {
+          await this.reloadMerchant(merchantId);
+        } catch (reloadError) {
+          console.error('❌ Failed to reload merchant credentials:', reloadError);
+        }
+      }
+      
       const result: SendResult = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -339,8 +430,7 @@ export class InstagramMessageSender {
       console.log(`💬 Replying to Instagram comment ${commentId}: ${replyText}`);
 
       // Get Instagram client
-      const client = getInstagramClient();
-      await client.initialize(merchantId);
+      const client = await this.getClient(merchantId);
 
       // Reply to comment
       const response = await client.replyToComment(commentId, replyText);
@@ -360,6 +450,18 @@ export class InstagramMessageSender {
 
     } catch (error) {
       console.error('❌ Instagram comment reply failed:', error);
+      
+      // Try reloading merchant credentials on auth errors
+      if (error instanceof Error && 
+          (error.message.includes('Invalid') || 
+           error.message.includes('Expired') ||
+           error.message.includes('Authentication'))) {
+        try {
+          await this.reloadMerchant(merchantId);
+        } catch (reloadError) {
+          console.error('❌ Failed to reload merchant credentials:', reloadError);
+        }
+      }
       
       const result: SendResult = {
         success: false,
@@ -400,8 +502,7 @@ export class InstagramMessageSender {
       }
 
       // Get Instagram client
-      const client = getInstagramClient();
-      await client.initialize(merchantId);
+      const client = await this.getClient(merchantId);
 
       // Send message with quick replies
       const response = await client.sendMessage({
@@ -443,6 +544,18 @@ export class InstagramMessageSender {
     } catch (error) {
       console.error('❌ Instagram quick replies sending failed:', error);
       
+      // Try reloading merchant credentials on auth errors
+      if (error instanceof Error && 
+          (error.message.includes('Invalid') || 
+           error.message.includes('Expired') ||
+           error.message.includes('Authentication'))) {
+        try {
+          await this.reloadMerchant(merchantId);
+        } catch (reloadError) {
+          console.error('❌ Failed to reload merchant credentials:', reloadError);
+        }
+      }
+      
       const result: SendResult = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -465,8 +578,9 @@ export class InstagramMessageSender {
     options?: {
       mediaUrl?: string;
       mediaType?: 'image' | 'video';
-      delayBetweenMessages?: number; // ms
+      delayBetweenMessages?: number; // ms between batches
       maxPerHour?: number;
+      concurrency?: number;
     }
   ): Promise<{
     sent: number;
@@ -491,6 +605,18 @@ export class InstagramMessageSender {
         return { sent: 0, failed: recipients.length, results: [], errors };
       }
 
+      // If local media is provided, upload once and reuse attachment
+      let sharedAttachmentId: string | undefined;
+      if (options?.mediaUrl && options.mediaType && !options.mediaUrl.startsWith('http')) {
+        const uploadResult = await this.uploadMedia(merchantId, options.mediaUrl, options.mediaType);
+        if (!uploadResult.success || !uploadResult.mediaId) {
+          const err = `Media upload failed: ${uploadResult.error}`;
+          errors.push(err);
+          return { sent: 0, failed: recipients.length, results: [], errors };
+        }
+        sharedAttachmentId = uploadResult.mediaId;
+      }
+
       // Send to each recipient
       for (const recipientId of recipients) {
         try {
@@ -502,7 +628,9 @@ export class InstagramMessageSender {
               recipientId,
               options.mediaUrl,
               options.mediaType,
-              message
+              message,
+              undefined,
+              sharedAttachmentId
             );
           } else {
             result = await this.sendTextMessage(merchantId, recipientId, message);
@@ -539,7 +667,16 @@ export class InstagramMessageSender {
       }
 
       // Log bulk send operation
-      await this.logBulkSend(merchantId, recipients.length, sent, failed, message);
+      await this.logBulkSend(
+        merchantId,
+        recipients.length,
+        sent,
+        failed,
+        message,
+        sharedAttachmentId
+          ? { attachmentId: sharedAttachmentId, mediaUrl: options?.mediaUrl, mediaType: options?.mediaType }
+          : undefined
+      );
 
       console.log(`✅ Bulk send completed: ${sent} sent, ${failed} failed`);
 
@@ -567,8 +704,7 @@ export class InstagramMessageSender {
     mediaType: 'image' | 'video' | 'audio'
   ): Promise<MediaUploadResult> {
     try {
-      const client = getInstagramClient();
-      await client.initialize(merchantId);
+      const client = await this.getClient(merchantId);
 
       // Validate file exists and type
       const stats = await fs.stat(mediaPath);
@@ -793,7 +929,8 @@ export class InstagramMessageSender {
     totalRecipients: number,
     sent: number,
     failed: number,
-    message: string
+    message: string,
+    metadata?: any
   ): Promise<void> {
     try {
       const sql = this.db.getSQL();
@@ -815,7 +952,8 @@ export class InstagramMessageSender {
             failed,
             successRate: (sent / totalRecipients) * 100,
             messagePreview: message.substring(0, 100),
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            ...(metadata || {})
           })},
           ${sent > failed}
         )

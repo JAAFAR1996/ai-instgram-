@@ -115,6 +115,7 @@ export interface InstagramProfile {
 export class InstagramAPIClient {
   private readonly baseUrl = GRAPH_API_BASE_URL;
   private credentials: InstagramCredentials | null = null;
+  private merchantId: string | null = null;
   private encryptionService = getEncryptionService();
   private db = getDatabase();
   private rateLimiter = getMetaRateLimiter();
@@ -128,18 +129,17 @@ export class InstagramAPIClient {
     method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH',
     path: string,
     accessToken: string,
-    body?: Record<string, any>,
-    merchantId?: string
+    body: Record<string, any> | undefined,
+    merchantId: string
   ): Promise<T> {
-    const resolvedMerchantId = merchantId ?? requireMerchantId();
-    if (!resolvedMerchantId) {
+    if (!merchantId) {
       throw Object.assign(new Error('MERCHANT_ID is required'), {
         code: 'MERCHANT_ID_MISSING'
       });
     }
     const windowMs = 60_000;         // 1 دقيقة
     const maxRequests = 90;          // حد لكل تاجر/دقيقة (عدّله كما يلزم)
-    const rateKey = `ig:${resolvedMerchantId}:${method}:${path}`;
+    const rateKey = `ig:${merchantId}:${method}:${path}`;
 
     // ✅ فحص المعدّل قبل الإرسال
       const check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
@@ -185,7 +185,8 @@ export class InstagramAPIClient {
   public async initialize(merchantId: string): Promise<void> {
     try {
       this.credentials = await this.loadMerchantCredentials(merchantId);
-      
+      this.merchantId = merchantId;
+
       if (!this.credentials) {
         throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
       }
@@ -205,7 +206,7 @@ export class InstagramAPIClient {
    */
   public async sendMessage(request: SendMessageRequest): Promise<InstagramAPIResponse> {
     try {
-      if (!this.credentials) {
+      if (!this.credentials || !this.merchantId) {
         throw new Error('Instagram API not initialized');
       }
 
@@ -215,7 +216,8 @@ export class InstagramAPIClient {
         'POST',
         `/${this.credentials.businessAccountId}/messages`,
         this.credentials.pageAccessToken,
-        payload
+        payload,
+        this.merchantId
       );
 
       return {
@@ -260,7 +262,7 @@ export class InstagramAPIClient {
     message: string
   ): Promise<InstagramAPIResponse> {
     try {
-      if (!this.credentials) {
+      if (!this.credentials || !this.merchantId) {
         throw new Error('Instagram API not initialized');
       }
 
@@ -272,7 +274,8 @@ export class InstagramAPIClient {
         'POST',
         `/${commentId}/replies`,
         this.credentials.pageAccessToken,
-        payload
+        payload,
+        this.merchantId
       );
 
       return {
@@ -297,14 +300,16 @@ export class InstagramAPIClient {
    */
   public async getUserProfile(userId: string): Promise<InstagramProfile | null> {
     try {
-      if (!this.credentials) {
+      if (!this.credentials || !this.merchantId) {
         throw new Error('Instagram API not initialized');
       }
 
       const result = await this.graphRequest<InstagramProfile>(
         'GET',
         `/${userId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,
-        this.credentials.pageAccessToken
+        this.credentials.pageAccessToken,
+        undefined,
+        this.merchantId
       );
       
       return result;
@@ -358,7 +363,7 @@ export class InstagramAPIClient {
    */
   public async subscribeToWebhooks(webhookUrl: string): Promise<boolean> {
     try {
-      if (!this.credentials) {
+      if (!this.credentials || !this.merchantId) {
         throw new Error('Instagram API not initialized');
       }
 
@@ -372,7 +377,8 @@ export class InstagramAPIClient {
         'POST',
         `/${this.credentials.pageId}/subscribed_apps`,
         this.credentials.pageAccessToken,
-        payload
+        payload,
+        this.merchantId
       );
 
       console.log('✅ Instagram webhook subscribed successfully');
@@ -388,14 +394,16 @@ export class InstagramAPIClient {
    */
   public async getBusinessAccountInfo(): Promise<any> {
     try {
-      if (!this.credentials) {
+      if (!this.credentials || !this.merchantId) {
         throw new Error('Instagram API not initialized');
       }
 
       return await this.graphRequest<any>(
         'GET',
         `/${this.credentials.businessAccountId}?fields=id,username,name,profile_picture_url,followers_count,media_count`,
-        this.credentials.pageAccessToken
+        this.credentials.pageAccessToken,
+        undefined,
+        this.merchantId
       );
     } catch (error) {
       console.error('❌ Get business account info failed:', error);
@@ -468,7 +476,7 @@ export class InstagramAPIClient {
 
       // Decrypt the token
       const decryptedToken = this.encryptionService.decryptInstagramToken(
-        JSON.parse(cred.instagram_token_encrypted)
+        cred.instagram_token_encrypted
       );
 
       return {
@@ -506,6 +514,16 @@ export class InstagramAPIClient {
       messaging_type: 'RESPONSE' // Within 24h window
     };
 
+    if (request.attachment) {
+      return {
+        ...basePayload,
+        message: {
+          attachment: request.attachment,
+          text: request.content || undefined
+        }
+      };
+    }
+
     switch (request.messageType) {
       case 'text':
         return {
@@ -522,10 +540,9 @@ export class InstagramAPIClient {
           message: {
             attachment: {
               type: 'image',
-              payload: {
-                url: request.imageUrl,
-                is_reusable: true
-              }
+              payload: request.attachmentId
+                ? { attachment_id: request.attachmentId }
+                : { url: request.imageUrl, is_reusable: true }
             },
             text: request.content || undefined
           }
@@ -644,6 +661,8 @@ export class InstagramCredentialsManager {
       `;
 
       console.log(`✅ Instagram credentials removed for merchant: ${merchantId}`);
+      const { getInstagramStoriesManager } = await import('./instagram-stories-manager.js');
+      getInstagramStoriesManager().clearMerchantClient(merchantId);
     } catch (error) {
       console.error('❌ Failed to remove Instagram credentials:', error);
       throw error;

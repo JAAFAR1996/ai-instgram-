@@ -131,11 +131,11 @@ export class InstagramOAuthService {
    * Using new Instagram Business Login API with PKCE security enhancement
    * https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/
    */
-  generateAuthorizationUrl(merchantId: string, state?: string): { 
-    oauthUrl: string; 
-    codeVerifier: string; 
-    state: string 
-  } {
+  async generateAuthorizationUrl(merchantId: string, state?: string): Promise<{
+    oauthUrl: string;
+    codeVerifier: string;
+    state: string
+  }> {
     // Use new Instagram Business Login endpoint (2025 requirement)
     const baseUrl = 'https://api.instagram.com/oauth/authorize';
     
@@ -162,7 +162,7 @@ export class InstagramOAuthService {
     const oauthUrl = `${baseUrl}?${params.toString()}`;
     
     // Store PKCE verifier securely in Redis for later retrieval
-    this.storePKCEInRedis(secureState, codeVerifier);
+    await this.storePKCEInRedis(secureState, codeVerifier);
     
     console.log('🔗 Instagram Business Login URL built (2025):', oauthUrl);
     console.log('📋 Enhanced scopes for 2025:', params.get('scope'));
@@ -325,7 +325,7 @@ export class InstagramOAuthService {
    * STEP 4: Refresh long-lived token (every <60 days)
    * GET https://graph.instagram.com/refresh_access_token
    */
-  async refreshLongLivedToken(currentToken: string): Promise<{
+  async refreshLongLivedToken(currentToken: string, merchantId: string): Promise<{
     access_token: string;
     token_type: string;
     expires_in: number;
@@ -341,7 +341,9 @@ export class InstagramOAuthService {
       const data: any = await this.graphRequest<any>(
         'GET',
         'https://graph.instagram.com/refresh_access_token',
-        params
+        params,
+        undefined,
+        merchantId
       );
       console.log('✅ Token refreshed successfully');
       
@@ -406,9 +408,7 @@ export class InstagramOAuthService {
       }
 
       const data: any = await jsonAny(response);
-      const permissions = data.data || [];
-
-      const grantedPerms = (permissions as any).data?.map((p: any) => p.permission) ?? [];
+      const grantedPerms = (data.data ?? []).map((p: any) => p.permission);
       const grantedPermissions = grantedPerms;
 
       // Updated required scopes for 2025 Instagram Business Login
@@ -715,12 +715,16 @@ export class InstagramOAuthService {
    * Store OAuth session securely (2025 Enhancement)
    */
   async storeOAuthSession(
-    merchantId: string, 
+    merchantId: string,
     sessionData: { state: string; codeVerifier: string; redirectUri: string }
   ): Promise<void> {
     try {
       const sql = this.db.getSQL();
-      const { codeVerifier, codeChallenge } = this.generatePKCE();
+
+      const codeVerifier = sessionData.codeVerifier;
+      const codeChallenge = crypto.createHash('sha256')
+        .update(codeVerifier)
+        .digest('base64url');
 
       await sql`
         INSERT INTO oauth_sessions (
@@ -735,7 +739,7 @@ export class InstagramOAuthService {
         ) VALUES (
           ${merchantId}::uuid,
           ${sessionData.state},
-          ${sessionData.codeVerifier},
+          ${codeVerifier},
           ${codeChallenge},
           ${sessionData.redirectUri},
           ARRAY['instagram_business_basic', 'instagram_business_content_publish', 'instagram_business_manage_messages', 'instagram_business_manage_comments'],
@@ -744,6 +748,7 @@ export class InstagramOAuthService {
         )
         ON CONFLICT (state) DO UPDATE SET
           code_verifier = EXCLUDED.code_verifier,
+          code_challenge = EXCLUDED.code_challenge,
           redirect_uri = EXCLUDED.redirect_uri,
           updated_at = NOW()
       `;
@@ -840,30 +845,38 @@ export class InstagramOAuthService {
         AND token_expires_at > NOW()
       `;
 
+      const refreshPromises = expiringTokens.map(async (record) => {
+        const refreshedToken = await this.refreshLongLivedToken(
+          record.instagram_access_token,
+          record.merchant_id
+        );
+
+        const newExpiresAt = new Date(Date.now() + (refreshedToken.expires_in * 1000));
+
+        await sql`
+          UPDATE merchant_credentials SET
+            instagram_access_token = ${refreshedToken.access_token},
+            token_expires_at = ${newExpiresAt},
+            last_token_refresh = NOW(),
+            updated_at = NOW()
+          WHERE merchant_id = ${record.merchant_id}
+        `;
+
+        return { merchantId: record.merchant_id };
+      });
+
+      const results = await Promise.allSettled(refreshPromises);
+
       let refreshedCount = 0;
-
-      for (const record of expiringTokens) {
-        try {
-          const refreshedToken = await this.refreshLongLivedToken(record.instagram_access_token);
-          
-          const newExpiresAt = new Date(Date.now() + (refreshedToken.expires_in * 1000));
-          
-          await sql`
-            UPDATE merchant_credentials SET
-              instagram_access_token = ${refreshedToken.access_token},
-              token_expires_at = ${newExpiresAt},
-              last_token_refresh = NOW(),
-              updated_at = NOW()
-            WHERE merchant_id = ${record.merchant_id}
-          `;
-
+      results.forEach((result, index) => {
+        const merchantId = expiringTokens[index].merchant_id;
+        if (result.status === 'fulfilled') {
           refreshedCount++;
-          console.log(`✅ Token refreshed for merchant ${record.merchant_id}`);
-
-        } catch (error) {
-          console.error(`❌ Failed to refresh token for merchant ${record.merchant_id}:`, error);
+          console.log(`✅ Token refreshed for merchant ${merchantId}`);
+        } else {
+          console.error(`❌ Failed to refresh token for merchant ${merchantId}:`, result.reason);
         }
-      }
+      });
 
       console.log(`🔄 Refreshed ${refreshedCount} tokens out of ${expiringTokens.length} expiring`);
       return refreshedCount;
@@ -907,15 +920,15 @@ export class InstagramOAuthService {
       const sql = this.db.getSQL();
 
       const result = await sql`
-        SELECT 
-          instagram_access_token,
+        SELECT
+          instagram_token_encrypted,
           instagram_user_id,
           instagram_username,
           instagram_scopes,
           token_expires_at
         FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
-        AND instagram_access_token IS NOT NULL
+        AND instagram_token_encrypted IS NOT NULL
       `;
 
       if (result.length === 0) {

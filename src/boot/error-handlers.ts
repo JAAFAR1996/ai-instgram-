@@ -100,7 +100,7 @@ process.on('multipleResolves', (type, promise, reason) => {
 let shuttingDown = false;
 const shutdownController = new AbortController();
 
-async function gracefulShutdown(signal: string, code = 0) {
+export async function gracefulShutdown(signal: string, code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   
@@ -126,12 +126,16 @@ async function gracefulShutdown(signal: string, code = 0) {
 
       // انتظر هدوء الطابور إن توفّر
       if (typeof (qm as any).waitForIdle === 'function') {
-        await (qm as any).waitForIdle(5000).catch(() => {});
+        await (qm as any)
+          .waitForIdle(5000)
+          .catch((e: unknown) => console.error('Failed to wait for idle queue:', e));
       }
 
       // اختياري: تفريغ متبقٍ
       if (typeof (qm as any).drain === 'function') {
-        await (qm as any).drain().catch(() => {});
+        await (qm as any)
+          .drain()
+          .catch((e: unknown) => console.error('Failed to drain queue:', e));
       }
 
       console.log('✅ Queue manager quiesced');

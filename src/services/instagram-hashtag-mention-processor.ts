@@ -398,7 +398,7 @@ export class InstagramHashtagMentionProcessor {
       console.error(`❌ Hashtag analysis failed for #${hashtag}:`, error);
       return {
         hashtag,
-        frequency: 1,
+        frequency: 0,
         sentiment: 'neutral',
         category: 'generic',
         marketingValue: 'low',
@@ -505,6 +505,9 @@ export class InstagramHashtagMentionProcessor {
     category: string,
     frequency: number
   ): 'high' | 'medium' | 'low' {
+    if (frequency === 0) {
+      return 'low';
+    }
     if (category === 'product' || category === 'brand') {
       return frequency > 5 ? 'high' : 'medium';
     }
@@ -693,9 +696,10 @@ export class InstagramHashtagMentionProcessor {
         AND merchant_id = ${merchantId}::uuid
         AND created_at >= NOW() - INTERVAL '30 days'
       `;
-      return Number(result[0]?.frequency || 1);
-    } catch {
-      return 1;
+      return Number(result[0]?.frequency || 0);
+    } catch (error) {
+      console.error('Error getting hashtag frequency:', error);
+      return 0;
     }
   }
 
@@ -826,26 +830,27 @@ export class InstagramHashtagMentionProcessor {
   private async updateTrendingData(hashtags: string[], merchantId: string): Promise<void> {
     try {
       const sql = this.db.getSQL();
+      if (hashtags.length === 0) return;
 
-      for (const hashtag of hashtags) {
-        await sql`
-          INSERT INTO hashtag_trends (
-            merchant_id,
-            hashtag,
-            usage_count,
-            date
-          ) VALUES (
-            ${merchantId}::uuid,
-            ${hashtag},
-            1,
-            CURRENT_DATE
-          )
-          ON CONFLICT (merchant_id, hashtag, date)
-          DO UPDATE SET
-            usage_count = hashtag_trends.usage_count + 1,
-            updated_at = NOW()
-        `;
-      }
+      const values = hashtags.map(tag => [
+        merchantId,
+        tag,
+        1,
+        sql`CURRENT_DATE`
+      ]);
+
+      await sql`
+        INSERT INTO hashtag_trends (
+          merchant_id,
+          hashtag,
+          usage_count,
+          date
+        ) VALUES ${sql(values)}
+        ON CONFLICT (merchant_id, hashtag, date)
+        DO UPDATE SET
+          usage_count = hashtag_trends.usage_count + EXCLUDED.usage_count,
+          updated_at = NOW()
+      `;
     } catch (error) {
       console.error('❌ Update trending data failed:', error);
     }

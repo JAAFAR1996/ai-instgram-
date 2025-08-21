@@ -227,13 +227,9 @@ export class InstagramAIService extends AIService {
   ): Promise<InstagramAIResponse> {
     try {
       const prompt = this.buildStoryReplyPrompt(storyReaction, storyContext, context);
-      
-      const openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY!,
-      });
 
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+      const completion = await this.openai.chat.completions.create({
+        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
         messages: prompt,
         temperature: 0.9, // Very creative for story interactions
         max_tokens: 200,

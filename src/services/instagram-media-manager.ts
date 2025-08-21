@@ -86,6 +86,22 @@ export interface MediaTemplate {
 export class InstagramMediaManager {
   private db = getDatabase();
   private aiOrchestrator = getConversationAIOrchestrator();
+  private instagramClient = getInstagramClient();
+  private initializedMerchantId: string | null = null;
+
+  private async getClient(merchantId: string) {
+    if (this.initializedMerchantId !== merchantId) {
+      await this.instagramClient.initialize(merchantId);
+      this.initializedMerchantId = merchantId;
+    }
+    return this.instagramClient;
+  }
+
+  public clearClient(merchantId?: string) {
+    if (!merchantId || this.initializedMerchantId === merchantId) {
+      this.initializedMerchantId = null;
+    }
+  }
 
   /**
    * Process incoming media message
@@ -183,9 +199,7 @@ export class InstagramMediaManager {
       }
 
       // Send via Instagram API
-      const instagramClient = getInstagramClient();
-      await instagramClient.initialize(merchantId);
-
+      const instagramClient = await this.getClient(merchantId);
       const result = await instagramClient.sendImageMessage(recipientId, mediaUrl, caption);
 
       if (result.success) {
@@ -517,9 +531,7 @@ export class InstagramMediaManager {
       );
 
       // Send response via Instagram API
-      const instagramClient = getInstagramClient();
-      await instagramClient.initialize(merchantId);
-
+      const instagramClient = await this.getClient(merchantId);
       let responseContent = aiResult.response.message;
 
       // Enhance response based on analysis

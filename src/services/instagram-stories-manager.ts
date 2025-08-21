@@ -215,8 +215,7 @@ export class InstagramStoriesManager {
       );
 
       // Send response via Instagram API
-      const instagramClient = getInstagramClient();
-      await instagramClient.initialize(merchantId);
+      const instagramClient = await this.getClient(merchantId);
 
       const sendResult = await instagramClient.sendMessage({
         recipientId: interaction.userId,
@@ -292,21 +291,23 @@ export class InstagramStoriesManager {
         ? sql`AND created_at BETWEEN ${dateRange.from.toISOString()} AND ${dateRange.to.toISOString()}`
         : sql`AND created_at >= NOW() - INTERVAL '30 days'`;
 
-      // Get interaction counts
-      const interactions = await sql`
-        SELECT 
-          interaction_type,
-          COUNT(*) as count,
-          COUNT(DISTINCT user_id) as unique_users
+      // Get aggregated interaction counts with unique users
+      const analytics = await sql`
+        SELECT
+          COUNT(*) as total_interactions,
+          COUNT(DISTINCT user_id) as unique_users,
+          COUNT(*) FILTER (WHERE interaction_type = 'story_reply') as replies,
+          COUNT(*) FILTER (WHERE interaction_type = 'story_mention') as mentions,
+          COUNT(*) FILTER (WHERE interaction_type = 'story_reaction') as reactions,
+          COUNT(*) FILTER (WHERE interaction_type = 'story_view') as views
         FROM story_interactions
         WHERE merchant_id = ${merchantId}::uuid
         ${dateFilter}
-        GROUP BY interaction_type
       `;
 
       // Calculate engagement metrics
-      const totalInteractions = interactions.reduce((sum, int) => sum + Number(int.count), 0);
-      const uniqueUsers = Math.max(...interactions.map(int => Number(int.unique_users)));
+      const totalInteractions = Number(analytics[0]?.total_interactions || 0);
+      const uniqueUsers = Number(analytics[0]?.unique_users || 0);
 
       // Get response rate
       const responseData = await sql`
@@ -348,10 +349,10 @@ export class InstagramStoriesManager {
         uniqueUsers,
         responseRate,
         engagementTypes: {
-          replies: interactions.find(i => i.interaction_type === 'story_reply')?.count || 0,
-          mentions: interactions.find(i => i.interaction_type === 'story_mention')?.count || 0,
-          reactions: interactions.find(i => i.interaction_type === 'story_reaction')?.count || 0,
-          views: interactions.find(i => i.interaction_type === 'story_view')?.count || 0
+          replies: Number(analytics[0]?.replies || 0),
+          mentions: Number(analytics[0]?.mentions || 0),
+          reactions: Number(analytics[0]?.reactions || 0),
+          views: Number(analytics[0]?.views || 0)
         },
         topInteractionTimes,
         userEngagementScore
@@ -731,6 +732,16 @@ export class InstagramStoriesManager {
   ): Promise<void> {
     try {
       const sql = this.db.getSQL();
+      const redis = await this.redis.getConnection(RedisUsageType.CACHING);
+
+      // Ensure unique users per day using Redis set
+      const today = new Date().toISOString().slice(0, 10);
+      const uniqueKey = `story:users:${merchantId}:${today}`;
+      const isNewUser = await redis.sadd(uniqueKey, interaction.userId);
+      if (isNewUser === 1) {
+        await redis.expire(uniqueKey, 86400);
+      }
+      const uniqueIncrement = isNewUser === 1 ? 1 : 0;
 
       // Update daily analytics
       await sql`
@@ -745,12 +756,12 @@ export class InstagramStoriesManager {
           CURRENT_DATE,
           'instagram',
           1,
-          1
+          ${uniqueIncrement}
         )
         ON CONFLICT (merchant_id, date, platform)
         DO UPDATE SET
           story_interactions = daily_analytics.story_interactions + 1,
-          unique_story_users = daily_analytics.unique_story_users + 1,
+          unique_story_users = daily_analytics.unique_story_users + ${uniqueIncrement},
           updated_at = NOW()
       `;
     } catch (error) {
@@ -806,8 +817,7 @@ export class InstagramStoriesManager {
     interaction: StoryInteraction
   ): Promise<void> {
     try {
-      const instagramClient = getInstagramClient();
-      await instagramClient.initialize(merchantId);
+      const instagramClient = await this.getClient(merchantId);
 
       const assistanceMessage = `شكراً لاهتمامك! 🛍️ يسعدني أساعدك في اختيار المنتج المناسب. راسلني هنا وراح أرسلك كل التفاصيل والأسعار ✨`;
 

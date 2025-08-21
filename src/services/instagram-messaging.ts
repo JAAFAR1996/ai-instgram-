@@ -143,16 +143,27 @@ export class InstagramMessagingService {
 
     } catch (error) {
       console.error('❌ Instagram messaging failed:', error);
-      
-      // Log the failed message
-      await this.logFailedMessage(merchantId, recipientId, messageText, error.message, options);
 
-      return {
+      const failureResult = {
         messageId: '',
         recipientId: recipientId,
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
+
+      try {
+        await this.logFailedMessage(
+          merchantId,
+          recipientId,
+          messageText,
+          error instanceof Error ? error.message : 'Unknown error',
+          options
+        );
+      } catch (logError) {
+        console.warn('⚠️ Failed to log failed Instagram message', logError);
+      }
+
+      return failureResult;
     }
   }
 
@@ -188,7 +199,7 @@ export class InstagramMessagingService {
         throw new Error('Outside 24-hour messaging window');
       }
 
-      // Prepare image message payload
+      // Prepare image message payload with optional caption
       const messagePayload = {
         recipient: {
           id: recipientId
@@ -199,14 +210,10 @@ export class InstagramMessagingService {
             payload: {
               url: imageUrl
             }
-          }
+          },
+          ...(caption ? { text: caption } : {})
         }
       };
-
-      // Add caption if provided
-      if (caption) {
-        (messagePayload as any).message = { text: caption };
-      }
 
       const response = await fetch(
         `https://graph.instagram.com/${this.config.instagram.apiVersion}/${igUserId}/messages`,
@@ -246,20 +253,26 @@ export class InstagramMessagingService {
     } catch (error) {
       console.error('❌ Instagram image messaging failed:', error);
 
-      await this.logFailedMessage(
-        merchantId, 
-        recipientId, 
-        `[IMAGE: ${imageUrl}]${caption ? ` ${caption}` : ''}`, 
-        error.message, 
-        options
-      );
-
-      return {
+      const failureResult = {
         messageId: '',
         recipientId: recipientId,
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
+
+      try {
+        await this.logFailedMessage(
+          merchantId,
+          recipientId,
+          `[IMAGE: ${imageUrl}]${caption ? ` ${caption}` : ''}`,
+          error instanceof Error ? error.message : 'Unknown error',
+          options
+        );
+      } catch (logError) {
+        console.warn('⚠️ Failed to log failed Instagram message', logError);
+      }
+
+      return failureResult;
     }
   }
 
@@ -367,20 +380,26 @@ export class InstagramMessagingService {
     } catch (error) {
       console.error('❌ Instagram template messaging failed:', error);
 
-      await this.logFailedMessage(
-        merchantId, 
-        recipientId, 
-        `[TEMPLATE] ${elements[0]?.title || 'Generic template'}`, 
-        error.message, 
-        options
-      );
-
-      return {
+      const failureResult = {
         messageId: '',
         recipientId: recipientId,
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
+
+      try {
+        await this.logFailedMessage(
+          merchantId,
+          recipientId,
+          `[TEMPLATE] ${elements[0]?.title || 'Generic template'}`,
+          error instanceof Error ? error.message : 'Unknown error',
+          options
+        );
+      } catch (logError) {
+        console.warn('⚠️ Failed to log failed Instagram message', logError);
+      }
+
+      return failureResult;
     }
   }
 
@@ -392,10 +411,10 @@ export class InstagramMessagingService {
       const sql = this.db.getSQL();
 
       const result = await sql`
-        SELECT instagram_access_token, token_expires_at
+        SELECT instagram_token_encrypted, token_expires_at
         FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
-        AND instagram_access_token IS NOT NULL
+        AND instagram_token_encrypted IS NOT NULL
       `;
 
       if (result.length === 0) {
@@ -410,7 +429,7 @@ export class InstagramMessagingService {
         return null;
       }
 
-      return record.instagram_access_token;
+      return this.encryption.decryptInstagramToken(record.instagram_token_encrypted);
 
     } catch (error) {
       console.error('❌ Failed to get merchant access token:', error);

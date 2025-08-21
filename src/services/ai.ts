@@ -80,7 +80,7 @@ export interface MerchantSettings {
 }
 
 export class AIService {
-  private openai: OpenAI;
+  protected openai: OpenAI;
   private encryptionService = getEncryptionService();
   protected db = getDatabase();
 

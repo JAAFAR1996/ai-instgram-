@@ -126,11 +126,23 @@ export class InstagramWebhookHandler {
 
     try {
       console.log(`📥 Processing Instagram webhook for merchant: ${merchantId}`);
-      
-      for (const entry of payload.entry) {
-        try {
-          await this.processWebhookEntry(entry, merchantId, result);
-        } catch (error) {
+      const entryPromises = payload.entry.map(entry =>
+        this.processWebhookEntry(entry, merchantId)
+      );
+
+      const settledResults = await Promise.allSettled(entryPromises);
+
+      for (const settled of settledResults) {
+        if (settled.status === 'fulfilled') {
+          const entryResult = settled.value;
+          result.eventsProcessed += entryResult.eventsProcessed;
+          result.conversationsCreated += entryResult.conversationsCreated;
+          result.messagesProcessed += entryResult.messagesProcessed;
+          if (entryResult.errors.length > 0) {
+            result.errors.push(...entryResult.errors);
+          }
+        } else {
+          const error = settled.reason;
           const errorMsg = `Entry processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
           result.errors.push(errorMsg);
           console.error('❌', errorMsg);
@@ -138,12 +150,12 @@ export class InstagramWebhookHandler {
       }
 
       result.success = result.errors.length === 0;
-      
+
       // Log webhook processing result
       await this.logWebhookProcessing(merchantId, payload, result);
-      
+
       console.log(`✅ Webhook processed: ${result.eventsProcessed} events, ${result.messagesProcessed} messages`);
-      
+
       return result;
     } catch (error) {
       console.error('❌ Webhook processing failed:', error);
@@ -183,9 +195,16 @@ export class InstagramWebhookHandler {
    */
   private async processWebhookEntry(
     entry: InstagramWebhookEntry,
-    merchantId: string,
-    result: ProcessedWebhookResult
-  ): Promise<void> {
+    merchantId: string
+  ): Promise<ProcessedWebhookResult> {
+    const result: ProcessedWebhookResult = {
+      success: true,
+      eventsProcessed: 0,
+      conversationsCreated: 0,
+      messagesProcessed: 0,
+      errors: []
+    };
+
     // Process messaging events (DMs and story replies)
     if (entry.messaging) {
       for (const messagingEvent of entry.messaging) {
@@ -209,6 +228,8 @@ export class InstagramWebhookHandler {
         result.eventsProcessed++;
       }
     }
+
+    return result;
   }
 
   /**
@@ -264,25 +285,23 @@ export class InstagramWebhookHandler {
         
         // Handle attachments with Media Manager
         if (event.message.attachments && event.message.attachments.length > 0) {
-          const attachment = event.message.attachments[0];
-          messageType = attachment.type.toUpperCase();
-          mediaUrl = attachment.payload.url;
-          
-          if (!messageContent) {
-            messageContent = `[${messageType}]`;
+          for (const attachment of event.message.attachments) {
+            const attachmentType = attachment.type.toUpperCase();
+            const content = messageContent || `[${attachmentType}]`;
+
+            // Process media with Media Manager
+            await this.processMediaAttachment(
+              attachment,
+              conversation.id,
+              merchantId,
+              customerId,
+              content,
+              timestamp
+            );
+
+            result.messagesProcessed++;
           }
 
-          // Process media with Media Manager
-          await this.processMediaAttachment(
-            attachment,
-            conversation.id,
-            merchantId,
-            customerId,
-            messageContent,
-            timestamp
-          );
-          
-          result.messagesProcessed++;
           return; // Early return as Media Manager handles the full flow
         }
       } else if (isPostback && event.postback) {

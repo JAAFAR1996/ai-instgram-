@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS merchant_credentials (
     -- Instagram credentials
     instagram_user_id VARCHAR(100),
     instagram_page_id VARCHAR(100),
-    instagram_access_token TEXT,
+    instagram_token_encrypted TEXT,
     instagram_token_expires_at TIMESTAMPTZ,
     
     -- WhatsApp credentials  
@@ -32,18 +32,3 @@ CREATE TABLE IF NOT EXISTS merchant_credentials (
 CREATE INDEX IF NOT EXISTS idx_merchant_credentials_merchant_id ON merchant_credentials(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_merchant_credentials_instagram_page ON merchant_credentials(instagram_page_id) WHERE instagram_page_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_merchant_credentials_platform ON merchant_credentials(platform, is_active);
-
--- إضافة بيانات تجريبية للاختبار
-INSERT INTO merchant_credentials (
-    merchant_id, 
-    platform, 
-    instagram_page_id, 
-    instagram_user_id,
-    is_active
-) VALUES (
-    uuid_generate_v4(),
-    'INSTAGRAM',
-    'test_page_id_123',
-    'test_user_id_123', 
-    true
-) ON CONFLICT DO NOTHING;

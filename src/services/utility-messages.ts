@@ -65,7 +65,7 @@ export class UtilityMessagesService {
       console.log('📨 Sending utility message:', payload.message_type);
 
       // Validate template exists and is approved
-      const template = await this.getApprovedTemplate(payload.template_id);
+      const template = await this.getApprovedTemplate(merchantId, payload.template_id);
       if (!template) {
         return {
           success: false,
@@ -76,6 +76,7 @@ export class UtilityMessagesService {
 
       // Get Instagram client
       const instagramClient = getInstagramClient();
+      await instagramClient.initialize(merchantId);
 
       // Prepare message content with variables
       const messageContent = this.interpolateTemplate(template.content, payload.variables);
@@ -84,8 +85,9 @@ export class UtilityMessagesService {
       const req: SendMessageRequest = {
         recipientId: String(payload.recipient_id),
         messageType: 'text',
-        content: String((payload as any)?.text ?? '')
+        content: messageContent
       };
+
       
       const response = await instagramClient.sendMessage(req);
 
@@ -184,13 +186,16 @@ export class UtilityMessagesService {
   /**
    * Get approved template by ID
    */
-  private async getApprovedTemplate(templateId: string): Promise<UtilityMessageTemplate | null> {
+  private async getApprovedTemplate(
+    merchantId: string,
+    templateId: string
+  ): Promise<UtilityMessageTemplate | null> {
     try {
       const sql = this.db.getSQL();
-      
+
       const result = await sql`
-        SELECT * FROM utility_message_templates 
-        WHERE id = ${templateId} AND approved = true
+        SELECT * FROM utility_message_templates
+        WHERE id = ${templateId} AND merchant_id = ${merchantId}::uuid AND approved = true
       `;
 
       if (result.length === 0) {

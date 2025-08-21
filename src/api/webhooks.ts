@@ -18,8 +18,6 @@ import { pushDLQ } from '../queue/dead-letter.js';
 import { z } from 'zod';
 import crypto from 'node:crypto';
 import { MerchantIdMissingError } from '../utils/merchant.js';
-import { MerchantIdMissingError } from '../utils/merchant.js';
-import { MerchantIdMissingError } from '../utils/merchant.js';
 
 // Webhook validation schemas
 const InstagramWebhookVerificationSchema = z.object({
@@ -226,6 +224,29 @@ export class WebhookRouter {
           const fs = await import('fs');
           await fs.promises.writeFile(dump, rawBuf);
           console.log('Debug dump saved:', dump);
+
+          // Keep debug dumps from growing without bound
+          const dir = '/var/tmp';
+          const maxFiles = 20;
+          const p = await import('path');
+          try {
+            const files = (await fs.promises.readdir(dir))
+              .filter(f => /^ig_\d+\.raw$/.test(f));
+
+            if (files.length > maxFiles) {
+              const stats = await Promise.all(
+                files.map(async f => ({
+                  f,
+                  t: (await fs.promises.stat(p.join(dir, f))).mtimeMs
+                }))
+              );
+
+              const toDelete = stats.sort((a, b) => b.t - a.t).slice(maxFiles);
+              await Promise.all(toDelete.map(s => fs.promises.unlink(p.join(dir, s.f))));
+            }
+          } catch (pruneError) {
+            console.error('❌ Could not prune debug dumps:', pruneError);
+          }
         } catch (writeError) {
           console.error('❌ Could not write debug file:', writeError);
         }
@@ -315,23 +336,59 @@ export class WebhookRouter {
       // Check for idempotency using merchant and body hash
       const idempotencyCheck = await this.checkWebhookIdempotency(merchantId, event, 'instagram');
 
+      if (idempotencyCheck.isDuplicate) {
+        console.log(`🔁 Duplicate Instagram webhook: ${idempotencyCheck.eventId}`);
+        return c.text('EVENT_RECEIVED', 200);
+      }
+
+      for (const entry of event.entry) {
+        await this.processInstagramEntry(entry);
+      }
+
+      await this.markWebhookProcessed(idempotencyCheck.eventId);
+      return c.text('EVENT_RECEIVED', 200);
+
+    } catch (error) {
+      if (error instanceof MerchantIdMissingError) {
+        return c.json({
+          error: 'Merchant ID required',
+          code: 'MERCHANT_ID_MISSING'
+        }, 400);
+      }
+      console.error('❌ Instagram webhook processing failed:', error);
+
+      pushDLQ({
+        ts: Date.now(),
+        reason: 'instagram-webhook-processing-failed',
+        payload: {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        },
+        platform: 'instagram',
+        merchantId: merchantId ?? 'unknown'
+      });
+
+      return c.text('Webhook processing failed', 500);
+    }
+  }
+
   /**
    * Handle WhatsApp webhook verification (GET request)
    */
   private async handleWhatsAppVerification(c: any) {
     try {
       console.log('🔍 WhatsApp webhook verification request received');
-      
+
       const query = c.req.query();
       const validation = WhatsAppWebhookVerificationSchema.safeParse(query);
-      
+
       if (!validation.success) {
         console.error('❌ Invalid WhatsApp verification parameters:', validation.error);
         return c.text('Invalid verification parameters', 400);
       }
 
       const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = validation.data;
-      
+
       if (mode !== 'subscribe') {
         console.error('❌ Invalid hub mode:', mode);
         return c.text('Invalid hub mode', 400);
@@ -339,7 +396,7 @@ export class WebhookRouter {
 
       // Verify token against stored webhook verify tokens
       const isValidToken = await this.verifyWebhookToken(token, 'whatsapp');
-      
+
       if (!isValidToken) {
         console.error('❌ Invalid WhatsApp webhook verify token');
         return c.text('Invalid verify token', 403);

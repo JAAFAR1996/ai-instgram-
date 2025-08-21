@@ -194,12 +194,36 @@ export function getEncryptionService(): EncryptionService {
   return encryptionInstance;
 }
 
-// Export main functions for convenience
-const service = new EncryptionService();
-export const encrypt = service.encrypt.bind(service);
-export const decrypt = service.decrypt.bind(service);
-export const encryptToken = service.encryptToken.bind(service);
-export const decryptToken = service.decryptToken.bind(service);
-export const verifyHMAC = service.verifyHMAC.bind(service);
+// Export main functions for convenience using lazy-loaded service
+export function encrypt(plaintext: string, aad?: string): EncryptedData {
+  return getEncryptionService().encrypt(plaintext, aad);
+}
+
+export function decrypt(data: EncryptedData, aad?: string): string {
+  return getEncryptionService().decrypt(data, aad);
+}
+
+export function encryptToken(
+  token: string,
+  platform: 'whatsapp' | 'instagram',
+  identifier: string
+): EncryptedData {
+  return getEncryptionService().encryptToken(token, platform, identifier);
+}
+
+export function decryptToken(
+  encryptedPayload: EncryptedData,
+  platform: 'whatsapp' | 'instagram'
+): { token: string; identifier: string; timestamp: number } {
+  return getEncryptionService().decryptToken(encryptedPayload, platform);
+}
+
+export function verifyHMAC(
+  payload: string,
+  signature: string,
+  secret: string
+): boolean {
+  return getEncryptionService().verifyHMAC(payload, signature, secret);
+}
 
 export default EncryptionService;

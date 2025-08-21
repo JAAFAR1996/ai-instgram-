@@ -63,7 +63,7 @@ app.post('/auth/instagram/initiate',
       const oauthService = getInstagramOAuthService();
       
       // Generate secure OAuth URL with PKCE (2025 Enhancement)
-      const oauthResult = oauthService.generateAuthorizationUrl(merchantId);
+      const oauthResult = await oauthService.generateAuthorizationUrl(merchantId);
       
       // Store OAuth session securely for later verification
       await oauthService.storeOAuthSession(merchantId, {
@@ -360,6 +360,147 @@ app.delete('/auth/instagram/disconnect/:merchantId', async (c) => {
     return c.json({
       error: 'Failed to disconnect Instagram account',
       details: err.message
+    }, 500);
+  }
+});
+
+/**
+ * تحديث رمز الوصول الطويل الأجل
+ */
+app.post('/auth/instagram/refresh/:merchantId', async (c) => {
+  try {
+    const merchantId = c.req.param('merchantId');
+
+    const oauthService = getInstagramOAuthService();
+    const status = await oauthService.getAuthorizationStatus(merchantId);
+    if (!status.isAuthorized) {
+      return c.json({ error: 'Merchant not authorized for Instagram' }, 401);
+    }
+
+    const db = getDatabase();
+    const sql = db.getSQL();
+    const result = await sql`
+      SELECT instagram_access_token
+      FROM merchant_credentials
+      WHERE merchant_id = ${merchantId}::uuid
+      AND instagram_access_token IS NOT NULL
+    `;
+
+    if (result.length === 0) {
+      return c.json({ error: 'No token found for merchant' }, 404);
+    }
+
+    const currentToken = result[0].instagram_access_token;
+    const refreshedToken = await oauthService.refreshLongLivedToken(currentToken, merchantId);
+
+    const newExpiresAt = new Date(Date.now() + (refreshedToken.expires_in * 1000));
+
+    await sql`
+      UPDATE merchant_credentials SET
+        instagram_access_token = ${refreshedToken.access_token},
+        token_expires_at = ${newExpiresAt},
+        last_token_refresh = NOW(),
+        updated_at = NOW()
+      WHERE merchant_id = ${merchantId}::uuid
+    `;
+
+    return c.json({
+      success: true,
+      message: 'Token refreshed successfully',
+      data: {
+        merchantId,
+        tokenExpiresAt: newExpiresAt,
+        expiresIn: refreshedToken.expires_in
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Token refresh failed:', error);
+    const err = error instanceof Error ? error : new Error(String(error));
+    return c.json({
+      error: 'Token refresh failed',
+      message: err.message
+    }, 500);
+  }
+});
+
+/**
+ * التحقق من صلاحية الرمز الحالي
+ */
+app.post('/auth/instagram/validate/:merchantId', async (c) => {
+  try {
+    const merchantId = c.req.param('merchantId');
+
+    const db = getDatabase();
+    const sql = db.getSQL();
+    const result = await sql`
+      SELECT instagram_access_token, token_expires_at
+      FROM merchant_credentials
+      WHERE merchant_id = ${merchantId}::uuid
+      AND instagram_access_token IS NOT NULL
+    `;
+
+    if (result.length === 0) {
+      return c.json({
+        success: false,
+        valid: false,
+        reason: 'No token found'
+      });
+    }
+
+    const record = result[0];
+    const now = new Date();
+    const expiresAt = new Date(record.token_expires_at);
+
+    if (expiresAt <= now) {
+      return c.json({
+        success: false,
+        valid: false,
+        reason: 'Token expired',
+        expiresAt
+      });
+    }
+
+    const oauthService = getInstagramOAuthService();
+    const isValid = await oauthService.validateToken(record.instagram_access_token, merchantId);
+
+    return c.json({
+      success: true,
+      valid: isValid,
+      expiresAt,
+      reason: isValid ? 'Token is valid' : 'Token invalid with Instagram'
+    });
+
+  } catch (error) {
+    console.error('❌ Token validation failed:', error);
+    const err = error instanceof Error ? error : new Error(String(error));
+    return c.json({
+      error: 'Token validation failed',
+      message: err.message
+    }, 500);
+  }
+});
+
+/**
+ * تحديث جماعي للرموز التي ستنتهي صلاحيتها
+ */
+app.post('/auth/instagram/refresh-batch', async (c) => {
+  try {
+    const oauthService = getInstagramOAuthService();
+    const refreshedCount = await oauthService.refreshExpiringTokens();
+
+    return c.json({
+      success: true,
+      message: `Refreshed ${refreshedCount} expiring tokens`,
+      refreshedCount
+    });
+
+  } catch (error) {
+    console.error('❌ Batch token refresh failed:', error);
+    const err = error instanceof Error ? error : new Error(String(error));
+    return c.json({
+      error: 'Batch token refresh failed',
+      message: err.message
     }, 500);
   }
 });

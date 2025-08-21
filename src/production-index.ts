@@ -41,6 +41,7 @@ import type { IGWebhookPayload } from './types/instagram.js';
 import { getLogger, bindRequestLogger } from './services/logger.js';
 import { telemetry, telemetryMiddleware } from './services/telemetry.js';
 import autoTenantContext, { requireAdminContext } from './middleware/auto-tenant-context.js';
+import instagramAuth from './api/instagram-auth.js';
 
 // Define App Environment for TypeScript
 type AppEnv = {
@@ -65,9 +66,6 @@ const REDIS_URL = process.env.REDIS_URL;
 if (process.env.DEBUG_DUMP === '1') {
   console.warn('⚠️ Debug mode enabled; this may increase logging and I/O load.');
 }
-
-// Temporary store for PKCE code verifiers keyed by state
-const pkceSessions = new Map<string, { codeVerifier: string; createdAt: number }>();
 
 if (!META_APP_SECRET || !IG_VERIFY_TOKEN) {
   console.error('❌ Missing META_APP_SECRET or IG_VERIFY_TOKEN. Refusing to start.');
@@ -107,59 +105,82 @@ function detectEnvironment(): Environment {
 }
 
 async function initializeRedisIntegration() {
-  console.log('🔍 [DEBUG] initializeRedisIntegration() - بدء دالة تهيئة النظام المتكامل');
+  const log = getLogger({ component: 'RedisInit' });
+  const debugDump = process.env.DEBUG_DUMP === '1';
+
+  if (debugDump) {
+    log.debug('initializeRedisIntegration() - بدء دالة تهيئة النظام المتكامل');
+  }
 
   if (!REDIS_URL) {
-    console.error('❌ REDIS_URL not configured - Redis integration disabled');
+    log.error('REDIS_URL not configured - Redis integration disabled');
     return;
   }
 
   try {
-    console.log('🔍 [DEBUG] REDIS_URL موجود:', REDIS_URL.substring(0, 20) + '...');
+    if (debugDump) {
+      log.debug('REDIS_URL موجود', { url: REDIS_URL.substring(0, 20) + '...' });
+    }
 
     const environment = detectEnvironment();
-    console.log('🔍 [DEBUG] تم تحديد البيئة:', environment);
+    if (debugDump) {
+      log.debug('تم تحديد البيئة', { environment });
+    }
 
-    console.log('🔍 [DEBUG] إنشاء RedisProductionIntegration...');
+    if (debugDump) {
+      log.debug('إنشاء RedisProductionIntegration...');
+    }
     redisIntegration = new RedisProductionIntegration(REDIS_URL, console, environment);
 
-    console.log('🔍 [DEBUG] استدعاء redisIntegration.initialize()...');
+    if (debugDump) {
+      log.debug('استدعاء redisIntegration.initialize()...');
+    }
     const result = await redisIntegration.initialize();
 
-    console.log('🔍 [DEBUG] نتيجة initialize():', {
-      success: result.success,
-      error: result.error?.substring(0, 100)
-    });
+    if (debugDump) {
+      log.debug('نتيجة initialize()', {
+        success: result.success,
+        error: result.error?.substring(0, 100)
+      });
+    }
 
     if (result.success) {
-      console.log('✅ نظام ريديس المتكامل جاهز', {
+      log.info('نظام ريديس المتكامل جاهز', {
         responseTime: result.diagnostics?.redisHealth?.responseTime,
         queueStats: result.diagnostics?.queueStats
       });
-      console.log('🔍 [DEBUG] queueManager موجود؟', !!result.queueManager);
+      if (debugDump) {
+        log.debug('queueManager موجود؟', { hasQueueManager: !!result.queueManager });
+      }
 
       // Start health monitoring after Redis and queue are ready
-      console.log('🏥 بدء نظام مراقبة الصحة...');
+      log.info('بدء نظام مراقبة الصحة...');
       startHealthMonitoring({
         redisReady: () => result.diagnostics?.redisHealth?.connected || false,
         queueReady: () => !!result.queueManager
       });
-      console.log('✅ نظام مراقبة الصحة نشط');
+      log.info('نظام مراقبة الصحة نشط');
     } else {
-      console.error('❌ فشل تهيئة نظام ريديس:', result.error);
-      console.warn('⚠️ سيتم استخدام المعالجة البديلة');
-      console.log('🔍 [DEBUG] تفاصيل الفشل:', result.diagnostics);
+      log.error('فشل تهيئة نظام ريديس', result.error);
+      log.warn('سيتم استخدام المعالجة البديلة');
+      if (debugDump) {
+        log.debug('تفاصيل الفشل', result.diagnostics);
+      }
     }
   } catch (error) {
-    console.error('❌ خطأ في تهيئة النظام المتكامل:', error);
-    console.error('🔍 [DEBUG] تفاصيل الخطأ:', {
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
-    });
-    console.warn('⚠️ سيتم استخدام المعالجة البديلة');
+    log.error('خطأ في تهيئة النظام المتكامل', error);
+    if (debugDump) {
+      log.debug('تفاصيل الخطأ', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+    }
+    log.warn('سيتم استخدام المعالجة البديلة');
   }
-  
-  console.log('🔍 [DEBUG] انتهاء initializeRedisIntegration()');
+
+  if (debugDump) {
+    log.debug('انتهاء initializeRedisIntegration()');
+  }
 }
 
 // Scheduled maintenance: cleanup old logs (daily) and webhook logs via function if available
@@ -203,7 +224,7 @@ function scheduleMaintenance() {
   };
 
   // Run at startup and then daily
-  run().catch(() => {});
+  run().catch((err) => console.error('Scheduled maintenance failed:', err));
   const intervalId = setInterval(run, intervalMs);
   intervalId.unref();
 }
@@ -216,9 +237,13 @@ if (pool) {
     // After migrations, ensure page mapping
     const PAGE_ID = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || process.env.PAGE_ID || process.env.IG_PAGE_ID;
     if (PAGE_ID) {
-      ensurePageMapping(pool, PAGE_ID).catch(() => {});
+      ensurePageMapping(pool, PAGE_ID).catch((err) => {
+        console.error('Failed to ensure page mapping:', err);
+      });
     }
-  }).catch(() => {});
+  }).catch((err) => {
+    console.error('Database migrations failed:', err);
+  });
 }
 
 console.log('🚀 AI Sales Platform - Production Runtime');
@@ -316,8 +341,8 @@ app.use('*', createMerchantIsolationMiddleware({
   strictMode: true,
   allowedPublicPaths: [
     '/health', '/ready', 
-    '/webhook', '/auth', 
-    '/api/auth', '/api/instagram-auth',
+    '/webhook', '/auth',
+    '/api/auth',
     '/debug' // للـ debugging في التطوير
   ],
   headerName: 'x-merchant-id',
@@ -332,6 +357,9 @@ app.use('*', async (c, next) => {
   }
   return logger()(c, next);
 });
+
+// Mount Instagram authentication routes
+app.route('/api', instagramAuth);
 
 // No CORS needed for server-to-server webhooks
 
@@ -745,60 +773,7 @@ app.get('/api/utility-messages/:merchantId/templates', async (c) => {
   }
 });
 
-// Enhanced OAuth initiation endpoint (2025)
-app.post('/api/auth/instagram/initiate', async (c) => {
-  try {
-    const { merchantId } = await c.req.json();
-    
-    if (!merchantId) {
-      return c.json({ error: 'merchantId is required' }, 400);
-    }
-    
-    console.log('🔗 Enhanced OAuth initiation for merchant:', merchantId);
-
-    // Generate secure OAuth URL with 2025 enhancements
-    const state = `secure_${Date.now()}_${Math.random().toString(36).substr(2, 15)}`;
-    const appId = process.env.IG_APP_ID;
-    const redirectUri = process.env.REDIRECT_URI || 'https://ai-instgram.onrender.com/auth/instagram/callback';
-
-    // PKCE: create code_verifier and code_challenge
-    const codeVerifier = crypto.randomBytes(32).toString('base64url');
-    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
-
-    // Store verifier in temporary session tied to state
-    pkceSessions.set(state, { codeVerifier, createdAt: Date.now() });
-    const cleanupTimer = setTimeout(() => pkceSessions.delete(state), 10 * 60 * 1000); // expire after 10 minutes
-    cleanupTimer.unref();
-
-    const oauthUrl = `https://api.instagram.com/oauth/authorize?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=instagram_business_basic,instagram_business_content_publish,instagram_business_manage_messages,instagram_business_manage_comments&response_type=code&state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256&business_login=true`;
-
-    return c.json({
-      success: true,
-      oauthUrl,
-      state,
-      codeVerifier,
-      requiredScopes: [
-        'instagram_business_basic',
-        'instagram_business_content_publish',
-        'instagram_business_manage_messages',
-        'instagram_business_manage_comments'
-      ],
-      securityFeatures: {
-        pkce: true,
-        secureState: true,
-        businessLogin: true,
-        hmacSha256: true
-      },
-      message: 'Enhanced OAuth URL with 2025 security standards'
-    });
-    
-  } catch (error) {
-    console.error('❌ OAuth initiation error:', error);
-    return c.json({ error: 'Failed to initiate OAuth' }, 500);
-  }
-});
-
-// =============================================== 
+// ===============================================
 // INSTAGRAM WEBHOOK ENDPOINTS
 // ===============================================
 
@@ -1352,31 +1327,5 @@ async function startServer() {
 fireAndForget(async () => {
   await startServer();
 }, 'startServer');
-
-// ===============================================
-// GRACEFUL SHUTDOWN HANDLING
-// ===============================================
-
-process.on('SIGINT', async () => {
-  console.log('🔄 بدء إغلاق النظام بأمان...');
-  
-  if (redisIntegration) {
-    await redisIntegration.gracefulShutdown();
-  }
-  
-  console.log('✅ تم إغلاق النظام بنجاح');
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  console.log('🔄 إغلاق النظام بناءً على طلب النظام...');
-  
-  if (redisIntegration) {
-    await redisIntegration.gracefulShutdown();
-  }
-  
-  console.log('✅ تم إغلاق النظام بنجاح');
-  process.exit(0);
-});
 
 export default app;
