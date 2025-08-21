@@ -37,7 +37,7 @@ const DEFAULT_CONFIG: IdempotencyConfig = {
  * Generate idempotency key from Hono context
  */
 async function generateIdempotencyKey(
-  c: Context, 
+  c: Context,
   config: IdempotencyConfig
 ): Promise<string> {
   const merchantId = c.req.header('x-merchant-id') || 'unknown';
@@ -134,6 +134,12 @@ export function createIdempotencyMiddleware(
       }
       
     } catch (error) {
+      if (error instanceof MerchantIdMissingError) {
+        return c.json({
+          error: 'Merchant ID required',
+          code: 'MERCHANT_ID_MISSING'
+        }, 400);
+      }
       console.error('❌ Idempotency middleware error:', error);
       // Continue with normal processing on idempotency errors
       await next();

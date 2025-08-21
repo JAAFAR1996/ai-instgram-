@@ -15,6 +15,8 @@ const PORT = Number(process.env.PORT) || 10000;
 const IG_VERIFY_TOKEN = process.env.IG_VERIFY_TOKEN || 'test_token_123';
 const META_APP_SECRET = process.env.META_APP_SECRET || 'test_secret_123';
 const NODE_ENV = process.env.NODE_ENV || 'development';
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || 'internal_key_123';
+const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
 // Maximum accepted body size for incoming requests (512KB)
 const MAX_BODY_SIZE = 512 * 1024; // 512KB
@@ -473,7 +475,7 @@ serve({
   fetch: app.fetch,
   port: PORT
 }, (info) => {
-  appLogger.info('AI Instagram Platform running on https://ai-instgram.onrender.com');
+  appLogger.info(`AI Instagram Platform running on ${BASE_URL}`);
   appLogger.info('Local port', { port: info.port });
   appLogger.info('Security features active', {
     features: [
@@ -485,10 +487,9 @@ serve({
       'Graph API: v23.0 with rate limit headers'
     ]
   });
-  appLogger.info('Webhooks ready for', {
-    instagram: 'https://ai-instgram.onrender.com/webhooks/instagram',
-    whatsapp: 'https://ai-instgram.onrender.com/webhooks/whatsapp'
+    appLogger.info('Webhooks ready for', {
+    instagram: `${BASE_URL}/webhooks/instagram`,
+    whatsapp: `${BASE_URL}/webhooks/whatsapp`
   });
-});
 
 module.exports = app;

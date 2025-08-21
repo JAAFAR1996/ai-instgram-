@@ -122,8 +122,11 @@ export class InstagramTestingOrchestrator {
   private mockData: Map<string, any> = new Map();
 
   constructor() {
-    this.initializeTestSuites();
-    this.setupMockData();
+    // Only load testing suites and mock data outside production
+    if (process.env.NODE_ENV !== 'production') {
+      this.initializeTestSuites();
+      this.setupMockData();
+    }
   }
 
   /**
@@ -1298,6 +1301,9 @@ let testingOrchestratorInstance: InstagramTestingOrchestrator | null = null;
  * Get Instagram Testing Orchestrator instance
  */
 export function getInstagramTestingOrchestrator(): InstagramTestingOrchestrator {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('InstagramTestingOrchestrator should not be used in production');
+  }
   if (!testingOrchestratorInstance) {
     testingOrchestratorInstance = new InstagramTestingOrchestrator();
   }

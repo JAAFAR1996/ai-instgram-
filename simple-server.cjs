@@ -188,7 +188,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`🚀 AI Instagram Platform running on https://ai-instgram.onrender.com (port ${PORT})`);
+  console.log(`🚀 AI Instagram Platform running on ${BASE_URL} (port ${PORT})`);
   console.log('📋 Available endpoints:');
   console.log('  GET  /health');
   console.log('  GET  /webhooks/instagram (verification)');

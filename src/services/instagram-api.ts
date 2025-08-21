@@ -129,11 +129,13 @@ export class InstagramAPIClient {
     path: string,
     accessToken: string,
     body?: Record<string, any>,
-    merchantId = process.env.MERCHANT_ID || 'default-merchant-001'
+    merchantId?: string
   ): Promise<T> {
     const resolvedMerchantId = merchantId ?? requireMerchantId();
-    if (merchantId) {
-      console.log(`Using MERCHANT_ID: ${resolvedMerchantId}`);
+    if (!resolvedMerchantId) {
+      throw Object.assign(new Error('MERCHANT_ID is required'), {
+        code: 'MERCHANT_ID_MISSING'
+      });
     }
     const windowMs = 60_000;         // 1 دقيقة
     const maxRequests = 90;          // حد لكل تاجر/دقيقة (عدّله كما يلزم)

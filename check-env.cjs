@@ -15,7 +15,11 @@ const requiredVars = [
   'OPENAI_API_KEY',
   'DATABASE_URL',
   'ENCRYPTION_KEY',
-  'JWT_SECRET'
+  'JWT_SECRET',
+  'MERCHANT_NAME',
+  'ADMIN_EMAIL',
+  'ADMIN_PHONE_NUMBER',
+  'INSTAGRAM_BUSINESS_ACCOUNT_ID'
 ];
 
 const optionalVars = [
@@ -53,6 +57,15 @@ optionalVars.forEach(varName => {
     console.log(`  ⚠️  ${varName}: Not set (will need manual configuration)`);
   }
 });
+
+// Ensure at least one Instagram page ID is provided
+const pageId = process.env.PAGE_ID || process.env.IG_PAGE_ID;
+if (pageId) {
+  console.log('\n✅ PAGE_ID/IG_PAGE_ID: Set');
+} else {
+  console.log('\n❌ PAGE_ID/IG_PAGE_ID: Missing');
+  allValid = false;
+}
 
 console.log('\n📊 Configuration Summary:');
 console.log(`  • Environment: ${process.env.NODE_ENV}`);

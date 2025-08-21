@@ -59,7 +59,7 @@ export function autoTenantContext(cfg: TenantContextConfig = {}) {
         c.set('tenantContext', tenant as TenantContext);
         contextSet = true;
       } else if (tenant.isAdmin) {
-        await rlsDb.setAdminContext(true, tenant.userId);
+        await rlsDb.setAdminContext(true, tenant.userId, true);
         c.set('tenantContext', tenant as TenantContext);
         contextSet = true;
       } else {

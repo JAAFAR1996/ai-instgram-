@@ -17,6 +17,9 @@ import { verifyHMAC, verifyHMACRaw, type HmacVerifyResult } from '../services/en
 import { pushDLQ } from '../queue/dead-letter.js';
 import { z } from 'zod';
 import crypto from 'node:crypto';
+import { MerchantIdMissingError } from '../utils/merchant.js';
+import { MerchantIdMissingError } from '../utils/merchant.js';
+import { MerchantIdMissingError } from '../utils/merchant.js';
 
 // Webhook validation schemas
 const InstagramWebhookVerificationSchema = z.object({
@@ -100,39 +103,47 @@ export class WebhookRouter {
       });
     });
 
-    // Temporary debug endpoint for signature verification
-    this.app.get('/internal/debug/last-dump-hash', async (c) => {
-      const fs = await import('fs'); 
-      const p = await import('path'); 
-      const crypto = await import('crypto');
-      const dir = '/var/tmp';
-      
-      try {
-        const files = (await fs.promises.readdir(dir))
-          .filter(f => /^ig_\d+\.raw$/.test(f))
-          .map(f => ({ f, t: fs.statSync(p.join(dir, f)).mtimeMs }))
-          .sort((a, b) => b.t - a.t);
-        
-        if (!files.length) {
-          return c.text('no dumps', 404);
+    // Temporary debug endpoint for signature verification (development only)
+    if (process.env.NODE_ENV !== 'production') {
+      this.app.get('/internal/debug/last-dump-hash', async (c) => {
+        const fs = await import('fs');
+        const p = await import('path');
+        const crypto = await import('crypto');
+        const dir = '/var/tmp';
+
+        try {
+          const files = (await fs.promises.readdir(dir))
+            .filter(f => /^ig_\d+\.raw$/.test(f));
+
+          const filesWithTime = await Promise.all(
+            files.map(async (f) => ({
+              f,
+              t: (await fs.promises.stat(p.join(dir, f))).mtimeMs
+            }))
+          );
+          const sorted = filesWithTime.sort((a, b) => b.t - a.t);
+
+          if (!sorted.length) {
+            return c.text('no dumps', 404);
+          }
+
+          const dumpPath = p.join(dir, sorted[0].f);
+          const raw = await fs.promises.readFile(dumpPath);
+          const exp = crypto.createHmac('sha256', (process.env.META_APP_SECRET || '').trim())
+            .update(raw)
+            .digest('hex');
+
+          return c.json({
+            dumpPath,
+            expected_first10: exp.slice(0, 10),
+            len: raw.length
+          });
+        } catch (error) {
+          console.error('Debug endpoint error:', error);
+          return c.text('Error reading dumps', 500);
         }
-        
-        const dumpPath = p.join(dir, files[0].f);
-        const raw = await fs.promises.readFile(dumpPath);
-        const exp = crypto.createHmac('sha256', (process.env.META_APP_SECRET || '').trim())
-          .update(raw)
-          .digest('hex');
-        
-        return c.json({ 
-          dumpPath, 
-          expected_first10: exp.slice(0, 10), 
-          len: raw.length 
-        });
-      } catch (error) {
-        console.error('Debug endpoint error:', error);
-        return c.text('Error reading dumps', 500);
-      }
-    });
+      });
+    }
 
     // Webhook status endpoint
     this.app.get('/webhooks/status', async (c) => {
@@ -189,35 +200,14 @@ export class WebhookRouter {
    * Handle Instagram webhook events (POST request)
    */
   private async handleInstagramWebhook(c: any) {
+    let merchantId: string | undefined;
     try {
       console.log('📨 Instagram webhook event received');
-      
-      // Apply Redis sliding window rate limiting
-      const instagramMerchantId = process.env.MERCHANT_ID || 'default-merchant-001';
-      const rateLimitKey = `webhook:instagram:${instagramMerchantId}`;
-      const windowMs = 60000; // 1 minute window
-      const maxRequests = 100; // 100 requests per minute per merchant
-      
-      const { getMetaRateLimiter } = await import('../services/meta-rate-limiter.js');
-      const rateLimiter = getMetaRateLimiter();
-      
-      const rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
-      
-      if (!rateCheck.allowed) {
-        console.warn(`🚫 Instagram webhook rate limit exceeded for merchant: ${instagramMerchantId}`);
-        return c.json({
-          error: 'Rate limit exceeded',
-          resetTime: rateCheck.resetTime,
-          remaining: rateCheck.remaining
-        }, 429);
-      }
-      
-      console.log(`✅ Rate limit check passed: ${rateCheck.remaining} remaining`);
-      
+
       // Get raw buffer - CRITICAL: do this before any other body parsing
       const rawAB = await c.req.arrayBuffer();
       const rawBuf = Buffer.from(rawAB);
-      
+
       // Check payload size to prevent server overload
       if (rawBuf.byteLength > 512 * 1024) {
         return c.text('Payload Too Large', 413);
@@ -288,48 +278,42 @@ export class WebhookRouter {
 
       if (event.object !== 'instagram') return c.text('Wrong object', 400);
 
-      // Check for idempotency using merchant and body hash
-      const idempotencyMerchantId = process.env.MERCHANT_ID || c.req.header('x-merchant-id');
-      if (!idempotencyMerchantId) {
+      // Determine merchant ID from header or page mapping
+      merchantId = c.req.header('x-merchant-id') || undefined;
+      if (!merchantId) {
+        const firstPageId = event.entry[0]?.id;
+        if (firstPageId) {
+          merchantId = await this.getMerchantIdFromPageId(firstPageId);
+        }
+      }
+      if (!merchantId) {
         return c.json({
           error: 'Merchant ID required',
           code: 'MERCHANT_ID_MISSING'
         }, 400);
       }
-      const idempotencyCheck = await this.checkWebhookIdempotency(idempotencyMerchantId, event, 'instagram');
-      
-      if (idempotencyCheck.isDuplicate) {
-        console.log(`🔒 Duplicate Instagram webhook ignored: ${idempotencyCheck.eventId}`);
-        return c.json({ status: 'duplicate', eventId: idempotencyCheck.eventId }, 200);
+
+      // Apply Redis sliding window rate limiting
+      const { getMetaRateLimiter } = await import('../services/meta-rate-limiter.js');
+      const rateLimiter = getMetaRateLimiter();
+      const rateLimitKey = `webhook:instagram:${merchantId}`;
+      const windowMs = 60000; // 1 minute window
+      const maxRequests = 100; // 100 requests per minute per merchant
+      const rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
+
+      if (!rateCheck.allowed) {
+        console.warn(`🚫 Instagram webhook rate limit exceeded for merchant: ${merchantId}`);
+        return c.json({
+          error: 'Rate limit exceeded',
+          resetTime: rateCheck.resetTime,
+          remaining: rateCheck.remaining
+        }, 429);
       }
 
-      for (const entry of event.entry) {
-        await this.processInstagramEntry(entry);
-      }
+      console.log(`✅ Rate limit check passed: ${rateCheck.remaining} remaining`);
 
-      // Mark webhook as successfully processed
-      await this.markWebhookProcessed(idempotencyCheck.eventId);
-
-      return c.text('EVENT_RECEIVED', 200);
-
-    } catch (error) {
-      console.error('❌ Instagram webhook processing failed:', error);
-      
-      // Push to DLQ for analysis
-      pushDLQ({
-        ts: Date.now(),
-        reason: 'instagram-webhook-processing-failed',
-        payload: { 
-          error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined
-        },
-        platform: 'instagram',
-        merchantId: process.env.MERCHANT_ID || 'unknown'
-      });
-      
-      return c.text('Webhook processing failed', 500);
-    }
-  }
+      // Check for idempotency using merchant and body hash
+      const idempotencyCheck = await this.checkWebhookIdempotency(merchantId, event, 'instagram');
 
   /**
    * Handle WhatsApp webhook verification (GET request)
@@ -449,27 +433,27 @@ export class WebhookRouter {
       return c.text('EVENT_RECEIVED', 200);
 
     } catch (error) {
-      if (error instanceof MerchantIdMissingError) {
-        return c.json({
-          error: 'Merchant ID required',
-          code: 'MERCHANT_ID_MISSING'
-        }, 400);
+        if (error instanceof MerchantIdMissingError) {
+          return c.json({
+            error: 'Merchant ID required',
+            code: 'MERCHANT_ID_MISSING'
+          }, 400);
+        }
+        console.error('❌ WhatsApp webhook processing failed:', error);
+
+        pushDLQ({
+          ts: Date.now(),
+          reason: 'whatsapp-webhook-processing-failed',
+          payload: {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined
+          },
+          platform: 'whatsapp',
+          merchantId: merchantId ?? 'unknown'
+        });
+
+        return c.text('Webhook processing failed', 500);
       }
-      console.error('❌ WhatsApp webhook processing failed:', error);
-
-      pushDLQ({
-        ts: Date.now(),
-        reason: 'whatsapp-webhook-processing-failed',
-        payload: {
-          error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined
-        },
-        platform: 'whatsapp',
-        merchantId: merchantId ?? 'unknown'
-      });
-
-      return c.text('Webhook processing failed', 500);
-    }
   }
 
   /**

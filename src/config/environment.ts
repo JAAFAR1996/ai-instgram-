@@ -52,6 +52,8 @@ export interface AppConfig {
   redis: RedisConfig;
   environment: 'development' | 'production' | 'test';
   port: number;
+  baseUrl: string;
+  internalApiKey: string;
 }
 
 /**
@@ -105,11 +107,26 @@ const REQUIRED_ENV_VARS = {
     validator: (value: string) => /^[0-9a-fA-F]{64}$/.test(value) || value.length === 32,
     error: 'ENCRYPTION_KEY must be 32 bytes (64 hex characters) or 32 ASCII characters'
   },
+  'JWT_SECRET': {
+    required: true,
+    validator: (value: string) => value.length >= 32,
+    error: 'JWT_SECRET must be at least 32 characters long'
+  },
   'CORS_ORIGINS': {
     required: true,
     validator: (value: string) =>
       value.split(',').every(origin => origin.trim().length > 0),
     error: 'CORS_ORIGINS must be a comma-separated list of allowed origins'
+  },
+  'INTERNAL_API_KEY': {
+    required: true,
+    validator: (value: string) => value.length >= 16,
+    error: 'INTERNAL_API_KEY must be at least 16 characters long'
+  },
+  'BASE_URL': {
+    required: true,
+    validator: (value: string) => value.startsWith('http://') || value.startsWith('https://'),
+    error: 'BASE_URL must be a valid HTTP or HTTPS URL'
   },
   
   // Redis
@@ -196,8 +213,10 @@ export function loadAndValidateEnvironment(): AppConfig {
   const config: AppConfig = {
     environment: (env.NODE_ENV as any) || 'development',
     port: parseInt(env.PORT || '10000'),
+    baseUrl: env.BASE_URL!,
+    internalApiKey: env.INTERNAL_API_KEY!,
     
-    database: parseDatabaseConfig(env.DATABASE_URL!),
+    database: parseDatabaseConfig(getEnvVar('DATABASE_URL')),
     
     ai: {
       openaiApiKey: env.OPENAI_API_KEY!,
@@ -216,7 +235,7 @@ export function loadAndValidateEnvironment(): AppConfig {
     },
 
     redis: {
-      url: env.REDIS_URL!,
+      url: getEnvVar('REDIS_URL'),
     },
 
     security: {

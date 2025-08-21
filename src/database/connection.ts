@@ -6,8 +6,8 @@
  */
 
 import postgres from 'postgres';
-import type { DatabaseConfig, DatabaseError } from '../types/database.js';
-import { getConfig } from '../config/environment.js';
+import type { DatabaseError } from '../types/database.js';
+import { getConfig, getEnvVar } from '../config/environment.js';
 
 // Configuration interface
 interface ConnectionConfig {
@@ -47,26 +47,17 @@ export class DatabaseConnection {
       // Fallback to environment variables if config validation fails
       console.warn('⚠️ Using fallback database configuration (environment validation failed)');
 
-      const password = config?.password || process.env.DB_PASSWORD;
-      if (!password) {
-        throw new Error('Database password is required. Set DB_PASSWORD or provide via config.');
-      }
-
       this.config = {
-        host: config?.host || process.env.DB_HOST || 'localhost',
-        port: config?.port || parseInt(process.env.DB_PORT || '5432'),
-        database: config?.database || process.env.DB_NAME || 'ai_sales_dev',
-        username: config?.username || process.env.DB_USER || 'postgres',
-        password,
+        host: config?.host || getEnvVar('DB_HOST'),
+        port: config?.port || parseInt(getEnvVar('DB_PORT'), 10),
+        database: config?.database || getEnvVar('DB_NAME'),
+        username: config?.username || getEnvVar('DB_USER'),
+        password: config?.password || getEnvVar('DB_PASSWORD'),
         ssl: config?.ssl !== undefined ? config.ssl : process.env.NODE_ENV === 'production',
         max_connections: config?.max_connections || parseInt(process.env.DB_POOL_MAX || '10'),
         idle_timeout: config?.idle_timeout || parseInt(process.env.DB_IDLE_TIMEOUT || '30'),
         connect_timeout: config?.connect_timeout || parseInt(process.env.DB_CONNECT_TIMEOUT || '10')
       };
-    }
-
-    if (!this.config.password) {
-      throw new Error('Database password must be provided via DB_PASSWORD or configuration.');
     }
   }
 

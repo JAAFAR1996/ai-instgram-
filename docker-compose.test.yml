@@ -6,7 +6,7 @@ services:
     ports:
       - "10000:10000"
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=test
       - PORT=10000
       - IG_VERIFY_TOKEN=ig_webhook_verify_token_2025_secure_test
       - META_APP_SECRET=test_meta_app_secret_for_production_2025
@@ -25,4 +25,4 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+            start_period: 40s

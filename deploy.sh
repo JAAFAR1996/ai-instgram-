@@ -7,6 +7,10 @@
 
 echo "🚀 تشغيل النظام في الإنتاج..."
 echo "=================================="
+export NODE_ENV=production
+echo "🔧 Using NODE_ENV=$NODE_ENV"
+export NODE_ENV=production
+echo "🔧 Using NODE_ENV=$NODE_ENV"
 
 # Colors for output
 RED='\033[0;31m'
@@ -58,8 +62,15 @@ curl -f https://ai-instgram.onrender.com/health > /dev/null 2>&1
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✅ النظام يعمل بنجاح!${NC}"
-    echo "📊 يمكنك زيارة: https://ai-instgram.onrender.com"
+    echo "📊 يمكنك زيارة: $BASE_URL"
     echo "📋 للمراقبة: docker-compose -f docker-compose.prod.yml logs -f"
+else
+    echo -e "${RED}❌ فشل في تشغيل النظام${NC}"
+    docker-compose -f docker-compose.prod.yml logs api
+    exit 1
+fi
+
+echo "🎉 تم النشر بنجاح!"
 else
     echo -e "${RED}❌ فشل في تشغيل النظام${NC}"
     docker-compose -f docker-compose.prod.yml logs api

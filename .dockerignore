@@ -15,3 +15,4 @@ nginx/logs
 .DS_Store
 *.log
 database/
+src/internal/test/

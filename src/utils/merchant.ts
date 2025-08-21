@@ -8,7 +8,12 @@ export class MerchantIdMissingError extends Error {
 }
 
 export function requireMerchantId(c?: Context): string {
-  const id = c?.get('merchantId') || c?.req?.query('merchantId') || process.env.MERCHANT_ID;
+  const tenantContext = c?.get('tenantContext') as { merchantId?: string } | undefined;
+  const id =
+    c?.get('merchantId') ||
+    tenantContext?.merchantId ||
+    c?.req?.header('x-merchant-id') ||
+    c?.req?.query('merchantId');
 
   if (!id) {
     throw new MerchantIdMissingError();

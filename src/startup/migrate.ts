@@ -8,10 +8,9 @@ import { join } from 'path';
  */
 export async function migrateAndSeed(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
-  
+
   if (!databaseUrl) {
-    console.warn('⚠️ DATABASE_URL not set, skipping migrations');
-    return;
+    throw new Error('DATABASE_URL not set');
   }
 
   const pool = new Pool({ 
@@ -97,15 +96,30 @@ export async function migrateAndSeed(): Promise<void> {
 async function seedInitialData(client: any): Promise<void> {
   // Get configuration from environment
   const merchantId = requireMerchantId();
-  const merchantName = process.env.MERCHANT_NAME || 'Default Merchant';
-  const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com';
-  const adminPhone = process.env.ADMIN_PHONE_NUMBER || '+1234567890';
-  const igBusinessId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '17841405545604018';
-  const igPageId = process.env.PAGE_ID || process.env.IG_PAGE_ID || '772043875986598';
-  
-  if (!igPageId || !igBusinessId) {
-    console.warn('⚠️ Instagram IDs not set, skipping seed');
-    return;
+  const merchantName = process.env.MERCHANT_NAME;
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPhone = process.env.ADMIN_PHONE_NUMBER;
+  const igBusinessId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID;
+  const igPageId = process.env.PAGE_ID || process.env.IG_PAGE_ID;
+
+  if (!merchantName) {
+    throw new Error('Environment variable MERCHANT_NAME is required');
+  }
+
+  if (!adminEmail) {
+    throw new Error('Environment variable ADMIN_EMAIL is required');
+  }
+
+  if (!adminPhone) {
+    throw new Error('Environment variable ADMIN_PHONE_NUMBER is required');
+  }
+
+  if (!igBusinessId) {
+    throw new Error('Environment variable INSTAGRAM_BUSINESS_ACCOUNT_ID is required');
+  }
+
+  if (!igPageId) {
+    throw new Error('Environment variable PAGE_ID or IG_PAGE_ID is required');
   }
 
   try {

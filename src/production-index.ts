@@ -3,6 +3,10 @@
  * Main entry point with full feature stack
  */
 
+// Initialize timer management before anything else
+import { setupTimerManagement } from './utils/timer-manager.js';
+setupTimerManagement();
+
 // CRITICAL: Initialize logging FIRST (before console usage)
 import { initLogging } from './bootstrap/logging.js';
 initLogging();
@@ -36,30 +40,7 @@ import { GRAPH_API_VERSION } from './config/graph-api.js';
 import type { IGWebhookPayload } from './types/instagram.js';
 import { getLogger, bindRequestLogger } from './services/logger.js';
 import { telemetry, telemetryMiddleware } from './services/telemetry.js';
-
-// ===== Debug helpers =====
-const sigEnvOn = () => process.env.DEBUG_SIG === '1';
-
-function hmacHex(secret: string, body: Buffer) {
-  return crypto.createHmac('sha256', secret).update(body).digest('hex');
-}
-
-function debugSig(appSecret: string, providedHeader: string, rawBody: Buffer) {
-  const provided = (providedHeader || '').trim();
-  const providedHex = provided.startsWith('sha256=') ? provided.slice(7) : provided;
-  const expectedHex = hmacHex(appSecret, rawBody);
-  const ok =
-    expectedHex.length === providedHex.length &&
-    crypto.timingSafeEqual(Buffer.from(expectedHex, 'hex'), Buffer.from(providedHex, 'hex'));
-
-  return {
-    ok,
-    expectedFirst20: 'sha256=' + expectedHex.slice(0, 20),
-    providedFirst20: 'sha256=' + providedHex.slice(0, 20),
-    rawLen: rawBody.length,
-    ct: '',
-  };
-}
+import autoTenantContext, { requireAdminContext } from './middleware/auto-tenant-context.js';
 
 // Define App Environment for TypeScript
 type AppEnv = {
@@ -80,6 +61,10 @@ const IG_VERIFY_TOKEN = (process.env.IG_VERIFY_TOKEN || '').trim();
 const META_APP_SECRET = (process.env.META_APP_SECRET || '').trim();
 const DATABASE_URL = process.env.DATABASE_URL;
 const REDIS_URL = process.env.REDIS_URL;
+
+if (process.env.DEBUG_DUMP === '1') {
+  console.warn('⚠️ Debug mode enabled; this may increase logging and I/O load.');
+}
 
 // Temporary store for PKCE code verifiers keyed by state
 const pkceSessions = new Map<string, { codeVerifier: string; createdAt: number }>();
@@ -219,7 +204,8 @@ function scheduleMaintenance() {
 
   // Run at startup and then daily
   run().catch(() => {});
-  setInterval(run, intervalMs);
+  const intervalId = setInterval(run, intervalMs);
+  intervalId.unref();
 }
 scheduleMaintenance();
 
@@ -240,6 +226,9 @@ console.log('🔧 Environment:', { NODE_ENV, PORT });
 
 // Initialize Hono app with typed environment
 const app = new Hono<AppEnv>();
+
+// Auto-tenant context middleware (applies to all routes)
+app.use('*', autoTenantContext());
 
 // Telemetry metrics middleware
 app.use('*', telemetryMiddleware());
@@ -511,109 +500,6 @@ async function logInstagramEvent(rawBody: Buffer, payload: IGWebhookPayload): Pr
 // ===============================================
 // Legacy function removed - using middleware version instead
 
-// Legacy function for backward compatibility
-function verifyInstagramSignatureLegacy(rawBody: Buffer, signature: string, contentType?: string, contentEncoding?: string, appIdHeader?: string): boolean {
-  const h256 = signature || '';
-  // Do not log raw headers or secrets
-  console.log('SIG_HEADERS', {
-    has256: !!h256,
-    ct: contentType ? String(contentType).replace(/[\r\n]/g, '') : 'none',
-    ce: contentEncoding ? String(contentEncoding).replace(/[\r\n]/g, '') : 'none'
-  });
-  
-  if (!signature) {
-    console.error('❌ Missing signature');
-    return false;
-  }
-  
-  let sig = signature.trim().replace(/^"+|"+$/g, '');
-  const provided = sig.replace(/^sha(1|256)=/i, '').toLowerCase();
-  const expected = crypto.createHmac('sha256', META_APP_SECRET.trim()).update(rawBody).digest('hex').toLowerCase();
-  
-  console.log('SIG_LENS', {
-    p: provided.length,
-    e: expected.length,
-    eq: provided.length === expected.length
-  });
-  
-  // Only log fingerprint, never log full secret
-  console.log('APP_SECRET_FINGERPRINT', META_APP_SECRET.trim().slice(0, 4) + '…' + META_APP_SECRET.trim().slice(-4));
-  console.log('RAW_LEN', rawBody.length);
-  
-  // Debug dump if enabled
-  if (process.env.DEBUG_DUMP === '1') {
-    try {
-      fs.writeFileSync('/tmp/ig.raw', rawBody);
-      console.log('📁 Raw body dumped to /tmp/ig.raw');
-      
-      // Debug: Show what Meta sent vs what we expect
-      console.log('🔍 SIGNATURE DEBUG:');
-      console.log('  Raw signature header:', signature);
-      console.log('  Parsed provided hash:', provided);
-      console.log('  Body length:', rawBody.length);
-      console.log('  Body first 100 chars:', rawBody.toString('utf8').substring(0, 100));
-      
-      // Test with the exact secret
-      const testSecret = '3b41e5421706802fbc1156f9aa84247e';
-      const testHash = crypto.createHmac('sha256', testSecret).update(rawBody).digest('hex');
-      console.log('  Expected with hardcoded secret:', testHash);
-      console.log('  Match with provided?:', testHash === provided);
-      
-      // If App ID is different, suggest checking that app's secret
-      const receivedAppId = appIdHeader || '';
-      if (receivedAppId && receivedAppId !== (process.env.META_APP_ID || '')) {
-        console.log('  ⚠️ App ID mismatch detected!');
-        console.log('  Go to: https://developers.facebook.com/apps/' + receivedAppId + '/settings/basic/');
-        console.log('  Copy the App Secret from THAT app, not from app ' + process.env.META_APP_ID);
-      }
-      
-      // Also try without lowercase conversion
-      const providedOriginal = sig.replace(/^sha(1|256)=/i, '');
-      console.log('  Provided (original case):', providedOriginal.substring(0, 20));
-      console.log('  Match without lowercase?:', testHash === providedOriginal);
-      
-      // Try with string instead of buffer
-      const bodyString = rawBody.toString('utf8');
-      const testHashString = crypto.createHmac('sha256', testSecret).update(bodyString, 'utf8').digest('hex');
-      console.log('  Expected with string body:', testHashString.substring(0, 20));
-      console.log('  Match with string?:', testHashString === provided || testHashString === providedOriginal);
-      
-    } catch (e) {
-      console.error('❌ Failed to dump raw body:', e instanceof Error ? e.message.replace(/[\r\n]/g, '') : String(e));
-    }
-  }
-  
-  // Add more debug info
-  console.log('DEBUG_SIG_COMPARE', {
-    providedFirst10: provided.substring(0, 10),
-    expectedFirst10: expected.substring(0, 10),
-    secretLen: META_APP_SECRET.trim().length,
-    rawBodyLen: rawBody.length,
-    rawBodyFirst50: rawBody.toString('utf8').substring(0, 50).replace(/[\r\n]/g, '')
-  });
-
-  try {
-    const providedBuf = Buffer.from(provided, 'hex');
-    const expectedBuf = Buffer.from(expected, 'hex');
-    const hexPattern = /^[a-f0-9]{64}$/;
-
-    if (providedBuf.length !== 32 || expectedBuf.length !== 32) {
-      console.warn(`❌ Invalid signature length: provided=${providedBuf.length} expected=${expectedBuf.length}`);
-      return false;
-    }
-    if (!hexPattern.test(provided) || !hexPattern.test(expected)) {
-      console.warn('❌ Signature format invalid: expected 64 hex characters.');
-      return false;
-    }
-
-    const result = crypto.timingSafeEqual(providedBuf, expectedBuf);
-    console.log('🔍 Signature verification result:', result);
-    return result;
-  } catch (e) {
-  console.error('❌ Signature verification error:', e instanceof Error ? e.message.replace(/[\r\n]/g, '') : String(e));
-    return false;
-  }
-}
 
 // ===============================================
 // MOCK DATABASE (for testing without Postgres)
@@ -716,7 +602,7 @@ class MockQueueService {
 const mockQueue = new MockQueueService();
 
 // DLQ monitoring endpoint
-app.get('/internal/dlq/stats', async (c) => {
+app.get('/internal/dlq/stats', requireAdminContext(), async (c) => {
   try {
     const stats = getDLQStats();
     const { getRecentDLQItems, getDLQHealth } = await import('./queue/dead-letter.js');
@@ -881,7 +767,8 @@ app.post('/api/auth/instagram/initiate', async (c) => {
 
     // Store verifier in temporary session tied to state
     pkceSessions.set(state, { codeVerifier, createdAt: Date.now() });
-    setTimeout(() => pkceSessions.delete(state), 10 * 60 * 1000); // expire after 10 minutes
+    const cleanupTimer = setTimeout(() => pkceSessions.delete(state), 10 * 60 * 1000); // expire after 10 minutes
+    cleanupTimer.unref();
 
     const oauthUrl = `https://api.instagram.com/oauth/authorize?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=instagram_business_basic,instagram_business_content_publish,instagram_business_manage_messages,instagram_business_manage_comments&response_type=code&state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256&business_login=true`;
 
@@ -1172,7 +1059,7 @@ app.get('/internal/diagnostics/meta-ping', async (c) => {
 });
 
 // RLS test endpoint
-app.get('/internal/test/rls', async (c) => {
+app.get('/internal/test/rls', requireAdminContext(), async (c) => {
   console.log('🔐 Testing Row Level Security');
   
   try {
@@ -1207,7 +1094,7 @@ app.get('/internal/test/rls', async (c) => {
 });
 
 // Queue + DLQ test endpoint
-app.get('/internal/test/queue', async (c) => {
+app.get('/internal/test/queue', requireAdminContext(), async (c) => {
   console.log('🔄 Testing Queue + DLQ + Idempotency');
   
   try {
@@ -1254,56 +1141,11 @@ app.get('/internal/test/queue', async (c) => {
   }
 });
 
-if (NODE_ENV !== 'production') {
-  app.post('/internal/debug/webhook-signature', async (c) => {
-    const body = await c.req.arrayBuffer();
-    const rawBody = Buffer.from(body);
-    const signature = c.req.header('X-Hub-Signature-256') || c.req.header('X-Hub-Signature') || '';
-    return c.json({
-      debug: 'Webhook Signature Verification',
-      match: verifyInstagramSignatureLegacy(rawBody, signature, '', ''),
-      timestamp: new Date().toISOString()
-    });
-  });
-}
 
-// حساب HMAC لملف محفوظ على السيرفر
-app.get('/internal/debug/ig-hash', async (c) => {
-  if (!sigEnvOn()) return c.body(null, 404);
-  const fs = await import('node:fs/promises');
-  const appSecret = (process.env.IG_APP_SECRET ?? process.env.META_APP_SECRET ?? '').trim();
-  try {
-    const b = await fs.readFile('/tmp/ig.raw');
-    const hex = hmacHex(appSecret, b);
-    return c.json({
-      file: '/tmp/ig.raw',
-      size: b.length,
-      expected: 'sha256=' + hex,
-      first20: 'sha256=' + hex.slice(0, 20),
-      secretFpr: appSecret.slice(0,4)+'…'+appSecret.slice(-4),
-    });
-  } catch (e) {
-    return c.json({ error: String(e) }, 500);
-  }
-});
 
-// استقبال RAW يدويًا ومقارنة توقيع
-app.post('/internal/debug/ig-echo', async (c) => {
-  if (!sigEnvOn()) return c.body(null, 404);
-  const appSecret = (process.env.IG_APP_SECRET ?? process.env.META_APP_SECRET ?? '').trim();
-  const signature = c.req.header('x-hub-signature-256') || '';
-  const rawBody = Buffer.from(await c.req.arrayBuffer());
-  const d = debugSig(appSecret, signature, rawBody);
-  return c.json({
-    ok: d.ok,
-    expectedFirst20: d.expectedFirst20,
-    providedFirst20: d.providedFirst20,
-    len: d.rawLen,
-  });
-});
 
 // AES-GCM crypto test endpoint
-app.get('/internal/crypto-test', async (c) => {
+app.get('/internal/crypto-test', requireAdminContext(), async (c) => {
   console.log('🔐 Running AES-256-GCM encryption test');
   
   const testData = `production-test-${Date.now()}`;
@@ -1354,7 +1196,7 @@ app.get('/internal/crypto-test', async (c) => {
 // ===============================================
 
 // شامل للصحة
-app.get('/internal/system/health', async (c) => {
+app.get('/internal/system/health', requireAdminContext(), async (c) => {
   if (!redisIntegration) {
     return c.json({ 
       status: 'disabled',
@@ -1367,7 +1209,7 @@ app.get('/internal/system/health', async (c) => {
 });
 
 // تقرير مفصل
-app.get('/internal/system/report', async (c) => {
+app.get('/internal/system/report', requireAdminContext(), async (c) => {
   if (!redisIntegration) {
     return c.json({ error: 'النظام غير مهيأ' }, 503);
   }
@@ -1377,7 +1219,7 @@ app.get('/internal/system/report', async (c) => {
 });
 
 // إحصائيات ريديس والطوابير
-app.get('/internal/redis/stats', async (c) => {
+app.get('/internal/redis/stats', requireAdminContext(), async (c) => {
   if (!redisIntegration) {
     return c.json({ error: 'غير متاح' }, 503);
   }
@@ -1394,7 +1236,7 @@ app.get('/internal/redis/stats', async (c) => {
 });
 
 // إحصائيات Circuit Breaker منفصلة
-app.get('/internal/circuit-breaker/stats', async (c) => {
+app.get('/internal/circuit-breaker/stats', requireAdminContext(), async (c) => {
   if (!redisIntegration) {
     return c.json({ error: 'غير متاح' }, 503);
   }
@@ -1468,32 +1310,28 @@ app.notFound((c) => {
 // ===============================================
 
 console.log('🚀 AI Sales Platform - Production Runtime Starting');
-console.log('📋 Available endpoints:');
-console.log('  GET  /health');
-console.log('  GET  /webhooks/instagram (verification)');
-console.log('  POST /webhooks/instagram (secure + database + queue)');
-console.log('  POST /api/whatsapp/send');
-console.log('  GET  /internal/diagnostics/meta-ping');
-console.log('  GET  /internal/test/rls');
-console.log('  GET  /internal/test/queue');
-console.log('  GET  /internal/crypto-test');
-if (sigEnvOn()) {
-  console.log('  GET  /internal/debug/ig-hash (DEBUG_SIG=1)');
-  console.log('  POST /internal/debug/ig-echo (DEBUG_SIG=1)');
-}
-console.log('⚠️  Production checklist:');
-console.log('   - Single connected app on IG webhook');
-console.log('   - Payload limit: 512KB enforced');
-console.log('   - Redis:', redisIntegration ? '✅' : '❌');
+console.log('📋 Production endpoints active:');
+console.log('  ✅ GET  /health');
+console.log('  ✅ GET  /webhooks/instagram (verification)');
+console.log('  ✅ POST /webhooks/instagram (secure + database + queue)');
+console.log('  ❌ POST /api/whatsapp/send (disabled)');
+console.log('🔒 Admin endpoints:');
+console.log('  ✅ GET  /internal/diagnostics/meta-ping');
+console.log('  ✅ GET  /internal/test/rls');
+console.log('  ✅ GET  /internal/test/queue');
+console.log('  ✅ GET  /internal/crypto-test');
+console.log('✅ Production checklist:');
+console.log('   • Single connected app on IG webhook');
+console.log('   • Payload limit: 512KB enforced');
+console.log('   • Redis integration:', redisIntegration ? '✅ Active' : '❌ Disabled');
+console.log('   • Admin context required for all internal endpoints');
 
 // Initialize and start server
 async function startServer() {
-  console.log('🔍 [DEBUG] startServer() - بدء دالة تشغيل السيرفر');
+  console.log('🚀 Starting production server...');
   
   // Initialize Redis Integration
-  console.log('🔍 [DEBUG] استدعاء initializeRedisIntegration()...');
   await initializeRedisIntegration();
-  console.log('🔍 [DEBUG] انتهى initializeRedisIntegration()');
   
   // Start server using @hono/node-server
   serve({
@@ -1511,9 +1349,7 @@ async function startServer() {
 }
 
 // Start the server with proper error handling
-console.log('🚀 Starting production server...');
 fireAndForget(async () => {
-  console.log('🔍 [DEBUG] استدعاء startServer() من النهاية...');
   await startServer();
 }, 'startServer');
 

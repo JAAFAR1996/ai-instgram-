@@ -43,10 +43,9 @@ export class ServiceControlAPI {
     this.app.use('*', securityHeaders);
     
     // CORS for API endpoints
+    const config = getConfig();
     this.app.use('/api/services/*', cors({
-      origin: process.env.NODE_ENV === 'production' 
-        ? ['https://ai-instgram.onrender.com'] 
-        : ['https://ai-instgram.onrender.com'],
+      origin: [config.baseUrl],
       allowHeaders: ['Content-Type', 'Authorization']
     }));
 

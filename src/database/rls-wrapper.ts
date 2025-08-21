@@ -49,18 +49,28 @@ export class RLSDatabase {
   /**
    * Set admin context (bypass RLS)
    */
-  async setAdminContext(isAdmin: boolean = true, userId?: string): Promise<void> {
+  async setAdminContext(
+    isAdmin: boolean = true,
+    userId?: string,
+    authorized = false
+  ): Promise<void> {
+    if (process.env.NODE_ENV === 'production' && !authorized) {
+      throw new Error('setAdminContext is restricted in production');
+    }
+
     const sql = this.db.getSQL();
-    
+
     try {
       // Use SET LOCAL for transaction-scoped context
       await sql`SET LOCAL app.is_admin = ${isAdmin ? 'true' : 'false'}`;
-      
+
       this.currentContext = {
         isAdmin,
         userId,
         sessionId: this.generateSessionId()
       };
+
+      await this.logAudit('set_admin_context', userId, { isAdmin, authorized });
     } catch (error) {
       throw new Error('Failed to set RLS admin context');
     }

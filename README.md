@@ -81,7 +81,7 @@
 - **🎯 التركيز الحالي**: Instagram فقط للحصول على أفضل جودة
 - **🔐 الأمان**: مطابق لأعلى معايير 2025
 - **🌍 السوق المستهدف**: التجار العراقيون والعرب
-- **🗄️ قاعدة البيانات**: يجب تحديد بيانات الاتصال (خصوصًا `DB_PASSWORD`) بشكل صريح في الإنتاج؛ لا توجد قيمة افتراضية وسيتم رفض الاتصال إذا لم تتوفر.
+- **🆔 معرّف التاجر مطلوب**: يجب تعيين `MERCHANT_ID` في متغيرات البيئة أو تمريره في رأس الطلب `X-Merchant-ID`. لا توجد قيمة افتراضية وسيتم رفض الطلبات بدونه.
 
 ---
 
@@ -224,6 +224,7 @@ bun run dev
 # Application Environment
 NODE_ENV=production
 PORT=3001
+BASE_URL=https://ai-instgram.onrender.com
 
 # Database Configuration (PostgreSQL)
 DATABASE_URL=postgresql://username:password@localhost:5432/ai_sales_platform
@@ -237,7 +238,7 @@ IG_APP_ID=your_instagram_app_id_here
 IG_APP_SECRET=your_instagram_app_secret_here
 META_APP_SECRET=your_meta_app_secret_here
 IG_VERIFY_TOKEN=your_webhook_verify_token_here
-REDIRECT_URI=https://ai-instgram.onrender.com/auth/instagram/callback
+REDIRECT_URI=${BASE_URL}/auth/instagram/callback
 
 # OpenAI Configuration (مطلوب)
 OPENAI_API_KEY=sk-your_openai_api_key_here
@@ -253,7 +254,7 @@ JWT_SECRET=your_jwt_secret_here
 # CORS Configuration (مطلوب - قائمة نطاقات مسموحة مفصولة بفاصلة)
 # مثال: https://myshop.com,https://admin.myshop.com
 # يجب ضبط هذا المتغير وإلا سيتوقف الخادم عن العمل
-CORS_ORIGINS=https://ai-instgram.onrender.com,https://graph.facebook.com,https://api.whatsapp.com
+CORS_ORIGINS=${BASE_URL},https://graph.facebook.com,https://api.whatsapp.com
 
 # Rate Limiting
 RATE_LIMIT_WINDOW=900000
@@ -261,7 +262,6 @@ RATE_LIMIT_MAX=100
 
 # Instagram Graph API Version
 API_VERSION=v21.0
-```
 
 ### ✅ التحقق من التكوين
 

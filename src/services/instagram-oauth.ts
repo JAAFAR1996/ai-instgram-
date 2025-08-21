@@ -14,6 +14,7 @@ import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { getMetaRateLimiter } from './meta-rate-limiter.js';
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
+import { requireMerchantId } from '../utils/merchant.js';
 
 // safe JSON helper for non-typed responses
 const jsonAny = async (r: any): Promise<any> => {
@@ -66,8 +67,10 @@ export class InstagramOAuthService {
     merchantId?: string
   ): Promise<T> {
     const resolvedMerchantId = merchantId ?? requireMerchantId();
-    if (merchantId) {
-      console.log(`Using MERCHANT_ID: ${resolvedMerchantId}`);
+    if (!resolvedMerchantId) {
+      throw Object.assign(new Error('MERCHANT_ID is required'), {
+        code: 'MERCHANT_ID_MISSING'
+      });
     }
     const windowMs = 60_000;
     const maxRequests = 90;

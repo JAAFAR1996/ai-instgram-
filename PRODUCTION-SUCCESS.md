@@ -23,8 +23,7 @@
 ✅ POST /webhooks/instagram (events processing)
 ✅ POST /api/whatsapp/send
 ✅ GET  /internal/diagnostics/meta-ping
-✅ GET  /internal/test/rls
-✅ GET  /internal/test/queue
+
 ✅ GET  /internal/crypto-test
 ```
 

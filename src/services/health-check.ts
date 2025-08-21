@@ -32,7 +32,7 @@ export async function startHealthMonitoring(deps: {
     status: r && q ? 'ok' : 'degraded',
     details: { redis: r, queue: q },
   });
-  setInterval(async () => {
+  const interval = setInterval(async () => {
     const [r2, q2] = await Promise.all([deps.redisReady(), deps.queueReady()]);
     setHealthSnapshot({
       ready: r2 && q2,
@@ -40,6 +40,7 @@ export async function startHealthMonitoring(deps: {
       details: { redis: r2, queue: q2 },
     });
   }, 5000);
+  interval.unref();
 }
 
 export function registerHealthRoute(app: any) {

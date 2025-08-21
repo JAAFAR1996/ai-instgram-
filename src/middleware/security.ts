@@ -7,16 +7,18 @@
 
 import { Context, Next } from 'hono';
 import { RateLimiterRedis, RateLimiterRes } from 'rate-limiter-flexible';
-import Redis from 'ioredis';
 import crypto from 'crypto';
 import { getMessageWindowService } from '../services/message-window.js';
 import { getDatabase } from '../database/connection.js';
 import type { Platform } from '../types/database.js';
+import { getRedisConnectionManager } from '../services/RedisConnectionManager.js';
+import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
+import { getEnvVar } from '../config/environment.js';
 
 // Redis connection for distributed rate limiting
-const redisClient = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-  enableOfflineQueue: false,
-});
+const redisUrl = getEnvVar('REDIS_URL');
+const redisClient = await getRedisConnectionManager()
+  .getConnection(RedisUsageType.CACHING);
 
 // Rate limiter configurations
 const rateLimiters = {
@@ -425,9 +427,10 @@ export function webhookSignatureMiddleware(secretKey: string) {
  * CORS security middleware
  */
 export function corsSecurityMiddleware() {
+  const config = getConfig();
   return async (c: Context, next: Next) => {
     const origin = c.req.header('origin');
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['https://ai-instgram.onrender.com'];
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [config.baseUrl];
     
     if (origin && allowedOrigins.includes(origin)) {
       c.header('Access-Control-Allow-Origin', origin);

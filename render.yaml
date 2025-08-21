@@ -19,9 +19,11 @@ services:
         sync: false
       - key: IG_APP_SECRET
         sync: false
-      - key: REDIRECT_URI
-        value: https://ai-instgram.onrender.com/auth/instagram/callback
-      - key: CORS_ORIGINS
+      - key: BASE_URL
         value: https://ai-instgram.onrender.com
+      - key: REDIRECT_URI
+        value: ${BASE_URL}/auth/instagram/callback
+      - key: CORS_ORIGINS
+        value: ${BASE_URL}
     healthCheckPath: /health
     autoDeploy: true

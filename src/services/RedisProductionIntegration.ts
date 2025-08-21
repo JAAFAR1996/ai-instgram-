@@ -420,6 +420,7 @@ export class RedisProductionIntegration {
         this.logger.error('خطأ في المراقبة الشاملة', { error });
       }
     }, 45000); // كل 45 ثانية
+    this.monitoringInterval.unref();
   }
 
   private startSmartAlerting(): void {
@@ -431,6 +432,7 @@ export class RedisProductionIntegration {
         this.logger.error('خطأ في نظام التنبيهات الذكية', { error });
       }
     }, 300000); // كل 5 دقائق
+    this.alertingInterval.unref();
   }
 
   private async performSmartAlerting(): Promise<void> {
