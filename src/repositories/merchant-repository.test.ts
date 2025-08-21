@@ -55,6 +55,7 @@ describe('MerchantRepository - Production Tests', () => {
         businessDescription: 'A modern fashion store specializing in Iraqi traditional wear',
         contactEmail: 'owner@testfashion.com',
         contactPhone: '+9647701234567',
+        businessAccountId: 'biz-123',
         subscriptionTier: 'BASIC',
         monthlyMessageLimit: 1000,
         settings: {
@@ -71,6 +72,7 @@ describe('MerchantRepository - Production Tests', () => {
       expect(merchant.businessName).toBe(merchantData.businessName);
       expect(merchant.businessCategory).toBe(merchantData.businessCategory);
       expect(merchant.contactEmail).toBe(merchantData.contactEmail);
+      expect(merchant.businessAccountId).toBe('biz-123');
       expect(merchant.subscriptionTier).toBe('BASIC');
       expect(merchant.monthlyMessageLimit).toBe(1000);
       expect(merchant.monthlyMessagesUsed).toBe(0);

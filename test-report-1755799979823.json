@@ -1,0 +1,258 @@
+{
+  "timestamp": "2025-08-21T18:12:59.823Z",
+  "summary": {
+    "total": 41,
+    "passed": 0,
+    "failed": 41,
+    "duration": 9180,
+    "successRate": "0.0"
+  },
+  "results": [
+    {
+      "file": "src/middleware/enhanced-security.test.ts",
+      "success": false,
+      "duration": 238,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/middleware/security.test.ts",
+      "success": false,
+      "duration": 133,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/services/ai.test.ts",
+      "success": false,
+      "duration": 291,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/services/instagram-ai.test.ts",
+      "success": false,
+      "duration": 359,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/services/instagram-api.test.ts",
+      "success": false,
+      "duration": 239,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/services/instagram-comments-manager.test.ts",
+      "success": false,
+      "duration": 218,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/repositories/merchant-repository.test.ts",
+      "success": false,
+      "duration": 225,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/database/migrate.test.ts",
+      "success": false,
+      "duration": 182,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/queue/enhanced-queue.test.ts",
+      "success": false,
+      "duration": 223,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/queue/dead-letter.test.ts",
+      "success": false,
+      "duration": 215,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/queue/processors/message-delivery-processor.test.ts",
+      "success": false,
+      "duration": 243,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/queue/processors/notification-processor.test.ts",
+      "success": false,
+      "duration": 208,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/config/environment.test.ts",
+      "success": false,
+      "duration": 178,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/startup/validation.test.ts",
+      "success": false,
+      "duration": 201,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/api/service-control.test.ts",
+      "success": false,
+      "duration": 152,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/services/monitoring.test.ts",
+      "success": false,
+      "duration": 160,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/services/telemetry.test.ts",
+      "success": false,
+      "duration": 173,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/services/logger.test.ts",
+      "success": false,
+      "duration": 166,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/services/utility-messages.test.ts",
+      "success": false,
+      "duration": 213,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/services/encryption.test.ts",
+      "success": false,
+      "duration": 297,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/services/CircuitBreaker.test.ts",
+      "success": false,
+      "duration": 279,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/errors/RedisErrors.test.ts",
+      "success": false,
+      "duration": 177,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/analytics-processing.test.ts",
+      "success": false,
+      "duration": 222,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/hashtag-growth.test.ts",
+      "success": false,
+      "duration": 303,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/idempotency.middleware.test.ts",
+      "success": false,
+      "duration": 119,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/input-sanitization.test.ts",
+      "success": false,
+      "duration": 234,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/instagram-integration.test.ts",
+      "success": false,
+      "duration": 387,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/instagram-media-manager.test.ts",
+      "success": false,
+      "duration": 204,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/instagram-message-sender.test.ts",
+      "success": false,
+      "duration": 382,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/instagram-messaging.test.ts",
+      "success": false,
+      "duration": 374,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/instagram-oauth.test.ts",
+      "success": false,
+      "duration": 278,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/instagram-token-retrieval.test.ts",
+      "success": false,
+      "duration": 161,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/instagram-webhook.test.ts",
+      "success": false,
+      "duration": 148,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/media-id-uniqueness.test.ts",
+      "success": false,
+      "duration": 118,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/meta-rate-limiter.test.ts",
+      "success": false,
+      "duration": 412,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/oauth-session-pkce.test.ts",
+      "success": false,
+      "duration": 218,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/raw-body-middleware.test.ts",
+      "success": false,
+      "duration": 151,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/rls-wrapper.test.ts",
+      "success": false,
+      "duration": 148,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/sql-injection.test.ts",
+      "success": false,
+      "duration": 172,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/utility-messages.test.ts",
+      "success": false,
+      "duration": 178,
+      "error": "/bin/sh: 1: bun: not found\n"
+    },
+    {
+      "file": "src/tests/whatsapp-signature.test.ts",
+      "success": false,
+      "duration": 197,
+      "error": "/bin/sh: 1: bun: not found\n"
+    }
+  ]
+}

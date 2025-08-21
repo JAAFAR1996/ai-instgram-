@@ -23,6 +23,7 @@ interface MerchantRow {
   created_at: string;
   updated_at: string;
   last_active_at: string | null;
+  business_account_id: string | null;
 }
 
 interface CountRow {
@@ -45,6 +46,7 @@ export interface Merchant {
   businessDescription?: string;
   contactEmail: string;
   contactPhone?: string;
+  businessAccountId?: string;
   isActive: boolean;
   subscriptionTier: 'FREE' | 'BASIC' | 'PREMIUM' | 'ENTERPRISE';
   monthlyMessageLimit: number;
@@ -62,6 +64,7 @@ export interface CreateMerchantRequest {
   contactEmail: string;
   contactPhone?: string;
   subscriptionTier?: 'FREE' | 'BASIC' | 'PREMIUM' | 'ENTERPRISE';
+  businessAccountId?: string;
   monthlyMessageLimit?: number;
   settings?: Record<string, any>;
 }
@@ -72,6 +75,7 @@ export interface UpdateMerchantRequest {
   businessDescription?: string;
   contactEmail?: string;
   contactPhone?: string;
+  businessAccountId?: string;
   isActive?: boolean;
   subscriptionTier?: 'FREE' | 'BASIC' | 'PREMIUM' | 'ENTERPRISE';
   monthlyMessageLimit?: number;
@@ -129,7 +133,8 @@ export class MerchantRepository {
         contact_phone,
         subscription_tier,
         monthly_message_limit,
-        settings
+        settings,
+        business_account_id
       ) VALUES (
         ${data.businessName},
         ${data.businessCategory},
@@ -138,7 +143,8 @@ export class MerchantRepository {
         ${data.contactPhone || null},
         ${data.subscriptionTier || 'FREE'},
         ${data.monthlyMessageLimit || this.getDefaultMessageLimit(data.subscriptionTier || 'FREE')},
-        ${JSON.stringify(data.settings || {})}
+        ${JSON.stringify(data.settings || {})},
+        ${data.businessAccountId || null}
       )
       RETURNING *
     `;
@@ -200,6 +206,10 @@ export class MerchantRepository {
 
     if (data.contactPhone !== undefined) {
       updateFields.push(sql`contact_phone = ${data.contactPhone}`);
+    }
+
+    if (data.businessAccountId !== undefined) {
+      updateFields.push(sql`business_account_id = ${data.businessAccountId}`);
     }
 
     if (data.isActive !== undefined) {
@@ -513,6 +523,7 @@ export class MerchantRepository {
       businessDescription: row.business_description ?? undefined,
       contactEmail: row.contact_email,
       contactPhone: row.contact_phone ?? undefined,
+      businessAccountId: row.business_account_id ?? undefined,
       isActive: row.is_active,
       subscriptionTier: row.subscription_tier,
       monthlyMessageLimit: parseInt(row.monthly_message_limit),

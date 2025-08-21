@@ -12,7 +12,8 @@ import {
   RedisValidationError,
   RedisErrorHandler,
   isConnectionError,
-  isTimeoutError
+  isTimeoutError,
+  RedisRateLimitError
 } from '../errors/RedisErrors.js';
 
 export interface ConnectionInfo {
@@ -51,6 +52,7 @@ export class RedisConnectionManager {
   private errorHandler: RedisErrorHandler;
   private healthCheckInterval?: NodeJS.Timeout;
   private poolConfig: ConnectionPoolConfig;
+  private rateLimitResetAt?: Date;
 
   constructor(
     private redisUrl: string,
@@ -74,7 +76,30 @@ export class RedisConnectionManager {
     // this.startHealthChecking(); // DISABLED: Using centralized health check instead
   }
 
+  private setRateLimitReset(): Date {
+    const now = new Date();
+    const reset = new Date(now);
+    reset.setHours(reset.getHours() + 1, 0, 0, 0);
+    this.rateLimitResetAt = reset;
+    return reset;
+  }
+
+  private isRateLimited(): boolean {
+    return !!this.rateLimitResetAt && this.rateLimitResetAt > new Date();
+  }
+
   async getConnection(usageType: RedisUsageType): Promise<RedisType> {
+    if (this.isRateLimited()) {
+      const error = new RedisRateLimitError('Rate limit exceeded', {
+        retryAt: this.rateLimitResetAt
+      });
+      this.logger?.warn('Redis rate limit active - connection blocked', {
+        usageType,
+        retryAt: this.rateLimitResetAt
+      });
+      throw error;
+    }
+
     // التحقق من وجود اتصال صحي
     if (this.connections.has(usageType)) {
       const connection = this.connections.get(usageType)!;
@@ -165,6 +190,17 @@ export class RedisConnectionManager {
         usageType,
         operation: 'createConnection'
       });
+      if (redisError instanceof RedisRateLimitError) {
+        const retryAt = this.setRateLimitReset();
+        info.status = 'error';
+        info.lastError = redisError.message;
+        info.healthScore = 0;
+        this.logger?.error('Redis rate limit exceeded, reconnection paused', {
+          usageType,
+          retryAt
+        });
+        throw redisError;
+      }
 
       info.status = 'error';
       info.lastError = redisError.message;
@@ -209,19 +245,29 @@ export class RedisConnectionManager {
     });
 
     connection.on('error', (error: any) => {
+      const redisError = this.errorHandler.handleError(error, { usageType });
       info.status = 'error';
-      info.lastError = error.message;
+      info.lastError = redisError.message;
       info.healthScore = 0;
 
       this.logger?.error('Redis connection error', {
         usageType,
-        error: error.message,
+        error: redisError.message,
         host: info.host,
         port: info.port
       });
 
-      // معالجة أخطاء محددة
-      if (isConnectionError(error) || isTimeoutError(error)) {
+      if (redisError instanceof RedisRateLimitError) {
+        const retryAt = this.setRateLimitReset();
+        this.logger?.error('Redis rate limit exceeded, disconnecting', {
+          usageType,
+          retryAt
+        });
+        connection.disconnect();
+        return;
+      }
+
+      if (isConnectionError(redisError) || isTimeoutError(redisError)) {
         this.scheduleReconnection(usageType, info);
       }
     });
@@ -258,10 +304,28 @@ export class RedisConnectionManager {
   }
 
   private async scheduleReconnection(usageType: RedisUsageType, info: ConnectionInfo): Promise<void> {
+    if (this.isRateLimited()) {
+      const delay = this.rateLimitResetAt!.getTime() - Date.now();
+      this.logger?.warn('Reconnection paused due to rate limit', {
+        usageType,
+        retryAt: this.rateLimitResetAt
+      });
+      setTimeout(() => {
+        info.reconnectAttempts = 0;
+        this.createConnection(usageType).catch(error => {
+          this.logger?.error('Reconnection after rate limit failed', {
+            usageType,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        });
+      }, delay);
+      return;
+    }
+
     if (info.reconnectAttempts >= this.poolConfig.maxReconnectAttempts) {
-      this.logger?.error('Max reconnection attempts exceeded', { 
-        usageType, 
-        attempts: info.reconnectAttempts 
+      this.logger?.error('Max reconnection attempts exceeded', {
+        usageType,
+        attempts: info.reconnectAttempts
       });
       return;
     }
