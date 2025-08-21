@@ -123,6 +123,14 @@ export class RedisMemoryError extends RedisBaseError {
   }
 }
 
+export class RedisRateLimitError extends RedisBaseError {
+  readonly code = 'REDIS_RATE_LIMIT_ERROR';
+
+  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+    super(message, context, cause);
+  }
+}
+
 // Error Factory لإنشاء الأخطاء بناءً على نوع المشكلة
 export class RedisErrorFactory {
   static createFromIORedisError(error: any, context?: Record<string, any>): RedisBaseError {
@@ -163,6 +171,14 @@ export class RedisErrorFactory {
     if (error.message?.includes('OOM') || error.message?.includes('memory')) {
       return new RedisMemoryError(
         `Memory error: ${message}`,
+        context,
+        error
+      );
+    }
+
+    if (message.toLowerCase().includes('max requests limit exceeded')) {
+      return new RedisRateLimitError(
+        `Rate limit exceeded: ${message}`,
         context,
         error
       );
@@ -310,6 +326,7 @@ export default {
   RedisAuthenticationError,
   RedisNetworkError,
   RedisMemoryError,
+  RedisRateLimitError,
   RedisErrorFactory,
   RedisErrorHandler,
   isRedisError,

@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { Redis } from 'ioredis';
+import { Redis, ReplyError } from 'ioredis';
 import type { Redis as RedisType } from 'ioredis';
 
 function settleOnce<T>() {
@@ -50,6 +50,7 @@ import {
 import { getInstagramWebhookHandler } from './instagram-webhook.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramWebhookEvent, ProcessedWebhookResult } from './instagram-webhook.js';
+import { getNotificationService } from './notification-service.js';
 
 export interface QueueJob {
   eventId: string;
@@ -106,7 +107,12 @@ export class ProductionQueueManager {
   private failedJobs = 0;
   private monitoringInterval?: NodeJS.Timeout;
   private manualPollingInterval?: NodeJS.Timeout;
+  private baseManualPollingIntervalMs = 5000;
+  private currentManualPollingIntervalMs = this.baseManualPollingIntervalMs;
   private workerHealthInterval?: NodeJS.Timeout;
+  private manualPollingBackoffTimeout?: NodeJS.Timeout;
+  private manualPollingAlertSent = false;
+  private notification = getNotificationService();
   
   // Real processing services
   private webhookHandler = getInstagramWebhookHandler();
@@ -526,10 +532,22 @@ export class ProductionQueueManager {
     this.startManualPolling();
   }
 
-  private startManualPolling(): void {
-    this.logger.info('🔄 [MANUAL-POLLING] بدء Manual Polling كـ fallback للإشعارات');
-    
-    // فحص الطابور كل 5 ثوانٍ للبحث عن jobs منتظرة
+  private startManualPolling(intervalMs: number = this.baseManualPollingIntervalMs): void {
+    if (this.manualPollingInterval) {
+      clearInterval(this.manualPollingInterval);
+    }
+    if (this.manualPollingBackoffTimeout) {
+      clearTimeout(this.manualPollingBackoffTimeout);
+      this.manualPollingBackoffTimeout = undefined;
+    }
+    this.manualPollingAlertSent = false;
+    this.currentManualPollingIntervalMs = intervalMs;
+
+    this.logger.info('🔄 [MANUAL-POLLING] بدء Manual Polling كـ fallback للإشعارات', {
+      intervalMs,
+    });
+
+    // فحص الطابور بشكل دوري للبحث عن jobs منتظرة
     this.manualPollingInterval = setInterval(async () => {
       try {
         this.logger.debug('🔍 [MANUAL-POLLING] فحص دوري...');
@@ -696,12 +714,85 @@ export class ProductionQueueManager {
           this.logger.debug('🔍 [MANUAL-POLLING] لا توجد waiting jobs');
         }
       } catch (error) {
-        this.logger.error('❌ [MANUAL-POLLING] خطأ في Manual Polling', { 
-          error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack?.substring(0, 500) : undefined
-        });
+        if (
+          error instanceof ReplyError &&
+          error.message?.toLowerCase().includes('max requests limit exceeded')
+        ) {
+          this.logger.warn(
+            '⚠️ [MANUAL-POLLING] تجاوز الحد الأقصى لعدد طلبات Upstash - إيقاف التحقق اليدوي'
+          );
+          if (this.manualPollingInterval) {
+            clearInterval(this.manualPollingInterval);
+            this.manualPollingInterval = undefined;
+          }
+          const backoffMs = 5 * 60 * 1000; // 5 دقائق
+          if (!this.manualPollingAlertSent) {
+            this.manualPollingAlertSent = true;
+            try {
+              await this.notification.send({
+                type: 'UPSTASH_RATE_LIMIT',
+                recipient: 'ops',
+                content: {
+                  message:
+                    'Manual polling paused: Upstash max requests limit exceeded',
+                },
+              });
+            } catch (notifyError) {
+              this.logger.error('❌ [MANUAL-POLLING] فشل إرسال تنبيه', {
+                error:
+                  notifyError instanceof Error
+                    ? notifyError.message
+                    : String(notifyError),
+              });
+            }
+          }
+          this.manualPollingBackoffTimeout = setTimeout(() => {
+            this.logger.info(
+              '⏳ [MANUAL-POLLING] إعادة تشغيل التحقق اليدوي بعد backoff'
+            );
+            this.manualPollingBackoffTimeout = undefined;
+            this.startManualPolling();
+          }, backoffMs);
+        } else {
+          this.logger.error('❌ [MANUAL-POLLING] خطأ في Manual Polling', {
+            error: error instanceof Error ? error.message : String(error),
+            stack:
+              error instanceof Error
+                ? error.stack?.substring(0, 500)
+                : undefined,
+          });
+        }
       }
-    }, 5000); // كل 5 ثوانٍ
+    }, intervalMs);
+    this.manualPollingInterval.unref();
+  }
+
+  public adjustManualPollingInterval(multiplier: number): void {
+    const newInterval = this.baseManualPollingIntervalMs * multiplier;
+    if (newInterval !== this.currentManualPollingIntervalMs) {
+      this.logger.warn('⚙️ [MANUAL-POLLING] تحديث الفاصل الزمني للـ polling', {
+        previous: this.currentManualPollingIntervalMs,
+        next: newInterval,
+      });
+      this.startManualPolling(newInterval);
+    }
+  }
+
+  public getRedisClient(): Redis | undefined {
+    return this.queueConnection;
+  }
+
+  public resumeManualPolling(): void {
+    this.logger.info('🔄 [MANUAL-POLLING] تم استلام إشارة لإعادة تشغيل التحقق اليدوي');
+    if (this.manualPollingInterval) {
+      this.logger.warn('⚠️ [MANUAL-POLLING] التحقق اليدوي يعمل بالفعل');
+      return;
+    }
+    if (this.manualPollingBackoffTimeout) {
+      clearTimeout(this.manualPollingBackoffTimeout);
+      this.manualPollingBackoffTimeout = undefined;
+    }
+    this.startManualPolling();
   }
 
   async addWebhookJob(

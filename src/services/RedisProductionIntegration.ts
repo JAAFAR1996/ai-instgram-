@@ -3,9 +3,11 @@ import { RedisUsageType, Environment } from '../config/RedisConfigurationFactory
 import RedisConnectionManager from './RedisConnectionManager.js';
 import RedisHealthMonitor from './RedisHealthMonitor.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
+import { UpstashQuotaMonitor } from './UpstashQuotaMonitor.js';
 import {
   RedisConnectionError,
   RedisErrorHandler,
+  RedisRateLimitError,
   isConnectionError,
   isTimeoutError
 } from '../errors/RedisErrors.js';
@@ -34,6 +36,7 @@ export class RedisProductionIntegration {
   private errorHandler: RedisErrorHandler;
   private monitoringInterval?: NodeJS.Timeout;
   private alertingInterval?: NodeJS.Timeout;
+  private quotaMonitor: UpstashQuotaMonitor;
 
   constructor(
     private redisUrl: string, 
@@ -47,6 +50,7 @@ export class RedisProductionIntegration {
       expectedErrorThreshold: 10
     });
     this.errorHandler = new RedisErrorHandler(logger);
+    this.quotaMonitor = new UpstashQuotaMonitor(logger);
   }
 
   async initialize(): Promise<RedisIntegrationResult> {
@@ -61,11 +65,35 @@ export class RedisProductionIntegration {
 
       if (!healthCheckResult.success) {
         const error = this.errorHandler.handleError(healthCheckResult.error);
+
+        if (error instanceof RedisRateLimitError) {
+          this.logger.error('❌ تجاوز حد طلبات Redis', {
+            error: error.message,
+            code: error.code
+          });
+
+          await this.queueManager?.gracefulShutdown();
+
+          return {
+            success: false,
+            error: error.message,
+            diagnostics: {
+              circuitBreakerStats: this.circuitBreaker.getStats(),
+              connectionStats: this.connectionManager.getConnectionStats(),
+              recommendations: [
+                'تم تجاوز حد طلبات Redis - تم إيقاف الطوابير مؤقتًا',
+                'قلل استخدام Redis أو قم بترقية الخطة'
+              ],
+              overallStatus: 'CRITICAL'
+            }
+          };
+        }
+
         this.logger.error('❌ فشل فحص صحة ريديس', {
           error: error.message,
           code: error.code
         });
-        
+
         return {
           success: false,
           error: error.message,
@@ -151,6 +179,31 @@ export class RedisProductionIntegration {
         operation: 'RedisIntegration.initialize',
         environment: this.environment
       });
+
+      if (redisError instanceof RedisRateLimitError) {
+        this.logger.error('💥 تجاوز حد طلبات Redis', {
+          error: redisError.message,
+          code: redisError.code,
+          context: redisError.context
+        });
+
+        await this.queueManager?.gracefulShutdown();
+
+        return {
+          success: false,
+          error: redisError.message,
+          diagnostics: {
+            circuitBreakerStats: this.circuitBreaker.getStats(),
+            connectionStats: this.connectionManager.getConnectionStats(),
+            errorDetails: redisError.toJSON(),
+            recommendations: [
+              'تم تجاوز حد طلبات Redis - تم تعطيل الأنظمة المعتمدة مؤقتًا',
+              'قلل استخدام Redis أو قم بترقية الخطة'
+            ],
+            overallStatus: 'CRITICAL'
+          }
+        };
+      }
 
       this.logger.error('💥 خطأ حرج في تهيئة النظام المتكامل', {
         error: redisError.message,
@@ -365,10 +418,28 @@ export class RedisProductionIntegration {
       };
 
     } catch (error) {
-      this.logger.error('خطأ حرج في إنشاء التقرير الشامل', { 
-        error: error instanceof Error ? error.message : String(error)
+      const redisError = this.errorHandler.handleError(error);
+
+      if (redisError instanceof RedisRateLimitError) {
+        await this.queueManager?.gracefulShutdown();
+
+        return {
+          timestamp,
+          redisHealth: { connected: false, error: redisError.message, timestamp },
+          queueStats: null,
+          circuitBreakerStats: this.circuitBreaker.getStats(),
+          recommendations: [
+            'تم تجاوز حد طلبات Redis - تم إيقاف الطوابير مؤقتًا',
+            'قلل استخدام Redis أو قم بترقية الخطة'
+          ],
+          overallStatus: 'CRITICAL'
+        };
+      }
+
+      this.logger.error('خطأ حرج في إنشاء التقرير الشامل', {
+        error: redisError.message
       });
-      
+
       return {
         timestamp,
         redisHealth: { connected: false, error: 'فشل في الفحص الشامل', timestamp },
@@ -415,6 +486,25 @@ export class RedisProductionIntegration {
             circuitState: report.circuitBreakerStats?.state,
             totalConnections: this.connectionManager.getConnectionStats().totalConnections
           });
+        }
+
+        // فحص حصة Upstash ومراجعة معدل polling اليدوي
+        if (this.queueManager) {
+          const quota = await this.quotaMonitor.check(this.queueManager.getRedisClient());
+
+          if (quota.level === 'CRITICAL') {
+            this.logger.error('🚨 استهلاك Upstash وصل إلى حد حرج', {
+              usage: quota.usage,
+            });
+          } else if (quota.level === 'WARNING') {
+            this.logger.warn('⚠️ استهلاك Upstash يقترب من الحد المسموح', {
+              usage: quota.usage,
+            });
+          }
+
+          this.queueManager.adjustManualPollingInterval(
+            quota.recommendedIntervalMultiplier
+          );
         }
       } catch (error) {
         this.logger.error('خطأ في المراقبة الشاملة', { error });
