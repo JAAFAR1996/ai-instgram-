@@ -251,7 +251,7 @@ export class DatabaseConnection {
     }
 
     try {
-      return this.sql.begin(callback);
+      return await this.sql.begin(callback) as T;
     } catch (error) {
       console.error('❌ Database transaction error:', error);
       throw this.formatDatabaseError(error);

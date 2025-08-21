@@ -7,7 +7,7 @@
 
 import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
-import { validator } from 'hono/validator';
+import { zValidator } from '@hono/zod-validator';
 import type { BlankEnv } from 'hono/types';
 import { getServiceController } from '../services/service-controller.js';
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
@@ -54,7 +54,7 @@ export class ServiceControlAPI {
     // Toggle specific service
     this.app.post(
       '/api/services/toggle',
-      validator('json', ToggleServiceSchema.parse),
+      zValidator('json', ToggleServiceSchema),
       this.toggleService.bind(this)
     );
 
@@ -80,11 +80,9 @@ export class ServiceControlAPI {
   /**
    * Toggle service on/off
    */
-  private async toggleService(
-    c: Context<{ Bindings: BlankEnv }, '', { json: ToggleService }>
-  ) {
+  private async toggleService(c: any) {
     try {
-      const data = c.req.valid('json') as ToggleService;
+      const data = c.req.valid('json');
       
       const result = await this.serviceController.toggleService(data);
       
