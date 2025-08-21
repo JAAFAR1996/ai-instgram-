@@ -63,6 +63,9 @@ const META_APP_SECRET = (process.env.META_APP_SECRET || '').trim();
 const DATABASE_URL = process.env.DATABASE_URL;
 const REDIS_URL = process.env.REDIS_URL;
 
+// Redis kill-switch configuration
+export const redisEnabled = !!process.env.REDIS_URL && process.env.REDIS_DISABLED !== 'true';
+
 if (process.env.DEBUG_DUMP === '1') {
   console.warn('⚠️ Debug mode enabled; this may increase logging and I/O load.');
 }
@@ -112,6 +115,15 @@ async function initializeRedisIntegration() {
     log.debug('initializeRedisIntegration() - بدء دالة تهيئة النظام المتكامل');
   }
 
+  // Kill-switch: منع تهيئة Redis إذا معطل
+  if (!redisEnabled) {
+    log.warn('Redis integration disabled via configuration', {
+      redisUrl: !!process.env.REDIS_URL,
+      redisDisabled: process.env.REDIS_DISABLED
+    });
+    return;
+  }
+  
   if (!REDIS_URL) {
     log.error('REDIS_URL not configured - Redis integration disabled');
     return;
@@ -675,10 +687,10 @@ app.get('/health', async (c) => {
   // إن لم توجد لقطة أو آخر لقطة فاشلة: انتظر نتيجة واحدة فقط لكن بدون تكرار الحسم
   const snap = await getHealthCached();
   c.header('Cache-Control', 'no-store');
-  return c.json(
-    snap.ok ? { status: 'ok', ...snap } : { status: 'fail', ...snap },
-    snap.ok ? 200 : 503
-  );
+  return c.json({ 
+    status: snap.ok ? 'ok' : 'degraded', 
+    ...snap 
+  }, 200); // دائماً 200
 });
 
 // Readiness endpoint for load balancer

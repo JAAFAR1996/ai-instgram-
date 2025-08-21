@@ -12,6 +12,10 @@ WHERE platform IS NULL;
 ALTER TABLE merchant_credentials 
   ALTER COLUMN platform SET NOT NULL;
 
+-- Create unique index for ON CONFLICT support
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mc_merchant_page
+  ON merchant_credentials (merchant_id, instagram_page_id);
+
 INSERT INTO migrations (name, filename) VALUES (
   'Add business_account_id and platform to merchant_credentials',
   '023_add_business_account_id_to_merchant_credentials.sql'

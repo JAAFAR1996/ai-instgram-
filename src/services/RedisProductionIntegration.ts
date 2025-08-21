@@ -14,8 +14,10 @@ import {
 
 export interface RedisIntegrationResult {
   success: boolean;
+  mode: 'active' | 'fallback' | 'disabled';
   queueManager?: ProductionQueueManager;
   error?: string;
+  reason?: string;
   diagnostics?: any;
 }
 
@@ -37,6 +39,8 @@ export class RedisProductionIntegration {
   private monitoringInterval?: NodeJS.Timeout;
   private alertingInterval?: NodeJS.Timeout;
   private quotaMonitor: UpstashQuotaMonitor;
+  private nextRetryAt?: Date;
+  private isInCooldown = false;
 
   constructor(
     private redisUrl: string, 
@@ -53,9 +57,41 @@ export class RedisProductionIntegration {
     this.quotaMonitor = new UpstashQuotaMonitor(logger);
   }
 
+  private ceilToHour(timestamp: number): Date {
+    const date = new Date(timestamp);
+    date.setHours(date.getHours() + 1, 0, 0, 0);
+    return date;
+  }
+
+  private enterCooldownMode(reason: 'rate_limit' | 'error'): void {
+    this.isInCooldown = true;
+    this.nextRetryAt = this.ceilToHour(Date.now());
+    this.circuitBreaker.forceOpen();
+    
+    this.logger.warn('Entering Redis cooldown mode', {
+      reason,
+      nextRetryAt: this.nextRetryAt.toISOString(),
+      durationMs: this.nextRetryAt.getTime() - Date.now()
+    });
+  }
+
   async initialize(): Promise<RedisIntegrationResult> {
     try {
       this.logger.info('🔄 بدء تهيئة النظام المتكامل الإنتاجي لريديس والطوابير...');
+
+      // تحقق من فترة التبريد قبل أي محاولة اتصال
+      if (this.isInCooldown || (this.nextRetryAt && Date.now() < this.nextRetryAt.getTime())) {
+        this.logger.warn('Redis in cooldown period - skipping initialization', {
+          nextRetryAt: this.nextRetryAt?.toISOString(),
+          isInCooldown: this.isInCooldown
+        });
+        return {
+          success: false,
+          mode: 'fallback',
+          reason: 'cooldown_period',
+          error: 'Redis connection blocked during cooldown'
+        };
+      }
 
       // 1. فحص صحة Redis باستخدام Health Check connection
       const healthCheckResult = await this.circuitBreaker.execute(async () => {
@@ -67,24 +103,47 @@ export class RedisProductionIntegration {
         const error = this.errorHandler.handleError(healthCheckResult.error);
 
         if (error instanceof RedisRateLimitError) {
-          this.logger.error('❌ تجاوز حد طلبات Redis', {
+          this.logger.warn('⚠️ Redis rate limit exceeded - entering cooldown mode', {
             error: error.message,
-            code: error.code
+            code: error.code,
+            fallbackMode: 'database_only'
           });
 
-          await this.queueManager?.gracefulShutdown();
+          // دخول في فترة تبريد منضبطة
+          this.enterCooldownMode('rate_limit');
+
+          // إيقاف الطوابير فعلياً عند الحصة
+          if (this.queueManager) {
+            await this.queueManager.pauseAll();
+            this.queueManager.disableRegistration();
+            this.logger.info('Queue manager paused and registration disabled');
+          }
+
+          // إغلاق جميع اتصالات Redis لتوفير الطلبات
+          await this.connectionManager.closeAllConnections();
+
+          // إيقاف monitoring إذا كان يستخدم Redis
+          if (this.monitoringInterval) {
+            clearInterval(this.monitoringInterval);
+            this.monitoringInterval = undefined;
+          }
+
+          this.logger.info('✅ Fallback mode activated - application will continue without Redis');
 
           return {
             success: false,
-            error: error.message,
+            mode: 'fallback',
+            reason: 'rate_limit',
+            error: 'Redis rate limit exceeded',
             diagnostics: {
               circuitBreakerStats: this.circuitBreaker.getStats(),
               connectionStats: this.connectionManager.getConnectionStats(),
               recommendations: [
-                'تم تجاوز حد طلبات Redis - تم إيقاف الطوابير مؤقتًا',
-                'قلل استخدام Redis أو قم بترقية الخطة'
+                'Redis rate limit reached - application running in fallback mode',
+                'Background processing and caching disabled temporarily',
+                'Consider upgrading Redis plan or reducing usage'
               ],
-              overallStatus: 'CRITICAL'
+              overallStatus: 'DEGRADED'
             }
           };
         }
