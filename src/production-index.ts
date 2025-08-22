@@ -1402,6 +1402,14 @@ async function startServer() {
   // Initialize Redis Integration
   const redisStatus = await initializeRedisIntegration();
   
+  // Start DB Spool Drainer if Redis queue not ready
+  if (!redisStatus?.queueReady) {
+    const { SpoolDrainer } = await import('./queue/spool-drainer.js');
+    const drainer = new SpoolDrainer();
+    await drainer.start();
+    console.log('  • DB Spool drainer: ✅ Active (Redis disabled)');
+  }
+  
   // Start server using @hono/node-server
   serve({
     fetch: app.fetch,

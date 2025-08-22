@@ -51,25 +51,14 @@ export function createMerchantIsolationMiddleware(
     }
   };
 
-  // Safe query getter (يدعم جميع حالات Hono/Web Request)
+  // Safe query getter (بسيط وسريع)
   const getQuery = (c: Context, name: string): string | undefined => {
     try {
-      const q1 = (c.req as any).query?.(name);
-      if (q1 != null) return q1 as string;
-
-      const all = (c.req as any).query?.();
-      if (all && typeof all === 'object' && name in all) return all[name];
-
-      const urlStr =
-        (c.req as any).url ??
-        (c.req as any).raw?.url ??
-        (typeof c.req.raw === 'object' && 'url' in c.req.raw ? (c.req.raw as any).url : undefined);
-
-      const u = new URL(urlStr ?? c.req.url, 'http://local');
-      const q2 = u.searchParams.get(name);
-      return q2 ?? undefined;
+      const u = new URL(c.req.url);
+      return u.searchParams.get(name) ?? undefined;
     } catch {
-      return undefined;
+      const q = (c.req as any).query?.(name);
+      return q ?? undefined;
     }
   };
   
@@ -90,6 +79,12 @@ export function createMerchantIsolationMiddleware(
           return '/'; 
         }
       })();
+      
+      // Skip webhooks immediately (before any checks)
+      if (path === '/webhooks/instagram' || path.startsWith('/webhooks/instagram/')) {
+        await next();
+        return;
+      }
       
       // Skip isolation for public paths with safe array checking
       const allowedPublicPaths = finalConfig.allowedPublicPaths;
