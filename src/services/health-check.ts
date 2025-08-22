@@ -44,15 +44,42 @@ export async function startHealthMonitoring(deps: {
 }
 
 export function registerHealthRoute(app: any) {
-  app.get('/health', (c: any) => {
+  app.get('/health', async (c: any) => {
     if (process.env.HEALTH_FORCE_OK === '1') {
       return c.json(
         { ...getHealthSnapshot(), ready: true, status: 'ok', details: { forced: true } },
         200
       );
     }
+    
+    // Get production metrics
     const snap = getHealthSnapshot();
-    return c.json(snap, snap.ready ? 200 : 503);
+    const legacy = await getHealthCached();
+    
+    const productionHealth = {
+      ...snap,
+      redis: {
+        available: legacy.circuitState === 'CLOSED',
+        responseTime: legacy.redisResponseTime,
+        circuitState: legacy.circuitState
+      },
+      queue: {
+        waiting: legacy.queueStats.waiting,
+        active: legacy.queueStats.active,
+        errorRate: legacy.queueStats.errorRate
+      },
+      database: {
+        connections: legacy.totalConnections,
+        healthy: legacy.ok
+      },
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      version: process.env.npm_package_version || '1.0.0',
+      environment: process.env.NODE_ENV || 'development'
+    };
+    
+    // Always return 200 for load balancers, include actual status in body
+    return c.json(productionHealth, 200);
   });
 }
 

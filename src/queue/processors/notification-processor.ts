@@ -5,14 +5,14 @@
  * ===============================================
  */
 
-import type { QueueJob, JobProcessor } from '../message-queue.js';
+import type { Job } from 'bull';
+import type { JobProcessor } from '../message-queue.js';
 import { getNotificationService, type NotificationPayload } from '../../services/notification-service.js';
-import { withTenantJob } from '../withTenantJob.js';
 
 export class NotificationProcessor implements JobProcessor {
   constructor(private service = getNotificationService()) {}
 
-  process = withTenantJob(async (job: QueueJob): Promise<{ success: boolean; result?: any; error?: string }> => {
+  async process(job: Job): Promise<{ success: boolean; result?: any; error?: string }> {
     const payload = ((job as any).data ?? (job as any).payload) as NotificationPayload;
     try {
       const result = await this.service.send(payload);
@@ -26,7 +26,7 @@ export class NotificationProcessor implements JobProcessor {
         error: error instanceof Error ? error.message : 'Unknown notification error'
       };
     }
-  });
+  }
 }
 
 // Export processor instance

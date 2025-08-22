@@ -5,11 +5,11 @@
  * ===============================================
  */
 
-import type { QueueJob, JobProcessor } from '../message-queue.js';
+import type { Job } from 'bull';
+import type { JobProcessor } from '../message-queue.js';
 import { getConversationAIOrchestrator } from '../../services/conversation-ai-orchestrator.js';
 import { getRepositories } from '../../repositories/index.js';
 import { getInstagramClient } from '../../services/instagram-api.js';
-import { withTenantJob } from '../withTenantJob.js';
 
 export interface AIJobPayload {
   conversationId: string;
@@ -30,7 +30,7 @@ export class AIProcessor implements JobProcessor {
   private repositories = getRepositories();
   private aiOrchestrator = getConversationAIOrchestrator();
 
-  process = withTenantJob(async (job: QueueJob): Promise<{ success: boolean; result?: any; error?: string }> => {
+  async process(job: Job): Promise<{ success: boolean; result?: any; error?: string }> {
     const payload = ((job as any).data ?? (job as any).payload) as AIJobPayload;
     const startTime = Date.now();
     
@@ -128,7 +128,7 @@ export class AIProcessor implements JobProcessor {
         error: error instanceof Error ? error.message : 'Unknown AI processing error'
       };
     }
-  });
+  }
 
   /**
    * Build AI context based on platform and conversation data

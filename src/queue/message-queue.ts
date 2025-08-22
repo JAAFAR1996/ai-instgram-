@@ -8,6 +8,7 @@
 import { getDatabase } from '../database/connection.js';
 import { getConfig } from '../config/environment.js';
 import { getAnalyticsService } from '../services/analytics-service.js';
+import type { Job } from 'bull';
 import { getLogger } from '../services/logger.js';
 import { pushDLQ } from './dead-letter.js';
 import { type Sql, type Fragment } from 'postgres';
@@ -49,7 +50,7 @@ export interface CreateJobRequest {
 }
 
 export interface JobProcessor {
-  process(job: QueueJob): Promise<{ success: boolean; result?: any; error?: string }>;
+  process(job: Job): Promise<{ success: boolean; result?: any; error?: string }>;
 }
 
 export interface QueueStats {
@@ -290,7 +291,7 @@ export class MessageQueue {
     const startTime = Date.now();
 
     try {
-      const result = await processor.process(job);
+      const result = await processor.process({ data: job.payload } as Job);
       
       if (result.success) {
         await this.completeJob(job.id, result.result);
@@ -433,32 +434,32 @@ export class MessageQueue {
   private setupDefaultProcessors(): void {
     // System maintenance processor
     this.registerProcessor('SYSTEM_MAINTENANCE', {
-      async process(job: QueueJob) {
-        console.log(`🔧 Running system maintenance: ${job.payload.type}`);
+      async process(job: Job) {
+        console.log(`🔧 Running system maintenance: ${job.data.type}`);
         
-        switch (job.payload.type) {
+        switch (job.data.type) {
           case 'cleanup_old_jobs':
             const queue = getMessageQueue();
-            const cleaned = await queue.cleanupOldJobs(job.payload.days || 7);
+            const cleaned = await queue.cleanupOldJobs(job.data.days || 7);
             return { success: true, result: { cleaned } };
             
           default:
-            return { success: false, error: `Unknown maintenance type: ${job.payload.type}` };
+            return { success: false, error: `Unknown maintenance type: ${job.data.type}` };
         }
       }
     });
 
     // Analytics processing processor
     this.registerProcessor('ANALYTICS_PROCESSING', {
-      async process(job: QueueJob) {
-        console.log(`📊 Processing analytics: ${job.payload.type}`);
+      async process(job: Job) {
+        console.log(`📊 Processing analytics: ${job.data.type}`);
 
         try {
           const analytics = getAnalyticsService();
           const recordResult = await analytics.recordEvent({
-            type: job.payload.type,
-            merchantId: job.payload.merchantId,
-            data: job.payload.data
+            type: job.data.type,
+            merchantId: job.data.merchantId,
+            data: job.data.data
           });
 
           if (!recordResult.success) {
@@ -468,7 +469,7 @@ export class MessageQueue {
           return {
             success: true,
             result: {
-              eventType: job.payload.type,
+              eventType: job.data.type,
               total: recordResult.total
             }
           };

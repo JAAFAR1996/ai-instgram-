@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
 import {
   loadAndValidateEnvironment,
   validateRuntimeConfig,
@@ -148,7 +148,7 @@ describe('Environment Configuration - تكوين متغيرات البيئة', (
 
     test('should validate CORS origins format', () => {
       process.env.CORS_ORIGINS = '';
-      expect(() => loadAndValidateEnvironment()).toThrow(/CORS_ORIGINS must be a comma-separated list/);
+      expect(() => loadAndValidateEnvironment()).toThrow(/Missing required environment variable: CORS_ORIGINS/);
       
       process.env.CORS_ORIGINS = 'https://example.com,https://app.example.com';
       expect(() => loadAndValidateEnvironment()).not.toThrow();
@@ -212,7 +212,7 @@ describe('Environment Configuration - تكوين متغيرات البيئة', (
     });
 
     test('should warn about development redirect URI in production', () => {
-      const consoleSpy = Bun.spyOn(console, 'warn');
+      const consoleSpy = spyOn(console, 'warn');
       process.env.REDIRECT_URI = 'https://localhost:3000/auth/instagram/callback';
       
       loadAndValidateEnvironment();
@@ -276,7 +276,7 @@ describe('Environment Configuration - تكوين متغيرات البيئة', (
     test('should throw error for invalid database URL', () => {
       process.env.DATABASE_URL = 'not-a-valid-url';
       
-      expect(() => loadAndValidateEnvironment()).toThrow(/Invalid DATABASE_URL format/);
+      expect(() => loadAndValidateEnvironment()).toThrow(/DATABASE_URL must be a valid PostgreSQL connection string/);
     });
   });
 
@@ -302,7 +302,7 @@ describe('Environment Configuration - تكوين متغيرات البيئة', (
     });
 
     test('should warn about high database connections', () => {
-      const consoleSpy = Bun.spyOn(console, 'warn');
+      const consoleSpy = spyOn(console, 'warn');
       const config = loadAndValidateEnvironment();
       config.database.maxConnections = 150;
       

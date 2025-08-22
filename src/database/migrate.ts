@@ -387,9 +387,11 @@ export async function rollbackMigration(): Promise<void> {
   await migrationRunner.rollback();
 }
 
-export async function getMigrationStatus(): Promise<any> {
-  return await migrationRunner.status();
-}
+// Export functions for testing
+export const migrate = () => migrationRunner.migrate();
+export const rollback = () => migrationRunner.rollback();
+export const getMigrationStatus = () => migrationRunner.status();
+export const createMigrationTable = () => migrationRunner.createMigrationTable();
 
 export async function createMigration(name: string): Promise<string> {
   return await migrationRunner.create(name);

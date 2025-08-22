@@ -48,11 +48,11 @@ export type WebhookJobData = z.infer<typeof WebhookJobSchema>;
 export type AIJobData = z.infer<typeof AIJobSchema>;
 export type CleanupJobData = z.infer<typeof CleanupJobSchema>;
 
-// Database tenant isolation with PostgreSQL RLS
+// Database tenant isolation with PostgreSQL RLS and proper transactions
 export async function withDbTenant<T>(
   pool: Pool,
   merchantId: string,
-  fn: () => Promise<T>
+  fn: (client: any) => Promise<T>
 ): Promise<T> {
   if (!merchantId) {
     throw new Error('MISSING_MERCHANT_ID');
@@ -60,12 +60,30 @@ export async function withDbTenant<T>(
   
   const client = await pool.connect();
   try {
-    // Set tenant context for RLS policies
+    // Begin transaction to ensure all operations use same connection context
+    await client.query('BEGIN');
+    
+    // Set tenant context for RLS policies within transaction
     await client.query('SET LOCAL app.current_merchant_id = $1', [merchantId]);
     await client.query('SET LOCAL app.admin_mode = $1', ['false']);
     
-    // Execute function within tenant context
-    return await fn();
+    // Execute function within tenant context with same client
+    const result = await fn(client);
+    
+    // Commit transaction if successful
+    await client.query('COMMIT');
+    return result;
+    
+  } catch (error) {
+    // Rollback transaction on error
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Failed to rollback transaction:', rollbackError);
+    }
+    
+    // Re-throw original error
+    throw error;
   } finally {
     // Clear context and release connection
     await client.query('RESET app.current_merchant_id').catch(() => {});
@@ -78,7 +96,7 @@ export async function withDbTenant<T>(
 export function withTenantJob<T>(
   pool: Pool,
   logger: any,
-  handler: (job: any, data: JobData) => Promise<T>
+  handler: (job: any, data: JobData, client: any) => Promise<T>
 ) {
   return async (job: any) => {
     try {
@@ -92,8 +110,8 @@ export function withTenantJob<T>(
       });
       
       // Execute with database tenant isolation
-      return await withDbTenant(pool, data.merchantId, () => 
-        handler(job, data)
+      return await withDbTenant(pool, data.merchantId, (client) => 
+        handler(job, data, client)
       );
       
     } catch (error) {
@@ -138,7 +156,7 @@ export function withTenantJob<T>(
 export function withWebhookTenantJob<T>(
   pool: Pool,
   logger: any,
-  handler: (job: any, data: WebhookJobData) => Promise<T>
+  handler: (job: any, data: WebhookJobData, client: any) => Promise<T>
 ) {
   return async (job: any) => {
     try {
@@ -154,8 +172,8 @@ export function withWebhookTenantJob<T>(
       });
       
       // Execute with database tenant isolation
-      return await withDbTenant(pool, data.merchantId, () => 
-        handler(job, data)
+      return await withDbTenant(pool, data.merchantId, (client) => 
+        handler(job, data, client)
       );
       
     } catch (error) {
@@ -168,7 +186,7 @@ export function withWebhookTenantJob<T>(
 export function withAITenantJob<T>(
   pool: Pool,
   logger: any,
-  handler: (job: any, data: AIJobData) => Promise<T>
+  handler: (job: any, data: AIJobData, client: any) => Promise<T>
 ) {
   return async (job: any) => {
     try {
@@ -184,8 +202,8 @@ export function withAITenantJob<T>(
       });
       
       // Execute with database tenant isolation
-      return await withDbTenant(pool, data.merchantId, () => 
-        handler(job, data)
+      return await withDbTenant(pool, data.merchantId, (client) => 
+        handler(job, data, client)
       );
       
     } catch (error) {

@@ -5,11 +5,11 @@
  * ===============================================
  */
 
-import type { QueueJob, JobProcessor } from '../message-queue.js';
+import type { Job } from 'bull';
+import type { JobProcessor } from '../message-queue.js';
 import { getInstagramWebhookHandler } from '../../services/instagram-webhook.js';
 import { getRepositories } from '../../repositories/index.js';
 import { getLogger } from '../../services/logger.js';
-import { withTenantJob } from '../withTenantJob.js';
 
 export interface WebhookJobPayload {
   platform: 'instagram';
@@ -23,7 +23,7 @@ export class WebhookProcessor implements JobProcessor {
   private repositories = getRepositories();
   private logger = getLogger({ component: 'WebhookProcessor' });
 
-  process = withTenantJob(async (job: QueueJob): Promise<{ success: boolean; result?: any; error?: string }> => {
+  async process(job: Job): Promise<{ success: boolean; result?: any; error?: string }> {
     const payload = ((job as any).data ?? (job as any).payload) as WebhookJobPayload;
 
     try {
@@ -72,7 +72,7 @@ export class WebhookProcessor implements JobProcessor {
           error: error instanceof Error ? error.message : 'Unknown webhook processing error'
         };
       }
-    });
+    }
 
     /**
      * Process Instagram webhook

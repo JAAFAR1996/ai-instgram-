@@ -75,13 +75,13 @@ export class QueueManager {
     // Register conversation cleanup processor
     this.messageQueue.registerProcessor('CONVERSATION_CLEANUP', {
       async process(job) {
-        console.log(`🧹 Processing conversation cleanup: ${job.payload.type}`);
+        console.log(`🧹 Processing conversation cleanup: ${job.data.type}`);
         
         const repositories = getRepositories();
         
-        switch (job.payload.type) {
+        switch (job.data.type) {
           case 'end_inactive_conversations':
-            const inactiveDays = job.payload.inactiveDays || 30;
+            const inactiveDays = job.data.inactiveDays || 30;
             const cutoffDate = new Date();
             cutoffDate.setDate(cutoffDate.getDate() - inactiveDays);
             
@@ -100,13 +100,13 @@ export class QueueManager {
             return { success: true, result: { endedCount } };
             
           case 'delete_old_messages':
-            const messageDays = job.payload.days || 90;
+            const messageDays = job.data.days || 90;
             const deletedCount = await repositories.message.deleteOldMessages(messageDays);
             
             return { success: true, result: { deletedCount } };
             
           default:
-            return { success: false, error: `Unknown cleanup type: ${job.payload.type}` };
+            return { success: false, error: `Unknown cleanup type: ${job.data.type}` };
         }
       }
     });

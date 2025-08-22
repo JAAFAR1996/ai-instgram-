@@ -4,7 +4,9 @@
       "Bash(npm run typecheck:*)",
       "Bash(npm run build:*)",
       "Bash(timeout 30 npm run build)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(uuidgen)",
+      "Bash(env:*)"
     ],
     "deny": [],
     "ask": []

@@ -41,7 +41,7 @@ mock.module('../services/RedisConnectionManager.js', () => ({
   })
 }));
 
-const TEST_MERCHANT_ID = 'test-service-control-merchant';
+const TEST_MERCHANT_ID = 'd5f7fe1e-f79e-4518-8d8a-b0cd8482bb0f';
 const TEST_USER_ID = 'test-admin-user';
 
 describe('Service Control API - Production Tests', () => {

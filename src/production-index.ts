@@ -24,10 +24,12 @@ import fs from 'node:fs';
 import { Pool } from 'pg';
 import Bull from 'bull';
 import { runStartupValidation } from './startup/validation.js';
+import { runStartupSecurityValidations } from './startup/security-validations.js';
 import { runMigrations } from './startup/runMigrations.js';
 import { ensurePageMapping } from './startup/ensurePageMapping.js';
 import { RedisProductionIntegration } from './services/RedisProductionIntegration.js';
 import { createMerchantIsolationMiddleware } from './middleware/rls-merchant-isolation.js';
+import { createInternalAuthMiddleware } from './middleware/internal-auth.js';
 import { getHealthCached, getLastSnapshot, startHealthMonitoring } from './services/health-check.js';
 import { verifyHMAC, verifyHMACRaw, readRawBody, type HmacVerifyResult } from './services/encryption.js';
 import { pushDLQ, getDLQStats } from './queue/dead-letter.js';
@@ -37,6 +39,7 @@ import { getLogger, bindRequestLogger } from './services/logger.js';
 import { telemetry, telemetryMiddleware } from './services/telemetry.js';
 import { requireAdminContext } from './middleware/auto-tenant-context.js';
 import instagramAuth from './api/instagram-auth.js';
+import { getProductionMetrics } from './services/production-metrics.js';
 
 // Define App Environment for TypeScript
 type AppEnv = {
@@ -47,6 +50,7 @@ type AppEnv = {
     log?: any;
     traceId?: string;
     correlationId?: string;
+    merchantId?: string | null;
   };
 };
 
@@ -268,6 +272,14 @@ app.use('*', async (c, next) => {
 
 // Telemetry metrics middleware
 app.use('*', telemetryMiddleware());
+
+// Internal routes security middleware
+app.use('*', createInternalAuthMiddleware({
+  enabled: process.env.NODE_ENV === 'production',
+  allowedIPs: (process.env.INTERNAL_ALLOWED_IPS || '127.0.0.1,::1').split(',').map(ip => ip.trim()),
+  authToken: process.env.INTERNAL_AUTH_TOKEN,
+  logAllAttempts: false // Only log in production
+}));
 
 // ===============================================
 // REQUEST LOGGING MIDDLEWARE - structured logging with trace IDs
@@ -829,13 +841,24 @@ app.post("/webhooks/instagram", async (c) => {
     return c.text('misconfigured', 500);
   }
 
-  // 4. التحقق من التوقيع باستخدام raw buffer
+  // 4. CRITICAL: التحقق من التوقيع قبل أي إدراج في القاعدة
   const verifyResult = verifyHMACRaw(rawBody, signature, secret);
   if (!verifyResult.ok) {
-    console.error(`❌ IG signature verification failed: ${verifyResult.reason}`, { 
+    console.error(`❌ IG signature verification FAILED - blocking request`, { 
       hasSignature: !!signature,
       bodyLength: rawBody.length,
-      reason: verifyResult.reason
+      reason: verifyResult.reason,
+      ip: c.req.header('x-forwarded-for') || 'unknown'
+    });
+    // Log security incident
+    pushDLQ({ 
+      reason: 'webhook_signature_verification_failed',
+      payload: { 
+        signature: signature ? 'present' : 'missing',
+        reason: verifyResult.reason,
+        ip: c.req.header('x-forwarded-for'),
+        timestamp: new Date().toISOString()
+      }
     });
     return c.text("invalid signature", 401);
   }
@@ -976,6 +999,35 @@ app.get('/internal/validate/startup', async (c) => {
   try {
     const report = await runStartupValidation();
     return c.json(report, report.overallSuccess ? 200 : 500);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+app.get('/internal/validate/security', async (c) => {
+  try {
+    const securityResult = await runStartupSecurityValidations();
+    return c.json(securityResult, securityResult.passed ? 200 : 500);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+app.get('/internal/metrics', async (c) => {
+  try {
+    const metrics = getProductionMetrics();
+    const data = metrics.getMetricsForMonitoring();
+    return c.json(data, 200);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+app.get('/internal/metrics/alerts', async (c) => {
+  try {
+    const metrics = getProductionMetrics();
+    const alerts = metrics.getAlerts(50);
+    return c.json({ alerts, count: alerts.length }, 200);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

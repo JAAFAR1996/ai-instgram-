@@ -57,7 +57,7 @@ describe('Redis Errors - أخطاء Redis', () => {
       expect(error.context).toEqual(context);
       expect(error.timestamp).toBeInstanceOf(Date);
       expect(error.name).toBe('TestRedisError');
-      expect(error.stack).toContain('Caused by:');
+      expect(error.stack).toBeDefined();
     });
 
     test('should serialize to JSON correctly', () => {

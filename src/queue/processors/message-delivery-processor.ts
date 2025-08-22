@@ -5,10 +5,10 @@
  * ===============================================
  */
 
-import type { QueueJob, JobProcessor } from '../message-queue.js';
+import type { Job } from 'bull';
+import type { JobProcessor } from '../message-queue.js';
 import { getInstagramMessageSender, type SendResult } from '../../services/instagram-message-sender.js';
 import { getRepositories, type RepositoryManager } from '../../repositories/index.js';
-import { withTenantJob } from '../withTenantJob.js';
 
 export interface MessageDeliveryJobPayload {
   messageId: string;
@@ -25,7 +25,7 @@ export class MessageDeliveryProcessor implements JobProcessor {
     private repositories: RepositoryManager = getRepositories()
   ) {}
 
-  process = withTenantJob(async (job: QueueJob): Promise<{ success: boolean; result?: any; error?: string }> => {
+  async process(job: Job): Promise<{ success: boolean; result?: any; error?: string }> {
     const payload = ((job as any).data ?? (job as any).payload) as MessageDeliveryJobPayload;
 
     try {
@@ -75,7 +75,7 @@ export class MessageDeliveryProcessor implements JobProcessor {
         error: error instanceof Error ? error.message : 'Unknown message delivery error'
       };
     }
-  });
+  }
 }
 
 // Export processor instance

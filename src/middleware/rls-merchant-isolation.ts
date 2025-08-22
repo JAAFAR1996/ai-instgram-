@@ -12,13 +12,15 @@ import { serr } from '../isolation/context.js';
 
 export interface MerchantIsolationConfig {
   strictMode: boolean; // Fail if no merchant ID found
+  softMode: boolean; // Allow requests without merchant ID with logging
   allowedPublicPaths: string[]; // Paths that don't require merchant isolation
   headerName: string; // Header to extract merchant ID from
   queryParam?: string; // Optional query parameter for merchant ID
 }
 
 const DEFAULT_CONFIG: MerchantIsolationConfig = {
-  strictMode: true,
+  strictMode: false, // Changed to support soft mode by default
+  softMode: true, // Enable soft mode for production readiness
   allowedPublicPaths: ['/health', '/ready', '/webhook', '/auth'],
   headerName: 'x-merchant-id',
   queryParam: 'merchant_id'
@@ -53,13 +55,26 @@ export function createMerchantIsolationMiddleware(
       
       if (!merchantId) {
         if (finalConfig.strictMode) {
+          logger.error('Merchant ID required but missing', {
+            path,
+            ip: c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown'
+          });
+          
           return c.json({
             error: 'Missing merchant identification',
             code: 'MERCHANT_ID_REQUIRED',
             message: `Merchant ID must be provided via ${finalConfig.headerName} header or ${finalConfig.queryParam} query parameter`
           }, 400);
+        } else if (finalConfig.softMode) {
+          logger.warn('No merchant ID found - proceeding in soft mode', {
+            path,
+            ip: c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown',
+            userAgent: c.req.header('user-agent')
+          });
+          
+          await next();
+          return;
         } else {
-          console.warn(`⚠️ No merchant ID found for path: ${path}`);
           await next();
           return;
         }
@@ -90,7 +105,12 @@ export function createMerchantIsolationMiddleware(
         //   USING (merchant_id = current_setting('app.current_merchant_id')::uuid);
         await sql`SELECT set_config('app.current_merchant_id', ${merchantId}, true)`;
         
-        console.log(`🔒 RLS: Set merchant isolation for ${merchantId} on path ${path}`);
+        logger.info('RLS merchant isolation activated', {
+          merchantId,
+          path,
+          method: c.req.method,
+          ip: c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown'
+        });
         
         await next();
         
@@ -102,6 +122,13 @@ export function createMerchantIsolationMiddleware(
             error: 'Database isolation setup failed',
             code: 'DB_ISOLATION_ERROR'
           }, 500);
+        } else if (finalConfig.softMode) {
+          logger.warn('Database isolation failed - continuing in soft mode', {
+            err: serr(dbError),
+            merchantId,
+            path
+          });
+          await next();
         } else {
           // Continue without DB isolation in non-strict mode
           await next();
