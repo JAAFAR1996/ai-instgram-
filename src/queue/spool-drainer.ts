@@ -104,6 +104,11 @@ export class SpoolDrainer {
    * Drain a batch of jobs from spool or process them inline if Redis is down
    */
   private async drainSpoolBatch(): Promise<void> {
+    // Circuit breaker: Skip if circuit is open
+    if (this.circuitOpen) {
+      return;
+    }
+
     try {
       // Check Redis health using safe wrapper
       const redisManager = getRedisConnectionManager();
@@ -130,6 +135,18 @@ export class SpoolDrainer {
     }
 
     try {
+      // Check database readiness before accessing spool (same as processJobsInline)
+      try {
+        const testSql = this.spool['getSQL']?.() || this.spool['sql'];
+        if (!testSql) {
+          logger.debug('Database not ready for spool draining, skipping');
+          return;
+        }
+      } catch (dbError) {
+        logger.debug('Database connection not ready for spool draining, skipping');
+        return;
+      }
+
       const spooledJobs = await this.spool.getNextJobs(this.config.batchSize);
       
       if (spooledJobs.length === 0) {
@@ -175,9 +192,44 @@ export class SpoolDrainer {
       }
 
       this.resetBackoff();
+      // Reset consecutive errors on successful processing (drain path)
+      if (this.consecutiveErrors > 0) {
+        this.consecutiveErrors = 0;
+        if (this.circuitOpen) {
+          this.circuitOpen = false;
+          logger.info('SpoolDrainer recovered - circuit breaker closed (drain path)');
+        }
+      }
 
     } catch (error) {
-      logger.error('Spool drain failed', { error: error.message });
+      this.totalErrors++;
+      this.consecutiveErrors++;
+      this.lastErrorTime = Date.now();
+
+      // Circuit breaker: If too many consecutive errors, open circuit
+      if (this.consecutiveErrors >= 5) {
+        this.circuitOpen = true;
+        logger.warn('SpoolDrainer circuit breaker opened (drain path)', {
+          consecutiveErrors: this.consecutiveErrors,
+          totalErrors: this.totalErrors
+        });
+        // Reset after 30 seconds
+        setTimeout(() => {
+          this.circuitOpen = false;
+          this.consecutiveErrors = 0;
+          logger.info('SpoolDrainer circuit breaker reset (drain path)');
+        }, 30000);
+      }
+
+      // Only log errors if circuit is closed (to reduce noise)
+      if (!this.circuitOpen || this.consecutiveErrors <= 1) {
+        logger.error('Spool drain failed', { 
+          error: error.message,
+          consecutiveErrors: this.consecutiveErrors,
+          circuitOpen: this.circuitOpen
+        });
+      }
+
       this.applyBackoff();
     }
   }

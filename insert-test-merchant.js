@@ -6,9 +6,13 @@
  * ===============================================
  */
 
-const { readFileSync } = require('fs');
-const { Pool } = require('pg');
-const path = require('path');
+import { readFileSync } from 'fs';
+import pg from 'pg';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const { Pool } = pg;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Database connection
 const pool = new Pool({
@@ -136,11 +140,11 @@ process.on('unhandledRejection', (error) => {
 });
 
 // Run if called directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(error => {
     console.error('❌ Script failed:', error.message);
     process.exit(1);
   });
 }
 
-module.exports = { insertTestMerchant };
+export { insertTestMerchant };

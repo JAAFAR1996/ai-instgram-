@@ -1351,7 +1351,7 @@ app.get('/legal/', async (c) => {
     const html = fs.readFileSync(p.join(process.cwd(), 'legal', 'index.html'), 'utf8');
     c.header('Content-Type', 'text/html; charset=utf-8');
     c.header('Cache-Control', 'public, max-age=3600');
-    return c.body(html);
+    return c.html(html);
   } catch (e) {
     return c.text('Legal index not found', 404);
   }
@@ -1363,7 +1363,7 @@ app.get('/privacy.html', async (c) => {
     const html = fs.readFileSync(p.join(process.cwd(), 'legal', 'privacy.html'), 'utf8');
     c.header('Content-Type', 'text/html; charset=utf-8');
     c.header('Cache-Control', 'public, max-age=3600');
-    return c.body(html);
+    return c.html(html);
   } catch (e) {
     return c.text('Privacy Policy not found', 404);
   }
@@ -1375,7 +1375,7 @@ app.get('/deletion.html', async (c) => {
     const html = fs.readFileSync(p.join(process.cwd(), 'legal', 'deletion.html'), 'utf8');
     c.header('Content-Type', 'text/html; charset=utf-8');
     c.header('Cache-Control', 'public, max-age=3600');
-    return c.body(html);
+    return c.html(html);
   } catch (e) {
     return c.text('Data Deletion Instructions not found', 404);
   }
