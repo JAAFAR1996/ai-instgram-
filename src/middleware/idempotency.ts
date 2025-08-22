@@ -123,8 +123,15 @@ export function createIdempotencyMiddleware(
         }
         logger.info(`🔒 Idempotency hit: ${idempotencyKey}`);
 
-        // Return cached response
-        return c.json(parsed.body, parsed.status, parsed.headers || {});
+        // Return cached response - with safety checks
+        if (!parsed || typeof parsed !== 'object' || !('body' in parsed) || !('status' in parsed)) {
+          logger.error('Corrupted cache entry - missing required fields', { parsed });
+          // Remove corrupted cache entry
+          await redis.del(idempotencyKey);
+          // Continue processing instead of returning corrupted data
+        } else {
+          return c.json(parsed.body, parsed.status, parsed.headers || {});
+        }
       }
       
       // Create a flag to track if we should cache response
