@@ -30,18 +30,29 @@ export interface SpoolJobRequest {
 }
 
 export class DatabaseJobSpool {
-  private sql: Sql;
+  private sql: Sql | null = null;
   private logger = getLogger({ component: 'DatabaseJobSpool' });
 
   constructor() {
-    this.sql = getDatabase().getSQL();
+    // تأخير تهيئة SQL حتى أول استخدام
+  }
+
+  /**
+   * Get SQL connection - initialize lazily
+   */
+  private getSQL(): Sql {
+    if (!this.sql) {
+      this.sql = getDatabase().getSQL();
+    }
+    return this.sql;
   }
 
   /**
    * Add job to database spool when Redis is unavailable
    */
   async spoolJob(request: SpoolJobRequest): Promise<SpooledJob> {
-    const result = await this.sql`
+    const sql = this.getSQL();
+    const result = await sql`
       INSERT INTO job_spool (
         job_id, job_type, job_data, priority, merchant_id, scheduled_at
       ) VALUES (
@@ -74,11 +85,12 @@ export class DatabaseJobSpool {
    * Get next jobs to process from spool (FIFO with priority)
    */
   async getNextJobs(limit: number = 10): Promise<SpooledJob[]> {
+    const sql = this.getSQL();
     // Use admin mode to see all merchant jobs
-    await this.sql`SELECT set_config('app.admin_mode', 'true', true)`;
+    await sql`SELECT set_config('app.admin_mode', 'true', true)`;
     
     try {
-      const result = await this.sql`
+      const result = await sql`
         UPDATE job_spool 
         SET processed_at = NOW()
         WHERE id = ANY(
@@ -110,7 +122,7 @@ export class DatabaseJobSpool {
 
       return jobs;
     } finally {
-      await this.sql`SELECT set_config('app.admin_mode', 'false', true)`.catch(() => {});
+      await sql`SELECT set_config('app.admin_mode', 'false', true)`.catch(() => {});
     }
   }
 
@@ -124,24 +136,25 @@ export class DatabaseJobSpool {
     byPriority: Record<string, number>;
     byType: Record<string, number>;
   }> {
-    await this.sql`SELECT set_config('app.admin_mode', 'true', true)`;
+    const sql = this.getSQL();
+    await sql`SELECT set_config('app.admin_mode', 'true', true)`;
     
     try {
       const [totalResult, priorityResult, typeResult] = await Promise.all([
-        this.sql`
+        sql`
           SELECT 
             COUNT(*) as total,
             COUNT(*) FILTER (WHERE processed_at IS NULL) as pending,
             COUNT(*) FILTER (WHERE processed_at IS NOT NULL) as processed
           FROM job_spool
         `,
-        this.sql`
+        sql`
           SELECT priority, COUNT(*) as count
           FROM job_spool 
           WHERE processed_at IS NULL
           GROUP BY priority
         `,
-        this.sql`
+        sql`
           SELECT job_type, COUNT(*) as count
           FROM job_spool 
           WHERE processed_at IS NULL
@@ -167,7 +180,7 @@ export class DatabaseJobSpool {
 
       return stats;
     } finally {
-      await this.sql`SELECT set_config('app.admin_mode', 'false', true)`.catch(() => {});
+      await sql`SELECT set_config('app.admin_mode', 'false', true)`.catch(() => {});
     }
   }
 
@@ -175,13 +188,14 @@ export class DatabaseJobSpool {
    * Clean up old processed jobs
    */
   async cleanupProcessedJobs(olderThanHours: number = 24): Promise<number> {
-    await this.sql`SELECT set_config('app.admin_mode', 'true', true)`;
+    const sql = this.getSQL();
+    await sql`SELECT set_config('app.admin_mode', 'true', true)`;
     
     try {
       const cutoffTime = new Date();
       cutoffTime.setHours(cutoffTime.getHours() - olderThanHours);
       
-      const result = await this.sql`
+      const result = await sql`
         DELETE FROM job_spool 
         WHERE processed_at IS NOT NULL 
         AND processed_at < ${cutoffTime}
@@ -198,7 +212,7 @@ export class DatabaseJobSpool {
 
       return deletedCount;
     } finally {
-      await this.sql`SELECT set_config('app.admin_mode', 'false', true)`.catch(() => {});
+      await sql`SELECT set_config('app.admin_mode', 'false', true)`.catch(() => {});
     }
   }
 
@@ -206,7 +220,8 @@ export class DatabaseJobSpool {
    * Remove specific job from spool (when successfully processed)
    */
   async removeJob(jobId: string, merchantId: string): Promise<boolean> {
-    const result = await this.sql`
+    const sql = this.getSQL();
+    const result = await sql`
       DELETE FROM job_spool 
       WHERE job_id = ${jobId} 
       AND merchant_id = ${merchantId}

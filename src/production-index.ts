@@ -1399,15 +1399,37 @@ console.log('   • Admin context required for all internal endpoints');
 async function startServer() {
   console.log('🚀 Starting production server...');
   
+  // CRITICAL: Ensure database is connected before anything else
+  if (!pool) {
+    console.error('❌ CRITICAL: Database not configured! Check DATABASE_URL environment variable.');
+    process.exit(1);
+  }
+  
+  // Test database connection
+  try {
+    const client = await pool.connect();
+    await client.query('SELECT 1');
+    client.release();
+    console.log('  • Database: ✅ Connected');
+  } catch (error) {
+    console.error('❌ CRITICAL: Database connection failed:', error.message);
+    process.exit(1);
+  }
+  
   // Initialize Redis Integration
   const redisStatus = await initializeRedisIntegration();
   
-  // Start DB Spool Drainer if Redis queue not ready
+  // Start DB Spool Drainer if Redis queue not ready (ONLY after DB is ready)
   if (!redisStatus?.queueReady) {
-    const { SpoolDrainer } = await import('./queue/spool-drainer.js');
-    const drainer = new SpoolDrainer();
-    await drainer.start();
-    console.log('  • DB Spool drainer: ✅ Active (Redis disabled)');
+    try {
+      const { SpoolDrainer } = await import('./queue/spool-drainer.js');
+      const drainer = new SpoolDrainer();
+      await drainer.start();
+      console.log('  • DB Spool drainer: ✅ Active (Redis disabled)');
+    } catch (drainerError) {
+      console.error('❌ Failed to start DB Spool Drainer:', drainerError.message);
+      console.log('  • DB Spool drainer: ❌ Failed (will continue without fallback)');
+    }
   }
   
   // Start server using @hono/node-server
