@@ -136,6 +136,24 @@ async function performChecks(): Promise<HealthSnapshotLegacy> {
     let circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
     
     try {
+      // Check Redis availability first
+      const { getRedisConnectionManager } = await import('./RedisConnectionManager.js');
+      const redisManager = getRedisConnectionManager();
+      const redisStatus = redisManager.getRedisStatus();
+      
+      if (!redisStatus.available) {
+        // Redis disabled due to quota - fallback mode active
+        return {
+          ok: true, // النظام يعمل في fallback mode
+          redisResponseTime: null,
+          queueStats: { waiting: 0, active: 0, errorRate: 0 },
+          circuitState: 'OPEN', // Redis معطل
+          totalConnections: 0,
+          ts: Date.now(),
+          reason: `Redis quota exceeded - DB spool active until ${redisStatus.pausedUntil}`
+        };
+      }
+      
       const redisStart = Date.now();
       stats = await qm.getStats();
       redisResponseTime = Date.now() - redisStart;

@@ -48,6 +48,9 @@ export class RedisConnectionManager {
   private connections: Map<RedisUsageType, RedisType> = new Map();
   private connectionInfo: Map<RedisUsageType, ConnectionInfo> = new Map();
   private configFactory: ProductionRedisConfigurationFactory;
+  
+  // Redis availability flag - set to false when quota exceeded
+  private redisEnabled: boolean = true;
   private healthMonitor: RedisHealthMonitor;
   private errorHandler: RedisErrorHandler;
   private healthCheckInterval?: NodeJS.Timeout;
@@ -197,10 +200,13 @@ export class RedisConnectionManager {
         info.lastError = redisError.message;
         info.healthScore = 0;
         
+        // Disable Redis integration when quota exceeded
+        this.redisEnabled = false;
+        
         // إيقاف محاولات إعادة الاتصال حتى إعادة تعيين الحد
         this.pauseReconnectionsUntil = retryAt;
         
-        this.logger?.warn('Redis rate limit exceeded, disconnecting', {
+        this.logger?.warn('Redis quota exceeded - switching to DB spool fallback', {
           usageType,
           retryAt: retryAt.toISOString()
         });
@@ -211,14 +217,21 @@ export class RedisConnectionManager {
           this.connections.delete(usageType);
         }
         
-        // جدولة إعادة المحاولة تلقائياً
+        // جدولة إعادة المحاولة تلقائياً مرة واحدة في بداية الساعة
         const delayMs = retryAt.getTime() - Date.now();
         setTimeout(async () => {
-          this.logger?.info('Rate limit reset, attempting reconnection', { usageType });
+          this.logger?.info('Rate limit reset - re-enabling Redis integration', { usageType });
           try {
+            this.redisEnabled = true; // Re-enable Redis
             await this.getConnection(usageType);
           } catch (error) {
-            this.logger?.warn('Auto-reconnect failed after rate limit reset', error);
+            this.logger?.warn('Auto-reconnect failed after rate limit reset', { 
+              error: error instanceof Error ? error.message : String(error) 
+            });
+            // Only disable again if it's another rate limit error
+            if (error instanceof Error && error.message.includes('max requests limit')) {
+              this.redisEnabled = false;
+            }
           }
         }, delayMs);
         
@@ -397,6 +410,25 @@ export class RedisConnectionManager {
     }
 
     this.connectionInfo.delete(usageType);
+  }
+
+  /**
+   * Check if Redis integration is available
+   */
+  public isRedisEnabled(): boolean {
+    return this.redisEnabled;
+  }
+
+  /**
+   * Get Redis status for health checks
+   */
+  public getRedisStatus() {
+    return {
+      available: this.redisEnabled,
+      rateLimited: !this.redisEnabled,
+      connectionCount: this.connections.size,
+      pausedUntil: this.pauseReconnectionsUntil?.toISOString() || null
+    };
   }
 
   async closeAllConnections(): Promise<void> {

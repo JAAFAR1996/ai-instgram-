@@ -21,7 +21,7 @@ export interface MerchantIsolationConfig {
 const DEFAULT_CONFIG: MerchantIsolationConfig = {
   strictMode: false, // Changed to support soft mode by default
   softMode: true, // Enable soft mode for production readiness
-  allowedPublicPaths: ['/health', '/ready', '/webhook', '/auth'],
+  allowedPublicPaths: ['/', '/health', '/ready', '/webhooks/instagram', '/webhook', '/auth'],
   headerName: 'x-merchant-id',
   queryParam: 'merchant_id'
 };
@@ -39,10 +39,23 @@ export function createMerchantIsolationMiddleware(
   
   return async (c: Context, next: Next) => {
     try {
-      const path = c.req.path;
+      // Safe path extraction with fallback
+      const path = (() => {
+        try { 
+          return c.req?.path ?? new URL(c.req.url).pathname ?? '/'; 
+        } catch { 
+          return '/'; 
+        }
+      })();
       
-      // Skip isolation for public paths
-      if (finalConfig.allowedPublicPaths.some(publicPath => path.startsWith(publicPath))) {
+      // Skip isolation for public paths with safe array checking
+      const allowed = Array.isArray(finalConfig.allowedPublicPaths)
+        ? finalConfig.allowedPublicPaths.some(
+            (p) => typeof p === 'string' && p.length > 0 && path.startsWith(p)
+          )
+        : false;
+        
+      if (allowed) {
         await next();
         return;
       }
