@@ -37,6 +37,20 @@ export function createMerchantIsolationMiddleware(
 ) {
   const finalConfig = { ...DEFAULT_CONFIG, ...config };
   
+  // Safe header getter (يدعم كل الحالات)
+  const getHeader = (c: Context, name: string): string | undefined => {
+    try {
+      const h1 = (c.req as any).header?.(name);
+      if (h1 != null) return h1 as string;
+      const h2 = c.req.raw?.headers?.get(name);
+      if (h2 != null) return h2;
+      const h3 = (c.req as any).headers?.get?.(name);
+      return h3 ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  
   return async (c: Context, next: Next) => {
     try {
       // Skip isolation for OPTIONS and HEAD methods
@@ -68,7 +82,7 @@ export function createMerchantIsolationMiddleware(
       }
       
       // Extract merchant ID from header or query parameter
-      let merchantId = c.req.header(finalConfig.headerName);
+      let merchantId = getHeader(c, finalConfig.headerName);
       if (!merchantId && finalConfig.queryParam) {
         merchantId = c.req.query(finalConfig.queryParam);
       }
@@ -77,7 +91,7 @@ export function createMerchantIsolationMiddleware(
         if (finalConfig.strictMode) {
           logger.error('Merchant ID required but missing', {
             path,
-            ip: c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown'
+            ip: getHeader(c, 'x-forwarded-for') || getHeader(c, 'x-real-ip') || 'unknown'
           });
           
           return c.json({
@@ -88,8 +102,8 @@ export function createMerchantIsolationMiddleware(
         } else if (finalConfig.softMode) {
           logger.warn('No merchant ID found - proceeding in soft mode', {
             path,
-            ip: c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown',
-            userAgent: c.req.header('user-agent')
+            ip: getHeader(c, 'x-forwarded-for') || getHeader(c, 'x-real-ip') || 'unknown',
+            userAgent: getHeader(c, 'user-agent')
           });
           
           await next();
@@ -129,7 +143,7 @@ export function createMerchantIsolationMiddleware(
           merchantId,
           path,
           method: c.req.method,
-          ip: c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown'
+          ip: getHeader(c, 'x-forwarded-for') || getHeader(c, 'x-real-ip') || 'unknown'
         });
         
         await next();
