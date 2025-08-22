@@ -50,6 +50,28 @@ export function createMerchantIsolationMiddleware(
       return undefined;
     }
   };
+
+  // Safe query getter (يدعم جميع حالات Hono/Web Request)
+  const getQuery = (c: Context, name: string): string | undefined => {
+    try {
+      const q1 = (c.req as any).query?.(name);
+      if (q1 != null) return q1 as string;
+
+      const all = (c.req as any).query?.();
+      if (all && typeof all === 'object' && name in all) return all[name];
+
+      const urlStr =
+        (c.req as any).url ??
+        (c.req as any).raw?.url ??
+        (typeof c.req.raw === 'object' && 'url' in c.req.raw ? (c.req.raw as any).url : undefined);
+
+      const u = new URL(urlStr ?? c.req.url, 'http://local');
+      const q2 = u.searchParams.get(name);
+      return q2 ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
   
   return async (c: Context, next: Next) => {
     try {
@@ -84,7 +106,7 @@ export function createMerchantIsolationMiddleware(
       // Extract merchant ID from header or query parameter
       let merchantId = getHeader(c, finalConfig.headerName);
       if (!merchantId && finalConfig.queryParam) {
-        merchantId = c.req.query(finalConfig.queryParam);
+        merchantId = getQuery(c, finalConfig.queryParam);
       }
       
       if (!merchantId) {
