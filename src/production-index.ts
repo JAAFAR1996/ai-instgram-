@@ -114,18 +114,24 @@ async function initializeRedisIntegration() {
     log.debug('initializeRedisIntegration() - بدء دالة تهيئة النظام المتكامل');
   }
 
+  // Kill-switch: منع تهيئة Redis إذا معطل بواسطة البيئة
+  if (process.env.REDIS_ENABLED === '0' || process.env.REDIS_ENABLED === 'false') {
+    log.info('Redis disabled by config');
+    return { enabled: false, queueReady: false };
+  }
+
   // Kill-switch: منع تهيئة Redis إذا معطل
   if (!redisEnabled) {
     log.warn('Redis integration disabled via configuration', {
       redisUrl: !!process.env.REDIS_URL,
       redisDisabled: process.env.REDIS_DISABLED
     });
-    return;
+    return { enabled: false, queueReady: false };
   }
   
   if (!REDIS_URL) {
     log.error('REDIS_URL not configured - Redis integration disabled');
-    return;
+    return { enabled: false, queueReady: false };
   }
 
   try {
@@ -156,6 +162,22 @@ async function initializeRedisIntegration() {
     }
 
     if (result.success) {
+      // Validate queue health thoroughly
+      const redisHealth = result.diagnostics?.redisHealth;
+      const pingOk = redisHealth?.connected || false;
+      const writeOk = redisHealth?.writeTest || false;
+      const readOk = redisHealth?.readTest || false;
+      
+      const ok = pingOk && writeOk && readOk;
+      const queueReady = !!result.queueManager && ok;
+      
+      if (!ok) {
+        log.error('Redis connection health check failed', {
+          pingOk, writeOk, readOk
+        });
+        return { enabled: false, queueReady: false };
+      }
+      
       log.info('نظام ريديس المتكامل جاهز', {
         responseTime: result.diagnostics?.redisHealth?.responseTime,
         queueStats: result.diagnostics?.queueStats
@@ -168,15 +190,18 @@ async function initializeRedisIntegration() {
       log.info('بدء نظام مراقبة الصحة...');
       startHealthMonitoring({
         redisReady: () => result.diagnostics?.redisHealth?.connected || false,
-        queueReady: () => !!result.queueManager
+        queueReady: () => queueReady
       });
       log.info('نظام مراقبة الصحة نشط');
+      
+      return { enabled: true, queueReady };
     } else {
       log.error('فشل تهيئة نظام ريديس', result.error);
       log.warn('سيتم استخدام المعالجة البديلة');
       if (debugDump) {
         log.debug('تفاصيل الفشل', result.diagnostics);
       }
+      return { enabled: false, queueReady: false };
     }
   } catch (error) {
     log.error('خطأ في تهيئة النظام المتكامل', error);
@@ -187,11 +212,14 @@ async function initializeRedisIntegration() {
       });
     }
     log.warn('سيتم استخدام المعالجة البديلة');
+    return { enabled: false, queueReady: false };
   }
 
   if (debugDump) {
     log.debug('انتهاء initializeRedisIntegration()');
   }
+  
+  return { enabled: false, queueReady: false };
 }
 
 // Scheduled maintenance: cleanup old logs (daily) and webhook logs via function if available
@@ -1364,7 +1392,7 @@ console.log('  ✅ GET  /internal/crypto-test');
 console.log('✅ Production checklist:');
 console.log('   • Single connected app on IG webhook');
 console.log('   • Payload limit: 512KB enforced');
-console.log('   • Redis integration:', redisIntegration ? '✅ Active' : '❌ Disabled');
+// Will be updated after Redis initialization
 console.log('   • Admin context required for all internal endpoints');
 
 // Initialize and start server
@@ -1372,7 +1400,7 @@ async function startServer() {
   console.log('🚀 Starting production server...');
   
   // Initialize Redis Integration
-  await initializeRedisIntegration();
+  const redisStatus = await initializeRedisIntegration();
   
   // Start server using @hono/node-server
   serve({
@@ -1385,7 +1413,9 @@ async function startServer() {
     console.log('  • HMAC-SHA256: webhook signature verification (before JSON parsing)');
     console.log('  • AES-256-GCM: 12-byte IV encryption');
     console.log('  • Graph API: v23.0 with rate limit headers');
-    console.log('  • Redis Integration:', redisIntegration ? '✅ Active' : '❌ Disabled');
+    
+    const redisActive = !!(redisStatus?.enabled && redisStatus?.queueReady);
+    console.log('  • Redis integration:', redisActive ? '✅ Active' : '❌ Disabled');
   });
 }
 

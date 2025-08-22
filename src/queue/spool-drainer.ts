@@ -21,11 +21,14 @@ export interface SpoolDrainerConfig {
 
 const DEFAULT_CONFIG: SpoolDrainerConfig = {
   enabled: true,
-  intervalMs: 10000,        // Check every 10 seconds
+  intervalMs: 10000,        // Check every 10 seconds  
   batchSize: 10,            // Process up to 10 jobs at a time
   backoffMultiplier: 1.5,   // Increase delay by 50% on each failure
   maxBackoffMs: 300000,     // Max 5 minutes backoff
 };
+
+// Fallback processing interval when Redis is down (faster)
+const FALLBACK_PROCESSING_INTERVAL = 5000; // 5 seconds
 
 export class SpoolDrainer {
   private config: SpoolDrainerConfig;
@@ -61,11 +64,26 @@ export class SpoolDrainer {
       batchSize: this.config.batchSize
     });
 
-    this.intervalId = setInterval(() => {
-      this.drainSpoolBatch().catch(error => {
-        logger.error('Spool drainer error', { error: error.message });
-      });
-    }, this.config.intervalMs);
+    this.scheduleNextRun();
+  }
+
+  /**
+   * Schedule next run with adaptive interval based on Redis health
+   */
+  private scheduleNextRun(): void {
+    if (!this.isRunning) return;
+
+    // Use faster interval when Redis is down and we're processing inline
+    const interval = this.redisHealthy ? this.config.intervalMs : FALLBACK_PROCESSING_INTERVAL;
+    
+    this.intervalId = setTimeout(() => {
+      this.drainSpoolBatch()
+        .then(() => this.scheduleNextRun())
+        .catch(error => {
+          logger.error('Spool drainer error', { error: error.message });
+          this.scheduleNextRun(); // Schedule next run even on error
+        });
+    }, interval);
   }
 
   /**
@@ -74,25 +92,32 @@ export class SpoolDrainer {
   async stop(): Promise<void> {
     this.isRunning = false;
     if (this.intervalId) {
-      clearInterval(this.intervalId);
+      clearTimeout(this.intervalId);
     }
     logger.info('Spool drainer stopped');
   }
 
   /**
-   * Drain a batch of jobs from spool
+   * Drain a batch of jobs from spool or process them inline if Redis is down
    */
   private async drainSpoolBatch(): Promise<void> {
     try {
-      // Check Redis health
+      // Check Redis health using safe wrapper
       const redisManager = getRedisConnectionManager();
-      const redisClient = await redisManager.getConnection(RedisUsageType.CACHING);
-      await redisClient.ping();
-      this.redisHealthy = true;
+      const ping = await redisManager.safeRedisOperation('ping', RedisUsageType.CACHING, (c: any) => c.ping());
+      
+      this.redisHealthy = !!ping.ok;
+      
+      if (!this.redisHealthy) {
+        // Process jobs inline when Redis is unavailable
+        await this.processJobsInline();
+        return;
+      }
       
     } catch (error) {
       this.redisHealthy = false;
-      logger.debug('Redis not available, skipping drain');
+      logger.debug('Redis not available, processing jobs inline');
+      await this.processJobsInline();
       return;
     }
 
@@ -114,12 +139,28 @@ export class SpoolDrainer {
         try {
           const queueName = this.mapJobTypeToQueue(job.jobType);
           
-          await addBullJob(queueName, job.jobType, job.jobData, {
-            priority: this.mapPriorityToBull(job.priority)
-          });
+          // Use safe Redis operation for enqueuing
+          const redisManager = getRedisConnectionManager();
+          const enqueueResult = await redisManager.safeRedisOperation(
+            `enqueue-${job.jobType}`,
+            RedisUsageType.CACHING,
+            async () => {
+              return await addBullJob(queueName, job.jobType, job.jobData, {
+                priority: this.mapPriorityToBull(job.priority)
+              });
+            }
+          );
 
-          await this.spool.removeJob(job.jobId, job.merchantId);
-          this.totalProcessed++;
+          if (enqueueResult.ok) {
+            await this.spool.removeJob(job.jobId, job.merchantId);
+            this.totalProcessed++;
+          } else {
+            logger.warn('Failed to enqueue job - Redis operation failed', {
+              jobId: job.jobId,
+              reason: enqueueResult.reason
+            });
+            this.totalErrors++;
+          }
           
         } catch (error) {
           logger.error('Failed to drain job', {
@@ -171,6 +212,96 @@ export class SpoolDrainer {
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Process jobs inline when Redis is unavailable
+   */
+  private async processJobsInline(): Promise<void> {
+    try {
+      const spooledJobs = await this.spool.getNextJobs(this.config.batchSize);
+      
+      if (spooledJobs.length === 0) {
+        return;
+      }
+
+      logger.info('Processing spooled jobs inline (Redis unavailable)', { count: spooledJobs.length });
+
+      for (const job of spooledJobs) {
+        try {
+          await this.processJobInline(job);
+          await this.spool.removeJob(job.jobId, job.merchantId);
+          this.totalProcessed++;
+          
+        } catch (error) {
+          logger.error('Failed to process inline job', {
+            jobId: job.jobId,
+            jobType: job.jobType,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          this.totalErrors++;
+        }
+      }
+
+      this.resetBackoff();
+
+    } catch (error) {
+      this.totalErrors++;
+      this.applyBackoff();
+      logger.error('Inline job processing batch failed', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * Process a single job inline without Redis queue
+   */
+  private async processJobInline(job: any): Promise<void> {
+    const { aiProcessor } = await import('./processors/ai-processor.js');
+    const { webhookProcessor } = await import('./processors/webhook-processor.js');
+    const { messageDeliveryProcessor } = await import('./processors/message-delivery-processor.js');
+    const { notificationProcessor } = await import('./processors/notification-processor.js');
+
+    // Create a minimal job object compatible with processors
+    const processorJob = {
+      id: job.jobId,
+      data: job.jobData,
+      opts: { priority: job.priority },
+      timestamp: Date.now(),
+      attemptsMade: 1,
+      queue: null as any,
+      name: job.jobType,
+      stacktrace: [],
+      returnvalue: null,
+      finishedOn: null,
+      processedOn: null,
+      failedReason: null,
+      delay: 0,
+      progress: 0
+    } as any;
+
+    switch (job.jobType) {
+      case 'AI_RESPONSE_GENERATION':
+        await aiProcessor.process(processorJob);
+        break;
+      
+      case 'WEBHOOK_PROCESSING':
+        await webhookProcessor.process(processorJob);
+        break;
+      
+      case 'MESSAGE_DELIVERY':
+        await messageDeliveryProcessor.process(processorJob);
+        break;
+      
+      case 'NOTIFICATION_SEND':
+        await notificationProcessor.process(processorJob);
+        break;
+      
+      default:
+        logger.warn('Unknown job type for inline processing', { jobType: job.jobType });
+        throw new Error(`Unknown job type: ${job.jobType}`);
+    }
   }
 
   public getStats() {

@@ -57,6 +57,10 @@ export class RedisConnectionManager {
   private poolConfig: ConnectionPoolConfig;
   private rateLimitResetAt?: Date;
   private pauseReconnectionsUntil?: Date;
+  
+  // Rate limiting for log messages to reduce noise
+  private lastRateLimitLogTime: number = 0;
+  private readonly RATE_LIMIT_LOG_INTERVAL_MS = 60000; // 1 minute
 
   constructor(
     private redisUrl: string,
@@ -90,6 +94,19 @@ export class RedisConnectionManager {
 
   private isRateLimited(): boolean {
     return !!this.rateLimitResetAt && this.rateLimitResetAt > new Date();
+  }
+
+  /**
+   * Check if Redis operations should be skipped due to rate limiting
+   */
+  private shouldSkipOperation(): { skip: boolean; reason?: string } {
+    if (this.pauseReconnectionsUntil && Date.now() < this.pauseReconnectionsUntil.getTime()) {
+      return { skip: true, reason: 'rate_limited' };
+    }
+    if (!this.redisEnabled) {
+      return { skip: true, reason: 'disabled' };
+    }
+    return { skip: false };
   }
 
   async getConnection(usageType: RedisUsageType): Promise<RedisType> {
@@ -126,6 +143,18 @@ export class RedisConnectionManager {
   }
 
   async createConnection(usageType: RedisUsageType): Promise<RedisType> {
+    // Short-circuit if Redis is paused due to rate limiting
+    if (this.pauseReconnectionsUntil && Date.now() < this.pauseReconnectionsUntil.getTime()) {
+      throw new RedisConnectionError(
+        'Redis operations paused due to rate limiting',
+        { 
+          reason: 'rate_limited',
+          pausedUntil: this.pauseReconnectionsUntil.toISOString(),
+          usageType
+        }
+      );
+    }
+
     if (this.connections.size >= this.poolConfig.maxConnections) {
       throw new RedisConnectionError(
         'Connection pool limit exceeded',
@@ -206,10 +235,15 @@ export class RedisConnectionManager {
         // إيقاف محاولات إعادة الاتصال حتى إعادة تعيين الحد
         this.pauseReconnectionsUntil = retryAt;
         
-        this.logger?.warn('Redis quota exceeded - switching to DB spool fallback', {
-          usageType,
-          retryAt: retryAt.toISOString()
-        });
+        // Rate-limited logging to reduce noise
+        const now = Date.now();
+        if (now - this.lastRateLimitLogTime > this.RATE_LIMIT_LOG_INTERVAL_MS) {
+          this.logger?.warn('Redis quota exceeded - switching to DB spool fallback', {
+            usageType,
+            retryAt: retryAt.toISOString()
+          });
+          this.lastRateLimitLogTime = now;
+        }
         
         // قطع الاتصال فوراً لتوفير الطلبات
         if (this.connections.has(usageType)) {
@@ -429,6 +463,37 @@ export class RedisConnectionManager {
       connectionCount: this.connections.size,
       pausedUntil: this.pauseReconnectionsUntil?.toISOString() || null
     };
+  }
+
+  /**
+   * Safe Redis operation wrapper that short-circuits when rate limited
+   */
+  public async safeRedisOperation<T>(
+    operation: string,
+    usageType: RedisUsageType,
+    fn: (connection: RedisType) => Promise<T>
+  ): Promise<{ ok: boolean; result?: T; skipped?: boolean; reason?: string }> {
+    const skipCheck = this.shouldSkipOperation();
+    if (skipCheck.skip) {
+      return { ok: false, skipped: true, reason: skipCheck.reason };
+    }
+
+    try {
+      const connection = await this.getConnection(usageType);
+      const result = await fn(connection);
+      return { ok: true, result };
+    } catch (error) {
+      // Don't log errors for rate limited operations to reduce noise
+      if (error instanceof Error && error.message.includes('rate limit')) {
+        return { ok: false, skipped: true, reason: 'rate_limited' };
+      }
+      
+      this.logger?.error(`Redis ${operation} failed`, {
+        usageType,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return { ok: false, reason: 'error' };
+    }
   }
 
   async closeAllConnections(): Promise<void> {
