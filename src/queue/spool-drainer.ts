@@ -39,6 +39,9 @@ export class SpoolDrainer {
   private redisHealthy = true;
   private totalProcessed = 0;
   private totalErrors = 0;
+  private consecutiveErrors = 0;
+  private lastErrorTime = 0;
+  private circuitOpen = false;
 
   constructor(config: Partial<SpoolDrainerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -218,7 +221,24 @@ export class SpoolDrainer {
    * Process jobs inline when Redis is unavailable
    */
   private async processJobsInline(): Promise<void> {
+    // Circuit breaker: Skip processing if circuit is open
+    if (this.circuitOpen) {
+      return;
+    }
+
     try {
+      // Check if database is available before trying to access spool
+      try {
+        const testSql = this.spool['getSQL']?.() || this.spool['sql'];
+        if (!testSql) {
+          logger.debug('Database not ready, skipping inline processing');
+          return;
+        }
+      } catch (dbError) {
+        logger.debug('Database connection not ready, skipping inline processing');
+        return;
+      }
+
       const spooledJobs = await this.spool.getNextJobs(this.config.batchSize);
       
       if (spooledJobs.length === 0) {
@@ -244,13 +264,45 @@ export class SpoolDrainer {
       }
 
       this.resetBackoff();
+      // Reset consecutive errors on successful processing
+      if (this.consecutiveErrors > 0) {
+        this.consecutiveErrors = 0;
+        if (this.circuitOpen) {
+          this.circuitOpen = false;
+          logger.info('SpoolDrainer recovered - circuit breaker closed');
+        }
+      }
 
     } catch (error) {
       this.totalErrors++;
+      this.consecutiveErrors++;
+      this.lastErrorTime = Date.now();
+
+      // Circuit breaker: If too many consecutive errors, open circuit
+      if (this.consecutiveErrors >= 5) {
+        this.circuitOpen = true;
+        logger.warn('SpoolDrainer circuit breaker opened', {
+          consecutiveErrors: this.consecutiveErrors,
+          totalErrors: this.totalErrors
+        });
+        // Reset after 30 seconds
+        setTimeout(() => {
+          this.circuitOpen = false;
+          this.consecutiveErrors = 0;
+          logger.info('SpoolDrainer circuit breaker reset');
+        }, 30000);
+      }
+
       this.applyBackoff();
-      logger.error('Inline job processing batch failed', {
-        error: error instanceof Error ? error.message : String(error)
-      });
+      
+      // Only log errors if circuit is closed (to reduce noise)
+      if (!this.circuitOpen || this.consecutiveErrors <= 1) {
+        logger.error('Inline job processing batch failed', {
+          error: error instanceof Error ? error.message : String(error),
+          consecutiveErrors: this.consecutiveErrors,
+          circuitOpen: this.circuitOpen
+        });
+      }
     }
   }
 
@@ -310,6 +362,8 @@ export class SpoolDrainer {
       redisHealthy: this.redisHealthy,
       totalProcessed: this.totalProcessed,
       totalErrors: this.totalErrors,
+      consecutiveErrors: this.consecutiveErrors,
+      circuitOpen: this.circuitOpen,
       currentBackoffMs: this.currentBackoffMs
     };
   }

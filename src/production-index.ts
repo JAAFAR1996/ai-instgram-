@@ -846,9 +846,23 @@ app.get("/webhooks/instagram", (c) => {
 });
 
 // POST webhook handler with production-grade security (2025)
+// Safe header getter for production routes
+const getHeader = (c: any, name: string): string | undefined => {
+  try {
+    const h1 = (c.req as any).header?.(name);
+    if (h1 != null) return h1 as string;
+    const h2 = c.req.raw?.headers?.get(name);
+    if (h2 != null) return h2;
+    const h3 = (c.req as any).headers?.get?.(name);
+    return h3 ?? undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 app.post("/webhooks/instagram", async (c) => {
   // 1. التحقق من الحدود قبل القراءة
-  const contentLength = c.req.header('content-length');
+  const contentLength = getHeader(c, 'content-length');
   const maxSize = 512 * 1024; // 512KB
   if (contentLength && Number(contentLength) > maxSize) {
     return c.text('payload too large', 413);
@@ -861,7 +875,7 @@ app.post("/webhooks/instagram", async (c) => {
   }
 
   // 3. التحقق من الإعدادات
-  const signature = c.req.header("x-hub-signature-256") ?? "";
+  const signature = getHeader(c, "x-hub-signature-256") ?? "";
   const secret = process.env.IG_WEBHOOK_SECRET || process.env.IG_APP_SECRET || process.env.META_APP_SECRET || "";
   
   if (!secret) {
@@ -876,7 +890,7 @@ app.post("/webhooks/instagram", async (c) => {
       hasSignature: !!signature,
       bodyLength: rawBody.length,
       reason: verifyResult.reason,
-      ip: c.req.header('x-forwarded-for') || 'unknown'
+      ip: getHeader(c, 'x-forwarded-for') || 'unknown'
     });
     // Log security incident
     pushDLQ({ 
@@ -884,7 +898,7 @@ app.post("/webhooks/instagram", async (c) => {
       payload: { 
         signature: signature ? 'present' : 'missing',
         reason: verifyResult.reason,
-        ip: c.req.header('x-forwarded-for'),
+        ip: getHeader(c, 'x-forwarded-for'),
         timestamp: new Date().toISOString()
       }
     });
