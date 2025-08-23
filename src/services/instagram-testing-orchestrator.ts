@@ -40,7 +40,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   });
 }
 
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import { getInstagramClient, type InstagramAPICredentials } from './instagram-api.js';
 import { getInstagramWebhookHandler } from './instagram-webhook.js';
 import { getInstagramStoriesManager } from './instagram-stories-manager.js';

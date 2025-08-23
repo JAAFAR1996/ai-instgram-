@@ -39,3 +39,7 @@ Thumbs.db
 
 # Production secrets (but keep examples and development)
 .env.production
+
+
+#Ignore cursor AI rules
+.cursor\rules\codacy.mdc

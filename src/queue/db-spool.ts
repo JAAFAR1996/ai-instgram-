@@ -4,7 +4,7 @@
  */
 
 import type { Sql } from 'postgres';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import { getLogger } from '../services/logger.js';
 import { withDbTenant } from '../isolation/context.js';
 

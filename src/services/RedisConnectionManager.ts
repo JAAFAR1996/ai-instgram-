@@ -1,5 +1,4 @@
 import { Redis } from 'ioredis';
-import type { Redis as RedisType } from 'ioredis';
 import {
   RedisUsageType,
   Environment,
@@ -45,7 +44,7 @@ export interface ConnectionPoolConfig {
 }
 
 export class RedisConnectionManager {
-  private connections: Map<RedisUsageType, RedisType> = new Map();
+  private connections: Map<RedisUsageType, Redis> = new Map();
   private connectionInfo: Map<RedisUsageType, ConnectionInfo> = new Map();
   private configFactory: ProductionRedisConfigurationFactory;
   
@@ -109,7 +108,7 @@ export class RedisConnectionManager {
     return { skip: false };
   }
 
-  async getConnection(usageType: RedisUsageType): Promise<RedisType> {
+  async getConnection(usageType: RedisUsageType): Promise<Redis> {
     if (this.isRateLimited()) {
       const error = new RedisRateLimitError('Rate limit exceeded', {
         retryAt: this.rateLimitResetAt
@@ -142,7 +141,7 @@ export class RedisConnectionManager {
     return await this.createConnection(usageType);
   }
 
-  async createConnection(usageType: RedisUsageType): Promise<RedisType> {
+  async createConnection(usageType: RedisUsageType): Promise<Redis> {
     // Short-circuit if Redis is paused due to rate limiting
     if (this.pauseReconnectionsUntil && Date.now() < this.pauseReconnectionsUntil.getTime()) {
       throw new RedisConnectionError(
@@ -291,7 +290,7 @@ export class RedisConnectionManager {
   }
 
   private setupConnectionMonitoring(
-    connection: RedisType, 
+    connection: Redis, 
     usageType: RedisUsageType, 
     info: ConnectionInfo
   ): void {
@@ -471,7 +470,7 @@ export class RedisConnectionManager {
   public async safeRedisOperation<T>(
     operation: string,
     usageType: RedisUsageType,
-    fn: (connection: RedisType) => Promise<T>
+    fn: (connection: Redis) => Promise<T>
   ): Promise<{ ok: boolean; result?: T; skipped?: boolean; reason?: string }> {
     const skipCheck = this.shouldSkipOperation();
     if (skipCheck.skip) {
@@ -634,11 +633,11 @@ export class RedisConnectionManager {
   }
 
   // الحصول على اتصال محدد للاستخدام المباشر (للحالات الخاصة)
-  getDirectConnection(usageType: RedisUsageType): RedisType | undefined {
+  getDirectConnection(usageType: RedisUsageType): Redis | undefined {
     return this.connections.get(usageType);
   }
 
-  private async waitForConnection(connection: RedisType, timeoutMs: number): Promise<void> {
+  private async waitForConnection(connection: Redis, timeoutMs: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new RedisConnectionError(
@@ -688,7 +687,7 @@ export class RedisConnectionManager {
   async createTemporaryConnection(
     usageType: RedisUsageType,
     ttl: number = 60000 // 60 ثانية افتراضياً
-  ): Promise<RedisType> {
+  ): Promise<Redis> {
     const config = this.configFactory.createConfiguration(
       usageType,
       this.environment,
@@ -741,6 +740,32 @@ export function getRedisConnectionManager(): RedisConnectionManager {
     );
   }
   return globalRedisManager;
+}
+
+// Patch 6: اتصال واحد مُدار
+import { Redis as RedisClient } from 'ioredis';
+let _client: RedisClient | null = null;
+
+export async function connectRedis() {
+  if (_client) return _client;
+  const url = process.env.REDIS_URL;
+  if (!url) throw new Error('REDIS_URL missing');
+  _client = new RedisClient(url, { lazyConnect: true, enableAutoPipelining: true });
+  await _client.connect();
+  // optional: set up listeners and logging
+  return _client;
+}
+
+export function getRedis() {
+  if (!_client) throw new Error('Redis not connected');
+  return _client;
+}
+
+export async function closeRedis() {
+  if (_client) {
+    try { await _client.quit(); } catch { await _client.disconnect(); }
+    _client = null;
+  }
 }
 
 export default RedisConnectionManager;

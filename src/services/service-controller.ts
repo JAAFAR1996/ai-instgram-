@@ -5,8 +5,9 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection.js';
 import type { Platform } from '../types/database.js';
+import type { DIContainer } from '../container/index.js';
+import type { Pool } from 'pg';
 
 export interface ServiceStatus {
   enabled: boolean;
@@ -43,8 +44,38 @@ export interface ServiceHealth {
 }
 
 export class ServiceController {
-  private db = getDatabase();
-  private sqlAny: any = this.db.getSQL();
+  private pool!: Pool;
+  private logger!: any;
+  private db!: any;
+
+  constructor(private container?: DIContainer) {
+    if (container) {
+      this.pool = container.get<Pool>('pool');
+      this.logger = container.get('logger');
+      this.db = { getSQL: () => this.getSQLFromPool() };
+    } else {
+      // Legacy fallback
+      this.initializeLegacy();
+    }
+  }
+
+  private getSQLFromPool() {
+    const { getSQLClient } = require('../db/index.js');
+    return getSQLClient(this.pool);
+  }
+
+  private async initializeLegacy(): Promise<void> {
+    const { getDatabase } = await import('../db/adapter.js');
+    const { getLogger } = await import('./logger.js');
+    
+    this.db = getDatabase();
+    this.pool = (this.db as any).pool || this.db;
+    this.logger = getLogger({ component: 'service-controller' });
+  }
+
+  private get sqlAny() {
+    return this.db.getSQL();
+  }
 
   /**
    * Toggle service on/off for merchant
@@ -55,13 +86,13 @@ export class ServiceController {
     previousState?: boolean;
   }> {
     try {
-      const sql = this.db.getSQL();
+      const sql = this.db.getSQL() as any;
       
       // Get current state
       const currentState = await this.getServiceStatus(request.merchantId, request.service);
       
       // Update service status
-      await this.sqlAny`
+      await sql`
         INSERT INTO merchant_service_status (
           merchant_id,
           service_name,
@@ -114,7 +145,8 @@ export class ServiceController {
     service: string
   ): Promise<boolean> {
     try {
-      const result = await this.sqlAny`
+      const sql = this.db.getSQL() as any;
+      const result = await sql`
         SELECT enabled
         FROM merchant_service_status
         WHERE merchant_id = ${merchantId}::uuid
@@ -138,7 +170,8 @@ export class ServiceController {
    */
   public async getAllServicesStatus(merchantId: string): Promise<MerchantServices> {
     try {
-      const result = await this.sqlAny`
+      const sql = this.db.getSQL() as any;
+      const result = await sql`
         SELECT 
           service_name,
           enabled,
@@ -398,7 +431,8 @@ export class ServiceController {
     service: string
   ): Promise<number> {
     try {
-      const result = await this.sqlAny`
+      const sql = this.db.getSQL() as any;
+      const result = await sql`
         SELECT COALESCE(error_count, 0) as count
         FROM service_errors
         WHERE merchant_id = ${merchantId}::uuid

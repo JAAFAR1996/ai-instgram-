@@ -11,7 +11,7 @@ import { validator } from 'hono/validator';
 import { getUtilityMessagesService, type UtilityMessageType } from '../services/utility-messages.js';
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
 import { z } from 'zod';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 
 // Validation schemas
 const SendUtilityMessageSchema = z.object({

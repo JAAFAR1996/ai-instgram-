@@ -7,7 +7,7 @@
  */
 
 import { getConfig } from '../config/environment.js';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import { hashMerchantAndBody } from '../middleware/idempotency.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { getEncryptionService } from './encryption.js';

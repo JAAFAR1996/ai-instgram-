@@ -7,7 +7,7 @@
 
 import { getInstagramClient, getInstagramAPICredentialsManager, type InstagramAPICredentials } from './instagram-api.js';
 import { getEncryptionService } from './encryption.js';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import { createLogger } from './logger.js';
 
 export interface InstagramSetupConfig {

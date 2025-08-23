@@ -9,7 +9,7 @@
 import crypto from 'crypto';
 import { getConfig } from '../config/environment.js';
 import { getEncryptionService } from './encryption.js';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { getMetaRateLimiter } from './meta-rate-limiter.js';

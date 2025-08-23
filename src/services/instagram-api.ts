@@ -5,17 +5,16 @@
  * ===============================================
  */
 
-import { getEncryptionService } from './encryption.js';
-import { getDatabase } from '../database/connection.js';
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { telemetry } from './telemetry.js';
-import { getMetaRateLimiter } from './meta-rate-limiter.js';
 import type { Platform } from '../types/database.js';
 import { createHash } from 'crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { InstagramAPICredentials, SendMessageRequest } from '../types/instagram.js';
-import { getLogger } from './logger.js';
+import type { DIContainer } from '../container/index.js';
+import type { Pool } from 'pg';
+import type { AppConfig } from '../config/environment.js';
 export type { InstagramAPICredentials } from '../types/instagram.js';
 
 export interface InstagramOAuthConfig {
@@ -103,15 +102,35 @@ function isInstagramProfile(data: unknown): data is InstagramProfile {
 
 export class InstagramAPIClient {
   private readonly baseUrl = GRAPH_API_BASE_URL;
-  private encryptionService = getEncryptionService();
-  private db = getDatabase();
-  private rateLimiter = getMetaRateLimiter();
-  private logger = getLogger({ component: 'InstagramAPIClient' });
+  private encryptionService: any;
+  private pool: Pool;
+  private rateLimiter: any;
+  private logger: any;
+  private config: AppConfig;
 
   private credentials: InstagramAPICredentials | null = null;
   private merchantId: string | null = null;
 
-  constructor() {}
+  constructor(private container: DIContainer) {
+    this.pool = container.get<Pool>('pool');
+    this.config = container.get<AppConfig>('config');
+    this.logger = container.get('logger');
+    
+    this.initializeDependencies();
+  }
+
+  private async initializeDependencies(): Promise<void> {
+    try {
+      const { getEncryptionService } = await import('./encryption.js');
+      const { getMetaRateLimiter } = await import('./meta-rate-limiter.js');
+      
+      this.encryptionService = getEncryptionService();
+      this.rateLimiter = getMetaRateLimiter();
+    } catch (error: any) {
+      this.logger.error('Failed to initialize InstagramAPIClient dependencies:', error);
+      throw error;
+    }
+  }
 
   public initialize(credentials: InstagramAPICredentials, merchantId: string): void {
     this.credentials = credentials;
@@ -538,7 +557,8 @@ export class InstagramAPIClient {
    */
   public async loadMerchantCredentials(merchantId: string): Promise<InstagramAPICredentials | null> {
     try {
-      const sql = this.db.getSQL();
+      // Use pool directly for SQL operations
+      const { query } = await import('../db/index.js');
       
       const credentials = await sql`
         SELECT
@@ -657,9 +677,28 @@ export class InstagramAPIClient {
  * Instagram Credentials Manager
  */
 export class InstagramAPICredentialsManager {
-  private encryptionService = getEncryptionService();
-  private db = getDatabase();
-  private logger = getLogger({ component: 'InstagramAPICredentialsManager' });
+  private encryptionService: any;
+  private pool: Pool;
+  private logger: any;
+  private config: AppConfig;
+
+  constructor(private container: DIContainer) {
+    this.pool = container.get<Pool>('pool');
+    this.config = container.get<AppConfig>('config');
+    this.logger = container.get('logger');
+    
+    this.initializeDependencies();
+  }
+
+  private async initializeDependencies(): Promise<void> {
+    try {
+      const { getEncryptionService } = await import('./encryption.js');
+      this.encryptionService = getEncryptionService();
+    } catch (error: any) {
+      this.logger.error('Failed to initialize InstagramAPICredentialsManager dependencies:', error);
+      throw error;
+    }
+  }
 
   /**
    * Store encrypted Instagram credentials for merchant
@@ -681,7 +720,8 @@ export class InstagramAPICredentialsManager {
         credentials.pageAccessToken
       );
 
-      const sql = this.db.getSQL();
+      // Use pool directly for SQL operations
+      const { query } = await import('../db/index.js');
       
       const hashedToken = createHash('sha256')
         .update(credentials.webhookVerifyToken)
@@ -739,7 +779,8 @@ export class InstagramAPICredentialsManager {
    */
   public async removeCredentials(merchantId: string): Promise<void> {
     try {
-      const sql = this.db.getSQL();
+      // Use pool directly for SQL operations
+      const { query } = await import('../db/index.js');
       
       await sql`
         UPDATE merchant_credentials
@@ -768,7 +809,8 @@ export class InstagramAPICredentialsManager {
    */
   public async hasValidCredentials(merchantId: string): Promise<boolean> {
     try {
-      const sql = this.db.getSQL();
+      // Use pool directly for SQL operations
+      const { query } = await import('../db/index.js');
       
       const result: any[] = await sql`
         SELECT instagram_token_encrypted
@@ -793,7 +835,8 @@ export class InstagramAPICredentialsManager {
     pageId?: string;
   }> {
     try {
-      const sql = this.db.getSQL();
+      // Use pool directly for SQL operations
+      const { query } = await import('../db/index.js');
       
       const result: any[] = await sql`
         SELECT
@@ -822,17 +865,27 @@ export class InstagramAPICredentialsManager {
   }
 }
 
-// Singleton instances
+// Factory functions for DI container
+export function createInstagramAPIClient(container: DIContainer): InstagramAPIClient {
+  return new InstagramAPIClient(container);
+}
+
+export function createInstagramAPICredentialsManager(container: DIContainer): InstagramAPICredentialsManager {
+  return new InstagramAPICredentialsManager(container);
+}
+
+// Legacy support (with DI container fallback)
 const instagramClients = new Map<string, InstagramAPIClient>();
-let credentialsManagerInstance: InstagramAPICredentialsManager | null = null;
 
 /**
  * Get Instagram API client instance for a merchant
+ * @deprecated Use DI container instead
  */
 export function getInstagramClient(merchantId: string): InstagramAPIClient {
   let client = instagramClients.get(merchantId);
   if (!client) {
-    client = new InstagramAPIClient();
+    const { container } = require('../container/index.js');
+    client = new InstagramAPIClient(container);
     instagramClients.set(merchantId, client);
   }
   return client;
@@ -844,12 +897,16 @@ export function clearInstagramClient(merchantId: string): void {
 
 /**
  * Get credentials manager instance
+ * @deprecated Use DI container instead
  */
 export function getInstagramAPICredentialsManager(): InstagramAPICredentialsManager {
-  if (!credentialsManagerInstance) {
-    credentialsManagerInstance = new InstagramAPICredentialsManager();
+  const { container } = require('../container/index.js');
+  if (!container.has('instagramCredentialsManager')) {
+    container.registerSingleton('instagramCredentialsManager', () => 
+      new InstagramAPICredentialsManager(container)
+    );
   }
-  return credentialsManagerInstance;
+  return container.get('instagramCredentialsManager');
 }
 
 export default InstagramAPIClient;

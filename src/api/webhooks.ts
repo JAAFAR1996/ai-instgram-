@@ -11,7 +11,7 @@ import { InstagramWebhookHandler, type InstagramWebhookEvent } from '../services
 import { getServiceController } from '../services/service-controller.js';
 // removed unused imports
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
-import { getDatabase } from '../database/connection.js';
+import { getPool } from '../db/index.js';
 import { getConfig } from '../config/environment.js';
 import { verifyHMAC, verifyHMACRaw, type HmacVerifyResult } from '../services/encryption.js';
 import { pushDLQ } from '../queue/dead-letter.js';
@@ -20,6 +20,8 @@ import crypto from 'node:crypto';
 import { MerchantIdMissingError } from '../utils/merchant.js';
 import { telemetry } from '../services/telemetry.js';
 import { getLogger } from '../services/logger.js';
+import { getMerchantCache } from '../cache/index.js';
+import { getDatabase } from '../db/adapter.js';
 
 // Webhook validation schemas
 const InstagramWebhookVerificationSchema = z.object({
@@ -45,17 +47,17 @@ const WhatsAppWebhookVerificationSchema = z.object({
   'hub.challenge': z.string()
 });
 
-// In-memory cache for mapping Instagram page IDs to merchant IDs
-const pageMerchantCache = new Map<string, { merchantId: string; expiresAt: number }>();
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+// Redis cache for mapping Instagram page IDs to merchant IDs
+const merchantCache = getMerchantCache();
 
 export class WebhookRouter {
   private app: Hono;
   private instagramHandler: InstagramWebhookHandler;
   private serviceController = getServiceController();
-  private db = getDatabase();
+  private pool = getPool();
   private config = getConfig();
   private logger = getLogger({ component: 'WebhookRouter' });
+  private db = getDatabase();
 
   constructor() {
     this.app = new Hono();
@@ -501,17 +503,17 @@ export class WebhookRouter {
   
 
   /**
-   * Get merchant ID from Instagram Page ID
+   * Get merchant ID from Instagram Page ID using Redis cache
    */
   private async getMerchantIdFromPageId(pageId: string): Promise<string | null> {
     try {
-      // Check cache first
-      const cached = pageMerchantCache.get(pageId);
-      const now = Date.now();
-      if (cached && cached.expiresAt > now) {
-        return cached.merchantId;
+      // Check Redis cache first
+      const cachedMerchantId = await merchantCache.getMerchantByPageId(pageId);
+      if (cachedMerchantId) {
+        return cachedMerchantId;
       }
 
+      // If not in cache, query database
       const sql = this.db.getSQL();
 
       const result = await sql`
@@ -527,8 +529,9 @@ export class WebhookRouter {
       }
       const merchantId = (result[0] as MerchantResult)?.merchant_id || null;
 
+      // Cache the result in Redis
       if (merchantId) {
-        pageMerchantCache.set(pageId, { merchantId, expiresAt: now + CACHE_TTL_MS });
+        await merchantCache.setMerchantByPageId(pageId, merchantId);
       }
 
       return merchantId;

@@ -12,7 +12,7 @@ import {
   type InstagramAPICredentials
 } from './instagram-api.js';
 import { ExpiringMap } from '../utils/expiring-map.js';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import { getMessageWindowService } from './message-window.js';
 import { getLogger } from './logger.js';
 import type { QuickReply, SendMessageRequest } from '../types/instagram.js';

@@ -6,7 +6,7 @@
  */
 
 import { Context, Next } from 'hono';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import { getLogger } from '../services/logger.js';
 import { serr } from '../isolation/context.js';
 

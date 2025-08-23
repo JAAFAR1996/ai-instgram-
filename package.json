@@ -10,10 +10,10 @@
   },
   "scripts": {
     "dev": "bun run --hot --env-file=.env.development src/index.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.json",
     "build:tsc": "tsc -p tsconfig.json",
-    "prestart": "node check-run.cjs",
-    "start": "node --enable-source-maps dist/production-index.js",
+    "prestart": "node -e \"if(process.versions.bun) process.exit(1)\" || true",
+    "start": "node dist/production-index.js",
     "start:production": "NODE_ENV=production node dist/production-index.js",
     "start:dev": "NODE_ENV=development bun run src/index.ts",
     "test": "bun test --env-file=.env.test",

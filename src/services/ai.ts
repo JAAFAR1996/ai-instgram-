@@ -6,9 +6,10 @@
  */
 
 import OpenAI from 'openai';
-import { getEncryptionService } from './encryption.js';
-import { getDatabase } from '../database/connection.js';
 import type { ConversationStage, Platform } from '../types/database.js';
+import type { DIContainer } from '../container/index.js';
+import type { Pool } from 'pg';
+import type { AppConfig } from '../config/environment.js';
 
 export interface AIResponse {
   message: string;
@@ -81,19 +82,34 @@ export interface MerchantSettings {
 
 export class AIService {
   protected openai: OpenAI;
-  private encryptionService = getEncryptionService();
-  protected db = getDatabase();
+  private encryptionService: any;
+  protected pool: Pool;
+  private config: AppConfig;
+  private logger: any;
 
-  constructor() {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error('OPENAI_API_KEY environment variable is required');
-    }
-
+  constructor(private container: DIContainer) {
+    this.pool = container.get<Pool>('pool');
+    this.config = container.get<AppConfig>('config');
+    this.logger = container.get('logger');
+    
+    // Initialize OpenAI client
     this.openai = new OpenAI({
-      apiKey,
-      timeout: parseInt(process.env.OPENAI_TIMEOUT || '30000'),
+      apiKey: this.config.ai.openaiApiKey,
+      timeout: 30000,
     });
+
+    // Get encryption service (will be injected later)
+    this.initializeEncryptionService();
+  }
+
+  private async initializeEncryptionService(): Promise<void> {
+    try {
+      const { getEncryptionService } = await import('./encryption.js');
+      this.encryptionService = getEncryptionService();
+    } catch (error: any) {
+      this.logger.error('Failed to initialize encryption service:', error);
+      throw error;
+    }
   }
 
   /**
@@ -111,10 +127,10 @@ export class AIService {
       
       // Call OpenAI API
       const completion = await this.openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        model: this.config.ai.model,
         messages: prompt,
-        temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7'),
-        max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS || '500'),
+        temperature: this.config.ai.temperature,
+        max_tokens: this.config.ai.maxTokens,
         top_p: 0.9,
         frequency_penalty: 0.1,
         presence_penalty: 0.1,
@@ -143,8 +159,8 @@ export class AIService {
       await this.logAIInteraction(context, customerMessage, aiResponse);
 
       return aiResponse;
-    } catch (error) {
-      console.error('❌ AI response generation failed:', error);
+    } catch (error: any) {
+      this.logger.error('AI response generation failed:', error);
       
       // Return fallback response
       return this.getFallbackResponse(context);
@@ -468,8 +484,8 @@ ${productsText}
           true
         )
       `;
-    } catch (error) {
-      console.error('❌ AI interaction logging failed:', error);
+    } catch (error: any) {
+      this.logger.error('AI interaction logging failed:', error);
     }
   }
 
@@ -499,17 +515,18 @@ ${productsText}
   }
 }
 
-// Singleton instance
-let aiServiceInstance: AIService | null = null;
+// Factory function for DI container
+export function createAIService(container: DIContainer): AIService {
+  return new AIService(container);
+}
 
-/**
- * Get AI service instance
- */
+// Legacy support function (deprecated)
 export function getAIService(): AIService {
-  if (!aiServiceInstance) {
-    aiServiceInstance = new AIService();
+  const { container } = require('../container/index.js');
+  if (!container.has('aiService')) {
+    container.registerSingleton('aiService', () => new AIService(container));
   }
-  return aiServiceInstance;
+  return container.get('aiService');
 }
 
 export default AIService;

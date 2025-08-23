@@ -9,7 +9,7 @@ import { Context, Next } from 'hono';
 import { RateLimiterRedis, RateLimiterRes } from 'rate-limiter-flexible';
 import crypto from 'crypto';
 import { getMessageWindowService } from '../services/message-window.js';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import type { Platform } from '../types/database.js';
 import { getRedisConnectionManager } from '../services/RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';

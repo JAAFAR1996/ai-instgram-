@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { Sql } from 'postgres';
 

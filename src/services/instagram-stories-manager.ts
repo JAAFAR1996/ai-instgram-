@@ -7,7 +7,7 @@
 
 import { getInstagramClient, clearInstagramClient, type InstagramAPICredentials } from './instagram-api.js';
 import { ExpiringMap } from '../utils/expiring-map.js';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramContext } from './instagram-ai.js';
 import { hashMerchantAndBody } from '../middleware/idempotency.js';

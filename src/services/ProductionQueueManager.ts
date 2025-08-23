@@ -54,6 +54,9 @@ import { getInstagramWebhookHandler } from './instagram-webhook.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramWebhookEvent, ProcessedWebhookResult } from './instagram-webhook.js';
 import { getNotificationService } from './notification-service.js';
+import { getRepositories } from '../repositories/index.js';
+import { getInstagramClient } from './instagram-api.js';
+import { getInstagramMessageSender } from './instagram-message-sender.js';
 
 export interface QueueJob {
   eventId: string;
@@ -120,6 +123,8 @@ export class ProductionQueueManager {
   // Real processing services
   private webhookHandler = getInstagramWebhookHandler();
   private aiOrchestrator = getConversationAIOrchestrator();
+  private repositories = getRepositories();
+  private messageSender = getInstagramMessageSender();
 
   constructor(
     private redisUrl: string,
@@ -350,8 +355,8 @@ export class ProductionQueueManager {
     // تسجيل بدء Workers للمراقبة
     setTimeout(() => {
       this.logger.info('🚀 تم تفعيل جميع معالجات الطوابير المخصصة', {
-        processors: ['process-webhook', 'ai-response', 'cleanup'],
-        totalConcurrency: 3 + 3 + 1 // مجموع concurrency لكل المعالجات
+        processors: ['process-webhook', 'ai-response', 'cleanup', 'notification', 'message-delivery'],
+        totalConcurrency: 5 + 3 + 1 + 2 + 3 // مجموع concurrency لكل المعالجات
       });
       clearTimeout(workerInitTimeout);
     }, 100);
@@ -517,11 +522,43 @@ export class ProductionQueueManager {
       }
     });
 
+    // 🔔 معالج الإشعارات
+    this.queue.process('notification', 2, async (job) => {
+      this.logger.info('🔔 [NOTIFICATION] بدء معالجة إشعار', { jobId: job.id });
+      try {
+        const result = await this.processNotificationJob(job.data);
+        this.logger.info('✅ [NOTIFICATION] تم إرسال الإشعار بنجاح', { jobId: job.id });
+        return result;
+      } catch (error) {
+        this.logger.error('❌ [NOTIFICATION] فشل في إرسال الإشعار', { 
+          jobId: job.id, 
+          error: error instanceof Error ? error.message : String(error) 
+        });
+        throw error;
+      }
+    });
+
+    // 📤 معالج تسليم الرسائل
+    this.queue.process('message-delivery', 3, async (job) => {
+      this.logger.info('📤 [MESSAGE-DELIVERY] بدء تسليم رسالة', { jobId: job.id });
+      try {
+        const result = await this.processMessageDeliveryJob(job.data);
+        this.logger.info('✅ [MESSAGE-DELIVERY] تم تسليم الرسالة بنجاح', { jobId: job.id });
+        return result;
+      } catch (error) {
+        this.logger.error('❌ [MESSAGE-DELIVERY] فشل في تسليم الرسالة', { 
+          jobId: job.id, 
+          error: error instanceof Error ? error.message : String(error) 
+        });
+        throw error;
+      }
+    });
+
     // تأكيد إنجاز تسجيل جميع المعالجات
     this.logger.info('🎯 [SUCCESS] تم تسجيل جميع معالجات الطوابير بنجاح!', {
-      processors: ['process-webhook', 'ai-response', 'cleanup'],
-      concurrency: { webhook: 5, ai: 3, cleanup: 1 },
-      total: 9
+      processors: ['process-webhook', 'ai-response', 'cleanup', 'notification', 'message-delivery'],
+      concurrency: { webhook: 5, ai: 3, cleanup: 1, notification: 2, messageDelivery: 3 },
+      total: 14
     });
     
     // 🔍 تحقق فوري من أن القائمة يمكنها إرسال إشعارات عند تفعيل الاختبارات صراحة
@@ -1273,32 +1310,100 @@ export class ProductionQueueManager {
         };
       }
 
+      // 📝 جلب بيانات المحادثة من قاعدة البيانات
+      const conversation = await this.repositories.conversation.findById(jobData.conversationId);
+      if (!conversation) {
+        throw new Error(`Conversation not found: ${jobData.conversationId}`);
+      }
+
+      // 🏪 جلب بيانات التاجر من قاعدة البيانات
+      const merchant = await this.repositories.merchant.findById(jobData.merchantId);
+      if (!merchant || !merchant.isActive) {
+        throw new Error(`Merchant not found or inactive: ${jobData.merchantId}`);
+      }
+
+      // 📚 جلب تاريخ المحادثة الحديث
+      const messageHistory = await this.repositories.message.getRecentMessagesForContext(
+        jobData.conversationId,
+        10
+      );
+
+      // 🧠 بناء context متقدم للذكاء الاصطناعي
+      const aiContext = await this.buildAdvancedAIContext(
+        jobData,
+        conversation,
+        merchant,
+        messageHistory
+      );
+
       const aiResponse = await this.aiOrchestrator.generatePlatformResponse(
         jobData.message,
-        context,
-        platform
+        aiContext,
+        'instagram' // تثبيت على instagram حالياً
       );
+
+      const processingTime = Date.now() - startTime;
+
+      // 💾 حفظ الاستجابة كرسالة صادرة
+      const outgoingMessage = await this.repositories.message.create({
+        conversationId: jobData.conversationId,
+        direction: 'OUTGOING',
+        platform: 'instagram', // تثبيت على instagram حالياً
+        messageType: 'TEXT',
+        content: aiResponse.response.message,
+        platformMessageId: `ai_generated_${Date.now()}`,
+        aiProcessed: true,
+        deliveryStatus: 'PENDING',
+        aiConfidence: aiResponse.response.confidence,
+        aiIntent: aiResponse.response.intent,
+        processingTimeMs: processingTime
+      });
+
+      // 🔄 تحديث مرحلة المحادثة إذا تغيرت
+      if (aiResponse.response.stage !== conversation.conversationStage) {
+        await this.repositories.conversation.update(jobData.conversationId, {
+          conversationStage: aiResponse.response.stage
+        });
+      }
+
+      // 📤 إرسال الرسالة عبر منصة API
+      const deliveryResult = await this.deliverAIMessage(jobData, aiResponse.response.message);
+
+      // ✅ تحديث حالة تسليم الرسالة
+      if (deliveryResult.success) {
+        await this.repositories.message.markAsDelivered(
+          outgoingMessage.id,
+          deliveryResult.platformMessageId
+        );
+      } else {
+        await this.repositories.message.markAsFailed(outgoingMessage.id);
+      }
 
       const duration = Date.now() - startTime;
       
-      const result = { 
-        processed: true, 
+      const result = {
+        processed: true,
+        messageId: outgoingMessage.id,
+        aiResponse: aiResponse.response.message,
+        confidence: aiResponse.response.confidence,
+        intent: aiResponse.response.intent,
+        stage: aiResponse.response.stage,
+        processingTime: duration,
+        delivered: deliveryResult.success,
+        platformMessageId: deliveryResult.platformMessageId,
         conversationId: jobData.conversationId,
-        aiResponse: aiResponse,
         timestamp: new Date().toISOString(),
-        duration: `${duration}ms`,
-        realProcessing: true // تحديد أن هذا معالجة حقيقية
+        advancedProcessing: true
       };
 
-      this.logger.info('✅ [AI-PROCESS] تمت معالجة AI بنجاح', {
+      this.logger.info('✅ [AI-PROCESS] تمت معالجة AI متقدمة بنجاح', {
         conversationId: jobData.conversationId,
         merchantId: jobData.merchantId,
-        customerId: jobData.customerId,
-        platform: platform,
+        messageId: outgoingMessage.id,
         duration: `${duration}ms`,
-        platformOptimized: aiResponse?.platformOptimized || false,
-        adaptationsCount: aiResponse?.adaptations?.length || 0,
-        responseType: typeof aiResponse?.response
+        confidence: aiResponse.response.confidence,
+        delivered: deliveryResult.success,
+        stage: aiResponse.response.stage
       });
 
       return result;
@@ -1657,6 +1762,278 @@ export class ProductionQueueManager {
 
   async close(): Promise<void> {
     await this.gracefulShutdown();
+  }
+
+  /**
+   * بناء context متقدم للذكاء الاصطناعي
+   */
+  private async buildAdvancedAIContext(
+    jobData: any,
+    conversation: any,
+    merchant: any,
+    messageHistory: any[]
+  ): Promise<any> {
+    const baseContext = {
+      merchantId: jobData.merchantId,
+      customerId: jobData.customerId,
+      platform: jobData.platform || 'instagram',
+      stage: conversation.conversationStage,
+      cart: conversation.sessionData?.cart || [],
+      preferences: conversation.sessionData?.preferences || {},
+      conversationHistory: messageHistory.map((msg: any) => ({
+        role: msg.direction === 'INCOMING' ? 'user' : 'assistant',
+        content: msg.content,
+        timestamp: msg.createdAt
+      })),
+      interactionType: jobData.interactionType || 'dm',
+      mediaContext: jobData.mediaContext,
+      merchantSettings: {
+        businessName: merchant.businessName,
+        businessCategory: merchant.businessCategory,
+        workingHours: merchant.settings?.workingHours || {},
+        paymentMethods: merchant.settings?.paymentMethods || [],
+        deliveryFees: merchant.settings?.deliveryFees || {},
+        autoResponses: merchant.settings?.autoResponses || {}
+      }
+    };
+
+    // Platform-specific context enhancements
+    if ((jobData.platform || 'instagram') === 'instagram') {
+      return {
+        ...baseContext,
+        // Instagram-specific context
+        hashtagSuggestions: merchant.settings?.instagramHashtags || [],
+        storyFeatures: merchant.settings?.storyFeatures || false,
+        commerceEnabled: merchant.settings?.instagramCommerce || false
+      };
+    }
+
+    return baseContext;
+  }
+
+  /**
+   * إرسال رسالة AI عبر منصة API
+   */
+  private async deliverAIMessage(
+    jobData: any,
+    message: string
+  ): Promise<{ success: boolean; platformMessageId?: string; error?: string }> {
+    try {
+      const platform = jobData.platform || 'instagram';
+      
+      switch (platform) {
+        case 'instagram':
+          return await this.deliverInstagramAIMessage(jobData, message);
+          
+        default:
+          return { success: false, error: `Unsupported platform: ${platform}` };
+      }
+    } catch (error) {
+      this.logger.error('❌ Message delivery error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown delivery error'
+      };
+    }
+  }
+
+  /**
+   * إرسال رسالة Instagram AI
+   */
+  private async deliverInstagramAIMessage(
+    jobData: any,
+    message: string
+  ): Promise<{ success: boolean; platformMessageId?: string; error?: string }> {
+    try {
+      const instagramClient = getInstagramClient(jobData.merchantId);
+      const credentials = await instagramClient.loadMerchantCredentials(jobData.merchantId);
+      if (!credentials) {
+        throw new Error('Instagram credentials not found');
+      }
+      await instagramClient.validateCredentials(credentials, jobData.merchantId);
+
+      const result = await instagramClient.sendMessage(credentials, jobData.merchantId, {
+        recipientId: jobData.customerId,
+        messageType: 'text',
+        content: message
+      });
+
+      return {
+        success: result.success,
+        platformMessageId: result.messageId,
+        error: result.error?.message
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Instagram delivery failed'
+      };
+    }
+  }
+
+  /**
+   * معالجة مهام الإشعارات
+   */
+  private async processNotificationJob(jobData: any): Promise<any> {
+    const startTime = Date.now();
+    
+    try {
+      this.logger.info('🔔 [NOTIFICATION-PROCESS] بدء معالجة إشعار', {
+        type: jobData.type,
+        recipient: jobData.recipient,
+        hasPayload: !!jobData.payload
+      });
+
+      // 🔍 التحقق من صحة البيانات
+      if (!jobData.type) {
+        throw new Error('Notification type is missing');
+      }
+      
+      if (!jobData.recipient) {
+        throw new Error('Notification recipient is missing');
+      }
+
+      // 📤 إرسال الإشعار باستخدام NotificationService
+      const result = await this.notification.send({
+        type: jobData.type,
+        recipient: jobData.recipient,
+        content: jobData.data || jobData.payload || { message: 'Notification' }
+      });
+
+      const duration = Date.now() - startTime;
+      
+      if (result.success) {
+        this.logger.info('✅ [NOTIFICATION-PROCESS] تم إرسال الإشعار بنجاح', {
+          type: jobData.type,
+          recipient: jobData.recipient,
+          duration: `${duration}ms`,
+          sent: true
+        });
+        
+        return { 
+          processed: true, 
+          sent: true,
+          type: jobData.type,
+          recipient: jobData.recipient,
+          duration: duration,
+          timestamp: new Date().toISOString()
+        };
+      } else {
+        throw new Error(result.error || 'Notification delivery failed');
+      }
+
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      
+      this.logger.error('💥 [NOTIFICATION-ERROR] خطأ في إرسال الإشعار', {
+        type: jobData.type,
+        recipient: jobData.recipient,
+        duration: `${duration}ms`,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
+      throw error;
+    }
+  }
+
+  /**
+   * معالجة مهام تسليم الرسائل
+   */
+  private async processMessageDeliveryJob(jobData: any): Promise<any> {
+    const startTime = Date.now();
+    
+    try {
+      this.logger.info('📤 [MESSAGE-DELIVERY-PROCESS] بدء تسليم رسالة', {
+        messageId: jobData.messageId,
+        conversationId: jobData.conversationId,
+        merchantId: jobData.merchantId,
+        platform: jobData.platform
+      });
+
+      // 🔍 التحقق من صحة البيانات
+      if (!jobData.messageId) {
+        throw new Error('Message ID is missing');
+      }
+      
+      if (!jobData.conversationId) {
+        throw new Error('Conversation ID is missing');
+      }
+      
+      if (!jobData.merchantId) {
+        throw new Error('Merchant ID is missing');
+      }
+      
+      if (!jobData.content) {
+        throw new Error('Message content is missing');
+      }
+
+      let sendResult;
+      const platform = jobData.platform || 'instagram';
+
+      // 📤 إرسال الرسالة حسب المنصة
+      switch (platform) {
+        case 'instagram':
+          sendResult = await this.messageSender.sendTextMessage(
+            jobData.merchantId,
+            jobData.customerId,
+            jobData.content,
+            jobData.conversationId
+          );
+          break;
+
+        default:
+          throw new Error(`Unsupported platform: ${platform}`);
+      }
+
+      const duration = Date.now() - startTime;
+
+      // ✅ تحديث حالة الرسالة في قاعدة البيانات
+      if (sendResult.success) {
+        await this.repositories.message.markAsDelivered(
+          jobData.messageId,
+          sendResult.messageId
+        );
+        
+        this.logger.info('✅ [MESSAGE-DELIVERY-PROCESS] تم تسليم الرسالة بنجاح', {
+          messageId: jobData.messageId,
+          platformMessageId: sendResult.messageId,
+          duration: `${duration}ms`,
+          delivered: true
+        });
+        
+        return {
+          processed: true,
+          delivered: true,
+          messageId: jobData.messageId,
+          platformMessageId: sendResult.messageId,
+          duration: duration,
+          timestamp: new Date().toISOString()
+        };
+      } else {
+        await this.repositories.message.markAsFailed(jobData.messageId);
+        throw new Error(sendResult.error || 'Message delivery failed');
+      }
+
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      
+      // ❌ تحديث حالة الرسالة كفاشلة
+      try {
+        await this.repositories.message.markAsFailed(jobData.messageId);
+      } catch {
+        // ignore repository errors during failure marking
+      }
+      
+      this.logger.error('💥 [MESSAGE-DELIVERY-ERROR] خطأ في تسليم الرسالة', {
+        messageId: jobData.messageId,
+        conversationId: jobData.conversationId,
+        merchantId: jobData.merchantId,
+        duration: `${duration}ms`,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
+      throw error;
+    }
   }
 }
 

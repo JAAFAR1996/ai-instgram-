@@ -7,7 +7,7 @@
 
 import { describe, test, expect, beforeAll } from 'bun:test';
 import { CrossPlatformConversationManager } from '../services/cross-platform-conversation-manager.js';
-import { initializeDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 
 describe('Database query sanitization', () => {
   let manager: CrossPlatformConversationManager;

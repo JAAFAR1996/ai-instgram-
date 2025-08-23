@@ -7,11 +7,17 @@
  */
 
 import { getInstagramClient } from './instagram-api.js';
-import { getDatabase } from '../database/connection.js';
+import { getPool } from '../db/index.js';
 import { getConfig } from '../config/environment.js';
 import type { SendMessageRequest } from '../types/instagram.js';
+import type { DIContainer } from '../container/index.js';
+import type { Pool } from 'pg';
+import type { AppConfig } from '../config/environment.js';
 import crypto from 'crypto';
 import { getLogger } from './logger.js';
+import * as TemplateRepo from '../repos/template.repo.js';
+import * as MessageRepo from '../repos/message.repo.js';
+import { getTemplateCache } from '../cache/index.js';
 
 interface UtilityMessageTemplateRow {
   id: string;
@@ -23,8 +29,6 @@ interface UtilityMessageTemplateRow {
   created_at: string;
   updated_at: string;
 }
-
-const logger = getLogger({ component: 'UtilityMessagesService' });
 
 // Escape special characters for use in RegExp
 function escapeRegex(str: string): string {
@@ -64,8 +68,26 @@ export interface UtilityMessageResult {
 }
 
 export class UtilityMessagesService {
-  private config = getConfig();
-  private db = getDatabase();
+  private pool: Pool;
+  private config: AppConfig;
+  private logger: any;
+
+  constructor(private container?: DIContainer) {
+    if (container) {
+      this.pool = container.get<Pool>('pool');
+      this.config = container.get<AppConfig>('config');
+      this.logger = container.get('logger');
+    } else {
+      // Legacy fallback
+      this.initializeLegacy();
+    }
+  }
+
+  private initializeLegacy(): void {
+    this.pool = getPool();
+    this.config = getConfig();
+    this.logger = getLogger({ component: 'UtilityMessagesService' });
+  }
 
   /**
    * Send utility message using pre-approved template (2025 Standard)
@@ -76,15 +98,27 @@ export class UtilityMessagesService {
     payload: UtilityMessagePayload
   ): Promise<UtilityMessageResult> {
     try {
-      logger.info('Sending utility message', {
+      this.logger.info('Sending utility message', {
         merchantId,
         messageType: payload.message_type,
         event: 'sendUtilityMessage'
       });
 
-      // Validate template exists and is approved
-      const template = await this.getApprovedTemplate(merchantId, payload.template_id);
+      // Validate template exists and is approved (with cache)
+      const templateCache = getTemplateCache();
+      let template = await templateCache.getTemplate(merchantId, payload.template_id);
+      
       if (!template) {
+        // Cache miss - fetch from database
+        template = await TemplateRepo.getTemplateById(this.pool, payload.template_id, merchantId);
+        
+        if (template) {
+          // Cache the template for future use
+          await templateCache.setTemplate(merchantId, payload.template_id, template);
+        }
+      }
+      
+      if (!template || !template.approved) {
         return {
           success: false,
           error: 'Template not found or not approved',
@@ -119,9 +153,16 @@ export class UtilityMessagesService {
 
       if (response.success) {
         // Log utility message for compliance tracking
-        await this.logUtilityMessage(merchantId, payload, response.messageId ?? '');
+        await MessageRepo.logUtilityMessage(this.pool, {
+          merchantId,
+          recipientId: payload.recipient_id,
+          templateId: payload.template_id,
+          messageId: response.messageId ?? '',
+          messageType: payload.message_type,
+          status: 'sent'
+        });
 
-        logger.info('Utility message sent successfully', {
+        this.logger.info('Utility message sent successfully', {
           merchantId,
           messageType: payload.message_type,
           event: 'sendUtilityMessage'
@@ -132,7 +173,7 @@ export class UtilityMessagesService {
           timestamp: new Date()
         };
       } else {
-        logger.error('Failed to send utility message', response.error, {
+        this.logger.error('Failed to send utility message', response.error, {
           merchantId,
           messageType: payload.message_type,
           event: 'sendUtilityMessage'
@@ -145,7 +186,7 @@ export class UtilityMessagesService {
       }
 
     } catch (error) {
-      logger.error('Utility message service error', error, {
+      this.logger.error('Utility message service error', error, {
         merchantId,
         event: 'sendUtilityMessage'
       });
@@ -166,7 +207,7 @@ export class UtilityMessagesService {
     template: Omit<UtilityMessageTemplate, 'id' | 'approved' | 'created_at' | 'updated_at'>
   ): Promise<{ success: boolean; template_id?: string; error?: string }> {
     try {
-      logger.info('Creating utility message template', {
+      this.logger.info('Creating utility message template', {
         merchantId,
         templateName: template.name,
         event: 'createUtilityTemplate'
@@ -180,35 +221,21 @@ export class UtilityMessagesService {
         };
       }
 
-      const sql = this.db.getSQL() as any;
-      const templateId = crypto.randomUUID();
+      // Store template in database using repository
+      const createdTemplate = await TemplateRepo.createTemplate(this.pool, {
+        merchantId,
+        name: template.name,
+        type: template.type,
+        content: template.content,
+        variables: template.variables
+      });
 
-      // Store template in database
-      await sql`
-        INSERT INTO utility_message_templates (
-          id,
-          merchant_id,
-          name,
-          type,
-          content,
-          variables,
-          approved,
-          created_at,
-          updated_at
-        ) VALUES (
-          ${templateId},
-          ${merchantId}::uuid,
-          ${template.name},
-          ${template.type},
-          ${template.content},
-          ${JSON.stringify(template.variables)},
-          true, -- Auto-approved for page-owned templates (2025)
-          NOW(),
-          NOW()
-        )
-      `;
+      // Auto-approve for page-owned templates (2025)
+      await TemplateRepo.updateTemplate(this.pool, createdTemplate.id, merchantId, {
+        approved: true
+      });
 
-      logger.info('Utility template created and auto-approved', {
+      this.logger.info('Utility template created and auto-approved', {
         merchantId,
         templateName: template.name,
         event: 'createUtilityTemplate'
@@ -216,11 +243,11 @@ export class UtilityMessagesService {
       
       return {
         success: true,
-        template_id: templateId
+        template_id: createdTemplate.id
       };
 
     } catch (error) {
-      logger.error('Failed to create utility template', error, {
+      this.logger.error('Failed to create utility template', error, {
         merchantId,
         templateName: template.name,
         event: 'createUtilityTemplate'
@@ -232,46 +259,6 @@ export class UtilityMessagesService {
     }
   }
 
-  /**
-   * Get approved template by ID
-   */
-  private async getApprovedTemplate(
-    merchantId: string,
-    templateId: string
-  ): Promise<UtilityMessageTemplate | null> {
-    try {
-      const sql = this.db.getSQL() as any;
-
-      const result = await sql<UtilityMessageTemplateRow[]>`
-        SELECT * FROM utility_message_templates
-        WHERE id = ${templateId} AND merchant_id = ${merchantId}::uuid AND approved = true
-      `;
-
-      if (result.length === 0) {
-        return null;
-      }
-
-      const row: UtilityMessageTemplateRow = result[0];
-      return {
-        id: row.id,
-        name: row.name,
-        type: row.type as UtilityMessageType,
-        content: row.content,
-        variables: JSON.parse(row.variables || '[]'),
-        approved: row.approved,
-        created_at: new Date(row.created_at),
-        updated_at: new Date(row.updated_at)
-      };
-
-    } catch (error) {
-      logger.error('Failed to get template', error, {
-        merchantId,
-        templateId,
-        event: 'getTemplate'
-      });
-      return null;
-    }
-  }
 
   /**
    * Interpolate template variables
@@ -301,76 +288,109 @@ export class UtilityMessagesService {
     return marketingKeywords.some(keyword => lowerContent.includes(keyword));
   }
 
-  /**
-   * Log utility message for compliance tracking
-   */
-  private async logUtilityMessage(
-    merchantId: string,
-    payload: UtilityMessagePayload,
-    messageId: string
-  ): Promise<void> {
-    try {
-      const sql = this.db.getSQL() as any;
-      
-      await sql`
-        INSERT INTO utility_message_logs (
-          id,
-          merchant_id,
-          recipient_id,
-          template_id,
-          message_id,
-          message_type,
-          sent_at,
-          created_at
-        ) VALUES (
-          ${crypto.randomUUID()},
-          ${merchantId}::uuid,
-          ${payload.recipient_id},
-          ${payload.template_id},
-          ${messageId},
-          ${payload.message_type},
-          NOW(),
-          NOW()
-        )
-      `;
-
-    } catch (error) {
-      logger.error('Failed to log utility message', error, {
-        merchantId,
-        messageId,
-        event: 'logUtilityMessage'
-      });
-    }
-  }
 
   /**
    * Get utility message templates for merchant
    */
   async getTemplates(merchantId: string): Promise<UtilityMessageTemplate[]> {
     try {
-      const sql = this.db.getSQL() as any;
-      
-      const result = await sql<UtilityMessageTemplateRow[]>`
-        SELECT * FROM utility_message_templates
-        WHERE merchant_id = ${merchantId}::uuid
-        ORDER BY created_at DESC
-      `;
-
-      return result.map((row: UtilityMessageTemplateRow) => ({
-        id: row.id,
-        name: row.name,
-        type: row.type as UtilityMessageType,
-        content: row.content,
-        variables: JSON.parse(row.variables || '[]'),
-        approved: row.approved,
-        created_at: new Date(row.created_at),
-        updated_at: new Date(row.updated_at)
+      const templates = await TemplateRepo.listTemplates(this.pool, merchantId);
+      return templates.map(template => ({
+        id: template.id,
+        name: template.name,
+        type: template.type,
+        content: template.content,
+        variables: template.variables,
+        approved: template.approved,
+        created_at: template.createdAt,
+        updated_at: template.updatedAt
       }));
 
     } catch (error) {
-      logger.error('Failed to get templates', error, {
+      this.logger.error('Failed to get templates', error, {
         merchantId,
         event: 'getTemplates'
+      });
+      return [];
+    }
+  }
+
+  /**
+   * Create a new utility message template
+   */
+  async createTemplate(
+    merchantId: string,
+    name: string,
+    type: UtilityMessageType,
+    content: string,
+    variables: string[]
+  ): Promise<UtilityMessageTemplate> {
+    try {
+      const template = await TemplateRepo.createTemplate(this.pool, {
+        merchantId,
+        name,
+        type,
+        content,
+        variables
+      });
+
+      this.logger.info('Template created successfully', {
+        merchantId,
+        templateId: template.id,
+        name,
+        type,
+        event: 'createTemplate'
+      });
+
+      return {
+        id: template.id,
+        name: template.name,
+        type: template.type,
+        content: template.content,
+        variables: template.variables,
+        approved: template.approved,
+        created_at: template.createdAt,
+        updated_at: template.updatedAt
+      };
+
+    } catch (error) {
+      this.logger.error('Failed to create template', error, {
+        merchantId,
+        name,
+        type,
+        event: 'createTemplate'
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get message history for merchant
+   */
+  async getMessageHistory(merchantId: string, limit: number = 50, offset: number = 0): Promise<any[]> {
+    try {
+      const messages = await MessageRepo.listUtilityMessages(this.pool, merchantId, {
+        limit,
+        offset
+      });
+
+      return messages.map(message => ({
+        id: message.id,
+        recipient_id: message.recipientId,
+        template_id: message.templateId,
+        template_name: message.templateName,
+        message_id: message.messageId,
+        message_type: message.messageType,
+        sent_at: message.sentAt,
+        created_at: message.createdAt
+      }));
+
+    } catch (error) {
+      this.logger.error('Failed to get message history', error, {
+        merchantId,
+        limit,
+        offset,
+        event: 'getMessageHistory'
       });
       return [];
     }
@@ -405,7 +425,7 @@ export class UtilityMessagesService {
       await this.createUtilityTemplate(merchantId, template);
     }
 
-    logger.info('Default utility templates created', {
+    this.logger.info('Default utility templates created', {
       merchantId,
       event: 'createDefaultTemplates'
     });

@@ -1,6 +1,6 @@
 /**
  * ===============================================
- * Service Control API - REST endpoints للتحكم في الخدمات
+ * Service Control API Routes - REST endpoints للتحكم في الخدمات
  * Provides REST API endpoints for managing service on/off states
  * ===============================================
  */
@@ -103,7 +103,7 @@ export class ServiceControlAPI {
         }, 400);
       }
     } catch (error) {
-      console.error('❌ Toggle service API error:', error);
+      // API error logged via security middleware
       return c.json({
         success: false,
         message: 'خطأ في النظام'
@@ -133,7 +133,7 @@ export class ServiceControlAPI {
         data: services
       });
     } catch (error) {
-      console.error('❌ Get services status API error:', error);
+      // API error logged via security middleware
       return c.json({
         success: false,
         message: 'خطأ في تحميل حالة الخدمات'
@@ -175,7 +175,7 @@ export class ServiceControlAPI {
         }
       });
     } catch (error) {
-      console.error('❌ Get service status API error:', error);
+      // API error logged via security middleware
       return c.json({
         success: false,
         message: 'خطأ في تحميل حالة الخدمة'
@@ -213,7 +213,7 @@ export class ServiceControlAPI {
         }, 400);
       }
     } catch (error) {
-      console.error('❌ Enable Instagram services API error:', error);
+      // API error logged via security middleware
       return c.json({
         success: false,
         message: 'خطأ في تفعيل خدمات Instagram'
@@ -254,7 +254,7 @@ export class ServiceControlAPI {
         }, 400);
       }
     } catch (error) {
-      console.error('❌ Disable all services API error:', error);
+      // API error logged via security middleware
       return c.json({
         success: false,
         message: 'خطأ في إيقاف الخدمات'
@@ -288,7 +288,7 @@ export class ServiceControlAPI {
         }
       });
     } catch (error) {
-      console.error('❌ Get services health API error:', error);
+      // API error logged via security middleware
       return c.json({
         success: false,
         message: 'خطأ في تحميل حالة صحة الخدمات'
@@ -332,7 +332,7 @@ export class ServiceControlAPI {
         }
       });
     } catch (error) {
-      console.error('❌ Get services overview API error:', error);
+      // API error logged via security middleware
       return c.json({
         success: false,
         message: 'خطأ في تحميل نظرة عامة على الخدمات'

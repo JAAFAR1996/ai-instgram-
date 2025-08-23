@@ -6,7 +6,7 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import { getConversationAIOrchestrator, type CrossPlatformContext } from './conversation-ai-orchestrator.js';
 import type { Platform } from '../types/database.js';
 import { type Sql, type Fragment } from 'postgres';

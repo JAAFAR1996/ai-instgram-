@@ -8,7 +8,7 @@
 import crypto from 'crypto';
 import { getInstagramClient } from './instagram-api.js';
 import { getMessageWindowService } from './message-window.js';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import { getRepositories } from '../repositories/index.js';
 import { getInstagramStoriesManager } from './instagram-stories-manager.js';
@@ -17,6 +17,8 @@ import { getInstagramMediaManager } from './instagram-media-manager.js';
 import { getServiceController } from './service-controller.js';
 import { verifyHMACRaw } from './encryption.js';
 import { createLogger } from './logger.js';
+import type { DIContainer } from '../container/index.js';
+import type { Pool } from 'pg';
 import type { InstagramMessage, InstagramComment, InstagramStoryMention } from './instagram-api.js';
 import type { InstagramContext } from './instagram-ai.js';
 import type { StoryInteraction } from './instagram-stories-manager.js';
@@ -121,14 +123,42 @@ interface MessageHistoryRow {
 }
 
 export class InstagramWebhookHandler {
-  private logger = createLogger({ component: 'InstagramWebhook' });
-  private db = getDatabase();
-  private repositories = getRepositories();
-  private messageWindowService = getMessageWindowService();
-  private aiOrchestrator = getConversationAIOrchestrator();
-  private storiesManager = getInstagramStoriesManager();
-  private commentsManager = getInstagramCommentsManager();
-  private mediaManager = getInstagramMediaManager();
+  private logger: ReturnType<typeof createLogger>;
+  private db: ReturnType<typeof getDatabase>;
+  private repositories: ReturnType<typeof getRepositories>;
+  private messageWindowService: ReturnType<typeof getMessageWindowService>;
+  private aiOrchestrator: ReturnType<typeof getConversationAIOrchestrator>;
+  private storiesManager: ReturnType<typeof getInstagramStoriesManager>;
+  private commentsManager: ReturnType<typeof getInstagramCommentsManager>;
+  private mediaManager: ReturnType<typeof getInstagramMediaManager>;
+  private pool: Pool;
+
+  constructor(private container?: DIContainer) {
+    if (container) {
+      this.pool = container.get<Pool>('pool');
+      this.logger = container.get<ReturnType<typeof createLogger>>('logger');
+      this.initializeFromContainer();
+    } else {
+      this.initializeLegacy();
+    }
+  }
+
+  private initializeFromContainer(): void {
+    // Services will be injected via container when available
+    // For now, fallback to legacy methods
+    this.initializeLegacy();
+  }
+
+  private initializeLegacy(): void {
+    this.logger = createLogger({ component: 'InstagramWebhook' });
+    this.db = getDatabase();
+    this.repositories = getRepositories();
+    this.messageWindowService = getMessageWindowService();
+    this.aiOrchestrator = getConversationAIOrchestrator();
+    this.storiesManager = getInstagramStoriesManager();
+    this.commentsManager = getInstagramCommentsManager();
+    this.mediaManager = getInstagramMediaManager();
+  }
 
   /**
    * Verify signature and process raw webhook payload

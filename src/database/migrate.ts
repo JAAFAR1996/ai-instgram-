@@ -262,7 +262,7 @@ INSERT INTO migrations (name, filename) VALUES ('${name}', '${filename}');
   /**
    * Create migrations table if it doesn't exist
    */
-  private async createMigrationsTable(): Promise<void> {
+  public async createMigrationsTable(): Promise<void> {
     const sql = this.db.getSQL() as any;
     
     await sql`
@@ -391,7 +391,7 @@ export async function rollbackMigration(): Promise<void> {
 export const migrate = () => migrationRunner.migrate();
 export const rollback = () => migrationRunner.rollback();
 export const getMigrationStatus = () => migrationRunner.status();
-export const createMigrationTable = () => migrationRunner.createMigrationTable();
+export const createMigrationTable = () => migrationRunner.createMigrationsTable();
 
 export async function createMigration(name: string): Promise<string> {
   return await migrationRunner.create(name);

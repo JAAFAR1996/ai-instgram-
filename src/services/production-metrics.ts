@@ -7,7 +7,7 @@ import { getLogger } from './logger.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { getDatabaseJobSpool } from '../queue/db-spool.js';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 
 const logger = getLogger({ component: 'ProductionMetrics' });
 

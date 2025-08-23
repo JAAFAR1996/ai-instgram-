@@ -1,439 +1,153 @@
-/**
- * ===============================================
- * OpenTelemetry Metrics & Observability (2025 Standards)
- * ✅ Production-grade monitoring and metrics collection
- * ===============================================
- */
-
-import {
-  context,
-  metrics,
-  trace,
-  SpanStatusCode,
-  type Meter,
-  type Tracer,
-  type Counter,
-  type Histogram,
-  type UpDownCounter,
-  type Span,
-  type Context,
-  type Attributes
-} from '@opentelemetry/api';
+import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
-import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import type { Context as HonoContext, Next } from 'hono';
+import { Resource } from '@opentelemetry/resources';
+import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
+import type { DIContainer } from '../container/index.js';
+import type { AppConfig } from '../config/environment.js';
 
-export interface MetricsCollector {
+let _inited = false;
+let meterProvider: MeterProvider | null = null;
+
+export async function initTelemetry(config?: AppConfig): Promise<void> {
+  if (_inited) return;
+  
+  // Set up diagnostics
+  const diagLevel = process.env.NODE_ENV === 'development' ? DiagLogLevel.DEBUG : DiagLogLevel.ERROR;
+  diag.setLogger(new DiagConsoleLogger(), diagLevel);
+  
+  // Create resource with service information
+  const resource = Resource.default().merge(
+    new Resource({
+      [SemanticResourceAttributes.SERVICE_NAME]: 'ai-sales-platform',
+      [SemanticResourceAttributes.SERVICE_VERSION]: process.env.npm_package_version || '1.0.0',
+      [SemanticResourceAttributes.SERVICE_NAMESPACE]: 'production',
+      [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: process.env.NODE_ENV || 'development',
+    })
+  );
+  
+  // Initialize meter provider with resource
+  meterProvider = new MeterProvider({ 
+    resource,
+    // Add readers/exporters here for Prometheus, etc.
+  });
+  
+  _inited = true;
+}
+
+export function getMeter(name = 'ai-sales-platform') {
+  if (!meterProvider) throw new Error('telemetry not initialized');
+  return meterProvider.getMeter(name);
+}
+
+// Convenience counters
+const counters = new Map<string, ReturnType<ReturnType<typeof getMeter>['createCounter']>>();
+// Enhanced counter creation with better caching
+export function counter(name: string, description?: string) {
+  if (!counters.has(name)) {
+    const m = getMeter();
+    counters.set(name, m.createCounter(name, { description, unit: 'count' }));
+  }
+  return counters.get(name)!;
+}
+
+// Histogram creation helper
+const histograms = new Map<string, ReturnType<ReturnType<typeof getMeter>['createHistogram']>>();
+export function histogram(name: string, description?: string, unit?: string) {
+  if (!histograms.has(name)) {
+    const m = getMeter();
+    histograms.set(name, m.createHistogram(name, { description, unit }));
+  }
+  return histograms.get(name)!;
+}
+
+// Gauge creation helper
+const gauges = new Map<string, ReturnType<ReturnType<typeof getMeter>['createGauge']>>();
+export function gauge(name: string, description?: string, unit?: string) {
+  if (!gauges.has(name)) {
+    const m = getMeter();
+    gauges.set(name, m.createGauge(name, { description, unit }));
+  }
+  return gauges.get(name)!;
+}
+
+// Enhanced telemetry service with more comprehensive metrics
+export const telemetry = {
   // Meta API metrics
-  metaRequestsTotal: Counter;
-  metaLatency: Histogram;
-  metaRateLimited: Counter;
-  rateLimitStoreFailures: Counter;
-
-  // WhatsApp/Instagram metrics
-  messagesTotal: Counter;
-  messagesSent: Counter;
-  messagesDelivered: Counter;
-  messagesFailed: Counter;
-
+  recordMetaRequest(platform: 'instagram'|'whatsapp', endpoint: string, status: number, latencyMs: number, rateLimited = false) {
+    try {
+      counter('meta_requests_total','Total Meta API requests').add(1,{ platform, endpoint, status: String(status) });
+      getMeter().createHistogram('meta_latency_ms',{ description:'Meta API request latency' }).record(latencyMs,{ platform, endpoint, status:String(status) });
+      if (rateLimited) counter('meta_rate_limited_total','Meta API rate limit hits').add(1,{ platform, endpoint });
+    } catch {}
+  },
+  
+  // Redis metrics
+  recordRateLimitStoreFailure(platform: 'instagram'|'whatsapp', endpoint: string) {
+    try {
+      counter('rate_limit_store_failures_total','Redis rate limit store failures').add(1,{ platform, endpoint });
+    } catch {}
+  },
+  
+  recordRedisOperation(operation: string, success: boolean, latencyMs: number) {
+    try {
+      counter('redis_operations_total','Redis operations').add(1,{ operation, success: String(success) });
+      getMeter().createHistogram('redis_latency_ms',{ description:'Redis operation latency' }).record(latencyMs,{ operation, success: String(success) });
+    } catch {}
+  },
+  
+  // Database metrics
+  recordDatabaseQuery(query: string, success: boolean, latencyMs: number) {
+    try {
+      counter('db_queries_total','Database queries').add(1,{ query_type: query, success: String(success) });
+      getMeter().createHistogram('db_latency_ms',{ description:'Database query latency' }).record(latencyMs,{ query_type: query, success: String(success) });
+    } catch {}
+  },
+  
+  // AI service metrics
+  recordAIRequest(model: string, success: boolean, latencyMs: number, tokens?: { prompt: number; completion: number }) {
+    try {
+      counter('ai_requests_total','AI service requests').add(1,{ model, success: String(success) });
+      getMeter().createHistogram('ai_latency_ms',{ description:'AI request latency' }).record(latencyMs,{ model, success: String(success) });
+      if (tokens) {
+        counter('ai_tokens_total','AI tokens used').add(tokens.prompt + tokens.completion,{ model, type: 'total' });
+        counter('ai_tokens_total','AI tokens used').add(tokens.prompt,{ model, type: 'prompt' });
+        counter('ai_tokens_total','AI tokens used').add(tokens.completion,{ model, type: 'completion' });
+      }
+    } catch {}
+  },
+  
+  // Message processing metrics
+  recordMessageProcessing(platform: 'instagram'|'whatsapp', direction: 'incoming'|'outgoing', success: boolean, latencyMs: number) {
+    try {
+      counter('messages_processed_total','Messages processed').add(1,{ platform, direction, success: String(success) });
+      getMeter().createHistogram('message_processing_latency_ms',{ description:'Message processing latency' }).record(latencyMs,{ platform, direction, success: String(success) });
+    } catch {}
+  },
+  
   // Queue metrics
-  queueJobsTotal: Counter;
-  queueProcessingTime: Histogram;
-  queueDepth: UpDownCounter;
-  dlqJobs: Counter;
-
+  recordQueueOperation(queue: string, operation: 'add'|'process'|'failed'|'completed', count: number = 1) {
+    try {
+      counter('queue_operations_total','Queue operations').add(count,{ queue, operation });
+    } catch {}
+  },
+  
   // Business metrics
-  conversionsTotal: Counter;
-  ordersTotal: Counter;
-  revenueTotal: Counter;
-  merchantsActive: UpDownCounter;
-
-  // System metrics
-  httpRequestsTotal: Counter;
-  httpRequestDuration: Histogram;
-  databaseConnections: UpDownCounter;
-  encryptionOperations: Counter;
-}
-
-export class TelemetryService {
-  private meter: Meter | null = null;
-  private tracer: Tracer | null = null;
-  private metrics: MetricsCollector = {} as MetricsCollector;
-  private isInitialized = false;
-
-  constructor() {
-    this.initializeSDK();
-  }
-
-  /**
-   * Initialize OpenTelemetry providers
-   */
-  private initializeSDK(): void {
-    const meterProvider = new MeterProvider();
-    metrics.setGlobalMeterProvider(meterProvider);
-    this.meter = metrics.getMeter('ai-instagram-platform');
-
-    const tracerProvider = new NodeTracerProvider();
-    tracerProvider.register();
-    trace.setGlobalTracerProvider(tracerProvider);
-    this.tracer = trace.getTracer('ai-instagram-platform');
-
-    this.initializeMetrics();
-    this.isInitialized = true;
-  }
-
-  /**
-   * Initialize all metrics collectors
-   */
-  private initializeMetrics(): void {
-    this.metrics = {
-      // Meta API metrics
-      metaRequestsTotal: this.meter!.createCounter('meta_requests_total', {
-        description: 'Total Meta API requests',
-        unit: '1'
-      }),
-      
-      metaLatency: this.meter!.createHistogram('meta_latency_ms', {
-        description: 'Meta API request latency',
-        unit: 'ms'
-      }),
-      
-      metaRateLimited: this.meter!.createCounter('meta_rate_limited_total', {
-        description: 'Meta API rate limit hits',
-        unit: '1'
-      }),
-
-      rateLimitStoreFailures: this.meter!.createCounter('rate_limit_store_failures_total', {
-        description: 'Redis rate limit store failures',
-        unit: '1'
-      }),
-
-      // Messaging metrics
-      messagesTotal: this.meter!.createCounter('messages_total', {
-        description: 'Total messages processed',
-        unit: '1'
-      }),
-      
-      messagesSent: this.meter!.createCounter('messages_sent_total', {
-        description: 'Messages successfully sent',
-        unit: '1'
-      }),
-      
-      messagesDelivered: this.meter!.createCounter('messages_delivered_total', {
-        description: 'Messages confirmed delivered',
-        unit: '1'
-      }),
-      
-      messagesFailed: this.meter!.createCounter('messages_failed_total', {
-        description: 'Failed message deliveries',
-        unit: '1'
-      }),
-
-      // Queue metrics
-      queueJobsTotal: this.meter!.createCounter('queue_jobs_total', {
-        description: 'Total queue jobs processed',
-        unit: '1'
-      }),
-      
-      queueProcessingTime: this.meter!.createHistogram('queue_processing_time_ms', {
-        description: 'Queue job processing time',
-        unit: 'ms'
-      }),
-      
-      queueDepth: this.meter!.createUpDownCounter('queue_depth', {
-        description: 'Current queue depth',
-        unit: '1'
-      }),
-      
-      dlqJobs: this.meter!.createCounter('dlq_jobs_total', {
-        description: 'Jobs sent to Dead Letter Queue',
-        unit: '1'
-      }),
-
-      // Business metrics
-      conversionsTotal: this.meter!.createCounter('conversions_total', {
-        description: 'Total conversation conversions',
-        unit: '1'
-      }),
-      
-      ordersTotal: this.meter!.createCounter('orders_total', {
-        description: 'Total orders created',
-        unit: '1'
-      }),
-      
-      revenueTotal: this.meter!.createCounter('revenue_total', {
-        description: 'Total revenue generated',
-        unit: 'USD'
-      }),
-      
-      merchantsActive: this.meter!.createUpDownCounter('merchants_active', {
-        description: 'Currently active merchants',
-        unit: '1'
-      }),
-
-      // System metrics
-      httpRequestsTotal: this.meter!.createCounter('http_requests_total', {
-        description: 'Total HTTP requests',
-        unit: '1'
-      }),
-      
-      httpRequestDuration: this.meter!.createHistogram('http_request_duration_ms', {
-        description: 'HTTP request duration',
-        unit: 'ms'
-      }),
-      
-      databaseConnections: this.meter!.createUpDownCounter('database_connections', {
-        description: 'Active database connections',
-        unit: '1'
-      }),
-      
-      encryptionOperations: this.meter!.createCounter('encryption_operations_total', {
-        description: 'Total encryption/decryption operations',
-        unit: '1'
-      })
-    };
-  }
-
-  /**
-   * Record Meta API request
-   */
-  recordMetaRequest(
-    platform: 'instagram' | 'whatsapp',
-    endpoint: string,
-    status: number,
-    latencyMs: number,
-    rateLimited = false
-  ): void {
-    const labels = { platform, endpoint, status: status.toString() };
-    
-    this.metrics.metaRequestsTotal.add(1, labels);
-    this.metrics.metaLatency.record(latencyMs, labels);
-    
-    if (rateLimited) {
-      this.metrics.metaRateLimited.add(1, { platform, endpoint });
-    }
-  }
-
-  /**
-   * Record rate limit store failures
-   */
-  recordRateLimitStoreFailure(
-    platform: 'instagram' | 'whatsapp',
-    endpoint: string
-  ): void {
-    this.metrics.rateLimitStoreFailures.add(1, { platform, endpoint });
-  }
-
-  /**
-   * Record message metrics
-   */
-  recordMessage(
-    platform: 'whatsapp' | 'instagram',
-    direction: 'incoming' | 'outgoing',
-    status: 'sent' | 'delivered' | 'failed',
-    merchantId: string
-  ): void {
-    const labels = { platform, direction, merchant_id: merchantId };
-    
-    this.metrics.messagesTotal.add(1, labels);
-    
-    switch (status) {
-      case 'sent':
-        this.metrics.messagesSent.add(1, labels);
-        break;
-      case 'delivered':
-        this.metrics.messagesDelivered.add(1, labels);
-        break;
-      case 'failed':
-        this.metrics.messagesFailed.add(1, labels);
-        break;
-    }
-  }
-
-  /**
-   * Record queue job metrics
-   */
-  recordQueueJob(
-    jobType: string,
-    status: 'completed' | 'failed' | 'dlq',
-    processingTimeMs: number,
-    merchantId?: string
-  ): void {
-    const labels = { 
-      job_type: jobType, 
-      status,
-      ...(merchantId && { merchant_id: merchantId })
-    };
-    
-    this.metrics.queueJobsTotal.add(1, labels);
-    
-    if (status === 'completed' || status === 'failed') {
-      this.metrics.queueProcessingTime.record(processingTimeMs, labels);
-    }
-    
-    if (status === 'dlq') {
-      this.metrics.dlqJobs.add(1, { job_type: jobType });
-    }
-  }
-
-  /**
-   * Update queue depth
-   */
-  updateQueueDepth(depth: number, jobType?: string): void {
-    const labels = jobType ? { job_type: jobType } : {};
-    this.metrics.queueDepth.add(depth, labels);
-  }
-
-  /**
-   * Record business conversion
-   */
-  recordConversion(
-    merchantId: string,
-    platform: 'whatsapp' | 'instagram',
-    orderValue?: number
-  ): void {
-    const labels = { merchant_id: merchantId, platform };
-    
-    this.metrics.conversionsTotal.add(1, labels);
-    
-    if (orderValue) {
-      this.metrics.revenueTotal.add(orderValue, labels);
-    }
-  }
-
-  /**
-   * Record order creation
-   */
-  recordOrder(
-    merchantId: string,
-    orderValue: number,
-    source: 'whatsapp' | 'instagram' | 'MANUAL'
-  ): void {
-    const labels = { merchant_id: merchantId, source };
-    
-    this.metrics.ordersTotal.add(1, labels);
-    this.metrics.revenueTotal.add(orderValue, labels);
-  }
-
-  /**
-   * Update active merchants count
-   */
-  updateActiveMerchants(delta: number, tier?: string): void {
-    const labels = tier ? { tier } : {};
-    this.metrics.merchantsActive.add(delta, labels);
-  }
-
-  /**
-   * Record HTTP request
-   */
-  recordHttpRequest(
-    method: string,
-    route: string,
-    status: number,
-    durationMs: number
-  ): void {
-    const labels = { method, route, status: status.toString() };
-    
-    this.metrics.httpRequestsTotal.add(1, labels);
-    this.metrics.httpRequestDuration.record(durationMs, labels);
-  }
-
-  /**
-   * Record encryption operation
-   */
-  recordEncryption(operation: 'encrypt' | 'decrypt', success: boolean): void {
-    const labels = { operation, status: success ? 'success' : 'failure' };
-    this.metrics.encryptionOperations.add(1, labels);
-  }
-
-  /**
-   * Create custom trace span
-   */
-  createSpan<T>(name: string, operation: () => Promise<T>, attributes?: Attributes): Promise<T> {
-    if (!this.tracer) {
-      return operation();
-    }
-
-    return this.tracer.startActiveSpan(name, { attributes }, async (span: Span) => {
-      try {
-        const result = await operation();
-        span.setStatus({ code: SpanStatusCode.OK });
-        return result;
-      } catch (error: unknown) {
-        span.recordException(error as Error);
-        span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
-        throw error;
-      } finally {
-        span.end();
-      }
-    });
-  }
-
-  /**
-   * Add custom attributes to current span (stub implementation)
-   */
-  addSpanAttributes(attributes: Attributes): void {
-    const span = trace.getActiveSpan();
-    if (span) {
-      span.setAttributes(attributes);
-    }
-  }
-
-  /**
-   * Get current trace context for propagation (stub implementation)
-   */
-  getCurrentTraceContext(): Context {
-    return context.active();
-  }
-
-  /**
-   * Health check for telemetry system
-   */
-  healthCheck(): { status: 'healthy' | 'unhealthy'; details: Record<string, unknown> } {
-    return {
-      status: this.isInitialized ? 'healthy' : 'unhealthy',
-      details: {
-        initialized: this.isInitialized,
-        metricsCount: Object.keys(this.metrics || {}).length,
-        timestamp: new Date().toISOString()
-      }
-    };
-  }
-}
-
-// Singleton instance
-let telemetryInstance: TelemetryService | null = null;
-
-/**
- * Get telemetry service instance
- */
-export function getTelemetryService(): TelemetryService {
-  if (!telemetryInstance) {
-    telemetryInstance = new TelemetryService();
-  }
-  return telemetryInstance;
-}
-
-/**
- * Express/Hono middleware for automatic HTTP metrics
- */
-export function telemetryMiddleware() {
-  const telemetry = getTelemetryService();
-
-  return async (c: HonoContext, next: Next) => {
-    const startTime = Date.now();
-    const method = c.req.method;
-    const route = c.req.routePath || c.req.url;
-    
-    await next();
-    
-    const duration = Date.now() - startTime;
-    const status = c.res.status || 200;
-    
-    telemetry.recordHttpRequest(method, route, status, duration);
-  };
-}
-
-// Export convenience functions
-export const telemetry = getTelemetryService();
-export default TelemetryService;
+  recordConversation(platform: 'instagram'|'whatsapp', stage: string, merchantId?: string) {
+    try {
+      counter('conversations_total','Conversations created').add(1,{ platform, stage, merchant_id: merchantId || 'unknown' });
+    } catch {}
+  },
+  
+  recordServiceControl(merchantId: string, service: string, enabled: boolean) {
+    try {
+      counter('service_toggles_total','Service control toggles').add(1,{ merchant_id: merchantId, service, enabled: String(enabled) });
+    } catch {}
+  },
+  
+  // Custom events
+  trackEvent(name: string, props: Record<string, unknown> = {}) {
+    try {
+      counter('events_total','Custom events').add(1,{ name, ...Object.fromEntries(Object.entries(props).map(([k,v]) => [k, String(v)])) });
+    } catch {}
+  },
+};

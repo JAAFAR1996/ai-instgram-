@@ -50,7 +50,7 @@ export class DatabaseSeeder {
     
     const sql = this.db.getSQL() as any;
     
-    await sql.begin(async (sql) => {
+    await sql.begin(async (sql: any) => {
       await sql`DELETE FROM message_logs WHERE 1=1`;
       await sql`DELETE FROM orders WHERE 1=1`;
       await sql`DELETE FROM conversations WHERE 1=1`;
@@ -118,7 +118,7 @@ export class DatabaseSeeder {
         instagram_user_id, email, subscription_status, 
         subscription_tier, subscription_expires_at
       ) 
-      SELECT * FROM ${sql(merchantsData.map(m => [
+      SELECT * FROM ${sql(merchantsData.map((m: any) => [
         m.business_name, m.business_category, m.business_address,
         m.whatsapp_number, m.whatsapp_number_id, m.instagram_username,
         m.instagram_user_id, m.email, m.subscription_status,
@@ -128,7 +128,7 @@ export class DatabaseSeeder {
     `;
 
     console.log(`✅ Created ${merchants.length} merchants`);
-    return merchants.map(m => m.id);
+    return merchants.map((m: any) => m.id);
   }
 
   /**
@@ -303,10 +303,10 @@ export class DatabaseSeeder {
         attributes, variants, images, tags, is_featured, is_on_sale, sale_price_usd
       )
       SELECT * FROM ${sql(allProducts.map(p => [
-        p.merchant_id, p.sku, p.name_ar, p.name_en || null, p.description_ar, p.category,
+        p.merchant_id, p.sku, p.name_ar, (p as any).name_en || null, p.description_ar, p.category,
         p.price_usd, p.cost_usd, p.stock_quantity, p.min_stock_alert,
-        p.attributes || '{}', p.variants || '[]', p.images || '[]', 
-        p.tags || [], p.is_featured || false, p.is_on_sale || false, p.sale_price_usd || null
+        p.attributes || '{}', (p as any).variants || '[]', (p as any).images || '[]', 
+        (p as any).tags || [], (p as any).is_featured || false, (p as any).is_on_sale || false, (p as any).sale_price_usd || null
       ]))}
     `;
 
@@ -404,7 +404,7 @@ export class DatabaseSeeder {
     `;
 
     console.log(`✅ Created ${conversations.length} conversations`);
-    return conversations.map(c => c.id);
+    return conversations.map((c: any) => c.id);
   }
 
   /**
@@ -580,7 +580,7 @@ export class DatabaseSeeder {
         conversation_id, direction, platform, content, ai_processed,
         ai_response_time_ms, delivery_status, created_at
       )
-      SELECT * FROM ${sql(messagesData.map(m => [
+      SELECT * FROM ${sql(messagesData.map((m: any) => [
         m.conversation_id, m.direction, m.platform, m.content, m.ai_processed,
         m.ai_response_time_ms || null, m.delivery_status || 'DELIVERED', m.created_at
       ]))}

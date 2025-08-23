@@ -7,7 +7,7 @@
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
 import { MerchantRepository, type Merchant, type CreateMerchantRequest, type UpdateMerchantRequest } from './merchant-repository.js';
-import { initializeDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 
 const TEST_MERCHANT_BASE_ID = 'merchant-repo-test';
 let testMerchantCounter = 0;

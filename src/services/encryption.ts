@@ -16,19 +16,40 @@ export function verifyHMACRaw(payload: Buffer, signature: string, secret: string
     // 1) وجود القيم
     if (!payload || !signature || !secret) return { ok: false, reason: 'missing_params' };
 
-    // 2) تنظيف التوقيع
-    const sig = signature.startsWith('sha256=') ? signature.slice(7) : signature;
+    // 2) دعم SHA256 و SHA1 للتوافقية
+    let algorithm = 'sha256';
+    let sig = signature;
+    
+    if (signature.startsWith('sha256=')) {
+      algorithm = 'sha256';
+      sig = signature.slice(7);
+    } else if (signature.startsWith('sha1=')) {
+      algorithm = 'sha1';
+      sig = signature.slice(5);
+    } else {
+      // Try to detect based on length
+      if (signature.length === 64) {
+        algorithm = 'sha256';
+      } else if (signature.length === 40) {
+        algorithm = 'sha1';
+      } else {
+        return { ok: false, reason: 'bad_format' };
+      }
+    }
 
-    // 3) تحقق من الصيغة: 64 hex
-    if (!/^[a-f0-9]{64}$/i.test(sig)) return { ok: false, reason: 'bad_format' };
+    // 3) تحقق من الصيغة: 64 hex للsha256 أو 40 hex للsha1
+    const expectedLength = algorithm === 'sha256' ? 64 : 40;
+    if (sig.length !== expectedLength || !/^[a-f0-9]+$/i.test(sig)) {
+      return { ok: false, reason: 'bad_format' };
+    }
 
     // 4) حساب المتوقع على الـ raw payload
-    const expectedHex = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+    const expectedHex = crypto.createHmac(algorithm, secret).update(payload).digest('hex');
 
     // 5) مقارنة ثابتة الوقت
     const a = Buffer.from(expectedHex, 'hex');
     const b = Buffer.from(sig, 'hex');
-    if (a.length !== b.length) return { ok: false, reason: 'bad_format' }; // نظرياً دائمًا 32 بايت
+    if (a.length !== b.length) return { ok: false, reason: 'bad_format' };
 
     const equal = crypto.timingSafeEqual(a, b);
     return equal ? { ok: true } : { ok: false, reason: 'mismatch' };

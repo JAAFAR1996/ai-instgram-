@@ -7,7 +7,7 @@
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach, mock } from 'bun:test';
 import { MonitoringService, MetricsCollector, AlertManager, type PerformanceMetric, type AlertRule } from './monitoring.js';
-import { initializeDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 
 // Mock external dependencies
 const mockRedisConnection = {

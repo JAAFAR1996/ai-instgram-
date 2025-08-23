@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import type { Fragment, Sql } from 'postgres';
 
 interface MessageRow {

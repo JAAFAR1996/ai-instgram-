@@ -8,8 +8,10 @@
 
 import { getAIService, type ConversationContext, type AIResponse } from './ai.js';
 import { getInstagramAIService, type InstagramContext, type InstagramAIResponse } from './instagram-ai.js';
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import type { Platform } from '../types/database.js';
+import type { DIContainer } from '../container/index.js';
+import type { Pool } from 'pg';
 
 interface InteractionRow {
   platform: string;
@@ -76,9 +78,31 @@ export interface ConversationPersonality {
 }
 
 export class ConversationAIOrchestrator {
-  private aiService = getAIService();
-  private instagramAI = getInstagramAIService();
-  private db = getDatabase();
+  private aiService: ReturnType<typeof getAIService>;
+  private instagramAI: ReturnType<typeof getInstagramAIService>;
+  private db: ReturnType<typeof getDatabase>;
+  private pool: Pool;
+
+  constructor(private container?: DIContainer) {
+    if (container) {
+      this.pool = container.get<Pool>('pool');
+      this.initializeFromContainer();
+    } else {
+      this.initializeLegacy();
+    }
+  }
+
+  private initializeFromContainer(): void {
+    // Services will be injected via container when available
+    // For now, fallback to legacy methods
+    this.initializeLegacy();
+  }
+
+  private initializeLegacy(): void {
+    this.aiService = getAIService();
+    this.instagramAI = getInstagramAIService();
+    this.db = getDatabase();
+  }
 
   /**
    * Generate platform-optimized AI response
@@ -701,7 +725,12 @@ interface ConversationTrend {
   platform: Platform;
 }
 
-// Singleton instance
+// Factory function for DI container
+export function createConversationAIOrchestrator(container: DIContainer): ConversationAIOrchestrator {
+  return new ConversationAIOrchestrator(container);
+}
+
+// Singleton instance (legacy support)
 let orchestratorInstance: ConversationAIOrchestrator | null = null;
 
 /**

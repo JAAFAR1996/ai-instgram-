@@ -202,6 +202,29 @@ export function loadAndValidateEnvironment(): AppConfig {
       if (env.CORS_ORIGINS === '*') {
         errors.push('CORS_ORIGINS should not be "*" in production');
       }
+
+      // Production security requirements
+      if (env.JWT_SECRET && env.JWT_SECRET.length < 32) {
+        errors.push('JWT_SECRET must be at least 32 characters in production');
+      }
+
+      if (env.ENCRYPTION_KEY && env.ENCRYPTION_KEY.length < 32) {
+        errors.push('ENCRYPTION_KEY must be at least 32 characters in production');
+      }
+
+      // Check for insecure defaults in production
+      const insecureDefaults = [
+        { key: 'JWT_SECRET', patterns: ['secret', 'default', 'changeme'] },
+        { key: 'ENCRYPTION_KEY', patterns: ['key', 'default', 'changeme'] },
+        { key: 'IG_VERIFY_TOKEN', patterns: ['token', 'verify', 'default'] }
+      ];
+
+      for (const check of insecureDefaults) {
+        const value = env[check.key]?.toLowerCase() || '';
+        if (check.patterns.some(pattern => value.includes(pattern))) {
+          errors.push(`${check.key} appears to contain insecure default values in production`);
+        }
+      }
     }
 
   // Throw if validation failed
@@ -277,12 +300,13 @@ function parseDatabaseConfig(databaseUrl: string): DatabaseConfig {
 }
 
 /**
- * Validate configuration at runtime
+ * Validate configuration at runtime with enhanced checks
  */
 export function validateRuntimeConfig(config: AppConfig): void {
   const errors: string[] = [];
+  const warnings: string[] = [];
   
-  // Runtime validations
+  // AI configuration validation
   if (config.ai.maxTokens > 4000) {
     errors.push('AI max_tokens should not exceed 4000 for cost control');
   }
@@ -290,13 +314,57 @@ export function validateRuntimeConfig(config: AppConfig): void {
   if (config.ai.temperature < 0 || config.ai.temperature > 2) {
     errors.push('AI temperature must be between 0 and 2');
   }
-  
-  if (config.database.maxConnections > 100) {
-    console.warn('⚠️ Database max connections is very high, consider connection pooling');
+
+  if (config.environment === 'production' && config.ai.temperature > 1.0) {
+    warnings.push('AI temperature > 1.0 may produce inconsistent results in production');
   }
   
+  // Database configuration validation
+  if (config.database.maxConnections > 100) {
+    warnings.push('Database max connections is very high, consider connection pooling');
+  }
+
+  if (config.database.maxConnections < 5) {
+    warnings.push('Database max connections is very low, may cause bottlenecks');
+  }
+  
+  // Security configuration validation
   if (config.environment === 'production' && config.security.corsOrigins.includes('*')) {
     errors.push('CORS should not allow all origins in production');
+  }
+
+  if (config.security.rateLimitMax < 10) {
+    warnings.push('Rate limit is very restrictive, may impact legitimate users');
+  }
+
+  if (config.security.rateLimitMax > 1000) {
+    warnings.push('Rate limit is very permissive, may not prevent abuse');
+  }
+
+  // Instagram configuration validation
+  if (config.instagram.apiVersion < 'v18.0') {
+    warnings.push('Instagram API version is outdated, consider upgrading');
+  }
+
+  // SSL/TLS validation for production
+  if (config.environment === 'production') {
+    if (!config.baseUrl.startsWith('https://')) {
+      errors.push('BASE_URL must use HTTPS in production');
+    }
+
+    if (!config.instagram.redirectUri.startsWith('https://')) {
+      errors.push('REDIRECT_URI must use HTTPS in production');
+    }
+
+    if (!config.database.ssl) {
+      warnings.push('Database SSL is disabled in production - security risk');
+    }
+  }
+
+  // Log warnings
+  if (warnings.length > 0) {
+    console.warn('⚠️ Configuration warnings:');
+    warnings.forEach(warning => console.warn(`  • ${warning}`));
   }
   
   if (errors.length > 0) {

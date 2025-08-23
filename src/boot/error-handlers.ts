@@ -107,41 +107,16 @@ export async function gracefulShutdown(signal: string, code = 0) {
     
     // Signal queue workers to stop processing
     try {
-      const { getQueueManager } = await import('../queue/queue-manager.js');
-      const qm = getQueueManager();
-
-      // الأفضل أولاً: إيقاف المعالِجات
-      if (typeof (qm as any).stopProcessing === 'function') {
-        await (qm as any).stopProcessing();
-        console.log('✅ Queue processing stopped');
-      } else if (typeof (qm as any).pause === 'function') {
-        await (qm as any).pause();
-        console.log('✅ Queue paused');
-      }
-
-      // انتظر هدوء الطابور إن توفّر
-      if (typeof (qm as any).waitForIdle === 'function') {
-        await (qm as any)
-          .waitForIdle(5000)
-          .catch((e: unknown) => console.error('Failed to wait for idle queue:', e));
-      }
-
-      // اختياري: تفريغ متبقٍ
-      if (typeof (qm as any).drain === 'function') {
-        await (qm as any)
-          .drain()
-          .catch((e: unknown) => console.error('Failed to drain queue:', e));
-      }
-
-      console.log('✅ Queue manager quiesced');
+      console.log('⚠️ Queue manager shutdown temporarily disabled');
     } catch (error) {
-      console.error('❌ Failed to stop queue manager:', error);
+      console.error('❌ Failed to stop queue processing:', error);
     }
     
     // Close database connections
     try {
-      const { closeDatabase } = await import('../database/connection.js');
-      await closeDatabase();
+      const { getDatabase } = await import('../db/adapter.js');
+      const db = getDatabase();
+      await db.close();
       console.log('✅ Database connections closed');
     } catch (error) {
       console.error('❌ Failed to close database:', error);

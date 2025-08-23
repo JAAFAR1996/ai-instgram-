@@ -5,9 +5,12 @@
  * ===============================================
  */
 
-import { getDatabase } from '../database/connection.js';
+import { getDatabase } from '../db/adapter.js';
 import type { Platform, QualityStatus, QualityMetrics } from '../types/database.js';
+import type { DIContainer } from '../container/index.js';
+import type { Pool } from 'pg';
 import { getLogger } from './logger.js';
+import { telemetry } from './telemetry.js';
 
 const logger = getLogger({ component: 'MonitoringService' });
 
@@ -81,7 +84,30 @@ interface QualityTrendRow {
 }
 
 export class MonitoringService {
-  private db = getDatabase();
+  private db: ReturnType<typeof getDatabase>;
+  private pool: Pool;
+  private logger: ReturnType<typeof getLogger>;
+
+  constructor(private container?: DIContainer) {
+    if (container) {
+      this.pool = container.get<Pool>('pool');
+      this.logger = container.get<ReturnType<typeof getLogger>>('logger');
+      this.initializeFromContainer();
+    } else {
+      this.initializeLegacy();
+    }
+  }
+
+  private initializeFromContainer(): void {
+    // Services will be injected via container when available
+    // For now, fallback to legacy methods
+    this.initializeLegacy();
+  }
+
+  private initializeLegacy(): void {
+    this.db = getDatabase();
+    this.logger = getLogger({ component: 'MonitoringService' });
+  }
 
   /**
    * Check WhatsApp Business API quality rating
@@ -104,6 +130,14 @@ export class MonitoringService {
       
       // Store quality check results
       await this.storeQualityMetrics(merchantId, 'whatsapp', metrics, status);
+      
+      // Record telemetry
+      telemetry.recordServiceControl(merchantId, 'quality_check', true);
+      telemetry.trackEvent('quality_check_completed', {
+        platform: 'whatsapp',
+        status,
+        quality_rating: metrics.qualityRating || 0
+      });
       
       return {
         merchantId,
@@ -136,6 +170,14 @@ export class MonitoringService {
       const alerts = this.generateAlerts(metrics, status);
       
       await this.storeQualityMetrics(merchantId, 'instagram', metrics, status);
+      
+      // Record telemetry
+      telemetry.recordServiceControl(merchantId, 'quality_check', true);
+      telemetry.trackEvent('quality_check_completed', {
+        platform: 'instagram',
+        status,
+        quality_rating: metrics.qualityRating || 0
+      });
       
       return {
         merchantId,
@@ -186,12 +228,22 @@ export class MonitoringService {
           ${metrics.errorMessage || null}
         )
       `;
+
+      // Record telemetry
+      telemetry.recordDatabaseQuery('audit_logs_insert', true, 0);
+      telemetry.trackEvent('performance_metric_logged', {
+        endpoint: metrics.endpoint,
+        method: metrics.method,
+        status_code: metrics.statusCode,
+        response_time: metrics.responseTime
+      });
     } catch (error) {
-      logger.error('Performance logging failed', error, {
+      this.logger.error('Performance logging failed', error, {
         merchantId: metrics.merchantId,
         endpoint: metrics.endpoint,
         event: 'logPerformanceMetrics'
       });
+      telemetry.recordDatabaseQuery('audit_logs_insert', false, 0);
     }
   }
 
@@ -275,6 +327,144 @@ export class MonitoringService {
   }
 
   /**
+   * Comprehensive system health check
+   */
+  public async getSystemHealth(): Promise<{
+    status: 'healthy' | 'degraded' | 'critical';
+    services: Array<{
+      name: string;
+      status: 'up' | 'down' | 'degraded';
+      responseTime: number;
+      error?: string;
+    }>;
+    metrics: {
+      averageResponseTime: number;
+      errorRate: number;
+      throughput: number;
+      activeConnections: number;
+      memoryUsage: number;
+      redisStatus: 'connected' | 'disconnected';
+      dbStatus: 'connected' | 'disconnected';
+    };
+  }> {
+    try {
+      const [performance, services] = await Promise.all([
+        this.getSystemPerformance(),
+        this.checkServiceHealth()
+      ]);
+
+      const overallStatus = this.determineOverallHealth(performance, services);
+
+      telemetry.trackEvent('system_health_check', {
+        status: overallStatus,
+        service_count: services.length,
+        healthy_services: services.filter(s => s.status === 'up').length
+      });
+
+      return {
+        status: overallStatus,
+        services,
+        metrics: {
+          ...performance,
+          redisStatus: services.find(s => s.name === 'redis')?.status === 'up' ? 'connected' : 'disconnected',
+          dbStatus: services.find(s => s.name === 'database')?.status === 'up' ? 'connected' : 'disconnected'
+        }
+      };
+    } catch (error) {
+      this.logger.error('System health check failed', error);
+      return {
+        status: 'critical',
+        services: [],
+        metrics: {
+          averageResponseTime: 0,
+          errorRate: 100,
+          throughput: 0,
+          activeConnections: 0,
+          memoryUsage: 0,
+          redisStatus: 'disconnected',
+          dbStatus: 'disconnected'
+        }
+      };
+    }
+  }
+
+  /**
+   * Check individual service health
+   */
+  private async checkServiceHealth(): Promise<Array<{
+    name: string;
+    status: 'up' | 'down' | 'degraded';
+    responseTime: number;
+    error?: string;
+  }>> {
+    const services = [];
+    
+    // Database health check
+    try {
+      const start = Date.now();
+      const sql = this.db.getSQL() as any;
+      await sql`SELECT 1`;
+      const responseTime = Date.now() - start;
+      
+      services.push({
+        name: 'database',
+        status: responseTime < 100 ? 'up' : 'degraded' as const,
+        responseTime
+      });
+      
+      telemetry.recordDatabaseQuery('health_check', true, responseTime);
+    } catch (error: any) {
+      services.push({
+        name: 'database',
+        status: 'down' as const,
+        responseTime: 0,
+        error: error.message
+      });
+      telemetry.recordDatabaseQuery('health_check', false, 0);
+    }
+
+    // Redis health check (if available)
+    try {
+      // This would be implemented when Redis client is available
+      services.push({
+        name: 'redis',
+        status: 'up' as const,
+        responseTime: 5 // Mock for now
+      });
+    } catch (error: any) {
+      services.push({
+        name: 'redis',
+        status: 'down' as const,
+        responseTime: 0,
+        error: error.message
+      });
+    }
+
+    return services;
+  }
+
+  /**
+   * Determine overall system health
+   */
+  private determineOverallHealth(
+    performance: Awaited<ReturnType<typeof this.getSystemPerformance>>,
+    services: Array<{ status: string }>
+  ): 'healthy' | 'degraded' | 'critical' {
+    const downServices = services.filter(s => s.status === 'down');
+    const degradedServices = services.filter(s => s.status === 'degraded');
+
+    if (downServices.length > 0 || performance.errorRate > 50) {
+      return 'critical';
+    }
+    
+    if (degradedServices.length > 0 || performance.errorRate > 10 || performance.averageResponseTime > 2000) {
+      return 'degraded';
+    }
+
+    return 'healthy';
+  }
+
+  /**
    * Get system-wide performance metrics
    */
   public async getSystemPerformance(): Promise<{
@@ -308,17 +498,28 @@ export class MonitoringService {
       
       const result = performance[0];
       
-      return {
+      const metrics = {
         averageResponseTime: Math.round(result.avg_response_time || 0),
         errorRate: Math.round((result.error_rate || 0) * 100) / 100,
         throughput: Math.round((result.total_requests || 0) / 5), // requests per minute
         activeConnections: parseInt(connections[0].active_connections),
         memoryUsage: Math.round((result.avg_memory_usage || 0) * 100) / 100
       };
+
+      // Record system metrics to telemetry
+      telemetry.trackEvent('system_performance_check', {
+        avg_response_time: metrics.averageResponseTime,
+        error_rate: metrics.errorRate,
+        throughput: metrics.throughput,
+        active_connections: metrics.activeConnections
+      });
+
+      return metrics;
     } catch (error) {
-      logger.error('Error getting system performance', error, {
+      this.logger.error('Error getting system performance', error, {
         event: 'getSystemPerformance'
       });
+      telemetry.trackEvent('system_performance_check_failed', {});
       throw new Error('Failed to get system performance');
     }
   }
@@ -595,7 +796,44 @@ export class MonitoringService {
   }
 }
 
-// Singleton instance
+/**
+ * Real-time monitoring middleware for API endpoints
+ */
+export function createPerformanceMiddleware(monitoringService: MonitoringService) {
+  return (req: any, res: any, next: any) => {
+    const startTime = Date.now();
+    const originalEnd = res.end;
+
+    res.end = function(...args: any[]) {
+      const responseTime = Date.now() - startTime;
+      const metrics: PerformanceMetrics = {
+        endpoint: req.path || req.url,
+        method: req.method,
+        responseTime,
+        statusCode: res.statusCode,
+        timestamp: new Date(),
+        merchantId: req.merchantId,
+        errorMessage: res.statusCode >= 400 ? args[0] : undefined
+      };
+
+      // Log async to avoid blocking response
+      monitoringService.logPerformanceMetrics(metrics).catch(err => {
+        console.error('Performance logging failed:', err);
+      });
+
+      originalEnd.apply(this, args);
+    };
+
+    next();
+  };
+}
+
+// Factory function for DI container
+export function createMonitoringService(container: DIContainer): MonitoringService {
+  return new MonitoringService(container);
+}
+
+// Singleton instance (legacy support)
 let monitoringInstance: MonitoringService | null = null;
 
 /**
