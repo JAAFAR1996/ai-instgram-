@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getDatabase } from './connection.js';
+// Database access via pg adapter
 import type postgres from 'postgres';
 import crypto from 'crypto';
 

@@ -6,7 +6,7 @@
  */
 
 import { getDatabase } from '../db/adapter.js';
-import type { Fragment, Sql } from 'postgres';
+// Database access via pg adapter
 
 interface MerchantRow {
   id: string;

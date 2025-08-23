@@ -6,7 +6,7 @@
  */
 
 import { getDatabase } from '../db/adapter.js';
-import type { Sql } from 'postgres';
+// Database access via pg adapter
 
 interface ConversationRow {
   id: string;
