@@ -14,12 +14,16 @@ assertEnvStrict();
 
 // 3) Core imports
 import { Hono } from 'hono';
+
 import { serve } from '@hono/node-server';
-import * as crypto from 'node:crypto';
 
 // 4) Logger and telemetry
 import { getLogger } from './services/logger.js';
 import { initTelemetry, telemetry } from './services/telemetry.js';
+import { randomUUID } from 'crypto';
+// اجعل prom-client اختيارياً
+let promClient: typeof import('prom-client') | null = null;
+try { promClient = await import('prom-client'); } catch {}
 
 // 5) Startup modules
 import { getPool, runDatabaseMigrations } from './startup/database.js';
@@ -81,6 +85,36 @@ async function bootstrap() {
     // Create Hono app
     const app = new Hono();
 
+    // Request ID لكل طلب
+    app.use('*', async (c, next) => {
+  const requestId = randomUUID();
+  c.header('X-Request-ID', requestId);
+  if (c.req.method === 'OPTIONS') {
+    return new Response('', { status: 204 });
+  }
+  await next();
+  return;
+});
+
+    // CORS محسّن لـ Render
+    app.use('*', async (c, next) => {
+      const allowedOrigins = process.env.CORS_ORIGINS?.split(',') || ['*'];
+      const origin = c.req.header('origin') || '';
+      
+      if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+        c.header('Access-Control-Allow-Origin', origin || '*');
+        c.header('Access-Control-Allow-Credentials', 'true');
+        c.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+        c.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Merchant-Id,X-Request-Id');
+      }
+      
+      if (c.req.method === 'OPTIONS') {
+        return c.status(204);
+      }
+      
+      await next();
+    });
+
     // Global middleware
     app.use('*', securityHeaders);
     
@@ -113,6 +147,42 @@ async function bootstrap() {
     registerAdminRoutes(app, deps);
     registerUtilityMessageRoutes(app);
     registerLegalRoutes(app);
+
+    // Prometheus Metrics (مفعّل فقط عند METRICS_ENABLED)
+    const metricsEnabled = process.env.METRICS_ENABLED === 'true';
+    if (metricsEnabled && promClient) {
+      const collectDefaultMetrics = promClient.collectDefaultMetrics;
+      collectDefaultMetrics({ prefix: 'ai_sales_' });
+      
+      // HTTP request duration histogram
+      const httpDuration = new promClient.Histogram({
+        name: 'ai_sales_http_request_duration_seconds',
+        help: 'Duration of HTTP requests in seconds',
+        labelNames: ['method', 'route', 'status']
+      });
+      
+      // Middleware لقياس الوقت
+      app.use('*', async (c, next) => {
+        const start = Date.now();
+        await next();
+        const duration = (Date.now() - start) / 1000;
+        httpDuration.observe(
+          { 
+            method: c.req.method, 
+            route: c.req.path, 
+            status: String(c.res.status) 
+          }, 
+          duration
+        );
+      });
+      
+      app.get('/metrics', async (c) => {
+        const metrics = await promClient!.register.metrics();
+        return c.text(metrics, 200, {
+          'Content-Type': promClient!.register.contentType
+        });
+      });
+    }
 
     // Health endpoints (accessible without auth)
     app.get('/health', async (c) => {

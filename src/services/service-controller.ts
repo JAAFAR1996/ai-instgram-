@@ -5,9 +5,15 @@
  * ===============================================
  */
 
-import type { Platform } from '../types/database.js';
+import type { SqlFunction as Sql } from '../infrastructure/db/sql-compat.js';
 import type { DIContainer } from '../container/index.js';
-import type { Pool } from 'pg';
+import { getDatabase } from '../db/adapter.js';
+import { logger } from './logger.js';
+import { firstOrNull } from '../utils/safety.js';
+
+interface Database {
+  getSQL: () => Sql;
+}
 
 export interface ServiceStatus {
   enabled: boolean;
@@ -44,36 +50,29 @@ export interface ServiceHealth {
 }
 
 export class ServiceController {
-  private pool!: Pool;
-  private logger!: any;
-  private db!: any;
+  private db!: Database;
 
-  constructor(private container?: DIContainer) {
+  constructor(container?: DIContainer) {
     if (container) {
-      this.pool = container.get<Pool>('pool');
-      this.logger = container.get('logger');
-      this.db = { getSQL: () => this.getSQLFromPool() };
+      this.db = getDatabase() as Database; // يوفّر getSQL متوافق
     } else {
       // Legacy fallback
       this.initializeLegacy();
     }
   }
 
-  private getSQLFromPool() {
-    const { getSQLClient } = require('../db/index.js');
-    return getSQLClient(this.pool);
-  }
+  // private async getSQLFromPool() {
+  //   const { getSQLClient } = await import('../db/index.js');
+  //   return getSQLClient(this.pool);
+  // }
 
   private async initializeLegacy(): Promise<void> {
     const { getDatabase } = await import('../db/adapter.js');
-    const { getLogger } = await import('./logger.js');
     
-    this.db = getDatabase();
-    this.pool = (this.db as any).pool || this.db;
-    this.logger = getLogger({ component: 'service-controller' });
+    this.db = getDatabase() as Database;
   }
 
-  private get sqlAny() {
+  private get sql() {
     return this.db.getSQL();
   }
 
@@ -86,7 +85,7 @@ export class ServiceController {
     previousState?: boolean;
   }> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql = this.db.getSQL();
       
       // Get current state
       const currentState = await this.getServiceStatus(request.merchantId, request.service);
@@ -105,8 +104,8 @@ export class ServiceController {
           ${request.service},
           ${request.enabled},
           NOW(),
-          ${request.toggledBy || 'system'},
-          ${request.reason}
+          ${request.toggledBy ?? 'system'},
+          ${request.reason ?? ''}
         )
         ON CONFLICT (merchant_id, service_name)
         DO UPDATE SET
@@ -145,8 +144,8 @@ export class ServiceController {
     service: string
   ): Promise<boolean> {
     try {
-      const sql = this.db.getSQL() as any;
-      const result = await sql`
+      const sql = this.db.getSQL();
+      const result = await sql<{ enabled: boolean }>`
         SELECT enabled
         FROM merchant_service_status
         WHERE merchant_id = ${merchantId}::uuid
@@ -158,7 +157,7 @@ export class ServiceController {
         return true;
       }
 
-      return result[0].enabled;
+      return firstOrNull(result)?.enabled ?? false;
     } catch (error) {
       console.error('❌ Failed to get service status:', error);
       return false; // Fail safe
@@ -170,7 +169,7 @@ export class ServiceController {
    */
   public async getAllServicesStatus(merchantId: string): Promise<MerchantServices> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql = this.db.getSQL();
       const result = await sql`
         SELECT 
           service_name,
@@ -282,7 +281,7 @@ export class ServiceController {
         });
       }
 
-      console.log(`✅ All Instagram services enabled for merchant: ${merchantId}`);
+      logger.info(`✅ All Instagram services enabled for merchant: ${merchantId}`);
       return true;
     } catch (error) {
       console.error('❌ Failed to enable Instagram services:', error);
@@ -318,7 +317,7 @@ export class ServiceController {
         });
       }
 
-      console.log(`🛑 All services disabled for merchant: ${merchantId}`);
+      logger.info(`🛑 All services disabled for merchant: ${merchantId}`);
       return true;
     } catch (error) {
       console.error('❌ Failed to disable all services:', error);
@@ -331,7 +330,7 @@ export class ServiceController {
    */
   public async getServicesHealth(merchantId: string): Promise<ServiceHealth[]> {
     try {
-      const healthData = await this.sqlAny`
+      const healthData = await this.sql`
         SELECT 
           mss.service_name,
           mss.enabled,
@@ -385,7 +384,7 @@ export class ServiceController {
     context?: any
   ): Promise<void> {
     try {
-      await this.sqlAny`
+      await this.sql`
         INSERT INTO service_errors (
           merchant_id,
           service_name,
@@ -431,8 +430,8 @@ export class ServiceController {
     service: string
   ): Promise<number> {
     try {
-      const sql = this.db.getSQL() as any;
-      const result = await sql`
+      const sql = this.db.getSQL();
+      const result = await sql<{ count: number }>`
         SELECT COALESCE(error_count, 0) as count
         FROM service_errors
         WHERE merchant_id = ${merchantId}::uuid
@@ -440,7 +439,7 @@ export class ServiceController {
         AND created_at >= NOW() - INTERVAL '1 hour'
       `;
 
-      return result[0]?.count || 0;
+      return result[0]?.count ?? 0;
     } catch (error) {
       return 0;
     }
@@ -454,8 +453,8 @@ export class ServiceController {
     previousState: boolean
   ): Promise<void> {
     try {
-      await this.sqlAny`
-        INSERT INTO audit_logs (
+      await this.sql`
+        INSERT INTO audit_log (
           merchant_id,
           action,
           entity_type,

@@ -6,12 +6,16 @@
  */
 
 import { getPool } from '../db/index.js';
-import { getConfig } from '../config/environment.js';
+import { getConfig } from '../config/index.js';
 import { getMerchantCache, getTemplateCache, getSessionCache } from '../cache/index.js';
 import { getLogger } from '../services/logger.js';
 import type { Pool } from 'pg';
-import type { AppConfig } from '../config/environment.js';
-import type { CacheService, MerchantCache, TemplateCache, SessionCache } from '../cache/index.js';
+import type { AppConfig } from '../config/index.js';
+import type { MerchantCache, TemplateCache, SessionCache } from '../cache/index.js';
+import type { AIService } from '../services/ai.js';
+import type { InstagramMessagingService } from '../services/instagram-messaging.js';
+import type { InstagramWebhookHandler } from '../services/instagram-webhook.js';
+import type { UtilityMessagesService } from '../services/utility-messages.js';
 
 const log = getLogger({ component: 'di-container' });
 
@@ -28,10 +32,10 @@ export interface ServiceRegistry {
   sessionCache: SessionCache;
 
   // Business services (will be populated)
-  aiService?: any;
-  instagramService?: any;
-  webhookService?: any;
-  utilityMessagesService?: any;
+  aiService?: AIService;
+  instagramService?: InstagramMessagingService;
+  webhookService?: InstagramWebhookHandler;
+  utilityMessagesService?: UtilityMessagesService;
 }
 
 /**
@@ -40,7 +44,7 @@ export interface ServiceRegistry {
 export class DIContainer {
   private static instance: DIContainer | null = null;
   private services: Partial<ServiceRegistry> = {};
-  private singletons: Map<string, any> = new Map();
+  private singletons: Map<string, { factory: (() => unknown) | null; instance: unknown | null }> = new Map();
 
   private constructor() {
     this.initializeCoreServices();
@@ -69,7 +73,7 @@ export class DIContainer {
       this.services.sessionCache = getSessionCache();
 
       log.info('Core services initialized in DI container');
-    } catch (error: any) {
+    } catch (error: unknown) {
       log.error('Failed to initialize core services:', error);
       throw error;
     }
@@ -119,13 +123,13 @@ export class DIContainer {
       try {
         registration.instance = registration.factory();
         log.debug(`Singleton created: ${key}`);
-      } catch (error: any) {
+      } catch (error: unknown) {
         log.error(`Failed to create singleton ${key}:`, error);
         throw error;
       }
     }
 
-    return registration.instance;
+    return registration.instance as T;
   }
 
   /**
@@ -198,11 +202,11 @@ export class DIContainer {
           await (service as Pool).query('SELECT 1');
         }
         results.push({ name, status: 'healthy' as const });
-      } catch (error: any) {
+      } catch (error: unknown) {
         results.push({ 
           name, 
           status: 'error' as const, 
-          error: error.message 
+          error: error instanceof Error ? error.message : String(error) 
         });
       }
     }
@@ -233,11 +237,11 @@ export function Service(name?: string) {
  * Inject decorator for dependency injection
  */
 export function Inject(token: string) {
-  return function (target: any, propertyKey: string | symbol | undefined, parameterIndex: number) {
+  return function (target: unknown, _propertyKey: string | symbol | undefined, parameterIndex: number) {
     // Store metadata for dependency injection
-    const existingTokens = Reflect.getMetadata('inject-tokens', target) || [];
+    const existingTokens = (Reflect as any).getMetadata?.('inject-tokens', target) || [];
     existingTokens[parameterIndex] = token;
-    Reflect.defineMetadata('inject-tokens', existingTokens, target);
+    (Reflect as any).defineMetadata?.('inject-tokens', existingTokens, target);
   };
 }
 

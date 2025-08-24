@@ -8,11 +8,14 @@
 import { getInstagramClient, clearInstagramClient, type InstagramAPICredentials } from './instagram-api.js';
 import { ExpiringMap } from '../utils/expiring-map.js';
 import { getDatabase } from '../db/adapter.js';
+import { createLogger } from './logger.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramContext } from './instagram-ai.js';
+import type { ConversationStage } from '../types/database.js';
 import { hashMerchantAndBody } from '../middleware/idempotency.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
+// removed unused import
 
 export interface MediaContent {
   id: string;
@@ -90,6 +93,7 @@ export interface MediaTemplate {
 
 export class InstagramMediaManager {
   private db = getDatabase();
+  private logger = createLogger({ component: 'InstagramMediaManager' });
   private aiOrchestrator = getConversationAIOrchestrator();
   private redis = getRedisConnectionManager();
   private credentialsCache = new ExpiringMap<string, InstagramAPICredentials>();
@@ -147,7 +151,7 @@ export class InstagramMediaManager {
     error?: string
   }> {
     try {
-      console.log(`📸 Processing incoming ${media.type}: ${media.id}`);
+      this.logger.info('Processing incoming media', { type: media.type, mediaId: media.id });
 
       const bodyForHash = {
         merchantId,
@@ -163,7 +167,7 @@ export class InstagramMediaManager {
       const existingResult = await redis.get(idempotencyKey);
 
       if (existingResult) {
-        console.log(`🔒 Idempotent media processing detected: ${idempotencyKey}`);
+        this.logger.info('Idempotent media processing detected', { idempotencyKey });
         try {
           return JSON.parse(existingResult);
         } catch (error) {
@@ -201,7 +205,7 @@ export class InstagramMediaManager {
         await this.handleProductInquiry(media, analysis, conversationId, merchantId);
       }
 
-      console.log(`✅ Media processed: ${media.type} (confidence: ${analysis.confidence}%)`);
+      this.logger.info('Media processed', { type: media.type, confidence: analysis.confidence });
 
       const successResult = {
         success: true,
@@ -211,11 +215,11 @@ export class InstagramMediaManager {
 
       // 💾 Cache successful result for idempotency (24 hours TTL)
       await redis.setex(idempotencyKey, 86400, JSON.stringify(successResult));
-      console.log(`💾 Cached media processing result: ${idempotencyKey}`);
+      this.logger.info('Cached media processing result', { idempotencyKey });
 
       return successResult;
     } catch (error) {
-      console.error('❌ Media processing failed:', error);
+      this.logger.error('Media processing failed', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -273,19 +277,21 @@ export class InstagramMediaManager {
       );
 
       if (result.success) {
-        console.log(`✅ Media message sent: ${mediaType} to ${recipientId}`);
+        this.logger.info('Media message sent', { mediaType, recipientId });
         return {
           success: true,
-          messageId: result.messageId
+          ...(result.messageId ? { messageId: result.messageId } : {})
         };
       } else {
         return {
           success: false,
-          error: result.error?.message || 'Failed to send media'
+          error: (typeof result.error === 'string'
+            ? result.error
+            : (result as any)?.error?.message) || 'Failed to send media'
         };
       }
     } catch (error) {
-      console.error('❌ Send media message failed:', error);
+      this.logger.error('Send media message failed', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -353,7 +359,7 @@ export class InstagramMediaManager {
 
       return analysis;
     } catch (error) {
-      console.error('❌ Media analysis failed:', error);
+      this.logger.error('Media analysis failed', error);
       // Return basic fallback analysis
       return {
         description: `Received ${media.type} content`,
@@ -379,16 +385,9 @@ export class InstagramMediaManager {
     try {
       const sql = this.db.getSQL();
 
-      const result = await sql`
+      const result = await sql<{ id: string }>`
         INSERT INTO media_templates (
-          merchant_id,
-          name,
-          category,
-          media_type,
-          template_url,
-          overlay_elements,
-          is_active,
-          created_at
+          merchant_id, name, category, media_type, template_url, overlay_elements, is_active, created_at
         ) VALUES (
           ${merchantId}::uuid,
           ${template.name},
@@ -402,11 +401,11 @@ export class InstagramMediaManager {
         RETURNING id
       `;
 
-      const templateId = result[0].id;
-      console.log(`✅ Media template created: ${template.name} (${templateId})`);
+      const templateId = ((result[0] as unknown) as { id: string })?.id ?? '';
+      this.logger.info('Media template created', { templateName: template.name, templateId });
       return templateId;
     } catch (error) {
-      console.error('❌ Media template creation failed:', error);
+      this.logger.error('Media template creation failed', error);
       throw error;
     }
   }
@@ -432,13 +431,18 @@ export class InstagramMediaManager {
     try {
       const sql = this.db.getSQL();
 
-      const dateFilter = dateRange 
+      const dateFilter = dateRange
         ? sql`AND created_at BETWEEN ${dateRange.from} AND ${dateRange.to}`
         : sql`AND created_at >= NOW() - INTERVAL '30 days'`;
 
       // Get media message stats
-      const mediaStats = await sql`
-        SELECT 
+      const mediaStats = await sql.unsafe<{
+        total_media: string;
+        responses: string;
+        media_type: string;
+        type_count: string;
+      }>(`
+        SELECT
           COUNT(*) as total_media,
           COUNT(CASE WHEN direction = 'outgoing' THEN 1 END) as responses,
           mm.media_type,
@@ -447,48 +451,55 @@ export class InstagramMediaManager {
         WHERE mm.merchant_id = ${merchantId}::uuid
         ${dateFilter}
         GROUP BY mm.media_type
-      `;
+      `);
 
       // Get product inquiry stats
-      const inquiryStats = await sql`
+      const inquiryStats = await sql.unsafe<{
+        product_inquiries: string;
+      }>(`
         SELECT COUNT(*) as product_inquiries
         FROM media_analysis ma
         JOIN media_messages mm ON ma.media_id = mm.media_id
         WHERE mm.merchant_id = ${merchantId}::uuid
         AND ma.is_product_inquiry = true
         ${dateFilter}
-      `;
+      `);
 
       // Get template usage
-      const templateStats = await sql`
+      const templateStats = await sql.unsafe<{
+        name: string;
+        usage_count: string;
+        category: string;
+      }>(`
         SELECT name, usage_count, category
         FROM media_templates
         WHERE merchant_id = ${merchantId}::uuid
         AND is_active = true
         ORDER BY usage_count DESC
         LIMIT 5
-      `;
+      `);
 
-      const totalMedia = mediaStats.reduce((sum, stat) => sum + Number(stat.type_count), 0);
-      const totalResponses = mediaStats.reduce((sum, stat) => sum + Number(stat.responses || 0), 0);
+      const totalMedia = mediaStats.reduce((sum: number, stat: any) => sum + Number(((stat as unknown) as { type_count: string })?.type_count ?? 0), 0);
+      const totalResponses = mediaStats.reduce((sum: number, stat: any) => sum + Number(((stat as unknown) as { responses: string })?.responses ?? 0), 0);
 
       return {
         totalMediaMessages: totalMedia,
-        mediaBreakdown: mediaStats.reduce((acc, stat) => {
-          acc[stat.media_type] = Number(stat.type_count);
+        mediaBreakdown: mediaStats.reduce((acc: Record<string, number>, stat) => {
+          const statData = (stat as unknown) as { total_media: string; responses: string; media_type: string; type_count: string };
+          acc[statData?.media_type ?? ''] = Number(statData?.type_count ?? 0);
           return acc;
-        }, {} as any),
+        }, {}),
         mediaResponseRate: totalMedia > 0 ? (totalResponses / totalMedia) * 100 : 0,
-        productInquiries: Number(inquiryStats[0]?.product_inquiries || 0),
+        productInquiries: Number(((inquiryStats[0] as unknown) as { product_inquiries: string })?.product_inquiries || 0),
         averageEngagement: 75, // Could be calculated from detailed engagement metrics
-        topMediaTemplates: templateStats.map(template => ({
-          name: template.name,
-          usageCount: Number(template.usage_count),
-          category: template.category
+        topMediaTemplates: templateStats.map((template: any) => ({
+          name: ((template as unknown) as { name: string; usage_count: string; category: string })?.name ?? '',
+          usageCount: Number(((template as unknown) as { name: string; usage_count: string; category: string })?.usage_count ?? 0),
+          category: ((template as unknown) as { name: string; usage_count: string; category: string })?.category ?? ''
         }))
       };
     } catch (error) {
-      console.error('❌ Media analytics failed:', error);
+      this.logger.error('Media analytics failed', error);
       throw error;
     }
   }
@@ -496,7 +507,7 @@ export class InstagramMediaManager {
   /**
    * Private: Analyze image content
    */
-  private async analyzeImage(media: MediaContent, textContent?: string): Promise<MediaAnalysisResult> {
+  private async analyzeImage(_media: MediaContent, _textContent?: string): Promise<MediaAnalysisResult> {
     // Enhanced image analysis could use AI vision APIs here
     const analysis: MediaAnalysisResult = {
       description: 'Image received - product or general inquiry',
@@ -511,14 +522,14 @@ export class InstagramMediaManager {
     };
 
     // Check if image looks like product inquiry
-    if (textContent) {
+    if (_textContent) {
       const productPatterns = [
         'عايزة زي دي', 'أريد مثل هذه', 'want like this',
         'متوفر', 'available', 'سعر', 'price'
       ];
       
       const hasProductPattern = productPatterns.some(pattern => 
-        textContent.toLowerCase().includes(pattern)
+        _textContent!.toLowerCase().includes(pattern)
       );
       
       if (hasProductPattern) {
@@ -539,10 +550,10 @@ export class InstagramMediaManager {
   /**
    * Private: Analyze video content
    */
-  private async analyzeVideo(media: MediaContent, textContent?: string): Promise<MediaAnalysisResult> {
+  private async analyzeVideo(_media: MediaContent, _textContent?: string): Promise<MediaAnalysisResult> {
     return {
       description: 'Video content received',
-      isProductInquiry: textContent?.toLowerCase().includes('سعر') || false,
+      isProductInquiry: _textContent?.toLowerCase().includes('سعر') || false,
       suggestedResponse: {
         type: 'text',
         content: 'شفت الفيديو! 🎥 إيه رأيك نتكلم عن المنتجات؟'
@@ -556,7 +567,7 @@ export class InstagramMediaManager {
   /**
    * Private: Analyze document content
    */
-  private async analyzeDocument(media: MediaContent, textContent?: string): Promise<MediaAnalysisResult> {
+  private async analyzeDocument(_media: MediaContent, _textContent?: string): Promise<MediaAnalysisResult> {
     return {
       description: 'Document or file received',
       isProductInquiry: false,
@@ -612,20 +623,20 @@ export class InstagramMediaManager {
 
       const sendResult = await instagramClient.sendMessage(credentials, merchantId, {
         recipientId: userId,
-        messageType: 'text',
+        messageType: 'text' as const,
         content: responseContent
       });
 
       if (sendResult.success) {
         // Store the response
         await this.storeMediaResponse(conversationId, responseContent, sendResult.messageId, merchantId);
-        console.log(`✅ Media response sent: ${responseContent.substring(0, 50)}...`);
+        this.logger.info('Media response sent', { preview: responseContent.substring(0, 50) });
         return true;
       }
 
       return false;
     } catch (error) {
-      console.error('❌ Generate media response failed:', error);
+      this.logger.error('Generate media response failed', error);
       return false;
     }
   }
@@ -676,7 +687,7 @@ export class InstagramMediaManager {
           updated_at = NOW()
       `;
     } catch (error) {
-      console.error('❌ Store media failed:', error);
+      this.logger.error('Store media failed', error);
       throw error;
     }
   }
@@ -724,7 +735,7 @@ export class InstagramMediaManager {
           updated_at = NOW()
       `;
     } catch (error) {
-      console.error('❌ Store media analysis failed:', error);
+      this.logger.error('Store media analysis failed', error);
     }
   }
 
@@ -752,34 +763,34 @@ export class InstagramMediaManager {
 
       const conversation = data[0];
 
-      let session: any = {};
+      let session: Record<string, unknown> = {};
       try {
-        session = typeof conversation.session_data === 'string'
-          ? JSON.parse(conversation.session_data)
-          : conversation.session_data || {};
+        session = typeof ((conversation as unknown) as { session_data: string | object })?.session_data === 'string'
+          ? JSON.parse(((conversation as unknown) as { session_data: string | object })?.session_data as string)
+          : ((conversation as unknown) as { session_data: string | object })?.session_data || {};
       } catch (error) {
-        console.error('❌ Failed to parse session data for conversation', conversationId, error);
+        this.logger.error('Failed to parse session data for conversation', { conversationId, error });
       }
 
       return {
         merchantId,
         customerId: userId,
         platform: 'instagram',
-        stage: conversation.conversation_stage,
-        cart: session.cart || [],
-        preferences: session.preferences || {},
+        stage: (((conversation as unknown) as { conversation_stage?: unknown })?.conversation_stage ?? 'greeting') as unknown as ConversationStage,
+        cart: (session.cart ?? []) as Record<string, unknown>[],
+        preferences: (session.preferences ?? {}) as Record<string, unknown>,
         conversationHistory: [],
         interactionType: 'dm',
         mediaContext: {
           mediaId: media.id,
-          mediaType: media.type === 'image' ? 'photo'
-                    : (media.type as 'video' | 'carousel' | 'photo' | undefined),
-          caption: (media as any)?.caption ?? '',
-          hashtags: (media as any)?.hashtags ?? [],
+          // حصر القيم على الأنواع المدعومة في الـ Context
+          mediaType: media.type === 'video' ? 'video' : 'photo',
+          caption: ((media as unknown as Record<string, unknown>)?.caption as string) ?? '',
+          hashtags: ((media as unknown as Record<string, unknown>)?.hashtags as string[]) ?? [],
         },
         merchantSettings: {
-          businessName: conversation.business_name,
-          businessCategory: conversation.business_category,
+          businessName: ((conversation as unknown) as { business_name: string })?.business_name ?? '',
+          businessCategory: ((conversation as unknown) as { business_category: string })?.business_category ?? '',
           workingHours: {},
           paymentMethods: [],
           deliveryFees: {},
@@ -787,7 +798,7 @@ export class InstagramMediaManager {
         }
       };
     } catch (error) {
-      console.error('❌ Build media context failed:', error);
+      this.logger.error('Build media context failed', error);
       throw error;
     }
   }
@@ -826,7 +837,7 @@ export class InstagramMediaManager {
         )
       `;
     } catch (error) {
-      console.error('❌ Store media response failed:', error);
+      this.logger.error('Store media response failed', error);
     }
   }
 
@@ -852,24 +863,24 @@ export class InstagramMediaManager {
       const template = templates[0];
       let overlayElements;
       try {
-        overlayElements = JSON.parse(template.overlay_elements || '{}');
+        overlayElements = JSON.parse(((template as unknown) as { overlay_elements: string })?.overlay_elements || '{}');
       } catch (error) {
-        console.warn(`⚠️ Failed to parse overlay elements for template ${template.id}:`, error);
+        console.warn(`⚠️ Failed to parse overlay elements for template ${((template as unknown) as { id: string })?.id}:`, error);
         overlayElements = {};
       }
       return {
-        id: template.id,
-        name: template.name,
-        category: template.category,
-        mediaType: template.media_type,
-        templateUrl: template.template_url,
-        attachmentId: template.attachment_id,
+        id: ((template as unknown) as { id: string })?.id ?? '',
+        name: ((template as unknown) as { name: string })?.name ?? '',
+        category: ((template as Record<string, unknown>)?.category ?? 'product') as 'story' | 'promo' | 'product' | 'greeting' | 'thanks',
+        mediaType: ((template as Record<string, unknown>)?.media_type ?? 'image') as 'image' | 'video' | 'gif',
+        templateUrl: ((template as unknown) as { template_url: string })?.template_url ?? '',
+        attachmentId: ((template as unknown) as { attachment_id: string })?.attachment_id ?? '',
         overlayElements,
-        usageCount: template.usage_count,
-        isActive: template.is_active
+        usageCount: ((template as unknown) as { usage_count: number })?.usage_count ?? 0,
+        isActive: ((template as unknown) as { is_active: boolean })?.is_active ?? false
       };
     } catch (error) {
-      console.error('❌ Get media template failed:', error);
+      this.logger.error('Get media template failed', error);
       return null;
     }
   }
@@ -904,7 +915,7 @@ export class InstagramMediaManager {
         WHERE id = ${templateId}::uuid
       `;
     } catch (error) {
-      console.error('❌ Increment template usage failed:', error);
+      this.logger.error('Increment template usage failed', error);
     }
   }
 
@@ -940,7 +951,7 @@ export class InstagramMediaManager {
           updated_at = NOW()
       `;
     } catch (error) {
-      console.error('❌ Update media analytics failed:', error);
+      this.logger.error('Update media analytics failed', error);
     }
   }
 
@@ -988,9 +999,9 @@ export class InstagramMediaManager {
           updated_at = NOW()
       `;
 
-      console.log(`💰 Product inquiry detected from ${media.type} - sales opportunity created`);
+      this.logger.info('Product inquiry detected - sales opportunity created', { mediaType: media.type });
     } catch (error) {
-      console.error('❌ Handle product inquiry failed:', error);
+      this.logger.error('Handle product inquiry failed', error);
     }
   }
 }

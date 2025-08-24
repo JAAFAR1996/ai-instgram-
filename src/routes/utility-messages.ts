@@ -6,11 +6,11 @@
  */
 
 import { Hono } from 'hono';
-import type { Pool } from 'pg';
+// Removed unused import: Pool
 import { getLogger } from '../services/logger.js';
 import { UtilityMessagesService, type UtilityMessageType } from '../services/utility-messages.js';
 import { z } from 'zod';
-import * as crypto from 'node:crypto';
+// Removed unused import: crypto
 
 const log = getLogger({ component: 'utility-messages-routes' });
 
@@ -250,7 +250,7 @@ export function registerUtilityMessageRoutes(app: Hono): void {
   // Health check for utility messages
   app.get('/api/utility-messages/health', async (c) => {
     try {
-      const utilityService = new UtilityMessagesService();
+      // const utilityService = new UtilityMessagesService(); // unused
       
       return c.json({
         status: 'healthy',

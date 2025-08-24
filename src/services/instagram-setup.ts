@@ -5,6 +5,7 @@
  * ===============================================
  */
 
+import type { BusinessAccountInfo } from '../types/instagram.js';
 import { getInstagramClient, getInstagramAPICredentialsManager, type InstagramAPICredentials } from './instagram-api.js';
 import { getEncryptionService } from './encryption.js';
 import { getDatabase } from '../db/adapter.js';
@@ -36,15 +37,7 @@ export interface SetupStep {
   details?: any;
 }
 
-export interface BusinessAccountInfo {
-  id: string;
-  username: string;
-  name: string;
-  profile_picture_url: string;
-  followers_count: number;
-  media_count: number;
-  biography?: string;
-}
+// Using imported BusinessAccountInfo from types/instagram.js
 
 function isBusinessAccountInfo(data: unknown): data is BusinessAccountInfo {
   if (!data || typeof data !== 'object') return false;
@@ -60,7 +53,7 @@ function isBusinessAccountInfo(data: unknown): data is BusinessAccountInfo {
 }
 
 export class InstagramSetupService {
-  private encryptionService = getEncryptionService();
+  private _encryptionService = getEncryptionService();
   private db = getDatabase();
   private logger = createLogger({ component: 'InstagramSetupService' });
 
@@ -227,7 +220,14 @@ export class InstagramSetupService {
 
       return {
         isValid: issues.length === 0,
-        accountInfo,
+        accountInfo: {
+          id: accountInfo.id,
+          username: accountInfo.username ?? accountInfo.name ?? '',
+          name: accountInfo.name ?? '',
+          profile_picture_url: accountInfo.profile_picture_url ?? '',
+          followers_count: accountInfo.followers_count ?? 0,
+          media_count: accountInfo.media_count ?? 0
+        },
         issues
       };
 
@@ -376,13 +376,17 @@ export class InstagramSetupService {
 
       // Get account info
       const accountInfo = await client.getBusinessAccountInfo(creds, merchantId);
+      const normalizedAccountInfo: BusinessAccountInfo = {
+        ...accountInfo,
+        username: String((accountInfo as any)?.username ?? '')
+      };
       
       // Perform health check
       const healthStatus = await client.healthCheck(creds, merchantId);
 
       return {
         success: true,
-        accountInfo,
+        accountInfo: normalizedAccountInfo,
         healthStatus,
         errors
       };

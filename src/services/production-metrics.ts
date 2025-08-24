@@ -8,6 +8,7 @@ import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { getDatabaseJobSpool } from '../queue/db-spool.js';
 import { getDatabase } from '../db/adapter.js';
+import { firstOrThrow, must } from '../utils/safety.js';
 
 const logger = getLogger({ component: 'ProductionMetrics' });
 
@@ -62,7 +63,7 @@ export class ProductionMetricsCollector {
   private metrics: ProductionMetrics | null = null;
   private alerts: MetricAlert[] = [];
   private isCollecting = false;
-  private intervalId?: NodeJS.Timeout;
+  private intervalId: ReturnType<typeof setInterval> | null = null;
 
   // Metric counters (in-memory, could be Redis in production)
   private counters = {
@@ -99,7 +100,7 @@ export class ProductionMetricsCollector {
       try {
         await this.collectMetrics();
       } catch (error) {
-        logger.error('Metrics collection error', { error: error.message });
+        logger.error('Metrics collection error', { error: error instanceof Error ? error.message : String(error) });
       }
     }, intervalMs);
   }
@@ -111,7 +112,7 @@ export class ProductionMetricsCollector {
     this.isCollecting = false;
     if (this.intervalId) {
       clearInterval(this.intervalId);
-      this.intervalId = undefined;
+      this.intervalId = null;
     }
     logger.info('Metrics collection stopped');
   }
@@ -151,7 +152,7 @@ export class ProductionMetricsCollector {
       logger.debug('Metrics collected', { collectionTimeMs: collectionTime });
 
     } catch (error) {
-      logger.error('Failed to collect metrics', { error: error.message });
+      logger.error('Failed to collect metrics', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -188,8 +189,9 @@ export class ProductionMetricsCollector {
       };
       
     } catch (error) {
-      const isRateLimit = error.message?.includes('max requests limit') || 
-                         error.message?.includes('rate limit');
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isRateLimit = errorMessage.includes('max requests limit') || 
+                         errorMessage.includes('rate limit');
       
       return {
         status: isRateLimit ? 'degraded' as const : 'down' as const,
@@ -224,7 +226,7 @@ export class ProductionMetricsCollector {
       
       return {
         status: 'healthy' as const,
-        connectionCount: parseInt(connStats.active_connections),
+        connectionCount: parseInt(String(must(connStats?.active_connections, 'missing active_connections'))),
         queryResponseTime: responseTime,
         rlsDeniedCount: this.counters.rlsViolations
       };
@@ -280,9 +282,9 @@ export class ProductionMetricsCollector {
       ]);
       
       return {
-        activeConversations: parseInt(conversations[0].count),
+        activeConversations: parseInt(String(firstOrThrow(conversations).count)),
         messagesProcessedHour: this.counters.messagesProcessed,
-        merchantCount: parseInt(merchants[0].count)
+                  merchantCount: parseInt(String(firstOrThrow(merchants).count))
       };
       
     } catch (error) {
@@ -395,7 +397,7 @@ export class ProductionMetricsCollector {
     // Add new alerts
     for (const alert of newAlerts) {
       this.alerts.unshift(alert);
-      logger.warn('Production alert triggered', alert);
+      logger.warn('Production alert triggered', { ...alert });
       
       // Send notification (implement based on your notification system)
       this.sendNotification(alert);

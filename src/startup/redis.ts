@@ -7,19 +7,28 @@
 
 import { Pool } from 'pg';
 import { getLogger } from '../services/logger.js';
-import { RedisProductionIntegration, type RedisIntegrationResult } from '../services/RedisProductionIntegration.js';
-import { Environment } from '../config/RedisConfigurationFactory.js';
+import { getRedisConnectionManager } from '../services/RedisConnectionManager.js';
+import { ProductionQueueManager } from '../services/ProductionQueueManager.js';
+import { RedisEnvironment } from '../config/RedisConfigurationFactory.js';
 
 const log = getLogger({ component: 'redis-startup' });
 
-// Global integration instance
-let redisIntegration: RedisProductionIntegration | null = null;
+// Global instances (simplified)
+let queueManager: ProductionQueueManager | null = null;
 let initializationResult: RedisIntegrationResult | null = null;
 
+export interface RedisIntegrationResult {
+  success: boolean;
+  mode: 'active' | 'fallback' | 'disabled';
+  queueManager?: ProductionQueueManager;
+  error?: string;
+  reason?: string;
+}
+
 /**
- * Initialize Redis integration with production configuration
+ * Initialize Redis integration (simplified version)
  */
-export async function initializeRedisIntegration(pool: Pool): Promise<RedisIntegrationResult> {
+export async function initializeRedisIntegration(_pool: Pool): Promise<RedisIntegrationResult> {
   if (initializationResult) {
     log.info('Redis integration already initialized, returning cached result');
     return initializationResult;
@@ -37,53 +46,63 @@ export async function initializeRedisIntegration(pool: Pool): Promise<RedisInteg
     return initializationResult;
   }
 
-  const environment = (process.env.NODE_ENV === 'production') ? Environment.PRODUCTION : Environment.DEVELOPMENT;
-  
   try {
-    log.info('🔄 Initializing Redis production integration...');
+    log.info('🔄 Initializing Redis integration...');
     
-    redisIntegration = new RedisProductionIntegration(
-      redisUrl,
-      log,
-      environment,
-      pool
-    );
-
-    initializationResult = await redisIntegration.initialize();
+    // Try to initialize queue manager
+    const { getPool } = await import('../db/index.js');
+    const environment = process.env.NODE_ENV === 'production' ? RedisEnvironment.PRODUCTION : RedisEnvironment.DEVELOPMENT;
+    const dbPool = getPool();
     
-    if (initializationResult.success) {
-      log.info('✅ Redis integration initialized successfully', {
-        mode: initializationResult.mode,
-        queueManagerReady: !!initializationResult.queueManager
-      });
+    // Create logger adapter for ProductionQueueManager
+    const queueLogger = {
+      info: (...args: unknown[]) => log.info(String(args[0]), args.length > 1 ? { extra: args.slice(1) } : undefined),
+      warn: (...args: unknown[]) => log.warn(String(args[0]), args.length > 1 ? { extra: args.slice(1) } : undefined),
+      error: (...args: unknown[]) => log.error(String(args[0]), args.length > 1 ? args[1] as Error : undefined, args.length > 2 ? { extra: args.slice(2) } : undefined),
+      debug: (...args: unknown[]) => log.debug?.(String(args[0]), args.length > 1 ? { extra: args.slice(1) } : undefined)
+    };
+    
+    queueManager = new ProductionQueueManager(redisUrl, queueLogger, environment, dbPool);
+    const queueResult = await queueManager.initialize();
+    
+    if (queueResult.success) {
+      log.info('✅ Redis integration initialized successfully');
+      initializationResult = {
+        success: true,
+        mode: 'active',
+        queueManager: queueManager
+      };
     } else {
-      log.warn('⚠️ Redis integration failed or degraded', {
-        mode: initializationResult.mode,
-        error: initializationResult.error,
-        reason: initializationResult.reason
-      });
+      log.warn('⚠️ Redis queue initialization failed, using fallback mode');
+      initializationResult = {
+        success: false,
+        mode: 'fallback',
+        error: queueResult.error || 'Queue initialization failed',
+        reason: 'queue_init_failed'
+      };
     }
 
-    return initializationResult;
+    return initializationResult!; // Safe because we always assign before returning
   } catch (error: any) {
     log.error('❌ Redis integration initialization failed', error);
     
-    initializationResult = {
+    const errorResult: RedisIntegrationResult = {
       success: false,
       mode: 'disabled',
       error: error.message,
       reason: 'initialization_error'
     };
     
-    return initializationResult;
+    initializationResult = errorResult;
+    return errorResult;
   }
 }
 
 /**
- * Get the current Redis integration instance
+ * Get the Redis connection manager (simplified)
  */
-export function getRedisIntegration(): RedisProductionIntegration | null {
-  return redisIntegration;
+export function getRedisManager() {
+  return getRedisConnectionManager();
 }
 
 /**
@@ -101,26 +120,26 @@ export function isRedisHealthy(): boolean {
 }
 
 /**
- * Get queue manager if available
+ * Get queue manager if available (simplified)
  */
 export function getQueueManager() {
-  if (!initializationResult?.queueManager) {
-    return null;
-  }
-  return initializationResult.queueManager;
+  return queueManager;
 }
 
 /**
- * Cleanup Redis connections gracefully
+ * Cleanup Redis connections gracefully (simplified)
  */
 export async function closeRedisConnections(): Promise<void> {
-  if (redisIntegration) {
-    try {
-      // Add cleanup method if available in RedisProductionIntegration
-      // await redisIntegration.cleanup();
-      log.info('Redis connections closed');
-    } catch (error: any) {
-      log.error('Error closing Redis connections:', error);
+  try {
+    if (queueManager) {
+      await queueManager.gracefulShutdown();
     }
+    
+    const connectionManager = getRedisConnectionManager();
+    await connectionManager.closeAllConnections();
+    
+    log.info('Redis connections closed');
+  } catch (error: any) {
+    log.error('Error closing Redis connections:', error);
   }
 }

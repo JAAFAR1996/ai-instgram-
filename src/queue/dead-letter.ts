@@ -7,7 +7,6 @@
 
 import { getLogger } from '../services/logger.js';
 import { withTimeout } from '../utils/timeout.js';
-import crypto from 'node:crypto';
 import { randomUUID } from 'crypto';
 
 export interface DeadLetterItem {
@@ -145,11 +144,13 @@ export function getRecentDLQItems(limit: number = 10): DeadLetterItem[] {
  */
 export function cleanupOldDLQItems(maxAgeMs: number = 24 * 60 * 60 * 1000): number {
   const cutoff = Date.now() - maxAgeMs;
-  const originalLength = dlq.length;
+  // const originalLength = dlq.length; // unused
   
   // Remove items older than cutoff
   let removed = 0;
-  while (dlq.length > 0 && dlq[0].ts < cutoff) {
+  while (dlq.length > 0) {
+    const item = dlq[0]!;
+    if (item.ts >= cutoff) break;
     dlq.shift();
     removed++;
   }
@@ -239,7 +240,7 @@ export async function processRetryableItems(
         if (item.retryCount < item.maxRetries) {
           item.nextRetryAt = Date.now() + (DLQ_RETRY_DELAY_MS * Math.pow(2, item.retryCount));
         } else {
-          item.nextRetryAt = undefined; // Max retries reached
+          delete item.nextRetryAt; // Max retries reached
           dlqStats.totalFailed++;
         }
         failed++;
@@ -345,7 +346,7 @@ export function enhancedCleanup(): {
   const maxAgeMs = 24 * 60 * 60 * 1000; // 24 hours
   const cutoff = now - maxAgeMs;
   
-  const initialLength = dlq.length;
+  // const initialLength = dlq.length; // unused
   let oldItemsRemoved = 0;
   let failedItemsRemoved = 0;
 
@@ -353,6 +354,7 @@ export function enhancedCleanup(): {
   for (let i = dlq.length - 1; i >= 0; i--) {
     const item = dlq[i];
     
+    if (!item) break;
     if (item.ts < cutoff) {
       dlq.splice(i, 1);
       oldItemsRemoved++;

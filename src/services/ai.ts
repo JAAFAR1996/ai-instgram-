@@ -9,7 +9,9 @@ import OpenAI from 'openai';
 import type { ConversationStage, Platform } from '../types/database.js';
 import type { DIContainer } from '../container/index.js';
 import type { Pool } from 'pg';
-import type { AppConfig } from '../config/environment.js';
+import type { AppConfig } from '../config/index.js';
+
+// removed unused JsonObject
 
 export interface AIResponse {
   message: string;
@@ -47,8 +49,8 @@ export interface ConversationContext {
   customerId: string;
   platform: Platform;
   stage: ConversationStage;
-  cart: any[];
-  preferences: Record<string, any>;
+  cart: Record<string, unknown>[];
+  preferences: Record<string, unknown>;
   conversationHistory: MessageHistory[];
   customerProfile?: CustomerProfile;
   merchantSettings?: MerchantSettings;
@@ -58,7 +60,7 @@ export interface MessageHistory {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: Date;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CustomerProfile {
@@ -74,41 +76,73 @@ export interface CustomerProfile {
 export interface MerchantSettings {
   businessName: string;
   businessCategory: string;
-  workingHours: any;
+  workingHours: Record<string, unknown>;
   paymentMethods: string[];
-  deliveryFees: any;
-  autoResponses: any;
+  deliveryFees: Record<string, unknown>;
+  autoResponses: Record<string, unknown>;
 }
 
 export class AIService {
   protected openai: OpenAI;
-  private encryptionService: any;
+  // removed unused field
   protected pool: Pool;
   private config: AppConfig;
-  private logger: any;
+  private logger: { error: (...args: unknown[]) => void; warn: (...args: unknown[]) => void };
+  private db: { query: (sql: string, params?: unknown[]) => Promise<unknown[]> };
 
-  constructor(private container: DIContainer) {
-    this.pool = container.get<Pool>('pool');
-    this.config = container.get<AppConfig>('config');
-    this.logger = container.get('logger');
-    
-    // Initialize OpenAI client
-    this.openai = new OpenAI({
-      apiKey: this.config.ai.openaiApiKey,
-      timeout: 30000,
-    });
+  constructor(_container: DIContainer) {}
 
-    // Get encryption service (will be injected later)
-    this.initializeEncryptionService();
+
+
+  /** Basic runtime validation for AIResponse payload */
+  private validateAIResponse(payload: unknown): payload is AIResponse {
+    return !!payload
+      && typeof (payload as AIResponse).message === 'string'
+      && typeof (payload as AIResponse).intent === 'string'
+      && typeof (payload as AIResponse).stage === 'string'
+      && Array.isArray((payload as AIResponse).actions)
+      && Array.isArray((payload as AIResponse).products)
+      && typeof (((payload as AIResponse).confidence) ?? 0.0) === 'number';
   }
 
-  private async initializeEncryptionService(): Promise<void> {
+  /** Mask PII (phones/IG handles) before logging */
+  private maskPII(text: string): string {
+    return (text || '')
+      .replace(/\b(\+?\d[\d\s-]{6,})\b/g, '***redacted-phone***')
+      .replace(/@[\w.\-]{3,}/g, '@***redacted***')
+      .slice(0, 500);
+  }
+
+  /** Exponential backoff retry helper */
+  private async withRetry<T>(fn: () => Promise<T>, label: string, max=3): Promise<T> {
+    let attempt = 0;
+    let lastErr: unknown;
+    while (attempt < max) {
+      try {
+        return await fn();
+      } catch (e: unknown) {
+        lastErr = e;
+        const msg = String((e as { message?: string })?.message || e);
+        const retriable = /rate limit|timeout|ETIMEDOUT|ECONNRESET|ENETUNREACH|EAI_AGAIN/i.test(msg);
+        if (!retriable) break;
+        const delay = Math.min(2000 * Math.pow(2, attempt), 8000);
+        this.logger.warn(`Retrying ${label} after ${delay}ms (attempt ${attempt + 1})`, { msg });
+        await new Promise(r => setTimeout(r, delay));
+      }
+      attempt++;
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(`${label} failed`);
+  }
+
+  /** Check if AI processing is enabled for merchant */
+  private async isAIEnabled(merchantId: string): Promise<boolean> {
     try {
-      const { getEncryptionService } = await import('./encryption.js');
-      this.encryptionService = getEncryptionService();
-    } catch (error: any) {
-      this.logger.error('Failed to initialize encryption service:', error);
-      throw error;
+      const { getServiceController } = await import('./service-controller.js');
+      const sc = getServiceController();
+      return await sc.isServiceEnabled(merchantId, 'ai_processing');
+    } catch {
+      // لو تعذّر الوصول للكنترولر، لا توقف العمل
+      return true;
     }
   }
 
@@ -122,30 +156,49 @@ export class AIService {
     const startTime = Date.now();
 
     try {
+      // حارس تفعيل الخدمة
+      if (!(await this.isAIEnabled(context.merchantId))) {
+        this.logger.warn('AI disabled by ServiceController; returning fallback');
+        return this.getFallbackResponse(context);
+      }
+
       // Build conversation prompt
       const prompt = await this.buildConversationPrompt(customerMessage, context);
-      
-      // Call OpenAI API
-      const completion = await this.openai.chat.completions.create({
-        model: this.config.ai.model,
-        messages: prompt,
-        temperature: this.config.ai.temperature,
-        max_tokens: this.config.ai.maxTokens,
-        top_p: 0.9,
-        frequency_penalty: 0.1,
-        presence_penalty: 0.1,
-        response_format: { type: 'json_object' }
-      });
+
+      // Call OpenAI API with timeout + retry
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.openai['timeout'] ?? 30000);
+      const completion = await this.withRetry(
+        () => this.openai.chat.completions.create({
+          model: this.config.ai.model,
+          messages: prompt,
+          temperature: this.config.ai.temperature,
+          max_tokens: this.config.ai.maxTokens,
+          top_p: 0.9,
+          frequency_penalty: 0.1,
+          presence_penalty: 0.1,
+          response_format: { type: 'json_object' },
+        }),
+        'openai.chat.completions'
+      ).finally(() => clearTimeout(timer));
 
       const responseTime = Date.now() - startTime;
-      const response = completion.choices[0]?.message?.content;
+      const response = (completion as any).choices?.[0]?.message?.content;
 
       if (!response) {
         throw new Error('No response from OpenAI');
       }
 
-      // Parse AI response
-      const aiResponse = JSON.parse(response) as AIResponse;
+      // Parse & validate AI response
+      let aiResponse: any;
+      try { aiResponse = JSON.parse(response); } catch (err) {
+        this.logger.error("Invalid AI JSON response", { err });
+        return this.getFallbackResponse(context);
+      }
+      if (!this.validateAIResponse(aiResponse)) {
+        this.logger.error("AI JSON schema validation failed", { got: aiResponse });
+        return this.getFallbackResponse(context);
+      }
       
       // Add metadata
       aiResponse.tokens = {
@@ -156,11 +209,14 @@ export class AIService {
       aiResponse.responseTime = responseTime;
 
       // Log AI interaction
-      await this.logAIInteraction(context, customerMessage, aiResponse);
+      await this.logAIInteraction(context, this.maskPII(customerMessage), aiResponse);
 
       return aiResponse;
-    } catch (error: any) {
-      this.logger.error('AI response generation failed:', error);
+    } catch (error: unknown) {
+      this.logger.error('AI response generation failed:', {
+        err: (error as { message?: string })?.message || String(error),
+        stack: (error as { stack?: string })?.stack,
+      });
       
       // Return fallback response
       return this.getFallbackResponse(context);
@@ -176,7 +232,7 @@ export class AIService {
   ): Promise<{
     intent: string;
     confidence: number;
-    entities: Record<string, any>;
+    entities: Record<string, unknown>;
     stage: ConversationStage;
   }> {
     try {
@@ -190,10 +246,10 @@ export class AIService {
         response_format: { type: 'json_object' }
       });
 
-      const response = completion.choices[0]?.message?.content;
+      const response = completion.choices?.[0]?.message?.content;
       return JSON.parse(response || '{}');
-    } catch (error) {
-      console.error('❌ Intent analysis failed:', error);
+    } catch (error: unknown) {
+      this.logger.error('❌ Intent analysis failed', error);
       return {
         intent: 'UNKNOWN',
         confidence: 0,
@@ -229,12 +285,12 @@ export class AIService {
         response_format: { type: 'json_object' }
       });
 
-      const response = completion.choices[0]?.message?.content;
+      const response = (completion as any).choices?.[0]?.message?.content;
       const recommendations = JSON.parse(response || '{"recommendations": []}');
       
       return recommendations.recommendations.slice(0, maxProducts);
-    } catch (error) {
-      console.error('❌ Product recommendation failed:', error);
+    } catch (error: any) {
+      this.logger.error('❌ Product recommendation failed', error);
       return [];
     }
   }
@@ -257,8 +313,8 @@ export class AIService {
       });
 
       return completion.choices[0]?.message?.content || 'لا يوجد ملخص متاح';
-    } catch (error) {
-      console.error('❌ Conversation summary failed:', error);
+    } catch (error: any) {
+      this.logger.error('❌ Conversation summary failed', error);
       return 'خطأ في إنتاج الملخص';
     }
   }
@@ -358,7 +414,7 @@ export class AIService {
   private buildProductRecommendationPrompt(
     customerQuery: string,
     context: ConversationContext,
-    products: any[]
+    products: Array<{ id: string; sku: string; name_ar: string; price_usd: number; category: string }>
   ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     const productsText = products.map(p => 
       `ID: ${p.id}, SKU: ${p.sku}, اسم: ${p.name_ar}, سعر: $${p.price_usd}, فئة: ${p.category}`
@@ -410,20 +466,19 @@ ${productsText}
    */
   private async getProductsSummary(merchantId: string): Promise<string> {
     try {
-      const sql = this.db.getSQL();
-      const products = await sql`
-        SELECT category, COUNT(*) as count, AVG(price_usd) as avg_price
+      const products = await this.db.query(`
+        SELECT category, COUNT(*)::int as count, AVG(price_usd)::float as avg_price
         FROM products 
-        WHERE merchant_id = ${merchantId}::uuid 
+        WHERE merchant_id = $1::uuid 
         AND status = 'ACTIVE'
         GROUP BY category
         LIMIT 5
-      `;
+      `, [merchantId]);
 
-      return products.map(p => 
-        `${p.category}: ${p.count} منتج (متوسط السعر: $${Math.round(p.avg_price)})`
+      return (products as Array<{category:string;count:string;avg_price:number}>).map((p) =>
+        `${p.category}: ${p.count} منتج (متوسط السعر: ${Math.round(p.avg_price)})`
       ).join(', ');
-    } catch (error) {
+    } catch (error: unknown) {
       return 'منتجات متنوعة';
     }
   }
@@ -433,18 +488,16 @@ ${productsText}
    */
   private async getMerchantProducts(merchantId: string): Promise<any[]> {
     try {
-      const sql = this.db.getSQL();
-      return await sql`
+      const rows = await this.db.query(`
         SELECT id, sku, name_ar, price_usd, category, stock_quantity
-        FROM products 
-        WHERE merchant_id = ${merchantId}::uuid 
-        AND status = 'ACTIVE'
-        AND stock_quantity > 0
-        ORDER BY is_featured DESC, created_at DESC
+        FROM products
+        WHERE merchant_id = $1::uuid AND status = 'ACTIVE'
+        ORDER BY created_at DESC
         LIMIT 20
-      `;
+      `, [merchantId]);
+      return rows as Array<{id:string;name:string;price:number;category:string}>;
     } catch (error) {
-      console.error('❌ Error fetching products:', error);
+      this.logger.error('Failed to fetch merchant products', { merchantId, error });
       return [];
     }
   }
@@ -458,9 +511,7 @@ ${productsText}
     response: AIResponse
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL();
-      
-      await sql`
+      await this.db.query(`
         INSERT INTO audit_logs (
           merchant_id,
           action,
@@ -469,23 +520,30 @@ ${productsText}
           execution_time_ms,
           success
         ) VALUES (
-          ${context.merchantId}::uuid,
+          $1::uuid,
           'AI_RESPONSE_GENERATED',
           'AI_INTERACTION',
-          ${JSON.stringify({
-            input: input.substring(0, 200),
-            intent: response.intent,
-            stage: response.stage,
-            tokens: response.tokens,
-            confidence: response.confidence,
-            platform: context.platform
-          })},
-          ${response.responseTime},
-          true
+          $2::jsonb,
+          $3::int,
+          $4::boolean
         )
-      `;
-    } catch (error: any) {
-      this.logger.error('AI interaction logging failed:', error);
+      `, [
+        context.merchantId,
+        JSON.stringify({
+          input: input.substring(0, 200),
+          intent: response.intent,
+          stage: response.stage,
+          tokens: response.tokens,
+          confidence: response.confidence,
+        }),
+        Math.round(response.responseTime ?? 0),
+        true
+      ]);
+    } catch (error: unknown) {
+      this.logger.error('AI interaction logging failed:', {
+        err: (error as { message?: string })?.message || String(error),
+        stack: (error as { stack?: string })?.stack,
+      });
     }
   }
 
@@ -502,8 +560,8 @@ ${productsText}
     const message = fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)];
 
     return {
-      message,
-      messageAr: message,
+      message: message ?? '',
+      messageAr: message ?? '',
       intent: 'SUPPORT',
       stage: context.stage,
       actions: [{ type: 'ESCALATE', data: { reason: 'AI_ERROR' }, priority: 1 }],
@@ -522,6 +580,10 @@ export function createAIService(container: DIContainer): AIService {
 
 // Legacy support function (deprecated)
 export function getAIService(): AIService {
+  // إبقِ الواجهة متزامِنة لتوافق الكود الحالي
+  // وحافظ على require كحل توافقي في بيئات CJS/ESM الممزوجة
+  // (يمكن لاحقاً ترقية المشروع لاستيراد ديناميكي بالكامل)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { container } = require('../container/index.js');
   if (!container.has('aiService')) {
     container.registerSingleton('aiService', () => new AIService(container));

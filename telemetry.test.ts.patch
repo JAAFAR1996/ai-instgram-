@@ -1,0 +1,50 @@
+--- /mnt/data/work/src4/src/services/telemetry.test.ts
++++ /mnt/data/work/src4/src/services/telemetry.test.ts
+@@ -8,6 +8,7 @@
+ import { describe, test, expect, beforeEach, afterEach, jest } from 'bun:test';
+ 
+ import {
++import { getEnv } from '../config/env.js';
+   TelemetryService,
+   getTelemetryService,
+   type TelemetryEvent,
+@@ -543,8 +544,8 @@
+       mockSQL.mockResolvedValue([]);
+ 
+       // Mock environment to enable filtering
+-      const originalEnv = process.env.TELEMETRY_FILTER_EVENTS;
+-      process.env.TELEMETRY_FILTER_EVENTS = 'debug,trace';
++      const originalEnv = getEnv('TELEMETRY_FILTER_EVENTS');
++      getEnv('TELEMETRY_FILTER_EVENTS') = 'debug,trace';
+ 
+       const debugEvent: TelemetryEvent = {
+         name: 'debug_event',
+@@ -562,7 +563,7 @@
+       // Only info_event should be tracked (debug filtered out)
+       expect(mockSQL).toHaveBeenCalledTimes(1);
+ 
+-      process.env.TELEMETRY_FILTER_EVENTS = originalEnv;
++      getEnv('TELEMETRY_FILTER_EVENTS') = originalEnv;
+     });
+ 
+     test('✅ should sample events based on configuration', async () => {
+@@ -573,8 +574,8 @@
+       Math.random = jest.fn().mockReturnValue(0.5); // 50%
+ 
+       // Set sampling rate to 75% (should include this event)
+-      const originalSampleRate = process.env.TELEMETRY_SAMPLE_RATE;
+-      process.env.TELEMETRY_SAMPLE_RATE = '0.75';
++      const originalSampleRate = getEnv('TELEMETRY_SAMPLE_RATE');
++      getEnv('TELEMETRY_SAMPLE_RATE') = '0.75';
+ 
+       const event: TelemetryEvent = {
+         name: 'sampled_event',
+@@ -586,7 +587,7 @@
+       expect(mockSQL).toHaveBeenCalled();
+ 
+       Math.random = originalRandom;
+-      process.env.TELEMETRY_SAMPLE_RATE = originalSampleRate;
++      getEnv('TELEMETRY_SAMPLE_RATE') = originalSampleRate;
+     });
+   });
+ 

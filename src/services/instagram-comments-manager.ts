@@ -1,3 +1,4 @@
+
 /**
  * ===============================================
  * Instagram Comments Manager
@@ -14,26 +15,8 @@ import { hashMerchantAndBody } from '../middleware/idempotency.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { createLogger } from './logger.js';
-
-export interface CommentInteraction {
-  id: string;
-  postId: string;
-  parentCommentId?: string; // For replies to comments
-  userId: string;
-  username: string;
-  content: string;
-  timestamp: Date;
-  isReply: boolean;
-  sentimentScore?: number;
-  metadata?: {
-    postType?: 'photo' | 'video' | 'reel' | 'carousel';
-    postUrl?: string;
-    isInfluencerComment?: boolean;
-    hasHashtags?: boolean;
-    mentionsCount?: number;
-    isLiked?: boolean;
-  };
-}
+import type { CommentInteraction } from '../types/social.js';
+import { asDate } from '../utils/safety.js';
 
 export interface CommentResponse {
   type: 'reply' | 'like' | 'dm_invite' | 'none';
@@ -42,6 +25,17 @@ export interface CommentResponse {
   dmInviteMessage?: string;
   confidence: number;
   reasoning: string;
+}
+
+export interface CommentAnalysis {
+  sentiment: 'positive' | 'neutral' | 'negative';
+  sentimentScore: number;
+  isSalesInquiry: boolean;
+  isComplaint: boolean;
+  isSpam: boolean;
+  keywords: string[];
+  urgencyLevel: 'low' | 'medium' | 'high';
+  recommendedAction: 'reply' | 'dm_invite' | 'escalate' | 'ignore';
 }
 
 export interface CommentAnalytics {
@@ -150,7 +144,7 @@ export class InstagramCommentsManager {
         postId: comment.postId,
         content: comment.content,
         userId: comment.userId,
-        timestamp: comment.timestamp.toISOString()
+        timestamp: asDate(comment.timestamp).toISOString()
       };
       const idempotencyKey = `ig:comment_process:${hashMerchantAndBody(merchantId, bodyForHash)}`;
       
@@ -178,7 +172,7 @@ export class InstagramCommentsManager {
       // Check moderation rules
       const moderationAction = await this.checkModerationRules(comment, merchantId);
 
-      if (moderationAction && moderationAction.action.type === 'hide') {
+      if (moderationAction && (moderationAction.action as unknown) === 'hide') {
         this.logger.warn('Comment hidden due to moderation rule', {
           ruleName: moderationAction.rule.name
         });
@@ -256,16 +250,7 @@ export class InstagramCommentsManager {
   public async analyzeComment(
     comment: CommentInteraction,
     merchantId: string
-  ): Promise<{
-    sentiment: 'positive' | 'neutral' | 'negative';
-    sentimentScore: number;
-    isSalesInquiry: boolean;
-    isComplaint: boolean;
-    isSpam: boolean;
-    keywords: string[];
-    urgencyLevel: 'low' | 'medium' | 'high';
-    recommendedAction: 'reply' | 'dm_invite' | 'escalate' | 'ignore';
-  }> {
+  ): Promise<CommentAnalysis> {
     try {
       // Use AI to analyze comment
       const analysisPrompt = `تحليل التعليق التالي من Instagram:
@@ -325,7 +310,7 @@ export class InstagramCommentsManager {
    */
   public async generateCommentResponse(
     comment: CommentInteraction,
-    analysis: any,
+    analysis: CommentAnalysis,
     merchantId: string
   ): Promise<CommentResponse> {
     try {
@@ -387,7 +372,7 @@ export class InstagramCommentsManager {
             }
           };
 
-          const aiResult = await this.aiOrchestrator.generatePlatformResponse(
+                    const _aiResult = await this.aiOrchestrator.generatePlatformResponse(
             responsePrompt,
             context,
             'instagram'
@@ -395,7 +380,7 @@ export class InstagramCommentsManager {
 
           return {
             type: 'reply',
-            content: aiResult.response.message,
+            content: _aiResult.response.message ?? '',
             confidence: 80,
             reasoning: 'Public reply to sales inquiry'
           };
@@ -415,7 +400,7 @@ export class InstagramCommentsManager {
 
         return {
           type: 'reply',
-          content: randomResponse,
+          content: randomResponse ?? '',
           confidence: 70,
           reasoning: 'Positive engagement response'
         };
@@ -440,20 +425,34 @@ export class InstagramCommentsManager {
   /**
    * Get comment analytics for merchant
    */
-  public async getCommentAnalytics(
-    merchantId: string,
-    dateRange?: { from: Date; to: Date }
-  ): Promise<CommentAnalytics> {
+    public async getCommentAnalytics(
+     merchantId: string,
+     dateRange?: { from: Date; to: Date }
+    ):  Promise<CommentAnalytics> {
     try {
       const sql = this.db.getSQL();
 
-      const dateFilter = dateRange 
-        ? sql`AND created_at BETWEEN ${dateRange.from} AND ${dateRange.to}`
-        : sql`AND created_at >= NOW() - INTERVAL '30 days'`;
+      // ✅ Date filters (بدون تكرار، مع مراعاة alias)
+      const baseFilter =
+        dateRange
+          ? sql`AND created_at BETWEEN ${dateRange.from} AND ${dateRange.to}`
+          : sql`AND created_at >= NOW() - INTERVAL '30 days'`;
+
+      const ciFilter =
+        dateRange
+          ? sql`AND ci.created_at BETWEEN ${dateRange.from} AND ${dateRange.to}`
+          : sql`AND ci.created_at >= NOW() - INTERVAL '30 days'`;
 
       // Get basic comment stats
-      const basicStats = await sql`
-        SELECT 
+      const basicStats = await sql.unsafe<{
+        total_comments: string;
+        avg_sentiment: string;
+        positive: string;
+        neutral: string;
+        negative: string;
+        sales_inquiries: string;
+      }>(`
+        SELECT
           COUNT(*) as total_comments,
           AVG(sentiment_score) as avg_sentiment,
           COUNT(CASE WHEN sentiment_score > 60 THEN 1 END) as positive,
@@ -462,38 +461,50 @@ export class InstagramCommentsManager {
           COUNT(CASE WHEN is_sales_inquiry = true THEN 1 END) as sales_inquiries
         FROM comment_interactions
         WHERE merchant_id = ${merchantId}::uuid
-        ${dateFilter}
-      `;
+        ${baseFilter}
+      `);
 
       // Get response stats
-      const responseStats = await sql`
-        SELECT 
+      const responseStats = await sql.unsafe<{
+        responses: string;
+        avg_response_time: string;
+      }>(`
+        SELECT
           COUNT(CASE WHEN cr.response_type IS NOT NULL THEN 1 END) as responses,
           AVG(EXTRACT(EPOCH FROM (cr.created_at - ci.created_at))/60) as avg_response_time
         FROM comment_interactions ci
         LEFT JOIN comment_responses cr ON ci.id = cr.comment_id
         WHERE ci.merchant_id = ${merchantId}::uuid
-        ${dateFilter}
-      `;
+        ${ciFilter}
+      `);
 
       // Get top commenting users
-      const topUsers = await sql`
-        SELECT 
+      const topUsers = await sql.unsafe<{
+        username: string;
+        comment_count: string;
+        engagement_score: string;
+      }>(`
+        SELECT
           username,
           COUNT(*) as comment_count,
           AVG(sentiment_score) as engagement_score
         FROM comment_interactions
         WHERE merchant_id = ${merchantId}::uuid
-        ${dateFilter}
+        ${ciFilter}
         AND username IS NOT NULL
         GROUP BY username
         ORDER BY comment_count DESC
         LIMIT 10
-      `;
+      `);
 
       // Get performance by post type
-      const postTypeStats = await sql`
-        SELECT 
+      const postTypeStats = await sql.unsafe<{
+        post_type: string;
+        comments: string;
+        responses: string;
+        conversions: string;
+      }>(`
+        SELECT
           COALESCE((metadata->>'postType')::text, 'unknown') as post_type,
           COUNT(*) as comments,
           COUNT(CASE WHEN cr.response_type IS NOT NULL THEN 1 END) as responses,
@@ -501,39 +512,40 @@ export class InstagramCommentsManager {
         FROM comment_interactions ci
         LEFT JOIN comment_responses cr ON ci.id = cr.comment_id
         WHERE ci.merchant_id = ${merchantId}::uuid
-        ${dateFilter}
+        ${ciFilter}
         GROUP BY COALESCE((metadata->>'postType')::text, 'unknown')
-      `;
+      `);
 
-      const stats = basicStats[0] || {};
-      const responseData = responseStats[0] || {};
+      const stats = (basicStats[0] as unknown) as { total_comments: string; avg_sentiment: string; positive: string; neutral: string; negative: string; sales_inquiries: string };
+      const responseData = (responseStats[0] as unknown) as { responses: string; avg_response_time: string };
 
       return {
-        totalComments: Number(stats.total_comments) || 0,
-        responseRate: stats.total_comments > 0 
-          ? (Number(responseData.responses) / Number(stats.total_comments)) * 100 
+        totalComments: Number(stats?.total_comments) || 0,
+        responseRate: Number(stats?.total_comments) > 0 
+          ? (Number(responseData?.responses) / Number(stats?.total_comments)) * 100 
           : 0,
-        averageResponseTime: Number(responseData.avg_response_time) || 0,
+        averageResponseTime: Number(responseData?.avg_response_time) || 0,
         sentimentBreakdown: {
-          positive: Number(stats.positive) || 0,
-          neutral: Number(stats.neutral) || 0,
-          negative: Number(stats.negative) || 0
+          positive: Number(stats?.positive) || 0,
+          neutral: Number(stats?.neutral) || 0,
+          negative: Number(stats?.negative) || 0
         },
-        salesInquiries: Number(stats.sales_inquiries) || 0,
+        salesInquiries: Number(stats?.sales_inquiries) || 0,
         dmConversions: 0, // Would need additional tracking
-        topCommentingUsers: topUsers.map(user => ({
-          username: user.username,
-          commentCount: Number(user.comment_count),
-          engagementScore: Number(user.engagement_score) || 0
+        topCommentingUsers: topUsers.map((user) => ({
+          username: (user as unknown as { username: string }).username,
+          commentCount: Number((user as unknown as { comment_count: string }).comment_count ?? 0),
+          engagementScore: Number((user as unknown as { engagement_score: string }).engagement_score ?? 0)
         })),
         performanceByPostType: postTypeStats.reduce((acc, stat) => {
-          acc[stat.post_type] = {
-            comments: Number(stat.comments),
-            responses: Number(stat.responses),
-            conversions: Number(stat.conversions)
+          const statData = stat as unknown as { post_type: string; comments: string; responses: string; conversions: string };
+          acc[statData?.post_type ?? ''] = {
+            comments: Number(statData?.comments ?? 0),
+            responses: Number(statData?.responses ?? 0),
+            conversions: Number(statData?.conversions ?? 0)
           };
           return acc;
-        }, {} as any)
+        }, {} as Record<string, { comments: number; responses: number; conversions: number }>)
       };
     } catch (error) {
       this.logger.error('Comment analytics failed', error, { merchantId });
@@ -570,7 +582,7 @@ export class InstagramCommentsManager {
         RETURNING id
       `;
 
-      const ruleId = result[0].id;
+      const ruleId = ((result[0] as unknown) as { id: string })?.id ?? '';
       this.logger.info('Comment moderation rule created', { ruleName: rule.name, ruleId });
       return ruleId;
     } catch (error) {
@@ -603,13 +615,13 @@ export class InstagramCommentsManager {
           ${comment.id},
           ${merchantId}::uuid,
           ${comment.postId},
-          ${comment.parentCommentId || null},
+          ${(comment as any).parentCommentId || null},
           ${comment.userId},
           ${comment.username},
           ${comment.content},
           ${comment.timestamp},
           ${comment.isReply},
-          ${comment.metadata ? JSON.stringify(comment.metadata) : null},
+          ${(comment as any).metadata ? JSON.stringify((comment as any).metadata) : null},
           NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
@@ -625,7 +637,7 @@ export class InstagramCommentsManager {
   /**
    * Private: Perform fallback comment analysis
    */
-  private performFallbackAnalysis(comment: CommentInteraction): any {
+  private performFallbackAnalysis(comment: CommentInteraction): CommentAnalysis {
     const content = comment.content.toLowerCase();
 
     // Sales inquiry keywords
@@ -666,17 +678,17 @@ export class InstagramCommentsManager {
       sentimentScore,
       isSalesInquiry,
       isComplaint,
-      isSpam: false, // Basic spam detection could be added
+      isSpam: false,
       keywords: [],
       urgencyLevel: isComplaint ? 'high' : isSalesInquiry ? 'medium' : 'low',
-      recommendedAction: isComplaint ? 'dm_invite' : isSalesInquiry ? 'reply' : 'like'
+      recommendedAction: isComplaint ? 'dm_invite' : isSalesInquiry ? 'reply' : 'ignore'
     };
   }
 
   /**
    * Private: Check if should invite to DM
    */
-  private shouldInviteToDM(comment: CommentInteraction, analysis: any): boolean {
+  private shouldInviteToDM(comment: CommentInteraction, _analysis: CommentAnalysis): boolean {
     // Invite to DM for detailed sales inquiries
     const detailedInquiryKeywords = [
       'سعر', 'أسعار', 'كم', 'توصيل', 'طلب', 'اشتري',
@@ -726,7 +738,7 @@ export class InstagramCommentsManager {
         // Send DM to user
         const dmResult = await instagramClient.sendMessage(credentials, merchantId, {
           recipientId: comment.userId,
-          messageType: 'text',
+          messagingType: 'RESPONSE',
           content: `مرحباً ${comment.username}! شكراً لتعليقك 🌹 كيف أقدر أساعدك؟`
         });
 
@@ -745,7 +757,7 @@ export class InstagramCommentsManager {
    */
   private async storeCommentAnalysis(
     commentId: string,
-    analysis: any,
+    analysis: CommentAnalysis,
     merchantId: string
   ): Promise<void> {
     try {
@@ -807,7 +819,7 @@ export class InstagramCommentsManager {
   private async checkModerationRules(
     comment: CommentInteraction,
     merchantId: string
-  ): Promise<{ rule: CommentModerationRule; action: any } | null> {
+  ): Promise<{ rule: CommentModerationRule; action: 'hide' | 'delete' | 'reply' | 'flag' } | null> {
     try {
       const sql = this.db.getSQL();
 
@@ -820,32 +832,33 @@ export class InstagramCommentsManager {
       `;
 
       for (const ruleData of rules) {
+        const ruleDataTyped = (ruleData as unknown) as { id: string; name: string; trigger_config: string; action_config: string; is_active: boolean };
         let triggerConfig;
         try {
-          triggerConfig = JSON.parse(ruleData.trigger_config);
+          triggerConfig = JSON.parse(ruleDataTyped.trigger_config);
         } catch (err) {
-          console.error(`❌ Invalid trigger_config for rule ${ruleData.id}:`, err);
+          console.error(`❌ Invalid trigger_config for rule ${ruleDataTyped.id}:`, err);
           continue;
         }
 
         let actionConfig;
         try {
-          actionConfig = JSON.parse(ruleData.action_config);
+          actionConfig = JSON.parse(ruleDataTyped.action_config);
         } catch (err) {
-          console.error(`❌ Invalid action_config for rule ${ruleData.id}:`, err);
+          console.error(`❌ Invalid action_config for rule ${ruleDataTyped.id}:`, err);
           continue;
         }
 
         const rule: CommentModerationRule = {
-          id: ruleData.id,
-          name: ruleData.name,
+          id: ruleDataTyped.id,
+          name: ruleDataTyped.name,
           trigger: triggerConfig,
           action: actionConfig,
-          isActive: ruleData.is_active
+          isActive: ruleDataTyped.is_active
         };
 
         if (this.evaluateRule(rule, comment)) {
-          return { rule, action: rule.action };
+          return { rule, action: rule.action.type as 'delete' | 'reply' | 'hide' | 'flag' };
         }
       }
 
@@ -881,8 +894,18 @@ export class InstagramCommentsManager {
         
         case 'spam':
           // Basic spam detection logic
-          const spamKeywords = ['spam', 'promotional', 'link', 'follow4follow'];
+          const spamKeywords = ['spam', 'promotional', 'link', 'follow4follow', 'رابط', 'تابعني'];
           return spamKeywords.some(keyword => content.includes(keyword));
+
+        case 'user_type':
+          // دعم بسيط لأنواع المستخدمين (influencer/customer) بالاعتماد على الميتاداتا
+          if (trigger.operator === 'equals') {
+            const val = String(trigger.value).toLowerCase();
+            const isInfluencer = comment.metadata?.isInfluencerComment === true;
+            if (val === 'influencer') return isInfluencer;
+            if (val === 'customer') return !isInfluencer;
+          }
+          return false;
         
         default:
           return false;

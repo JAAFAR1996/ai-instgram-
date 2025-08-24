@@ -7,18 +7,19 @@
 
 import { getDatabase } from '../db/adapter.js';
 import { getEncryptionService } from '../services/encryption.js';
-import type { MerchantCredentials, Platform } from '../types/database.js';
-// import type { Sql } from 'postgres'; // Removed - using pg adapter
+import type { Platform } from '../types/database.js';
+import type { Sql } from '../types/sql.js';
+import type { DatabaseRow } from '../types/db.js';
 
-interface TokenRow {
+interface TokenRow extends DatabaseRow {
   token_encrypted: string | null;
 }
 
-interface TokenExpiryRow {
+interface TokenExpiryDbRow extends DatabaseRow {
   token_expires_at: string | null;
 }
 
-interface CredentialRow {
+interface CredentialDbRow extends DatabaseRow {
   merchant_id: string;
   whatsapp_phone_number_id: string | null;
   instagram_page_id: string | null;
@@ -32,9 +33,7 @@ interface CredentialRow {
   last_access_at: string | null;
 }
 
-interface MerchantIdRow {
-  merchant_id: string;
-}
+// Removed unused interface: MerchantIdRow
 
 export interface StoredCredentials {
   merchantId: string;
@@ -77,7 +76,7 @@ export class CredentialsRepository {
     const encryptedData = this.encryption.encryptToken(token, platform, identifier);
     const encryptedJson = JSON.stringify(encryptedData);
 
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
     if (platform === 'whatsapp') {
       await sql`
@@ -138,9 +137,9 @@ export class CredentialsRepository {
    * Retrieve and decrypt platform token
    */
   async getToken(merchantId: string, platform: Platform): Promise<string | null> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
-    const field = platform === 'whatsapp' ? 'whatsapp_token_encrypted' : 'instagram_token_encrypted';
+    // const field = platform === 'whatsapp' ? 'whatsapp_token_encrypted' : 'instagram_token_encrypted'; // unused
     
     let rows;
     if (platform === 'whatsapp') {
@@ -148,7 +147,7 @@ export class CredentialsRepository {
     } else {
       rows = await sql`SELECT instagram_token_encrypted as token_encrypted FROM merchant_credentials WHERE merchant_id = ${merchantId}::uuid`;
     }
-    const row = rows[0] as TokenRow | undefined;
+    const row = rows[0] as unknown as TokenRow | undefined;
 
     if (!row?.token_encrypted) {
       return null;
@@ -172,42 +171,34 @@ export class CredentialsRepository {
    * Check if token exists and is not expired
    */
   async isTokenValid(merchantId: string, platform: Platform): Promise<boolean> {
-    const sql = this.db.getSQL();
-    
-    let row;
+    const sql: Sql = this.db.getSQL();
+    let row: TokenExpiryDbRow | undefined;
+
     if (platform === 'whatsapp') {
-      [row] = await sql`
-        SELECT whatsapp_token_expires_at as token_expires_at
-        FROM merchant_credentials 
+      [row] = await sql<TokenExpiryDbRow>`
+        SELECT token_expires_at
+        FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
-        AND whatsapp_token_encrypted IS NOT NULL
+          AND whatsapp_token_encrypted IS NOT NULL
       `;
     } else {
-      [row] = await sql`
-        SELECT instagram_token_expires_at as token_expires_at
-        FROM merchant_credentials 
+      [row] = await sql<TokenExpiryDbRow>`
+        SELECT token_expires_at
+        FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
-        AND instagram_token_encrypted IS NOT NULL
+          AND instagram_token_encrypted IS NOT NULL
       `;
     }
 
-    if (!row) {
-      return false;
-    }
-
-    // تحقق من انتهاء صلاحية التوكن
-    if (row.token_expires_at && new Date() > new Date(row.token_expires_at)) {
-      return false;
-    }
-
-    return true;
+    if (!row || !row.token_expires_at) return false;
+    return new Date(row.token_expires_at).getTime() > Date.now();
   }
 
   /**
    * Remove platform token (secure deletion)
    */
   async removeToken(merchantId: string, platform: Platform): Promise<void> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
     if (platform === 'whatsapp') {
       await sql`
@@ -233,10 +224,10 @@ export class CredentialsRepository {
   /**
    * Get all stored credentials (for merchant)
    */
-  async getCredentials(merchantId: string): Promise<StoredCredentials | null> {
-    const sql = this.db.getSQL();
+  async getCredentials(merchantId: string): Promise<CredentialDbRow | null> {
+    const sql: Sql = this.db.getSQL();
     
-    const [row] = await sql`
+    const [row] = await sql<CredentialDbRow>`
       SELECT
         merchant_id,
         whatsapp_phone_number_id,
@@ -253,30 +244,14 @@ export class CredentialsRepository {
       WHERE merchant_id = ${merchantId}::uuid
     `;
 
-    if (!row) {
-      return null;
-    }
-
-    return {
-      merchantId: row.merchant_id,
-      whatsappPhoneNumberId: row.whatsapp_phone_number_id ?? undefined,
-      instagramPageId: row.instagram_page_id ?? undefined,
-      businessAccountId: row.business_account_id ?? undefined,
-      webhookVerifyToken: row.webhook_verify_token ?? undefined,
-      tokenExpiresAt: row.token_expires_at ? new Date(row.token_expires_at) : undefined,
-      lastTokenRefresh: row.last_token_refresh ? new Date(row.last_token_refresh) : undefined,
-      tokenRefreshCount: parseInt(row.token_refresh_count) || 0,
-      tokenCreatedIp: row.token_created_ip ?? undefined,
-      lastAccessIp: row.last_access_ip ?? undefined,
-      lastAccessAt: row.last_access_at ? new Date(row.last_access_at) : undefined
-    };
+    return row ?? null;
   }
 
   /**
    * Record access for audit trail
    */
   private async recordAccess(merchantId: string, ip?: string): Promise<void> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
     
     await sql`
       UPDATE merchant_credentials 
@@ -305,17 +280,17 @@ export class CredentialsRepository {
    * Get expired tokens for cleanup
    */
   async getExpiredTokens(): Promise<string[]> {
-    const sql = this.db.getSQL();
+    const sql: Sql = this.db.getSQL();
 
-    const rows = await sql`
+    const rows = await sql<{ merchant_id: string }>`
       SELECT DISTINCT merchant_id
       FROM merchant_credentials
       WHERE token_expires_at IS NOT NULL
-      AND token_expires_at < NOW()
-      AND (whatsapp_token_encrypted IS NOT NULL OR instagram_token_encrypted IS NOT NULL)
+        AND token_expires_at < NOW()
+        AND (whatsapp_token_encrypted IS NOT NULL OR instagram_token_encrypted IS NOT NULL)
     `;
 
-    return rows.map(row => row.merchant_id);
+    return rows.map((row: { merchant_id: string }) => row.merchant_id);
   }
 
   /**

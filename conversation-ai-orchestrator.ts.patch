@@ -1,0 +1,19 @@
+--- /mnt/data/work/src4/src/services/conversation-ai-orchestrator.ts
++++ /mnt/data/work/src4/src/services/conversation-ai-orchestrator.ts
+@@ -12,6 +12,7 @@
+ import type { Platform } from '../types/database.js';
+ import type { DIContainer } from '../container/index.js';
+ import type { Pool } from 'pg';
++import { logger } from 'logger.js';
+ 
+ interface InteractionRow {
+   platform: string;
+@@ -113,7 +114,7 @@
+     platform: Platform
+   ): Promise<PlatformAIResponse> {
+     try {
+-      console.log(`🤖 Generating ${platform} AI response for merchant: ${context.merchantId}`);
++      logger.info(`🤖 Generating ${platform} AI response for merchant: ${context.merchantId}`);
+ 
+       // احترام Service Controller قبل تشغيل الذكاء
+       try {

@@ -1,0 +1,34 @@
+--- /mnt/data/work/src4/src/services/instagram-ai.test.ts
++++ /mnt/data/work/src4/src/services/instagram-ai.test.ts
+@@ -9,6 +9,7 @@
+ import OpenAI from 'openai';
+ 
+ import {
++import { getEnv } from '../config/env.js';
+   InstagramAIService,
+   getInstagramAIService,
+   type InstagramAIResponse,
+@@ -93,10 +94,10 @@
+     jest.clearAllMocks();
+     
+     // Setup environment variables
+-    process.env.OPENAI_API_KEY = 'test-api-key';
+-    process.env.OPENAI_MODEL = 'gpt-4o-mini';
+-    process.env.OPENAI_TIMEOUT = '30000';
+-    process.env.OPENAI_MAX_TOKENS = '600';
++    getEnv('OPENAI_API_KEY') = 'test-api-key';
++    getEnv('OPENAI_MODEL') = 'gpt-4o-mini';
++    getEnv('OPENAI_TIMEOUT') = '30000';
++    getEnv('OPENAI_MAX_TOKENS') = '600';
+ 
+     // Mock database
+     mockSQL = jest.fn();
+@@ -112,7 +113,7 @@
+   });
+ 
+   afterEach(() => {
+-    delete process.env.OPENAI_API_KEY;
++    delete getEnv('OPENAI_API_KEY');
+   });
+ 
+   describe('Constructor', () => {

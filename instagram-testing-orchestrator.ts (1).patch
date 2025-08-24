@@ -1,0 +1,134 @@
+--- /mnt/data/work/src4/src/services/instagram-testing-orchestrator.ts
++++ /mnt/data/work/src4/src/services/instagram-testing-orchestrator.ts
+@@ -4,7 +4,7 @@
+  * أي محاولة لاستيراد هذا الملف في الإنتاج سترمي خطأً مبكراً.
+  * ===============================================
+  */
+-if (process.env.NODE_ENV === 'production') {
++if (getEnv('NODE_ENV') === 'production') {
+   throw new Error(
+     'InstagramTestingOrchestrator is DEV-only and must not be used in production.'
+   );
+@@ -58,6 +58,8 @@
+ import { getInstagramCommentsManager } from './instagram-comments-manager.js';
+ import { getInstagramMediaManager } from './instagram-media-manager.js';
+ import { getInstagramHashtagMentionProcessor } from './instagram-hashtag-mention-processor.js';
++import { logger } from 'logger.js';
++import { getEnv } from '../config/env.js';
+ 
+ export interface TestScenario {
+   id: string;
+@@ -134,7 +136,7 @@
+ 
+   constructor() {
+     // Only load testing suites and mock data outside production
+-    if (process.env.NODE_ENV !== 'production') {
++    if (getEnv('NODE_ENV') !== 'production') {
+       this.initializeTestSuites();
+       this.setupMockData();
+     }
+@@ -153,7 +155,7 @@
+     } = {}
+   ): Promise<TestExecutionReport[]> {
+     try {
+-      console.log(`🧪 Starting comprehensive Instagram integration tests...`);
++      logger.info(`🧪 Starting comprehensive Instagram integration tests...`);
+ 
+       const reports: TestExecutionReport[] = [];
+       const startTime = Date.now();
+@@ -162,20 +164,20 @@
+         const shouldRun = this.shouldRunSuite(suite, options);
+         
+         if (shouldRun) {
+-          console.log(`📋 Running test suite: ${suite.name}`);
++          logger.info(`📋 Running test suite: ${suite.name}`);
+           
+           const report = await this.executeSuite(suite, merchantId, options);
+           reports.push(report);
+ 
+           if (options.stopOnFailure && report.failed > 0) {
+-            console.log(`❌ Stopping tests due to failures in ${suite.name}`);
++            logger.info(`❌ Stopping tests due to failures in ${suite.name}`);
+             break;
+           }
+         }
+       }
+ 
+       const totalTime = Date.now() - startTime;
+-      console.log(`✅ All tests completed in ${totalTime}ms`);
++      logger.info(`✅ All tests completed in ${totalTime}ms`);
+ 
+       // Generate comprehensive report
+       await this.generateTestReport(reports, merchantId);
+@@ -201,7 +203,7 @@
+         throw new Error(`Test scenario not found: ${scenarioId}`);
+       }
+ 
+-      console.log(`🔬 Running scenario: ${scenario.name}`);
++      logger.info(`🔬 Running scenario: ${scenario.name}`);
+ 
+       const startTime = Date.now();
+       const result: TestResult = {
+@@ -250,7 +252,7 @@
+       // Store test result
+       await this.storeTestResult(result, merchantId);
+ 
+-      console.log(`${result.status === 'passed' ? '✅' : '❌'} Scenario completed: ${scenario.name} (${result.executionTime}ms)`);
++      logger.info(`${result.status === 'passed' ? '✅' : '❌'} Scenario completed: ${scenario.name} (${result.executionTime}ms)`);
+ 
+       return result;
+     } catch (error) {
+@@ -282,7 +284,7 @@
+     recommendations: string[];
+   }> {
+     try {
+-      console.log(`⚡ Starting performance tests with ${options.concurrentUsers} concurrent users...`);
++      logger.info(`⚡ Starting performance tests with ${options.concurrentUsers} concurrent users...`);
+ 
+       const startTime = Date.now();
+       const endTime = startTime + (options.duration * 1000);
+@@ -329,7 +331,7 @@
+       // Store performance test results
+       await this.storePerformanceTestResult(performanceReport, merchantId);
+ 
+-      console.log(`⚡ Performance tests completed: ${successfulRequests}/${results.length} successful requests`);
++      logger.info(`⚡ Performance tests completed: ${successfulRequests}/${results.length} successful requests`);
+ 
+       return performanceReport;
+     } catch (error) {
+@@ -362,7 +364,7 @@
+     recommendations: string[];
+   }> {
+     try {
+-      console.log(`🔍 Validating Instagram API integration...`);
++      logger.info(`🔍 Validating Instagram API integration...`);
+ 
+       const instagramClient = getInstagramClient(merchantId);
+       const credentials = await instagramClient.loadMerchantCredentials(merchantId);
+@@ -410,7 +412,7 @@
+       // Store validation results
+       await this.storeValidationResult(validationResult, merchantId);
+ 
+-      console.log(`🔍 API validation completed: ${apiHealth}`);
++      logger.info(`🔍 API validation completed: ${apiHealth}`);
+ 
+       return validationResult;
+     } catch (error) {
+@@ -1311,7 +1313,7 @@
+         )
+       `;
+ 
+-      console.log(`📊 Test report generated: ${totalPassed}/${totalScenarios} scenarios passed`);
++      logger.info(`📊 Test report generated: ${totalPassed}/${totalScenarios} scenarios passed`);
+     } catch (error) {
+       console.error('❌ Generate test report failed:', error);
+     }
+@@ -1326,7 +1328,7 @@
+  */
+ export function getInstagramTestingOrchestrator(): InstagramTestingOrchestrator {
+   // تبقى الحماية هنا أيضاً في حال تم تغيير رأس الملف
+-  if (process.env.NODE_ENV === 'production') {
++  if (getEnv('NODE_ENV') === 'production') {
+     throw new Error('InstagramTestingOrchestrator should not be used in production');
+   }
+   if (!testingOrchestratorInstance) {

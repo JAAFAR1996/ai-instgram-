@@ -1,0 +1,93 @@
+--- /mnt/data/work/src4/src/services/logger.test.ts
++++ /mnt/data/work/src4/src/services/logger.test.ts
+@@ -8,6 +8,7 @@
+ import { describe, test, expect, beforeEach, afterEach, jest } from 'bun:test';
+ 
+ import {
++import { getEnv } from '../config/env.js';
+   Logger,
+   getLogger,
+   createLogger,
+@@ -46,8 +47,8 @@
+     });
+ 
+     // Reset environment
+-    delete process.env.LOG_LEVEL;
+-    delete process.env.NODE_ENV;
++    delete getEnv('LOG_LEVEL');
++    delete getEnv('NODE_ENV');
+ 
+     logger = new Logger();
+   });
+@@ -76,7 +77,7 @@
+     });
+ 
+     test('✅ should set log level from environment', () => {
+-      process.env.LOG_LEVEL = 'debug';
++      getEnv('LOG_LEVEL') = 'debug';
+       const logger = new Logger();
+       
+       logger.debug('debug message');
+@@ -86,7 +87,7 @@
+     });
+ 
+     test('✅ should default to info level for invalid log level', () => {
+-      process.env.LOG_LEVEL = 'invalid';
++      getEnv('LOG_LEVEL') = 'invalid';
+       const logger = new Logger();
+       
+       logger.debug('debug message');
+@@ -159,7 +160,7 @@
+ 
+   describe('Log Levels', () => {
+     beforeEach(() => {
+-      process.env.LOG_LEVEL = 'trace';
++      getEnv('LOG_LEVEL') = 'trace';
+       logger = new Logger();
+     });
+ 
+@@ -250,7 +251,7 @@
+ 
+   describe('Level Filtering', () => {
+     test('✅ should filter logs below minimum level', () => {
+-      process.env.LOG_LEVEL = 'warn';
++      getEnv('LOG_LEVEL') = 'warn';
+       const logger = new Logger();
+       
+       logger.trace('trace message');
+@@ -266,7 +267,7 @@
+     });
+ 
+     test('✅ should allow all logs at trace level', () => {
+-      process.env.LOG_LEVEL = 'trace';
++      getEnv('LOG_LEVEL') = 'trace';
+       const logger = new Logger();
+       
+       logger.trace('trace message');
+@@ -386,7 +387,7 @@
+ 
+   describe('Output Formats', () => {
+     test('✅ should output structured JSON in production', () => {
+-      process.env.NODE_ENV = 'production';
++      getEnv('NODE_ENV') = 'production';
+       const logger = new Logger();
+       
+       logger.info('production message', { key: 'value' });
+@@ -401,7 +402,7 @@
+     });
+ 
+     test('✅ should output human-readable format in development', () => {
+-      process.env.NODE_ENV = 'development';
++      getEnv('NODE_ENV') = 'development';
+       const logger = new Logger();
+       
+       logger.info('dev message', { key: 'value' });
+@@ -547,7 +548,7 @@
+ 
+   describe('Performance', () => {
+     test('✅ should skip processing when log level filtered', () => {
+-      process.env.LOG_LEVEL = 'error';
++      getEnv('LOG_LEVEL') = 'error';
+       const logger = new Logger();
+       
+       const expensiveContext = () => {

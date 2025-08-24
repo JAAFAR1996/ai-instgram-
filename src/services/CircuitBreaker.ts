@@ -271,12 +271,10 @@ export class CircuitBreaker {
       ? this.totalExecutionTime / this.totalExecutions 
       : 0;
 
-    return {
+    const stats: CircuitBreakerStats = {
       state: this.state,
       failureCount: this.failureCount,
       successCount: this.successCount,
-      lastFailureTime: this.lastFailureTime > 0 ? new Date(this.lastFailureTime) : undefined,
-      lastSuccessTime: this.lastSuccessTime > 0 ? new Date(this.lastSuccessTime) : undefined,
       totalExecutions: this.totalExecutions,
       averageExecutionTime: Math.round(averageExecutionTime),
       errorRate: Math.round(errorRate * 100) / 100,
@@ -284,6 +282,11 @@ export class CircuitBreaker {
       circuitOpenCount: this.circuitOpenCount,
       lastStateChange: this.lastStateChange
     };
+    
+    if (this.lastFailureTime > 0) stats.lastFailureTime = new Date(this.lastFailureTime);
+    if (this.lastSuccessTime > 0) stats.lastSuccessTime = new Date(this.lastSuccessTime);
+    
+    return stats;
   }
 
   // إعادة تعيين الدائرة يدوياً

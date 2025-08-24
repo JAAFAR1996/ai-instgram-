@@ -1,0 +1,46 @@
+--- /mnt/data/work/src4/src/services/instagram-hashtag-mention-processor.ts
++++ /mnt/data/work/src4/src/services/instagram-hashtag-mention-processor.ts
+@@ -7,6 +7,7 @@
+ 
+ import { getDatabase } from '../db/adapter.js';
+ import type { Sql } from '../types/sql.js';
++import { logger } from 'logger.js';
+ 
+ const TIMEFRAME_INTERVALS: Record<'day' | 'week' | 'month', string> = {
+   day: '1 day',
+@@ -94,7 +95,7 @@
+     error?: string;
+   }> {
+     try {
+-      console.log(`#️⃣ Processing content with ${data.hashtags.length} hashtags and ${data.mentions.length} mentions`);
++      logger.info(`#️⃣ Processing content with ${data.hashtags.length} hashtags and ${data.mentions.length} mentions`);
+ 
+       // Extract and validate hashtags/mentions
+       const extractedHashtags = this.extractHashtags(data.content);
+@@ -142,7 +143,7 @@
+       // Check for marketing opportunities
+       await this.checkMarketingOpportunities(hashtagAnalyses, mentionAnalyses, data);
+ 
+-      console.log(
++      logger.info(
+         `✅ Processed ${limitedHashtags.length} hashtags and ${limitedMentions.length} mentions`
+       );
+ 
+@@ -271,7 +272,7 @@
+       `;
+ 
+       const strategyId = ((result[0] as unknown) as { id: string })?.id ?? '';
+-      console.log(`✅ Hashtag strategy created: ${strategy.name} (${strategyId})`);
++      logger.info(`✅ Hashtag strategy created: ${strategy.name} (${strategyId})`);
+       return strategyId;
+     } catch (error) {
+       console.error('❌ Create hashtag strategy failed:', error);
+@@ -916,7 +917,7 @@
+           )
+         `;
+ 
+-        console.log(`📈 Marketing opportunity identified from hashtags/mentions`);
++        logger.info(`📈 Marketing opportunity identified from hashtags/mentions`);
+       }
+     } catch (error) {
+       console.error('❌ Check marketing opportunities failed:', error);

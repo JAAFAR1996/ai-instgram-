@@ -5,8 +5,10 @@
  * ===============================================
  */
 
-export const GRAPH_API_VERSION =
-  process.env.GRAPH_API_VERSION ?? process.env.API_VERSION ?? 'v23.0';
+import { getConfig } from './index.js';
+
+const { instagram } = getConfig();
+export const GRAPH_API_VERSION = instagram.apiVersion;
 export const GRAPH_API_BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 
 export const API_ENDPOINTS = {

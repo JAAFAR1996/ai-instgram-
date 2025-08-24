@@ -2,13 +2,15 @@ import { Pool } from 'pg';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { requireMerchantId } from '../utils/merchant.js';
+import { getEnv } from '../config/env.js';
+import { logger } from '../services/logger.js';
 
 /**
  * Production-grade migration and seeding system
  * Applies SQL migrations in order and seeds initial data
  */
 export async function migrateAndSeed(): Promise<void> {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databaseUrl = getEnv('DATABASE_URL');
 
   if (!databaseUrl) {
     throw new Error('DATABASE_URL not set');
@@ -16,7 +18,7 @@ export async function migrateAndSeed(): Promise<void> {
 
   const pool = new Pool({ 
     connectionString: databaseUrl,
-    ssl: process.env.NODE_ENV === 'production' 
+    ssl: getEnv('NODE_ENV') === 'production' 
       ? { rejectUnauthorized: false } 
       : undefined
   });
@@ -44,7 +46,7 @@ export async function migrateAndSeed(): Promise<void> {
         .filter(f => /^\d+_.+\.sql$/.test(f))
         .sort(); // Sort in ascending order
     } catch (err) {
-      console.log('📁 No migrations directory found, skipping migrations');
+      logger.info('📁 No migrations directory found, skipping migrations');
     }
 
     // Apply each migration
@@ -58,7 +60,7 @@ export async function migrateAndSeed(): Promise<void> {
       );
       
       if (exists.rowCount && exists.rowCount > 0) {
-        console.log(`⏭️  Migration already applied: ${migrationId}`);
+        logger.info(`⏭️  Migration already applied: ${migrationId}`);
         continue;
       }
 
@@ -72,11 +74,11 @@ export async function migrateAndSeed(): Promise<void> {
         [migrationId]
       );
       
-      console.log(`✅ Applied migration: ${migrationId}`);
+      logger.info(`✅ Applied migration: ${migrationId}`);
     }
 
     await client.query('COMMIT');
-    console.log('✅ All migrations completed');
+    logger.info('✅ All migrations completed');
 
     // ====== SEED DATA (idempotent) ======
     await seedInitialData(client);
@@ -97,11 +99,11 @@ export async function migrateAndSeed(): Promise<void> {
 async function seedInitialData(client: any): Promise<void> {
   // Get configuration from environment
   const merchantId = requireMerchantId();
-  const merchantName = process.env.MERCHANT_NAME;
-  const adminEmail = process.env.ADMIN_EMAIL;
-  const adminPhone = process.env.ADMIN_PHONE_NUMBER;
-  const igBusinessId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID;
-  const igPageId = process.env.PAGE_ID || process.env.IG_PAGE_ID;
+  const merchantName = getEnv('MERCHANT_NAME');
+  const adminEmail = getEnv('ADMIN_EMAIL');
+  const adminPhone = getEnv('ADMIN_PHONE_NUMBER');
+  const igBusinessId = getEnv('INSTAGRAM_BUSINESS_ACCOUNT_ID');
+  const igPageId = getEnv('PAGE_ID') || getEnv('IG_PAGE_ID');
 
   if (!merchantName) {
     throw new Error('Environment variable MERCHANT_NAME is required');
@@ -165,7 +167,7 @@ async function seedInitialData(client: any): Promise<void> {
     
     await client.query('COMMIT');
     
-    console.log('✅ Seed complete:', {
+    logger.info('✅ Seed complete:', {
       merchantId: merchantId.substring(0, 8) + '...',
       pageId: igPageId,
       businessId: igBusinessId

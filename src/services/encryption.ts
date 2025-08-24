@@ -6,6 +6,7 @@
  */
 
 import crypto from 'node:crypto';
+import { getEnv } from '../config/env.js';
 
 export type HmacVerifyResult =
   | { ok: true }
@@ -116,7 +117,7 @@ export class EncryptionService {
   private readonly encryptionKey: Buffer;
 
   constructor(masterKey?: string) {
-    const key = masterKey || process.env.ENCRYPTION_KEY;
+    const key = masterKey || getEnv('ENCRYPTION_KEY');
     if (!key) {
       throw new Error('ENCRYPTION_KEY environment variable required');
     }

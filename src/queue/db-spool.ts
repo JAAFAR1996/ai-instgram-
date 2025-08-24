@@ -3,10 +3,11 @@
  * When Redis is rate limited or unavailable, jobs are stored in PostgreSQL
  */
 
-import type { Sql } from 'postgres';
+import type { StatsRow } from '../types/database-rows.js';
+import type { Sql } from '../types/sql.js';
 import { getDatabase } from '../db/adapter.js';
 import { getLogger } from '../services/logger.js';
-import { withDbTenant } from '../isolation/context.js';
+// Removed unused import: withDbTenant
 
 export interface SpooledJob {
   id: string;
@@ -162,10 +163,11 @@ export class DatabaseJobSpool {
         `
       ]);
 
+      const totalRow = totalResult[0] as unknown as StatsRow | undefined;
       const stats = {
-        total: parseInt(totalResult[0]?.total || '0'),
-        pending: parseInt(totalResult[0]?.pending || '0'),
-        processed: parseInt(totalResult[0]?.processed || '0'),
+        total: totalRow?.total ?? 0,
+        pending: totalRow?.pending ?? 0, 
+        processed: totalRow?.processed ?? 0,
         byPriority: {} as Record<string, number>,
         byType: {} as Record<string, number>
       };
@@ -201,7 +203,7 @@ export class DatabaseJobSpool {
         AND processed_at < ${cutoffTime}
       `;
 
-      const deletedCount = result.count || 0;
+      const deletedCount = (result as any).count || 0;
       
       if (deletedCount > 0) {
         this.logger.info('Cleaned up processed spool jobs', {
@@ -227,7 +229,7 @@ export class DatabaseJobSpool {
       AND merchant_id = ${merchantId}
     `;
 
-    return (result.count || 0) > 0;
+    return ((result as any).count || 0) > 0;
   }
 
   /**
@@ -253,7 +255,7 @@ export class DatabaseJobSpool {
       });
     }
 
-    return {
+    const result: SpooledJob = {
       id: row.id,
       jobId: row.job_id,
       jobType: row.job_type,
@@ -261,9 +263,14 @@ export class DatabaseJobSpool {
       priority: row.priority,
       merchantId: row.merchant_id,
       scheduledAt: new Date(row.scheduled_at),
-      createdAt: new Date(row.created_at),
-      processedAt: row.processed_at ? new Date(row.processed_at) : undefined
+      createdAt: new Date(row.created_at)
     };
+    
+    if (row.processed_at) {
+      result.processedAt = new Date(row.processed_at);
+    }
+    
+    return result;
   }
 }
 

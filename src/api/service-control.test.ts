@@ -7,9 +7,13 @@
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach, mock } from 'bun:test';
 import { RateLimiterMemory } from 'rate-limiter-flexible';
-import { getServiceControlAPI } from './service-control.js';
+import { getServiceControlAPI } from './service-controller.js';
 import { getDatabase } from '../db/adapter.js';
 import { createTestMerchant, cleanupTestMerchant } from '../tests/instagram-integration.test.js';
+
+async function initializeDatabase() {
+  return getDatabase();
+}
 
 // Mock security middleware لاختبارات مستقلة
 mock.module('../middleware/security.js', () => {

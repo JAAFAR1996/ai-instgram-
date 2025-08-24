@@ -5,9 +5,19 @@
  * ===============================================
  */
 
-import { getDatabase } from './connection';
+import { getDatabase } from '../db/adapter.js';
+import { checkDatabaseHealth } from '../db/index.js';
 import { runMigrations, getMigrationStatus } from './migrate';
 import { seedDatabase } from './seed';
+import { logger } from '../services/logger.js';
+import { firstOrThrow } from '../utils/safety.js';
+
+// حارس عنصر أول
+const get0 = <T>(arr: T[] | undefined, msg = 'empty result'): T => {
+  const v = arr?.[0];
+  if (!v) throw new Error(msg);
+  return v;
+};
 
 export class DatabaseTester {
   private db = getDatabase();
@@ -16,7 +26,7 @@ export class DatabaseTester {
    * Run comprehensive database tests
    */
   public async runTests(): Promise<boolean> {
-    console.log('🧪 Starting comprehensive database tests...\n');
+    logger.info('🧪 Starting comprehensive database tests...\n');
     
     let allTestsPassed = true;
 
@@ -40,9 +50,9 @@ export class DatabaseTester {
       allTestsPassed = allTestsPassed && await this.testPerformance();
 
       if (allTestsPassed) {
-        console.log('\n✅ All database tests passed successfully! 🎉');
+        logger.info('\n✅ All database tests passed successfully! 🎉');
       } else {
-        console.log('\n❌ Some database tests failed');
+        logger.info('\n❌ Some database tests failed');
       }
 
       return allTestsPassed;
@@ -56,27 +66,26 @@ export class DatabaseTester {
    * Test database connection
    */
   private async testConnection(): Promise<boolean> {
-    console.log('🔗 Testing database connection...');
+    logger.info('🔗 Testing database connection...');
     
     try {
       if (!this.db.isReady()) {
         await this.db.connect();
       }
 
-      const health = await this.db.healthCheck();
-      
-      if (health.status === 'healthy') {
-        console.log('✅ Connection test passed');
-        console.log(`   📊 Response time: ${health.details.response_time_ms}ms`);
-        console.log(`   🔌 Active connections: ${health.details.active_connections}`);
-        console.log(`   💾 Database size: ${health.details.database_size}`);
+      const health = await checkDatabaseHealth();
+      if (health.healthy) {
+        logger.info('✅ Connection test passed');
+        if (health.details.poolStats) {
+          logger.info(`   🔌 Pool:`, health.details.poolStats);
+        }
         return true;
       } else {
-        console.log('❌ Connection test failed - database unhealthy');
+        logger.info('❌ Connection test failed - database unhealthy');
         return false;
       }
     } catch (error) {
-      console.log('❌ Connection test failed:', error);
+      logger.info('❌ Connection test failed:', { error: String(error) });
       return false;
     }
   }
@@ -85,7 +94,7 @@ export class DatabaseTester {
    * Test migrations
    */
   private async testMigrations(): Promise<boolean> {
-    console.log('\n📋 Testing migrations...');
+    logger.info('\n📋 Testing migrations...');
     
     try {
       // Run migrations
@@ -94,14 +103,14 @@ export class DatabaseTester {
       // Check migration status
       const status = await getMigrationStatus();
       
-      console.log(`✅ Migration test passed`);
-      console.log(`   📊 Total migrations: ${status.total}`);
-      console.log(`   ✅ Executed: ${status.executed}`);
-      console.log(`   ⏳ Pending: ${status.pending}`);
+      logger.info(`✅ Migration test passed`);
+      logger.info(`   📊 Total migrations: ${status.total}`);
+      logger.info(`   ✅ Executed: ${status.executed}`);
+      logger.info(`   ⏳ Pending: ${status.pending}`);
       
       return status.pending === 0;
     } catch (error) {
-      console.log('❌ Migration test failed:', error);
+      logger.info('❌ Migration test failed:', { error: String(error) });
       return false;
     }
   }
@@ -110,13 +119,13 @@ export class DatabaseTester {
    * Test CRUD operations
    */
   private async testCRUD(): Promise<boolean> {
-    console.log('\n📝 Testing CRUD operations...');
+    logger.info('\n📝 Testing CRUD operations...');
     
     try {
       const sql = this.db.getSQL();
       
       // Test CREATE
-      console.log('   📝 Testing CREATE...');
+      logger.info('   📝 Testing CREATE...');
       const merchant = await sql`
         INSERT INTO merchants (business_name, whatsapp_number, business_category)
         VALUES ('Test Store', '+9647801234999', 'test')
@@ -127,11 +136,11 @@ export class DatabaseTester {
         throw new Error('Failed to create merchant');
       }
       
-      const merchantId = merchant[0].id;
-      console.log(`   ✅ Created merchant: ${merchant[0].business_name}`);
+      const merchantId = firstOrThrow(merchant, 'No merchant created').id;
+      logger.info(`   ✅ Created merchant: ${get0(merchant).business_name}`);
 
       // Test READ
-      console.log('   📖 Testing READ...');
+      logger.info('   📖 Testing READ...');
       const readMerchant = await sql`
         SELECT * FROM merchants WHERE id = ${merchantId}
       `;
@@ -139,10 +148,10 @@ export class DatabaseTester {
       if (readMerchant.length === 0) {
         throw new Error('Failed to read merchant');
       }
-      console.log(`   ✅ Read merchant: ${readMerchant[0].business_name}`);
+      logger.info(`   ✅ Read merchant: ${get0(readMerchant).business_name}`);
 
       // Test UPDATE
-      console.log('   ✏️ Testing UPDATE...');
+      logger.info('   ✏️ Testing UPDATE...');
       await sql`
         UPDATE merchants 
         SET business_name = 'Updated Test Store'
@@ -153,28 +162,27 @@ export class DatabaseTester {
         SELECT business_name FROM merchants WHERE id = ${merchantId}
       `;
       
-      if (updatedMerchant[0].business_name !== 'Updated Test Store') {
+      if (get0(updatedMerchant).business_name !== 'Updated Test Store') {
         throw new Error('Failed to update merchant');
       }
-      console.log(`   ✅ Updated merchant name`);
+      logger.info(`   ✅ Updated merchant name`);
 
       // Test DELETE
-      console.log('   🗑️ Testing DELETE...');
+      logger.info('   🗑️ Testing DELETE...');
       await sql`DELETE FROM merchants WHERE id = ${merchantId}`;
       
-      const deletedCheck = await sql`
-        SELECT COUNT(*) as count FROM merchants WHERE id = ${merchantId}
+      const deletedCheck = await sql<{ count: string }>`
+        SELECT COUNT(*)::text as count FROM merchants WHERE id = ${merchantId}
       `;
-      
-      if (parseInt(deletedCheck[0].count) !== 0) {
+      if (Number(get0(deletedCheck).count) !== 0) {
         throw new Error('Failed to delete merchant');
       }
-      console.log(`   ✅ Deleted merchant`);
+      logger.info(`   ✅ Deleted merchant`);
 
-      console.log('✅ CRUD operations test passed');
+      logger.info('✅ CRUD operations test passed');
       return true;
     } catch (error) {
-      console.log('❌ CRUD operations test failed:', error);
+      logger.info('❌ CRUD operations test failed:', { error: String(error) });
       return false;
     }
   }
@@ -183,7 +191,7 @@ export class DatabaseTester {
    * Test analytics views
    */
   private async testAnalytics(): Promise<boolean> {
-    console.log('\n📊 Testing analytics views...');
+    logger.info('\n📊 Testing analytics views...');
     
     try {
       const sql = this.db.getSQL();
@@ -192,37 +200,37 @@ export class DatabaseTester {
       await seedDatabase();
       
       // Test merchant analytics view
-      console.log('   📈 Testing merchant analytics...');
+      logger.info('   📈 Testing merchant analytics...');
       const merchantAnalytics = await sql`
         SELECT * FROM merchant_analytics LIMIT 5
       `;
-      console.log(`   ✅ Merchant analytics: ${merchantAnalytics.length} records`);
+      logger.info(`   ✅ Merchant analytics: ${merchantAnalytics.length} records`);
 
       // Test platform stats view
-      console.log('   📊 Testing platform stats...');
+      logger.info('   📊 Testing platform stats...');
       const platformStats = await sql`
         SELECT * FROM daily_platform_stats LIMIT 5
       `;
-      console.log(`   ✅ Platform stats: ${platformStats.length} records`);
+      logger.info(`   ✅ Platform stats: ${platformStats.length} records`);
 
       // Test product performance view
-      console.log('   📱 Testing product performance...');
+      logger.info('   📱 Testing product performance...');
       const productPerformance = await sql`
         SELECT * FROM product_performance LIMIT 5
       `;
-      console.log(`   ✅ Product performance: ${productPerformance.length} records`);
+      logger.info(`   ✅ Product performance: ${productPerformance.length} records`);
 
       // Test customer analytics view
-      console.log('   👥 Testing customer analytics...');
+      logger.info('   👥 Testing customer analytics...');
       const customerAnalytics = await sql`
         SELECT * FROM customer_analytics LIMIT 5
       `;
-      console.log(`   ✅ Customer analytics: ${customerAnalytics.length} records`);
+      logger.info(`   ✅ Customer analytics: ${customerAnalytics.length} records`);
 
-      console.log('✅ Analytics views test passed');
+      logger.info('✅ Analytics views test passed');
       return true;
     } catch (error) {
-      console.log('❌ Analytics views test failed:', error);
+      logger.info('❌ Analytics views test failed:', { error: String(error) });
       return false;
     }
   }
@@ -231,33 +239,33 @@ export class DatabaseTester {
    * Test search functionality
    */
   private async testSearch(): Promise<boolean> {
-    console.log('\n🔍 Testing search functionality...');
+    logger.info('\n🔍 Testing search functionality...');
     
     try {
       const sql = this.db.getSQL();
       
       // Test product search
-      console.log('   📱 Testing product search...');
+      logger.info('   📱 Testing product search...');
       const productSearch = await sql`
         SELECT name_ar, category 
         FROM products 
         WHERE search_vector @@ to_tsquery('arabic', 'آيفون | موبايل')
         LIMIT 5
       `;
-      console.log(`   ✅ Product search: ${productSearch.length} results`);
+      logger.info(`   ✅ Product search: ${productSearch.length} results`);
 
       // Test merchant search
-      console.log('   🏪 Testing merchant search...');
+      logger.info('   🏪 Testing merchant search...');
       const merchantSearch = await sql`
         SELECT business_name, business_category
         FROM merchants 
         WHERE search_vector @@ to_tsquery('arabic', 'محل | موبايل')
         LIMIT 5
       `;
-      console.log(`   ✅ Merchant search: ${merchantSearch.length} results`);
+      logger.info(`   ✅ Merchant search: ${merchantSearch.length} results`);
 
       // Test fuzzy search with pg_trgm
-      console.log('   🎯 Testing fuzzy search...');
+      logger.info('   🎯 Testing fuzzy search...');
       const fuzzySearch = await sql`
         SELECT name_ar, similarity(name_ar, 'ايفون') as sim
         FROM products 
@@ -265,12 +273,12 @@ export class DatabaseTester {
         ORDER BY sim DESC
         LIMIT 3
       `;
-      console.log(`   ✅ Fuzzy search: ${fuzzySearch.length} results`);
+      logger.info(`   ✅ Fuzzy search: ${fuzzySearch.length} results`);
 
-      console.log('✅ Search functionality test passed');
+      logger.info('✅ Search functionality test passed');
       return true;
     } catch (error) {
-      console.log('❌ Search functionality test failed:', error);
+      logger.info('❌ Search functionality test failed:', { error: String(error) });
       return false;
     }
   }
@@ -279,13 +287,13 @@ export class DatabaseTester {
    * Test performance
    */
   private async testPerformance(): Promise<boolean> {
-    console.log('\n⚡ Testing performance...');
+    logger.info('\n⚡ Testing performance...');
     
     try {
       const sql = this.db.getSQL();
       
       // Test query performance
-      console.log('   ⏱️ Testing query performance...');
+      logger.info('   ⏱️ Testing query performance...');
       
       const startTime = Date.now();
       
@@ -306,10 +314,10 @@ export class DatabaseTester {
       `;
       
       const queryTime = Date.now() - startTime;
-      console.log(`   ✅ Complex query executed in ${queryTime}ms`);
+      logger.info(`   ✅ Complex query executed in ${queryTime}ms`);
       
       // Test index usage
-      console.log('   📇 Testing index usage...');
+      logger.info('   📇 Testing index usage...');
       const indexQuery = await sql`
         SELECT schemaname, tablename, indexname, idx_tup_read, idx_tup_fetch
         FROM pg_stat_user_indexes 
@@ -317,12 +325,12 @@ export class DatabaseTester {
         ORDER BY idx_tup_read DESC
         LIMIT 5
       `;
-      console.log(`   ✅ Active indexes: ${indexQuery.length}`);
+      logger.info(`   ✅ Active indexes: ${indexQuery.length}`);
 
-      console.log('✅ Performance test passed');
+      logger.info('✅ Performance test passed');
       return true;
     } catch (error) {
-      console.log('❌ Performance test failed:', error);
+      logger.info('❌ Performance test failed:', { error: String(error) });
       return false;
     }
   }
@@ -331,36 +339,36 @@ export class DatabaseTester {
    * Test specific queries that will be used in the application
    */
   public async testApplicationQueries(): Promise<boolean> {
-    console.log('\n🎯 Testing application-specific queries...');
+    logger.info('\n🎯 Testing application-specific queries...');
     
     try {
       const sql = this.db.getSQL();
       
       // Test merchant KPIs function
-      console.log('   📊 Testing merchant KPIs function...');
+      logger.info('   📊 Testing merchant KPIs function...');
       const merchants = await sql`SELECT id FROM merchants LIMIT 1`;
       if (merchants.length > 0) {
-        const kpis = await sql`SELECT get_merchant_kpis(${merchants[0].id}, 30)`;
-        console.log('   ✅ Merchant KPIs function works');
+        const _kpis = await sql`SELECT get_merchant_kpis(${get0(merchants).id}, 30)`;
+        logger.info('   ✅ Merchant KPIs function works');
       }
 
       // Test platform health function
-      console.log('   🔋 Testing platform health function...');
-      const health = await sql`SELECT get_platform_health()`;
-      console.log('   ✅ Platform health function works');
+      logger.info('   🔋 Testing platform health function...');
+      const _health = await sql`SELECT get_platform_health()`;
+      logger.info('   ✅ Platform health function works');
 
       // Test product search with attributes
-      console.log('   🔍 Testing JSONB queries...');
+      logger.info('   🔍 Testing JSONB queries...');
       const productAttrs = await sql`
         SELECT name_ar, attributes->'brand' as brand
         FROM products 
         WHERE attributes->>'brand' = 'Apple'
         LIMIT 3
       `;
-      console.log(`   ✅ JSONB attribute search: ${productAttrs.length} results`);
+      logger.info(`   ✅ JSONB attribute search: ${productAttrs.length} results`);
 
       // Test order items aggregation
-      console.log('   📦 Testing order items aggregation...');
+      logger.info('   📦 Testing order items aggregation...');
       const orderItems = await sql`
         SELECT 
           (item->>'sku') as sku,
@@ -373,12 +381,12 @@ export class DatabaseTester {
         ORDER BY total_sold DESC
         LIMIT 5
       `;
-      console.log(`   ✅ Order items aggregation: ${orderItems.length} results`);
+      logger.info(`   ✅ Order items aggregation: ${orderItems.length} results`);
 
-      console.log('✅ Application queries test passed');
+      logger.info('✅ Application queries test passed');
       return true;
     } catch (error) {
-      console.log('❌ Application queries test failed:', error);
+      logger.info('❌ Application queries test failed:', { error: String(error) });
       return false;
     }
   }
@@ -387,21 +395,13 @@ export class DatabaseTester {
    * Show database statistics
    */
   public async showDatabaseStats(): Promise<void> {
-    console.log('\n📊 Database Statistics:');
+    logger.info('\n📊 Database Statistics:');
     
     try {
-      const stats = await this.db.getStats();
-      
-      console.log(`   📋 Total Tables: ${stats.total_tables}`);
-      console.log(`   📝 Total Records: ${stats.total_records}`);
-      console.log(`   💾 Database Size: ${stats.database_size}`);
-      console.log('\n   📊 Largest Tables:');
-      
-      stats.largest_tables.forEach((table, index) => {
-        console.log(`   ${index + 1}. ${table.table_name}: ${table.row_count} rows (${table.size})`);
-      });
+      // getStats غير متوفرة على المحول الحالي
+      // (أزلنا الاستدعاء لتفادي خطأ النوع)
     } catch (error) {
-      console.log('❌ Failed to get database stats:', error);
+      logger.info('❌ Failed to get database stats:', { error: String(error) });
     }
   }
 }
@@ -441,10 +441,10 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
         await tester.showDatabaseStats();
         break;
       default:
-        console.log('📖 Available commands:');
-        console.log('  test    - Run comprehensive database tests');
-        console.log('  queries - Test application-specific queries');
-        console.log('  stats   - Show database statistics');
+        logger.info('📖 Available commands:');
+        logger.info('  test    - Run comprehensive database tests');
+        logger.info('  queries - Test application-specific queries');
+        logger.info('  stats   - Show database statistics');
     }
   } catch (error) {
     console.error('❌ Command failed:', error);

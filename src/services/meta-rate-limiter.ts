@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { RATE_LIMIT_HEADERS, RATE_LIMITS } from '../config/graph-api.js';
+import { RATE_LIMITS } from '../config/graph-api.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { randomUUID, randomInt } from 'crypto';
@@ -227,7 +227,8 @@ export class MetaRateLimiter {
       multi.expire(windowKey, Math.ceil(windowMs / 1000) + 1);
       
       const results = await multi.exec();
-      const currentCount = results?.[2]?.[1] as number || 0;
+      const countEntry = Array.isArray(results?.[2]) ? results?.[2][1] : 0;
+      const currentCount = typeof countEntry === 'number' ? countEntry : Number(countEntry) || 0;
       
       return {
         allowed: currentCount <= maxRequests,

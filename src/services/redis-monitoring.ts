@@ -142,9 +142,11 @@ export class RedisMonitor {
     for (const line of lines) {
       if (line.includes(':')) {
         const [key, value] = line.split(':');
-        const numValue = parseInt(value, 10);
-        if (!isNaN(numValue)) {
-          stats[key] = numValue;
+        if (value !== undefined) {
+          const numValue = parseInt(value, 10);
+          if (!Number.isNaN(numValue) && typeof key === 'string') {
+            stats[key] = numValue;
+          }
         }
       }
     }

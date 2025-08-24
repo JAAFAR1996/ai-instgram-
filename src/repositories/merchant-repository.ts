@@ -6,9 +6,11 @@
  */
 
 import { getDatabase } from '../db/adapter.js';
+import type { Sql, SqlFragment } from '../types/sql.js';
+import type { DatabaseRow } from '../types/db.js';
 // Database access via pg adapter
 
-interface MerchantRow {
+interface MerchantDbRow extends DatabaseRow {
   id: string;
   business_name: string;
   business_category: string;
@@ -24,19 +26,22 @@ interface MerchantRow {
   updated_at: string;
   last_active_at: string | null;
   business_account_id: string | null;
+  [key: string]: unknown;
 }
 
-interface CountRow {
+interface CountRow extends DatabaseRow {
   count: string;
+  [key: string]: unknown;
 }
 
-interface MerchantStatsRow {
+interface MerchantStatsRow extends DatabaseRow {
   total_merchants: string;
   active_merchants: string;
   subscription_tier: string | null;
   business_category: string | null;
   total_messages_used: string | null;
   avg_messages_per_merchant: string | null;
+  [key: string]: unknown;
 }
 
 export interface Merchant {
@@ -51,7 +56,7 @@ export interface Merchant {
   subscriptionTier: 'FREE' | 'BASIC' | 'PREMIUM' | 'ENTERPRISE';
   monthlyMessageLimit: number;
   monthlyMessagesUsed: number;
-  settings: Record<string, any>;
+  settings: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
   lastActiveAt?: Date;
@@ -66,7 +71,7 @@ export interface CreateMerchantRequest {
   subscriptionTier?: 'FREE' | 'BASIC' | 'PREMIUM' | 'ENTERPRISE';
   businessAccountId?: string;
   monthlyMessageLimit?: number;
-  settings?: Record<string, any>;
+  settings?: Record<string, unknown>;
 }
 
 export interface UpdateMerchantRequest {
@@ -79,7 +84,7 @@ export interface UpdateMerchantRequest {
   isActive?: boolean;
   subscriptionTier?: 'FREE' | 'BASIC' | 'PREMIUM' | 'ENTERPRISE';
   monthlyMessageLimit?: number;
-  settings?: Record<string, any>;
+  settings?: Record<string, unknown>;
 }
 
 export interface MerchantFilters {
@@ -119,12 +124,19 @@ export class MerchantRepository {
   private db = getDatabase();
 
   /**
+   * Helper method to safely get first row from SQL result
+   */
+  private getFirstRow<T>(rows: T[]): T | null {
+    return rows.length > 0 ? rows[0]! : null;
+  }
+
+  /**
    * Create new merchant
    */
   async create(data: CreateMerchantRequest): Promise<Merchant> {
     const sql: Sql = this.db.getSQL();
     
-    const [merchant] = await sql<MerchantRow[]>`
+    const rows = await sql<MerchantDbRow>`
       INSERT INTO merchants (
         business_name,
         business_category,
@@ -149,6 +161,10 @@ export class MerchantRepository {
       RETURNING *
     `;
 
+    const merchant = this.getFirstRow(rows);
+    if (!merchant) {
+      throw new Error('Failed to create merchant');
+    }
     return this.mapToMerchant(merchant);
   }
 
@@ -158,11 +174,12 @@ export class MerchantRepository {
   async findById(id: string): Promise<Merchant | null> {
     const sql: Sql = this.db.getSQL();
     
-    const [merchant] = await sql<MerchantRow[]>`
+    const rows = await sql<MerchantDbRow>`
       SELECT * FROM merchants
       WHERE id = ${id}::uuid
     `;
 
+    const merchant = this.getFirstRow(rows);
     return merchant ? this.mapToMerchant(merchant) : null;
   }
 
@@ -172,21 +189,23 @@ export class MerchantRepository {
   async findByEmail(email: string): Promise<Merchant | null> {
     const sql: Sql = this.db.getSQL();
     
-    const [merchant] = await sql<MerchantRow[]>`
+    const rows = await sql<MerchantDbRow>`
       SELECT * FROM merchants
       WHERE contact_email = ${email}
     `;
 
+    const merchant = this.getFirstRow(rows);
     return merchant ? this.mapToMerchant(merchant) : null;
   }
 
   /**
    * Update merchant
+   * Note: For production consistency, consider using UnitOfWork for transactional operations
    */
   async update(id: string, data: UpdateMerchantRequest): Promise<Merchant | null> {
     const sql: Sql = this.db.getSQL();
     
-    const updateFields: Fragment[] = [];
+    const updateFields: SqlFragment[] = [];
 
     if (data.businessName !== undefined) {
       updateFields.push(sql`business_name = ${data.businessName}`);
@@ -235,18 +254,19 @@ export class MerchantRepository {
     updateFields.push(sql`updated_at = NOW()`);
 
     if (updateFields.length === 1) {
+      // No actual updates to perform, return existing merchant
+      // Note: For consistency with UnitOfWork pattern, consider using transaction context
       return await this.findById(id);
     }
 
-    const rows = await this.db.query<MerchantRow>`
+    const [merchant] = await sql<MerchantDbRow>`
       UPDATE merchants
       SET ${(sql as any).join(updateFields, sql`, `)}
       WHERE id = ${id}::uuid
       RETURNING *
     `;
-    const row = rows[0];
 
-    return row ? this.mapToMerchant(row) : null;
+    return merchant ? this.mapToMerchant(merchant) : null;
   }
 
   /**
@@ -324,7 +344,7 @@ export class MerchantRepository {
   async findMany(filters: MerchantFilters = {}): Promise<Merchant[]> {
     const sql: Sql = this.db.getSQL();
     
-    const conditions: Fragment[] = [];
+    const conditions: SqlFragment[] = [];
 
     if (filters.isActive !== undefined) {
       conditions.push(sql`is_active = ${filters.isActive}`);
@@ -353,20 +373,31 @@ export class MerchantRepository {
       conditions.push(sql`created_at <= ${filters.createdBefore}`);
     }
 
-    const whereClause = conditions.length
-      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
-      : sql``;
+    // const whereClause = conditions.length  // unused
+    //   ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
+    //   : sql``;
     const limitClause = filters.limit ? sql`LIMIT ${filters.limit}` : sql``;
     const offsetClause = filters.offset ? sql`OFFSET ${filters.offset}` : sql``;
 
-    const merchants = await this.db.query<MerchantRow>`
-      SELECT * FROM merchants
-      ${whereClause}
-      ORDER BY created_at DESC
-      ${limitClause}
-      ${offsetClause}
-    `;
-    return merchants.map((m: MerchantRow) => this.mapToMerchant(m));
+    // Use original template literal approach but properly
+    if (conditions.length > 0) {
+      const merchants = await sql<MerchantDbRow>`
+        SELECT * FROM merchants
+        WHERE ${(sql as any).join(conditions, sql` AND `)}
+        ORDER BY created_at DESC
+        ${limitClause}
+        ${offsetClause}
+      `;
+      return merchants.map((m: MerchantDbRow) => this.mapToMerchant(m));
+    } else {
+      const merchants = await sql<MerchantDbRow>`
+        SELECT * FROM merchants
+        ORDER BY created_at DESC
+        ${limitClause}
+        ${offsetClause}
+      `;
+      return merchants.map((m: MerchantDbRow) => this.mapToMerchant(m));
+    }
   }
 
   /**
@@ -375,7 +406,7 @@ export class MerchantRepository {
   async getStats(): Promise<MerchantStats> {
     const sql: Sql = this.db.getSQL();
 
-    const results = await sql<MerchantStatsRow[]>`
+    const results = await sql<MerchantStatsRow>`
       SELECT
         COUNT(*) as total_merchants,
         COUNT(*) FILTER (WHERE is_active = true) as active_merchants,
@@ -397,22 +428,30 @@ export class MerchantRepository {
       averageMessagesPerMerchant: 0
     };
 
-    for (const row of results as MerchantStatsRow[]) {
-      if (!row.subscription_tier && !row.business_category) {
+    for (const row of results) {
+      const statsRow = row as MerchantStatsRow;
+      if (!statsRow.subscription_tier && !statsRow.business_category) {
         // Overall totals
-        stats.totalMerchants = parseInt(row.total_merchants || '0');
-        stats.activeMerchants = parseInt(row.active_merchants || '0');
-        stats.totalMessagesUsed = parseInt(row.total_messages_used || '0');
-        stats.averageMessagesPerMerchant = parseFloat(row.avg_messages_per_merchant || '0');
-      } else if (row.subscription_tier && !row.business_category) {
+        stats.totalMerchants = parseInt(statsRow.total_merchants || '0');
+        stats.activeMerchants = parseInt(statsRow.active_merchants || '0');
+        stats.totalMessagesUsed = parseInt(statsRow.total_messages_used || '0');
+        stats.averageMessagesPerMerchant = parseFloat(statsRow.avg_messages_per_merchant || '0');
+      } else if (statsRow.subscription_tier && !statsRow.business_category) {
         // Subscription tier totals
-        stats.bySubscriptionTier[row.subscription_tier] = parseInt(row.total_merchants || '0');
-      } else if (row.subscription_tier && row.business_category) {
+        stats.bySubscriptionTier[statsRow.subscription_tier] = parseInt(statsRow.total_merchants || '0');
+      } else if (statsRow.subscription_tier && statsRow.business_category) {
         // Business category totals
-        if (!stats.byBusinessCategory[row.business_category]) {
-          stats.byBusinessCategory[row.business_category] = 0;
+        if (!statsRow?.business_category) continue;
+        const totalMerchants = statsRow.total_merchants;
+        if (totalMerchants !== null && totalMerchants !== undefined) {
+          const businessCategory = statsRow.business_category;
+          if (businessCategory) {
+            if (!stats.byBusinessCategory[businessCategory]) {
+              stats.byBusinessCategory[businessCategory] = 0;
+            }
+            stats.byBusinessCategory[businessCategory] += parseInt(String(totalMerchants));
+          }
         }
-        stats.byBusinessCategory[row.business_category] += parseInt(row.total_merchants);
       }
     }
 
@@ -441,7 +480,7 @@ export class MerchantRepository {
   async getMerchantsApproachingLimit(threshold: number = 0.8): Promise<Merchant[]> {
     const sql: Sql = this.db.getSQL();
     
-    const merchants = await sql<MerchantRow[]>`
+    const merchants = await sql<MerchantDbRow>`
       SELECT * FROM merchants
       WHERE is_active = true
       AND monthly_messages_used >= (monthly_message_limit * ${threshold})
@@ -449,7 +488,7 @@ export class MerchantRepository {
       ORDER BY (monthly_messages_used::float / monthly_message_limit) DESC
     `;
 
-    return merchants.map((m: MerchantRow) => this.mapToMerchant(m));
+    return merchants.map((m: MerchantDbRow) => this.mapToMerchant(m));
   }
 
   /**
@@ -458,14 +497,14 @@ export class MerchantRepository {
   async getMerchantsOverLimit(): Promise<Merchant[]> {
     const sql: Sql = this.db.getSQL();
     
-    const merchants = await sql<MerchantRow[]>`
+    const merchants = await sql<MerchantDbRow>`
       SELECT * FROM merchants
       WHERE is_active = true
       AND monthly_messages_used >= monthly_message_limit
       ORDER BY monthly_messages_used DESC
     `;
 
-    return merchants.map((m: MerchantRow) => this.mapToMerchant(m));
+    return merchants.map((m: MerchantDbRow) => this.mapToMerchant(m));
   }
 
   /**
@@ -474,7 +513,7 @@ export class MerchantRepository {
   async count(filters: MerchantFilters = {}): Promise<number> {
     const sql: Sql = this.db.getSQL();
     
-    const conditions: Fragment[] = [];
+    const conditions: SqlFragment[] = [];
 
     if (filters.isActive !== undefined) {
       conditions.push(sql`is_active = ${filters.isActive}`);
@@ -492,11 +531,14 @@ export class MerchantRepository {
       ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
       : sql``;
 
-    const [result] = await this.db.query<CountRow>`
-      SELECT COUNT(*) as count FROM merchants ${whereClause}
+    const rows = await sql<CountRow>`
+      SELECT COUNT(*) as count
+      FROM merchants
+      ${whereClause}
     `;
     
-    return parseInt(result.count);
+    const result = this.getFirstRow(rows);
+    return result ? parseInt(result.count) : 0;
   }
 
   /**
@@ -516,25 +558,27 @@ export class MerchantRepository {
   /**
    * Map database row to Merchant object
    */
-  private mapToMerchant(row: MerchantRow): Merchant {
-    const lastActiveAt = row.last_active_at ?? undefined;
-    return {
+  private mapToMerchant(row: MerchantDbRow): Merchant {
+    const merchant: Merchant = {
       id: row.id,
       businessName: row.business_name,
       businessCategory: row.business_category,
-      businessDescription: row.business_description ?? undefined,
       contactEmail: row.contact_email,
-      contactPhone: row.contact_phone ?? undefined,
-      businessAccountId: row.business_account_id ?? undefined,
       isActive: row.is_active,
       subscriptionTier: row.subscription_tier,
       monthlyMessageLimit: parseInt(row.monthly_message_limit),
       monthlyMessagesUsed: parseInt(row.monthly_messages_used) || 0,
       settings: typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings,
       createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
-      lastActiveAt: lastActiveAt ? new Date(lastActiveAt) : undefined
+      updatedAt: new Date(row.updated_at)
     };
+    
+    if (row.business_description) merchant.businessDescription = row.business_description;
+    if (row.contact_phone) merchant.contactPhone = row.contact_phone;
+    if (row.business_account_id) merchant.businessAccountId = row.business_account_id;
+    if (row.last_active_at) merchant.lastActiveAt = new Date(row.last_active_at);
+    
+    return merchant;
   }
 }
 

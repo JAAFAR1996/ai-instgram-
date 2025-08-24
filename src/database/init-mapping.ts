@@ -1,10 +1,10 @@
 import { Pool } from 'pg';
-import { requireMerchantId } from '../utils/merchant.js';
+// requireMerchantId removed - not used
+import { getConfig } from '../config/index.js';
 
 export async function ensurePageMapping(): Promise<void> {
-  const dbUrl = process.env.DATABASE_URL;
-  const pageId = process.env.IG_PAGE_ID;
-  const merchantId = process.env.MERCHANT_ID;
+  const config = getConfig();
+  const { database: { url: dbUrl }, pageId, merchantId } = config;
 
   if (!merchantId) {
     console.error('❌ Environment variable MERCHANT_ID is missing. Aborting page mapping.');

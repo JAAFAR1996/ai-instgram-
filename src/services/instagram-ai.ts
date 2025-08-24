@@ -9,6 +9,7 @@ import { type ConversationContext, type AIResponse, type MessageHistory } from '
 import { getDatabase } from '../db/adapter.js';
 import { createLogger } from './logger.js';
 import OpenAI from 'openai';
+import { getEnv } from '../config/env.js';
 
 // Simple merchant configuration interface
 interface MerchantAIConfig {
@@ -57,12 +58,29 @@ export interface InstagramContext extends ConversationContext {
 
 export class InstagramAIService {
   private logger = createLogger({ component: 'InstagramAI' });
-  private openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY!,
-    timeout: parseInt(process.env.OPENAI_TIMEOUT || '30000'),
-  });
+  private openai: OpenAI;
+  private static readonly DEFAULT_TIMEOUT_MS = 30_000;
+  private static readonly MAX_TOKENS_HARD_CAP = 1_000;
+  private static readonly MIN_TEMPERATURE = 0;
+  private static readonly MAX_TEMPERATURE = 1;
 
   private db = getDatabase();
+
+  constructor() {
+    const apiKey = getEnv('OPENAI_API_KEY');
+    if (!apiKey) {
+      // فشل مبكر آمن في بيئات الإنتاج
+      const msg = 'OPENAI_API_KEY is missing';
+      if (getEnv('NODE_ENV') === 'production') throw new Error(msg);
+      this.logger.warn(`⚠️ ${msg} – running in degraded mode (fallbacks only).`);
+    }
+    this.openai = new OpenAI({
+      apiKey: apiKey ?? 'DEGRADED',
+      timeout: Number.isFinite(parseInt(getEnv('OPENAI_TIMEOUT') || '', 10))
+        ? parseInt(getEnv('OPENAI_TIMEOUT')!, 10)
+        : InstagramAIService.DEFAULT_TIMEOUT_MS,
+    });
+  }
   /**
    * Get merchant-specific AI configuration
    */
@@ -75,27 +93,29 @@ export class InstagramAIService {
         WHERE id = ${merchantId}::uuid
       `;
       
-      if (result.length > 0 && result[0].ai_config) {
+      if (result.length > 0 && result[0]?.ai_config) {
+        const config = (result[0]!.ai_config) as any;
         return {
-          aiModel: result[0].ai_config.model || 'gpt-4o-mini',
-          maxTokens: result[0].ai_config.maxTokens || 600,
-          temperature: result[0].ai_config.temperature || 0.8,
-          language: result[0].ai_config.language || 'ar'
+          aiModel: config?.model || 'gpt-4o-mini',
+          maxTokens: config?.maxTokens || 600,
+          temperature: config?.temperature || 0.8,
+          language: config?.language || 'ar'
         };
       }
 
       // Default configuration
-      const maxTokensEnv = parseInt(process.env.OPENAI_MAX_TOKENS || '600', 10);
-      const maxTokens = Number.isFinite(maxTokensEnv) ? maxTokensEnv : 600;
+      const maxTokensEnv = parseInt(getEnv('OPENAI_MAX_TOKENS') || '600', 10);
+      const maxTokensRaw = Number.isFinite(maxTokensEnv) ? maxTokensEnv : 600;
+      const maxTokens = Math.min(maxTokensRaw, InstagramAIService.MAX_TOKENS_HARD_CAP);
 
       return {
-        aiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        aiModel: getEnv('OPENAI_MODEL') || 'gpt-4o-mini',
         maxTokens,
         temperature: 0.8,
         language: 'ar'
       };
     } catch (error) {
-      this.logger.error('❌ Error loading merchant config:', error);
+      this.logger.error('❌ Failed to get merchant AI config:', error);
       return {
         aiModel: 'gpt-4o-mini',
         maxTokens: 600,
@@ -103,6 +123,30 @@ export class InstagramAIService {
         language: 'ar'
       };
     }
+  }
+
+  private clampTemperature(t: number): number {
+    if (Number.isFinite(t)) {
+      return Math.min(InstagramAIService.MAX_TEMPERATURE, Math.max(InstagramAIService.MIN_TEMPERATURE, t));
+    }
+    return 0.8;
+  }
+
+  private parseJsonSafe<T>(raw?: string): { ok: true; data: T } | { ok: false } {
+    try {
+      if (!raw) return { ok: false };
+      const data = JSON.parse(raw) as T;
+      return { ok: true, data };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  private validateInstagramResponse(x: Partial<InstagramAIResponse>): x is InstagramAIResponse {
+    return !!x &&
+      typeof x.message === 'string' &&
+      typeof x.intent === 'string' &&
+      typeof x.stage === 'string';
   }
 
   /**
@@ -147,8 +191,8 @@ export class InstagramAIService {
     const message = fb[code] ?? fb.AI_API_ERROR;
 
     return {
-      message,
-      messageAr: message,
+      message: message ?? '',
+      messageAr: message ?? '',
       intent: 'SUPPORT',
       stage: context.stage,
       actions: [{ type: 'ESCALATE', data: { reason: errorType }, priority: 1 }],
@@ -186,8 +230,8 @@ export class InstagramAIService {
       const completion = await this.openai.chat.completions.create({
         model: config.aiModel,
         messages: prompt,
-        temperature: config.temperature,
-        max_tokens: config.maxTokens,
+        temperature: this.clampTemperature(config.temperature),
+        max_tokens: Math.min(config.maxTokens, InstagramAIService.MAX_TOKENS_HARD_CAP),
         top_p: 0.95,
         frequency_penalty: 0.2,
         presence_penalty: 0.3,
@@ -195,31 +239,17 @@ export class InstagramAIService {
       });
 
       const responseTime = Date.now() - startTime;
-      const response = completion.choices[0]?.message?.content;
-
+      const response = completion.choices?.[0]?.message?.content || '';
       if (!response) {
         throw new Error('No response from OpenAI for Instagram');
       }
-      // Parse Instagram AI response with validation
-      let aiResponse: InstagramAIResponse;
-      try {
-        const parsed = JSON.parse(response) as Partial<InstagramAIResponse>;
 
-        // Ensure required fields exist before proceeding
-        if (
-          !parsed.message ||
-          !parsed.messageAr ||
-          !parsed.intent ||
-          !Array.isArray(parsed.actions)
-        ) {
-          throw new Error('Missing required AI response fields');
-        }
-
-        aiResponse = parsed as InstagramAIResponse;
-      } catch (parseError) {
-        this.logger.error('❌ Failed to parse Instagram AI response:', parseError);
+      const parsed = this.parseJsonSafe<Partial<InstagramAIResponse>>(response);
+      if (!parsed.ok || !this.validateInstagramResponse(parsed.data)) {
+        this.logger.error('Invalid Instagram AI JSON response', { sample: response.slice(0, 200) });
         return this.getContextualFallback(context, 'AI_API_ERROR');
       }
+      let aiResponse = parsed.data;
       
       // Add metadata
       aiResponse.tokens = {
@@ -239,15 +269,13 @@ export class InstagramAIService {
       await this.logInstagramAIInteraction(context, customerMessage, aiResponse);
 
       return aiResponse;
-    } catch (error) {
-      this.logger.error('❌ Instagram AI response generation failed:', error);
+    } catch (error: any) {
+      this.logger.error('❌ Instagram AI response generation failed:', {
+        err: error?.message || String(error),
+        stack: error?.stack,
+      });
       
-      // ✅ 2. Error Handling: Use contextual fallback
-      const errorType = error.message?.includes('rate limit') ? 'RATE_LIMIT'
-                       : error.message?.includes('network') ? 'NETWORK_ERROR'
-                       : 'AI_API_ERROR';
-      
-      return this.getContextualFallback(context, errorType);
+      return this.getContextualFallback(context, 'AI_API_ERROR');
     }
   }
 
@@ -263,20 +291,18 @@ export class InstagramAIService {
       const prompt = this.buildStoryReplyPrompt(storyReaction, storyContext, context);
 
       const completion = await this.openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        model: getEnv('OPENAI_MODEL') || 'gpt-4o-mini',
         messages: prompt,
         temperature: 0.9, // Very creative for story interactions
         max_tokens: 200,
         response_format: { type: 'json_object' }
       });
 
-      const response = completion.choices[0]?.message?.content;
-      let aiResponse: InstagramAIResponse;
-      try {
-        aiResponse = JSON.parse(response || '{}');
-      } catch {
-        aiResponse = this.getInstagramFallbackResponse(context);
-      }
+      const response = completion.choices?.[0]?.message?.content;
+      const parsed = this.parseJsonSafe<InstagramAIResponse>(response ?? undefined);
+      let aiResponse = parsed.ok && this.validateInstagramResponse(parsed.data)
+        ? parsed.data
+        : this.getInstagramFallbackResponse(context);
 
       // Set visual style for story replies
       aiResponse.visualStyle = 'story';
@@ -287,8 +313,8 @@ export class InstagramAIService {
       };
 
       return aiResponse;
-    } catch (error) {
-      this.logger.error('❌ Story reply generation failed:', error);
+    } catch (error: any) {
+      this.logger.error('❌ Story reply generation failed:', error?.message || String(error));
       return this.getInstagramFallbackResponse(context);
     }
   }
@@ -312,13 +338,11 @@ export class InstagramAIService {
         response_format: { type: 'json_object' }
       });
 
-      const response = completion.choices[0]?.message?.content;
-      let aiResponse: InstagramAIResponse;
-      try {
-        aiResponse = JSON.parse(response || '{}');
-      } catch {
-        aiResponse = this.getInstagramFallbackResponse(context);
-      }
+      const response = completion.choices?.[0]?.message?.content;
+      const parsed = this.parseJsonSafe<InstagramAIResponse>(response ?? undefined);
+      let aiResponse = parsed.ok && this.validateInstagramResponse(parsed.data)
+        ? parsed.data
+        : this.getInstagramFallbackResponse(context);
 
       // Set visual style for post comments
       aiResponse.visualStyle = 'post';
@@ -329,8 +353,8 @@ export class InstagramAIService {
       };
 
       return aiResponse;
-    } catch (error) {
-      this.logger.error('❌ Comment response generation failed:', error);
+    } catch (error: any) {
+      this.logger.error('❌ Comment response generation failed:', error?.message || String(error));
       return this.getInstagramFallbackResponse(context);
     }
   }
@@ -377,8 +401,8 @@ export class InstagramAIService {
         };
       }
       return showcase;
-    } catch (error) {
-      this.logger.error('❌ Product showcase generation failed:', error);
+    } catch (error: any) {
+      this.logger.error('❌ Product showcase generation failed:', error?.message || String(error));
       return {
         mediaRecommendations: [],
         caption: '',
@@ -430,8 +454,8 @@ export class InstagramAIService {
         };
       }
       return analysis;
-    } catch (error) {
-      this.logger.error('❌ Content performance analysis failed:', error);
+    } catch (error: any) {
+      this.logger.error('❌ Content performance analysis failed:', error?.message || String(error));
       return {
         viralScore: 0,
         engagementPrediction: 0,
@@ -696,7 +720,9 @@ ${productsText}
       // Trending hashtags (this could be enhanced with real-time trend data)
       const trendingHashtags = ['#ترند', '#جديد', '#حصري', '#عرض_خاص'];
 
-      return [...baseHashtags, ...relevantHashtags, ...trendingHashtags].slice(0, 8);
+      // إزالة التكرارات + قص للطول
+      const uniq = Array.from(new Set([...baseHashtags, ...relevantHashtags, ...trendingHashtags]));
+      return uniq.slice(0, 8);
     } catch (error) {
       this.logger.error('❌ Hashtag generation failed:', error);
       return ['#عراق', '#تسوق', '#جديد'];
@@ -800,26 +826,19 @@ ${productsText}
           )
         `,
         
-        // Update analytics in the same batch
+        // NOTE: use a daily rollup table with a real unique key (merchant_id, day)
         () => sql`
-          INSERT INTO instagram_analytics (
-            merchant_id,
-            interaction_type,
-            tokens_used,
-            response_time_ms,
-            created_at
+          INSERT INTO instagram_analytics_daily (
+            merchant_id, day, interaction_type, tokens_used, response_time_ms, total_interactions, total_tokens, avg_response_time
           ) VALUES (
-            ${context.merchantId}::uuid,
-            ${context.interactionType},
-            ${response.tokens?.total || 0},
-            ${response.responseTime},
-            NOW()
+            ${context.merchantId}::uuid, CURRENT_DATE, ${context.interactionType},
+            ${response.tokens?.total || 0}, ${response.responseTime}, 1, ${response.tokens?.total || 0}, ${response.responseTime}
           )
-          ON CONFLICT (merchant_id, DATE(created_at)) 
+          ON CONFLICT (merchant_id, day)
           DO UPDATE SET
-            total_interactions = instagram_analytics.total_interactions + 1,
-            total_tokens = instagram_analytics.total_tokens + ${response.tokens?.total || 0},
-            avg_response_time = (instagram_analytics.avg_response_time + ${response.responseTime}) / 2
+            total_interactions = instagram_analytics_daily.total_interactions + 1,
+            total_tokens = instagram_analytics_daily.total_tokens + EXCLUDED.tokens_used,
+            avg_response_time = (instagram_analytics_daily.avg_response_time + EXCLUDED.response_time_ms) / 2
         `
       ];
 
@@ -844,8 +863,8 @@ ${productsText}
     const message = fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)];
 
     return {
-      message,
-      messageAr: message,
+      message: message ?? '',
+      messageAr: message ?? '',
       intent: 'SUPPORT',
       stage: context.stage,
       actions: [{ type: 'ESCALATE', data: { reason: 'AI_ERROR' }, priority: 1 }],
@@ -859,7 +878,7 @@ ${productsText}
         viralPotential: 0,
         userGeneratedContent: false
       },
-      hashtagSuggestions: ['#عذر', '#مساعدة']
+      hashtagSuggestions: ['#مساعدة']
     };
   }
 }

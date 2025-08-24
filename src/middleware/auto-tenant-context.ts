@@ -30,7 +30,7 @@ export interface TenantContextConfig {
 }
 
 function getDefaultConfig(): TenantContextConfig {
-  return {
+  const config: TenantContextConfig = {
     enableAutoContext: true,
     headerName: 'x-merchant-id',
     cookieName: 'merchant_id',
@@ -39,12 +39,15 @@ function getDefaultConfig(): TenantContextConfig {
       (() => {
         throw new Error('JWT_SECRET is required');
       })(),
-    jwtIssuer: process.env.JWT_ISSUER || undefined,
-    jwtAudience: process.env.JWT_AUDIENCE || undefined,
     adminRoles: ['admin', 'super_admin'],
     skipPaths: ['/health', '/webhooks', '/public', '/metrics'],
     allowedAlgs: ['HS256', 'RS256'],
   };
+  
+  if (process.env.JWT_ISSUER) config.jwtIssuer = process.env.JWT_ISSUER;
+  if (process.env.JWT_AUDIENCE) config.jwtAudience = process.env.JWT_AUDIENCE;
+  
+  return config;
 }
 
 export function autoTenantContext(cfg: TenantContextConfig = {}) {
@@ -52,7 +55,7 @@ export function autoTenantContext(cfg: TenantContextConfig = {}) {
   try {
     opts = { ...getDefaultConfig(), ...cfg };
   } catch (err) {
-    return async (c: Context, next: Next) =>
+    return async (c: Context, _next: Next) =>
       c.json(
         {
           error: 'Failed to initialize tenant context',
@@ -148,7 +151,9 @@ async function extractTenantInfo(
   if (m) {
     try {
       const encryption = getEncryptionService();
-      const decrypted = encryption.decrypt(JSON.parse(decodeURIComponent(m[1])));
+      const token = m?.[1];
+      if (!token) throw new Error('Missing tenant context cookie');
+      const decrypted = encryption.decrypt(JSON.parse(decodeURIComponent(token)));
       const data = JSON.parse(decrypted);
       if (data.merchantId && isValidUUID(data.merchantId)) {
         return { merchantId: data.merchantId, userId: data.userId, source: 'cookie' };
@@ -184,7 +189,7 @@ export function requireTenantContext() {
       }, 401);
     }
 
-    await next();
+    return await next();
   };
 }
 
@@ -202,7 +207,7 @@ export function requireAdminContext() {
       }, 403);
     }
 
-    await next();
+    return await next();
   };
 }
 

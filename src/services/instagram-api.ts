@@ -5,16 +5,26 @@
  * ===============================================
  */
 
+
+
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { telemetry } from './telemetry.js';
-import type { Platform } from '../types/database.js';
 import { createHash } from 'crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { InstagramAPICredentials, SendMessageRequest } from '../types/instagram.js';
+import type {
+  QuickReply,
+  InstagramMessagePayload,
+  InstagramAPIResponse,
+  InstagramAPICredentials,
+  SendMessageRequest
+} from '../types/instagram.js';
 import type { DIContainer } from '../container/index.js';
 import type { Pool } from 'pg';
-import type { AppConfig } from '../config/environment.js';
+import type { AppConfig } from '../config/index.js';
+import type EncryptionService from './encryption.js';
+import type { MetaRateLimiter } from './meta-rate-limiter.js';
+import type Logger from './logger.js';
 export type { InstagramAPICredentials } from '../types/instagram.js';
 
 export interface InstagramOAuthConfig {
@@ -73,16 +83,7 @@ export interface InstagramStoryMention {
 }
 
 
-export interface InstagramAPIResponse {
-  success: boolean;
-  messageId?: string;
-  error?: {
-    code: number;
-    message: string;
-    type: string;
-  };
-  rateLimitRemaining?: number;
-}
+
 
 export interface InstagramProfile {
   id: string;
@@ -102,19 +103,17 @@ function isInstagramProfile(data: unknown): data is InstagramProfile {
 
 export class InstagramAPIClient {
   private readonly baseUrl = GRAPH_API_BASE_URL;
-  private encryptionService: any;
-  private pool: Pool;
-  private rateLimiter: any;
-  private logger: any;
-  private config: AppConfig;
+  private encryptionService!: EncryptionService;
+  // removed unused fields
+  private rateLimiter!: MetaRateLimiter;
+  private logger: Logger;
+  // removed unused fields
 
   private credentials: InstagramAPICredentials | null = null;
-  private merchantId: string | null = null;
+  // removed unused fields
 
-  constructor(private container: DIContainer) {
-    this.pool = container.get<Pool>('pool');
-    this.config = container.get<AppConfig>('config');
-    this.logger = container.get('logger');
+  constructor(_container: DIContainer) {
+    this.logger = _container.get('logger');
     
     this.initializeDependencies();
   }
@@ -126,15 +125,15 @@ export class InstagramAPIClient {
       
       this.encryptionService = getEncryptionService();
       this.rateLimiter = getMetaRateLimiter();
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.logger.error('Failed to initialize InstagramAPIClient dependencies:', error);
       throw error;
     }
   }
 
-  public initialize(credentials: InstagramAPICredentials, merchantId: string): void {
+  public initialize(credentials: InstagramAPICredentials, _merchantId: string): void {
     this.credentials = credentials;
-    this.merchantId = merchantId;
+    // removed unused assignment
   }
 
   /**
@@ -144,7 +143,7 @@ export class InstagramAPIClient {
     method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH',
     path: string,
     accessToken: string,
-    body: Record<string, any> | undefined,
+    body: Record<string, unknown> | undefined,
     merchantId: string,
     returnResponse?: true
   ): Promise<Response>;
@@ -152,7 +151,7 @@ export class InstagramAPIClient {
     method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH',
     path: string,
     accessToken: string,
-    body: Record<string, any> | undefined,
+    body: Record<string, unknown> | undefined,
     merchantId: string,
     returnResponse?: false
   ): Promise<T>;
@@ -160,7 +159,7 @@ export class InstagramAPIClient {
     method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH',
     path: string,
     accessToken: string,
-    body: Record<string, any> | undefined,
+    body: Record<string, unknown> | undefined,
     merchantId: string,
     returnResponse: boolean = false
   ): Promise<T | Response> {
@@ -193,20 +192,23 @@ export class InstagramAPIClient {
       });
     }
 
-      const url = `${GRAPH_API_BASE_URL}${path}`;
+    const url = `${GRAPH_API_BASE_URL}${path}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
     const start = Date.now();
     try {
-      const res = await fetch(url, {
+      const init: RequestInit = {
         method,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`
+          Authorization: `Bearer ${accessToken}`,
         },
-        body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal
-      });
+      };
+      if (body !== undefined) {
+        (init as Record<string, unknown>).body = JSON.stringify(body);
+      }
+      const res = await fetch(url, init);
 
       const latency = Date.now() - start;
       telemetry.recordMetaRequest('instagram', path, res.status, latency, res.status === 429);
@@ -220,9 +222,9 @@ export class InstagramAPIClient {
 
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
-        const e = new Error(`IG Graph error ${res.status}: ${errBody}`);
-        (e as any).status = res.status;
-        throw e;
+        const err = new Error(`IG Graph error ${res.status}: ${errBody}`) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
       }
 
       return returnResponse ? res : (res.json() as Promise<T>);
@@ -245,7 +247,7 @@ export class InstagramAPIClient {
       const response = await this.graphRequest<Response>(
         'POST',
         `/${credentials.businessAccountId}/messages`,
-        credentials.pageAccessToken,
+        (credentials.accessToken || credentials.pageAccessToken)!,
         payload,
         merchantId,
         true
@@ -253,28 +255,22 @@ export class InstagramAPIClient {
 
       const rateLimitRemaining =
         this.parseRateLimitHeaders(response) ?? 200;
-      const result: any = await response.json();
+      const result = (await response.json()) as { message_id?: string };
 
-      return {
+      const out: InstagramAPIResponse = {
         success: true,
-        messageId: result.message_id,
-        rateLimitRemaining
+        ...(result.message_id ? { id: result.message_id } : {})
       };
+      return out;
     } catch (error) {
       this.logger.error('❌ Instagram message send failed:', error);
-      const status = typeof (error as any)?.status === 'number'
-        ? (error as any).status
+      const status = typeof (error as { status?: unknown })?.status === 'number'
+        ? (error as { status?: number }).status!
         : 500;
-      const message = typeof (error as any)?.message === 'string'
-        ? (error as any).message
-        : 'Unknown error';
+      const message = error instanceof Error ? error.message : 'Unknown error';
       return {
         success: false,
-        error: {
-          code: status,
-          message,
-          type: status >= 400 && status < 500 ? 'API_ERROR' : 'NETWORK_ERROR'
-        }
+        error: JSON.stringify({ code: status, message, type: status >= 400 && status < 500 ? 'API_ERROR' : 'NETWORK_ERROR' })
       };
     }
   }
@@ -302,10 +298,11 @@ export class InstagramAPIClient {
     };
 
     const config = typeConfig[mediaType];
-    if (!config.exts.includes(ext)) {
+    if (!config || !config.exts.includes(ext)) {
       throw new Error(`Unsupported ${mediaType} format: ${ext}`);
     }
 
+    if (!config) throw new Error('Missing media config');
     if (stats.size > config.max) {
       throw new Error(
         `${mediaType} exceeds ${(config.max / 1024 / 1024).toFixed(0)}MB limit`
@@ -318,7 +315,7 @@ export class InstagramAPIClient {
     form.append('media_type', mediaType);
 
     const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
-      this.credentials.pageAccessToken
+      (this.credentials.accessToken || this.credentials.pageAccessToken)!
     )}`;
 
     const response = await fetch(uploadUrl, {
@@ -331,8 +328,14 @@ export class InstagramAPIClient {
       throw new Error(errText);
     }
 
-    const data: any = await response.json().catch(() => ({}));
-    return data.id || data.media_id || data.attachment_id || data.mediaId;
+    const data = await response.json().catch<Partial<Record<'id'|'media_id'|'attachment_id'|'mediaId', string>>>(() => ({}));
+    const d = data as Record<string, unknown>;
+    return String(
+      (d['id'] ??
+       d['media_id'] ??
+       d['attachment_id'] ??
+       (d['mediaId'] as string | undefined)) ?? ''
+    );
   }
 
   /**
@@ -345,12 +348,12 @@ export class InstagramAPIClient {
     imageUrl: string,
     caption?: string
   ): Promise<InstagramAPIResponse> {
-    return this.sendMessage(credentials, merchantId, {
-      recipientId,
-      messageType: 'image',
-      content: caption || '',
-      attachment: { type: 'image', payload: { url: imageUrl } }
-    });
+          return this.sendMessage(credentials, merchantId, {
+        recipientId,
+        messagingType: 'RESPONSE',
+        content: caption || '',
+        attachment: { type: 'image', payload: { url: imageUrl } }
+      });
   }
 
   /**
@@ -367,27 +370,23 @@ export class InstagramAPIClient {
         message: message
       };
 
-      const result: any = await this.graphRequest<any>(
+      const result = await this.graphRequest<{ id: string }>(
         'POST',
         `/${commentId}/replies`,
-        credentials.pageAccessToken,
+        (credentials.accessToken || credentials.pageAccessToken)!,
         payload,
         merchantId
       );
 
       return {
         success: true,
-        messageId: result.id
+        ...(result && typeof result === 'object' && 'id' in result ? { id: String((result as any).id) } : {})
       };
     } catch (error) {
       this.logger.error('❌ Instagram comment reply failed:', error);
       return {
         success: false,
-        error: {
-          code: 500,
-          message: error instanceof Error ? error.message : 'Unknown error',
-          type: 'NETWORK_ERROR'
-        }
+        error: JSON.stringify({ code: 500, message: error instanceof Error ? error.message : 'Unknown error', type: 'NETWORK_ERROR' })
       };
     }
   }
@@ -404,7 +403,7 @@ export class InstagramAPIClient {
       const res = await this.graphRequest(
         'GET',
         `/${userId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,
-        credentials.pageAccessToken,
+        (credentials.accessToken || credentials.pageAccessToken)!,
         undefined,
         merchantId,
         true
@@ -475,17 +474,17 @@ export class InstagramAPIClient {
         verify_token: credentials.webhookVerifyToken
       };
 
-      const result: any = await this.graphRequest<any>(
+      const _result = await this.graphRequest<{ success?: boolean }>(
         'POST',
         `/${credentials.pageId}/subscribed_apps`,
-        credentials.pageAccessToken,
+        (credentials.accessToken || credentials.pageAccessToken)!,
         payload,
         merchantId
       );
 
       this.logger.info('✅ Instagram webhook subscribed successfully');
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('❌ Webhook subscription error:', error);
       return false;
     }
@@ -497,16 +496,20 @@ export class InstagramAPIClient {
   public async getBusinessAccountInfo(
     credentials: InstagramAPICredentials,
     merchantId: string
-  ): Promise<any> {
+  ): Promise<{ id: string; username?: string; name?: string; profile_picture_url?: string; followers_count?: number; media_count?: number }> {
     try {
-      return await this.graphRequest<any>(
+      const response = await this.graphRequest(
         'GET',
         `/${credentials.businessAccountId}?fields=id,username,name,profile_picture_url,followers_count,media_count`,
-        credentials.pageAccessToken,
+        (credentials.accessToken || credentials.pageAccessToken)!,
         undefined,
-        merchantId
+        merchantId,
+        true
       );
-    } catch (error) {
+      
+      const data = await response.json();
+      return data as { id: string; username?: string; name?: string; profile_picture_url?: string; followers_count?: number; media_count?: number };
+    } catch (error: unknown) {
       this.logger.error('❌ Get business account info failed:', error);
       throw error;
     }
@@ -542,7 +545,7 @@ export class InstagramAPIClient {
         businessAccountId: accountInfo.id,
         lastChecked: new Date()
       };
-    } catch (error) {
+    } catch (error: unknown) {
       return {
         status: 'unhealthy',
         rateLimitRemaining: 0,
@@ -559,8 +562,18 @@ export class InstagramAPIClient {
     try {
       // Use pool directly for SQL operations
       const { query } = await import('../db/index.js');
+      const { getDatabase } = await import('../db/adapter.js');
+      const sql = getDatabase().getSQL();
       
-      const credentials = await sql`
+      type CredRow = {
+        instagram_token_encrypted: string | null;
+        instagram_page_id: string | null;
+        webhook_verify_token: string | null;
+        business_account_id: string | null;
+        app_secret: string | null;
+        [key: string]: unknown;
+      };
+      const credentials = await sql<CredRow>`
         SELECT
           instagram_token_encrypted,
           instagram_page_id,
@@ -575,7 +588,7 @@ export class InstagramAPIClient {
         return null;
       }
 
-      const cred = credentials[0];
+      const cred = credentials[0] as CredRow;
       
       if (!cred.instagram_token_encrypted) {
         return null;
@@ -587,13 +600,14 @@ export class InstagramAPIClient {
       );
 
       return {
-        businessAccountId: cred.business_account_id || '',
+        accessToken: decryptedToken,
+        businessAccountId: cred.business_account_id ?? '',
         pageAccessToken: decryptedToken,
-        pageId: cred.instagram_page_id || '',
-        webhookVerifyToken: cred.webhook_verify_token || '',
-        appSecret: cred.app_secret || ''
+        pageId: cred.instagram_page_id ?? '',
+        webhookVerifyToken: cred.webhook_verify_token ?? '',
+        appSecret: cred.app_secret ?? ''
       };
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('❌ Failed to load merchant credentials:', error);
       return null;
     }
@@ -608,7 +622,7 @@ export class InstagramAPIClient {
   ): Promise<void> {
     try {
       await this.getBusinessAccountInfo(credentials, merchantId);
-    } catch (error) {
+    } catch (error: unknown) {
       throw new Error(`Invalid Instagram credentials: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -616,43 +630,50 @@ export class InstagramAPIClient {
   /**
    * Private: Build message payload for API
    */
-  private buildMessagePayload(request: SendMessageRequest): any {
-    const basePayload = {
+  private buildMessagePayload(request: SendMessageRequest): Record<string, unknown> {
+    const basePayload: Record<string, unknown> = {
+      messaging_product: 'instagram',
       recipient: {
         id: request.recipientId
       },
-      messaging_type: 'RESPONSE' // Within 24h window
+      messaging_type: request.messagingType || 'RESPONSE'
     };
 
     if (request.attachment) {
+      const message: Record<string, unknown> = { attachment: request.attachment };
+      if (request.content) message.text = request.content;
+      if (request.quickReplies && request.quickReplies.length) message.quick_replies = request.quickReplies;
+      
       return {
         ...basePayload,
-        message: {
-          attachment: request.attachment,
-          text: request.content || undefined,
-          quick_replies: request.quickReplies
-        }
+        message
       };
     }
 
-    if (request.messageType === 'template') {
+    // Check if content is JSON template
+    const isTemplate = request.content && 
+      request.content.trim().startsWith('{') && 
+      request.content.trim().endsWith('}');
+
+    if (isTemplate) {
       return {
         ...basePayload,
         message: {
           attachment: {
             type: 'template',
-            payload: JSON.parse(request.content)
+            payload: JSON.parse(request.content!)
           }
         }
       };
     }
 
+    const message: Record<string, unknown> = {};
+    if (request.content) message.text = request.content;
+    if (request.quickReplies && request.quickReplies.length) message.quick_replies = request.quickReplies;
+
     return {
       ...basePayload,
-      message: {
-        text: request.content,
-        quick_replies: request.quickReplies
-      }
+      message
     };
   }
 
@@ -677,9 +698,9 @@ export class InstagramAPIClient {
  * Instagram Credentials Manager
  */
 export class InstagramAPICredentialsManager {
-  private encryptionService: any;
+  private encryptionService!: EncryptionService;
   private pool: Pool;
-  private logger: any;
+  private logger: Logger;
   private config: AppConfig;
 
   constructor(private container: DIContainer) {
@@ -694,7 +715,7 @@ export class InstagramAPICredentialsManager {
     try {
       const { getEncryptionService } = await import('./encryption.js');
       this.encryptionService = getEncryptionService();
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.logger.error('Failed to initialize InstagramAPICredentialsManager dependencies:', error);
       throw error;
     }
@@ -717,11 +738,14 @@ export class InstagramAPICredentialsManager {
     try {
       // Encrypt the access token
       const encryptedToken = this.encryptionService.encryptInstagramToken(
-        credentials.pageAccessToken
+        ('accessToken' in credentials ? (credentials as { accessToken?: string }).accessToken : undefined)
+          || credentials.pageAccessToken!
       );
 
       // Use pool directly for SQL operations
       const { query } = await import('../db/index.js');
+      const { getDatabase } = await import('../db/adapter.js');
+      const sql = getDatabase().getSQL();
       
       const hashedToken = createHash('sha256')
         .update(credentials.webhookVerifyToken)
@@ -781,6 +805,8 @@ export class InstagramAPICredentialsManager {
     try {
       // Use pool directly for SQL operations
       const { query } = await import('../db/index.js');
+      const { getDatabase } = await import('../db/adapter.js');
+      const sql = getDatabase().getSQL();
       
       await sql`
         UPDATE merchant_credentials
@@ -811,16 +837,18 @@ export class InstagramAPICredentialsManager {
     try {
       // Use pool directly for SQL operations
       const { query } = await import('../db/index.js');
+      const { getDatabase } = await import('../db/adapter.js');
+      const sql = getDatabase().getSQL();
       
-      const result: any[] = await sql`
+      const result = await sql.unsafe<{ instagram_token_encrypted: string | null }>(`
         SELECT instagram_token_encrypted
         FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
         AND instagram_token_encrypted IS NOT NULL
-      `;
+      `);
 
-      return result.length > 0;
-    } catch (error) {
+      return (result as Array<{ instagram_token_encrypted: string | null }>).length > 0;
+    } catch (error: unknown) {
       this.logger.error('❌ Failed to check Instagram credentials:', error);
       return false;
     }
@@ -837,28 +865,38 @@ export class InstagramAPICredentialsManager {
     try {
       // Use pool directly for SQL operations
       const { query } = await import('../db/index.js');
+      const { getDatabase } = await import('../db/adapter.js');
+      const db = getDatabase();
       
-      const result: any[] = await sql`
+      const result = await query(db.getPool(), `
         SELECT
           instagram_token_encrypted,
           instagram_page_id,
           last_access_at
         FROM merchant_credentials
-        WHERE merchant_id = ${merchantId}::uuid
-      `;
+        WHERE merchant_id = $1::uuid
+      `, [merchantId]) as Array<{
+        instagram_token_encrypted: string | null;
+        instagram_page_id: string | null;
+        last_access_at: string | null;
+        [key: string]: unknown;
+      }>;
 
       if (result.length === 0) {
         return { hasCredentials: false };
       }
 
       const cred = result[0];
+      if (!cred) {
+        return { hasCredentials: false };
+      }
 
       return {
         hasCredentials: !!cred.instagram_token_encrypted,
-        lastAccess: cred.last_access_at ? new Date(cred.last_access_at) : undefined,
-        pageId: cred.instagram_page_id ?? undefined
+        ...(cred.last_access_at ? { lastAccess: new Date(cred.last_access_at) } : {}),
+        ...(cred.instagram_page_id ? { pageId: cred.instagram_page_id } : {})
       };
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('❌ Failed to get credentials info:', error);
       return { hasCredentials: false };
     }

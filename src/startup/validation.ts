@@ -5,9 +5,10 @@
  * ===============================================
  */
 
-import { getConfig, EnvironmentValidationError } from '../config/environment.js';
+import { getConfig } from '../config/index.js';
 import { getDatabase } from '../db/adapter.js';
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
+import { getLogger } from '../services/logger.js';
 
 export interface ValidationResult {
   success: boolean;
@@ -28,7 +29,8 @@ export interface StartupValidationReport {
  * Run comprehensive startup validation
  */
 export async function runStartupValidation(): Promise<StartupValidationReport> {
-  console.log('🔍 Running startup validation checks...');
+  const logger = getLogger({ component: 'startup-validation' });
+  logger.info('🔍 Running startup validation checks...');
   const startTime = Date.now();
   
   const results: ValidationResult[] = [];
@@ -178,7 +180,7 @@ async function validateEnvironmentConfiguration(): Promise<ValidationResult> {
       details: {
         environment: config.environment,
         aiModel: config.ai.model,
-        databaseHost: config.database.host,
+        databaseUrl: config.database.url,
         corsOrigins: config.security.corsOrigins.length
       }
     };
@@ -201,9 +203,9 @@ async function validateDatabaseConnection(): Promise<ValidationResult> {
   try {
     const db = getDatabase();
     
-    // Initialize connection and run health check
+    // Initialize connection and run health check  
     const sql = db.getSQL();
-    const result = await sql`SELECT 1 as test`;
+    const result = await sql<{ test: number }>`SELECT 1 as test`;
     
     if (!result || result.length === 0) {
       throw new Error('Database health check failed: No response');
@@ -239,18 +241,18 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
   
   try {
     const db = getDatabase();
-    const sql = db.getSQL() as any;
+    const sql = db.getSQL();
 
     // Check required tables exist
     const requiredTables = [
       'merchants',
-      'conversations',
+      'conversations', 
       'message_logs',
       'merchant_credentials',
       'audit_logs'
     ];
 
-    const existingTables: { table_name: string }[] = await sql<{ table_name: string }>`
+    const existingTables = await sql<{ table_name: string }>`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public' 
@@ -550,39 +552,40 @@ async function validateSecurityConfiguration(): Promise<ValidationResult> {
  * Log validation report with proper formatting
  */
 function logValidationReport(report: StartupValidationReport): void {
-  console.log('\n' + '='.repeat(60));
-  console.log('🔍 STARTUP VALIDATION REPORT');
-  console.log('='.repeat(60));
+  const logger = getLogger({ component: 'startup-validation' });
+  logger.info('\n' + '='.repeat(60));
+  logger.info('🔍 STARTUP VALIDATION REPORT');
+  logger.info('='.repeat(60));
 
   report.results.forEach(result => {
     const icon = result.success ? '✅' : '❌';
     const status = result.success ? 'PASS' : 'FAIL';
-    console.log(`${icon} ${result.service}: ${status} (${result.duration}ms)`);
-    console.log(`   ${result.message}`);
+    logger.info(`${icon} ${result.service}: ${status} (${result.duration}ms)`);
+    logger.info(`   ${result.message}`);
     
     if (result.details) {
       const detailsStr = Object.entries(result.details)
         .map(([key, value]) => `${key}: ${value}`)
         .join(', ');
-      console.log(`   Details: ${detailsStr}`);
+      logger.info(`   Details: ${detailsStr}`);
     }
-    console.log();
+    logger.info(' ');
   });
 
-  console.log('='.repeat(60));
+  logger.info('='.repeat(60));
   
   if (report.overallSuccess) {
-    console.log(`✅ ALL CHECKS PASSED (${report.totalDuration}ms total)`);
-    console.log('🚀 Application is ready to start');
+    logger.info(`✅ ALL CHECKS PASSED (${report.totalDuration}ms total)`);
+    logger.info('🚀 Application is ready to start');
   } else {
-    console.log(`❌ CRITICAL ERRORS FOUND (${report.criticalErrors.length})`);
+    logger.info(`❌ CRITICAL ERRORS FOUND (${report.criticalErrors.length})`);
     report.criticalErrors.forEach(error => {
-      console.log(`   • ${error}`);
+      logger.info(`   • ${error}`);
     });
-    console.log('🛑 Application startup blocked');
+    logger.info('🛑 Application startup blocked');
   }
   
-  console.log('='.repeat(60) + '\n');
+  logger.info('='.repeat(60) + '\n');
 }
 
 /**
@@ -610,7 +613,8 @@ export async function validateMerchantConfig(merchantId: string): Promise<boolea
       return false;
     }
 
-    console.log(`✅ Merchant validation passed: ${merchant.business_name}`);
+    const logger = getLogger({ component: 'startup-validation' });
+    logger.info(`✅ Merchant validation passed: ${merchant.business_name}`);
     return true;
   } catch (error) {
     console.error(`❌ Merchant validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);

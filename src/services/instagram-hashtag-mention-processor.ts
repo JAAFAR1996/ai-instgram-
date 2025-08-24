@@ -6,8 +6,8 @@
  */
 
 import { getDatabase } from '../db/adapter.js';
-import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
-import type { Sql } from 'postgres';
+import type { Sql } from '../types/sql.js';
+import { logger } from './logger.js';
 
 const TIMEFRAME_INTERVALS: Record<'day' | 'week' | 'month', string> = {
   day: '1 day',
@@ -83,7 +83,6 @@ export interface HashtagStrategy {
 
 export class InstagramHashtagMentionProcessor {
   private db = getDatabase();
-  private aiOrchestrator = getConversationAIOrchestrator();
 
   /**
    * Process hashtags and mentions from content
@@ -96,7 +95,7 @@ export class InstagramHashtagMentionProcessor {
     error?: string;
   }> {
     try {
-      console.log(`#️⃣ Processing content with ${data.hashtags.length} hashtags and ${data.mentions.length} mentions`);
+      logger.info(`#️⃣ Processing content with ${data.hashtags.length} hashtags and ${data.mentions.length} mentions`);
 
       // Extract and validate hashtags/mentions
       const extractedHashtags = this.extractHashtags(data.content);
@@ -144,7 +143,7 @@ export class InstagramHashtagMentionProcessor {
       // Check for marketing opportunities
       await this.checkMarketingOpportunities(hashtagAnalyses, mentionAnalyses, data);
 
-      console.log(
+      logger.info(
         `✅ Processed ${limitedHashtags.length} hashtags and ${limitedMentions.length} mentions`
       );
 
@@ -175,17 +174,23 @@ export class InstagramHashtagMentionProcessor {
   ): Promise<HashtagTrendAnalysis[]> {
     try {
       const sql: Sql = this.db.getSQL();
-
       const intervalValue = TIMEFRAME_INTERVALS[timeframe] || TIMEFRAME_INTERVALS.week;
-
-      const trends = await sql`
-        SELECT 
+      const trends = await sql.unsafe<{
+        hashtag: string;
+        total_usage: string;
+        avg_sentiment: string;
+        positive_count: string;
+        neutral_count: string;
+        negative_count: string;
+        usage_hours: number[];
+      }>(`
+        SELECT
           hashtag,
           COUNT(*) as total_usage,
-          AVG(CASE 
-            WHEN hm.sentiment = 'positive' THEN 1 
-            WHEN hm.sentiment = 'negative' THEN -1 
-            ELSE 0 
+          AVG(CASE
+            WHEN hm.sentiment = 'positive' THEN 1
+            WHEN hm.sentiment = 'negative' THEN -1
+            ELSE 0
           END) as avg_sentiment,
           COUNT(CASE WHEN hm.sentiment = 'positive' THEN 1 END) as positive_count,
           COUNT(CASE WHEN hm.sentiment = 'neutral' THEN 1 END) as neutral_count,
@@ -199,28 +204,29 @@ export class InstagramHashtagMentionProcessor {
         HAVING COUNT(*) >= 2
         ORDER BY total_usage DESC
         LIMIT 20
-      `;
+      `);
 
       const trendAnalyses: HashtagTrendAnalysis[] = [];
 
       for (const trend of trends) {
+        const trendData = (trend as unknown) as { hashtag: string; total_usage: string; avg_sentiment: string; positive_count: string; neutral_count: string; negative_count: string; usage_hours: number[] };
         // Calculate growth (simplified - would need historical data)
-        const recentGrowth = await this.calculateHashtagGrowth(trend.hashtag, merchantId, timeframe);
+        const recentGrowth = await this.calculateHashtagGrowth(trendData.hashtag, merchantId, timeframe);
 
         // Get associated words
-        const associatedWords = await this.getAssociatedWords(trend.hashtag, merchantId);
+        const associatedWords = await this.getAssociatedWords(trendData.hashtag, merchantId);
 
         trendAnalyses.push({
-          hashtag: trend.hashtag,
-          totalUsage: Number(trend.total_usage),
+          hashtag: trendData.hashtag,
+          totalUsage: Number(trendData.total_usage),
           recentGrowth,
           topAssociatedWords: associatedWords.slice(0, 5),
           sentimentTrend: {
-            positive: Number(trend.positive_count),
-            neutral: Number(trend.neutral_count),
-            negative: Number(trend.negative_count)
+            positive: Number(trendData.positive_count),
+            neutral: Number(trendData.neutral_count),
+            negative: Number(trendData.negative_count)
           },
-          peakUsageTimes: trend.usage_hours.map((hour: number) => `${hour}:00`),
+          peakUsageTimes: (trendData.usage_hours || []).map((hour: number) => `${Number(hour)}:00`),
           competitorUsage: 0, // Would need competitor tracking
           recommendedStrategy: this.generateHashtagStrategy(trend)
         });
@@ -242,8 +248,7 @@ export class InstagramHashtagMentionProcessor {
   ): Promise<string> {
     try {
       const sql: Sql = this.db.getSQL();
-
-      const result = await sql`
+      const result = await sql<{ id: string }>`
         INSERT INTO hashtag_strategies (
           merchant_id,
           name,
@@ -266,8 +271,8 @@ export class InstagramHashtagMentionProcessor {
         RETURNING id
       `;
 
-      const strategyId = result[0].id;
-      console.log(`✅ Hashtag strategy created: ${strategy.name} (${strategyId})`);
+      const strategyId = ((result[0] as unknown) as { id: string })?.id ?? '';
+      logger.info(`✅ Hashtag strategy created: ${strategy.name} (${strategyId})`);
       return strategyId;
     } catch (error) {
       console.error('❌ Create hashtag strategy failed:', error);
@@ -301,20 +306,23 @@ export class InstagramHashtagMentionProcessor {
     try {
       const sql: Sql = this.db.getSQL();
 
-      const dateFilter = dateRange 
+      const dateFilter = dateRange
         ? sql`AND created_at BETWEEN ${dateRange.from} AND ${dateRange.to}`
         : sql`AND created_at >= NOW() - INTERVAL '30 days'`;
-
-      // Get hashtag performance
-      const hashtagStats = await sql`
-        SELECT 
+      const hashtagStats = await sql.unsafe<{
+        hashtag: string;
+        usage_count: string;
+        avg_engagement: string;
+        sentiment_score: string;
+      }>(`
+        SELECT
           hashtag,
           COUNT(*) as usage_count,
           AVG(engagement_score) as avg_engagement,
-          AVG(CASE 
-            WHEN sentiment = 'positive' THEN 1 
-            WHEN sentiment = 'negative' THEN -1 
-            ELSE 0 
+          AVG(CASE
+            WHEN sentiment = 'positive' THEN 1
+            WHEN sentiment = 'negative' THEN -1
+            ELSE 0
           END) as sentiment_score
         FROM hashtag_mentions
         WHERE merchant_id = ${merchantId}::uuid
@@ -323,11 +331,14 @@ export class InstagramHashtagMentionProcessor {
         GROUP BY hashtag
         ORDER BY usage_count DESC, avg_engagement DESC
         LIMIT 10
-      `;
+      `);
 
       // Get mention statistics
-      const mentionStats = await sql`
-        SELECT 
+      const mentionStats = await sql.unsafe<{
+        mention_type: string;
+        count: string;
+      }>(`
+        SELECT
           mention_type,
           COUNT(*) as count
         FROM hashtag_mentions
@@ -335,7 +346,7 @@ export class InstagramHashtagMentionProcessor {
         AND mentioned_user IS NOT NULL
         ${dateFilter}
         GROUP BY mention_type
-      `;
+      `);
 
       // Get trending hashtags (growing in usage)
       const trendingHashtags = await this.identifyTrendingHashtags(merchantId);
@@ -346,16 +357,16 @@ export class InstagramHashtagMentionProcessor {
       return {
         totalHashtagsUsed: hashtagStats.length,
         topPerformingHashtags: hashtagStats.map(stat => ({
-          hashtag: stat.hashtag,
-          usage: Number(stat.usage_count),
-          engagement: Number(stat.avg_engagement) || 0,
-          sentiment: Number(stat.sentiment_score) || 0
+          hashtag: ((stat as unknown) as { hashtag: string; usage_count: string; avg_engagement: string; sentiment_score: string })?.hashtag ?? '',
+          usage: Number(((stat as unknown) as { hashtag: string; usage_count: string; avg_engagement: string; sentiment_score: string })?.usage_count ?? 0),
+          engagement: Number(((stat as unknown) as { hashtag: string; usage_count: string; avg_engagement: string; sentiment_score: string })?.avg_engagement ?? 0),
+          sentiment: Number(((stat as unknown) as { hashtag: string; usage_count: string; avg_engagement: string; sentiment_score: string })?.sentiment_score ?? 0)
         })),
         mentionAnalytics: {
-          totalMentions: mentionStats.reduce((sum, stat) => sum + Number(stat.count), 0),
-          influencerMentions: Number(mentionStats.find(s => s.mention_type === 'influencer')?.count || 0),
-          customerMentions: Number(mentionStats.find(s => s.mention_type === 'customer')?.count || 0),
-          competitorMentions: Number(mentionStats.find(s => s.mention_type === 'competitor')?.count || 0)
+          totalMentions: mentionStats.reduce((sum, stat) => sum + Number(((stat as unknown) as { mention_type: string; count: string })?.count ?? 0), 0),
+          influencerMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'influencer') as any)?.count ?? 0),
+          customerMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'customer') as any)?.count ?? 0),
+          competitorMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'competitor') as any)?.count ?? 0)
         },
         trendingHashtags,
         recommendedHashtags
@@ -370,6 +381,7 @@ export class InstagramHashtagMentionProcessor {
    * Private: Extract hashtags from content
    */
   private extractHashtags(content: string): string[] {
+    // يشمل العربية + الأرقام/الحروف والشرطة السفلية
     const hashtagRegex = /#[\u0600-\u06FF\w]+/g;
     const matches = content.match(hashtagRegex) || [];
     return matches.map(hashtag => hashtag.toLowerCase().substring(1)); // Remove # symbol
@@ -508,7 +520,7 @@ export class InstagramHashtagMentionProcessor {
   /**
    * Private: Analyze hashtag sentiment
    */
-  private analyzeHashtagSentiment(hashtag: string, content: string): 'positive' | 'neutral' | 'negative' {
+  private analyzeHashtagSentiment(_hashtag: string, content: string): 'positive' | 'neutral' | 'negative' {
     const positiveWords = ['حب', 'عجب', 'جميل', 'رائع', 'ممتاز', 'love', 'amazing', 'great', 'excellent'];
     const negativeWords = ['سيء', 'مش عاجب', 'غلط', 'خطأ', 'bad', 'terrible', 'wrong', 'awful'];
 
@@ -719,7 +731,7 @@ export class InstagramHashtagMentionProcessor {
         AND merchant_id = ${merchantId}::uuid
         AND created_at >= NOW() - INTERVAL '30 days'
       `;
-      return Number(result[0]?.frequency || 0);
+      return Number(((result[0] as unknown) as { frequency: string })?.frequency || 0);
     } catch (error) {
       console.error('Error getting hashtag frequency:', error);
       return 0;
@@ -746,8 +758,8 @@ export class InstagramHashtagMentionProcessor {
           AND merchant_id = ${merchantId}::uuid
       `;
 
-      const current = Number(result[0]?.current_count || 0);
-      const previous = Number(result[0]?.previous_count || 0);
+      const current = Number(((result[0] as unknown) as { current_count: string })?.current_count || 0);
+      const previous = Number(((result[0] as unknown) as { previous_count: string })?.previous_count || 0);
 
       if (previous === 0) {
         return current > 0 ? 100 : 0;
@@ -905,7 +917,7 @@ export class InstagramHashtagMentionProcessor {
           )
         `;
 
-        console.log(`📈 Marketing opportunity identified from hashtags/mentions`);
+        logger.info(`📈 Marketing opportunity identified from hashtags/mentions`);
       }
     } catch (error) {
       console.error('❌ Check marketing opportunities failed:', error);
@@ -929,7 +941,7 @@ export class InstagramHashtagMentionProcessor {
         LIMIT 5
       `;
 
-      return related.map(row => row.hashtag);
+      return related.map(row => ((row as unknown) as { hashtag: string })?.hashtag ?? '');
     } catch {
       return [];
     }

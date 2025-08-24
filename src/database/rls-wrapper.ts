@@ -5,9 +5,13 @@
  * ===============================================
  */
 
-// Database access via pg adapter
-import type postgres from 'postgres';
 import crypto from 'crypto';
+import { getDatabase } from '../db/adapter.js';
+import type { Sql } from '../types/sql.js';
+import type { SqlFunction } from '../db/sql-template.js';
+import { q } from '../db/safe-query.js';
+import { RlsContextRow } from '../types/db-schemas.js';
+import { must } from '../utils/safety.js';
 
 export interface RLSContext {
   merchantId?: string;
@@ -28,16 +32,15 @@ export class RLSDatabase {
       throw new Error('merchantId is required for RLS context');
     }
 
-    const sql = this.db.getSQL();
-    
+    const sql: SqlFunction = this.db.getSQL();
     try {
-      // Use SET LOCAL for transaction-scoped context (critical for pooled connections)
+      // سياق محلي داخل التراكنشن
       await sql`SET LOCAL app.tenant_id = ${merchantId}`;
       await sql`SET LOCAL app.current_merchant_id = ${merchantId}`;
       
       this.currentContext = {
         merchantId,
-        userId,
+        ...(userId ? { userId } : {}),
         isAdmin: false,
         sessionId: this.generateSessionId()
       };
@@ -58,15 +61,13 @@ export class RLSDatabase {
       throw new Error('setAdminContext is restricted in production');
     }
 
-    const sql = this.db.getSQL();
-
+    const sql: SqlFunction = this.db.getSQL();
     try {
-      // Use SET LOCAL for transaction-scoped context
       await sql`SET LOCAL app.is_admin = ${isAdmin ? 'true' : 'false'}`;
 
       this.currentContext = {
         isAdmin,
-        userId,
+        ...(userId ? { userId } : {}),
         sessionId: this.generateSessionId()
       };
 
@@ -80,7 +81,7 @@ export class RLSDatabase {
    * Clear all RLS context
    */
   async clearContext(): Promise<void> {
-    const sql = this.db.getSQL();
+    const sql: SqlFunction = this.db.getSQL();
     
     try {
       // Clear all LOCAL settings (automatic at transaction end for pooled connections)
@@ -103,17 +104,16 @@ export class RLSDatabase {
     contextAgeSeconds: number;
     isValid: boolean;
   }> {
-    const sql = this.db.getSQL();
-    
     try {
-      const [result] = await sql`SELECT * FROM validate_rls_context()`;
-      
+      const userId = this.currentContext.userId ?? 'system';
+      const rows = await q(RlsContextRow, 'select * from get_rls_context($1)', [userId]);
+      const r = must(rows[0], 'RLS: empty');
       return {
-        hasMerchantContext: result.has_merchant_context,
-        merchantId: result.merchant_id,
-        isAdmin: result.is_admin,
-        contextAgeSeconds: result.context_age_seconds,
-        isValid: result.has_merchant_context || result.is_admin
+        hasMerchantContext: r.has_merchant_context,
+        ...(r.merchant_id ? { merchantId: r.merchant_id } : {}),
+        isAdmin: r.is_admin,
+        contextAgeSeconds: r.context_age_seconds,
+        isValid: r.has_merchant_context || r.is_admin
       };
     } catch (error) {
       console.error('❌ Failed to validate RLS context:', error);
@@ -129,7 +129,7 @@ export class RLSDatabase {
   /**
    * Execute query with automatic context validation
    */
-  async query<T>(strings: TemplateStringsArray, ...params: any[]): Promise<T[]> {
+  async query<T extends { [key: string]: unknown } = { [key: string]: unknown }>(strings: TemplateStringsArray, ...params: unknown[]): Promise<T[]> {
     // التحقق من السياق قبل التنفيذ
     const contextValidation = await this.validateContext();
 
@@ -140,30 +140,29 @@ export class RLSDatabase {
       );
     }
 
-    return await this.db.query(strings, ...params) as T[];
+    const sql: SqlFunction = this.db.getSQL();
+    return await sql<T>(strings, ...params);
   }
 
   /**
    * Execute query in transaction with RLS
    */
   async transaction<T>(
-    callback: (sql: postgres.Sql) => Promise<T>,
+    callback: (sql: Sql) => Promise<T>,
     merchantId?: string
   ): Promise<T> {
-    const sql = this.db.getSQL();
-    
-    return await sql.begin(async (transaction) => {
+    const sql: SqlFunction = this.db.getSQL();
+    return await sql.transaction(async (trx: SqlFunction) => {
       // إعداد السياق داخل التراكنشن
       if (merchantId) {
-        await transaction`SELECT set_merchant_context(${merchantId}::uuid)`;
+        await trx`SELECT set_merchant_context(${merchantId}::uuid)`;
       } else if (this.currentContext.merchantId) {
-        await transaction`SELECT set_merchant_context(${this.currentContext.merchantId}::uuid)`;
+        await trx`SELECT set_merchant_context(${this.currentContext.merchantId}::uuid)`;
       } else if (this.currentContext.isAdmin) {
-        await transaction`SELECT set_admin_context(${this.currentContext.isAdmin})`;
+        await trx`SELECT set_admin_context(${this.currentContext.isAdmin})`;
       }
 
-      // تنفيذ الكود
-      return await callback(transaction);
+      return await callback(trx as unknown as Sql);
     }) as T;
   }
 
@@ -226,7 +225,7 @@ export class RLSDatabase {
   /**
    * Internal helper to log security-related actions
    */
-  private async logAudit(action: string, userId?: string, details?: any): Promise<void> {
+  private async logAudit(action: string, userId?: string, details?: Record<string, unknown>): Promise<void> {
     try {
       const sql = this.db.getSQL();
       await sql`
@@ -262,7 +261,13 @@ export class RLSDatabase {
 export class RLSContextError extends Error {
   constructor(
     message: string,
-    public readonly contextInfo: any
+    public readonly contextInfo: {
+      hasMerchantContext: boolean;
+      merchantId?: string;
+      isAdmin: boolean;
+      contextAgeSeconds: number;
+      isValid: boolean;
+    }
   ) {
     super(message);
     this.name = 'RLSContextError';

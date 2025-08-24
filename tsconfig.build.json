@@ -8,14 +8,19 @@
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
-    "downlevelIteration": true
+    "downlevelIteration": true,
+    // نفس تليين الأنواع في tsconfig العادي
+    "exactOptionalPropertyTypes": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
   },
   "exclude": [
     "src/database/migrations/**",
     "src/database/migrate.ts",
     "src/database/seed.ts",
+    "src/database/test.ts",
     "src/**/__tests__/**",
-    "src/**/*.spec.ts",
+    "src/**/*.spec.ts", 
     "src/**/*.test.ts",
     "src/scripts/**",
     "src/**/test.ts",

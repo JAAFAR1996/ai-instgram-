@@ -5,16 +5,15 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   loadAndValidateEnvironment,
-  validateRuntimeConfig,
   getEnvVar,
   getConfig,
   resetConfig,
-  EnvironmentValidationError,
   type AppConfig
-} from './environment.js';
+} from './index.js';
+import { validateRuntimeConfig, EnvironmentValidationError } from './validators.js';
 
 describe('Environment Configuration - تكوين متغيرات البيئة', () => {
   let originalEnv: NodeJS.ProcessEnv;
@@ -78,7 +77,7 @@ describe('Environment Configuration - تكوين متغيرات البيئة', (
       const config = loadAndValidateEnvironment();
       expect(config).toBeDefined();
       expect(config.environment).toBe('test');
-      expect(config.database.host).toBe('localhost');
+      expect(config.database.url).toBe('postgresql://user:pass@localhost:5432/testdb');
       expect(config.instagram.appId).toBe('1234567890123');
     });
 
@@ -212,12 +211,12 @@ describe('Environment Configuration - تكوين متغيرات البيئة', (
     });
 
     test('should warn about development redirect URI in production', () => {
-      const consoleSpy = spyOn(console, 'warn');
+      const consoleSpy = vi.spyOn(console, 'warn');
       process.env.REDIRECT_URI = 'https://localhost:3000/auth/instagram/callback';
       
       loadAndValidateEnvironment();
       
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('REDIRECT_URI should use your production domain'));
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('REDIRECT_URI should match BASE_URL'));
       consoleSpy.mockRestore();
     });
 
@@ -241,20 +240,8 @@ describe('Environment Configuration - تكوين متغيرات البيئة', (
       
       const config = loadAndValidateEnvironment();
       
-      expect(config.database.host).toBe('db.example.com');
-      expect(config.database.port).toBe(5432);
-      expect(config.database.database).toBe('mydb');
-      expect(config.database.username).toBe('user');
-      expect(config.database.password).toBe('password');
+      expect(config.database.url).toBe('postgresql://user:password@db.example.com:5432/mydb?sslmode=require');
       expect(config.database.ssl).toBe(true);
-    });
-
-    test('should handle default port for PostgreSQL', () => {
-      process.env.DATABASE_URL = 'postgresql://user:password@localhost/testdb';
-      
-      const config = loadAndValidateEnvironment();
-      
-      expect(config.database.port).toBe(5432);
     });
 
     test('should disable SSL when sslmode=disable', () => {
@@ -263,6 +250,14 @@ describe('Environment Configuration - تكوين متغيرات البيئة', (
       const config = loadAndValidateEnvironment();
       
       expect(config.database.ssl).toBe(false);
+    });
+
+    test('should enable SSL by default for Render compatibility', () => {
+      process.env.DATABASE_URL = 'postgresql://user:password@localhost:5432/testdb';
+      
+      const config = loadAndValidateEnvironment();
+      
+      expect(config.database.ssl).toBe(true);
     });
 
     test('should handle database max connections', () => {
@@ -302,7 +297,7 @@ describe('Environment Configuration - تكوين متغيرات البيئة', (
     });
 
     test('should warn about high database connections', () => {
-      const consoleSpy = spyOn(console, 'warn');
+      const consoleSpy = vi.spyOn(console, 'warn');
       const config = loadAndValidateEnvironment();
       config.database.maxConnections = 150;
       
@@ -537,7 +532,7 @@ describe('Environment Configuration - تكوين متغيرات البيئة', (
       validateRuntimeConfig(config);
       
       expect(config.environment).toBe('development');
-      expect(config.database.database).toBe('sales_platform_test');
+      expect(config.database.url).toContain('sales_platform_test');
       expect(config.ai.model).toBe('gpt-4o-mini');
       expect(config.instagram.apiVersion).toBe('v23.0');
       expect(config.security.corsOrigins).toHaveLength(2);

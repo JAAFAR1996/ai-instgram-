@@ -6,15 +6,16 @@
  */
 
 import { getDatabase } from '../db/adapter.js';
+import type { Sql } from '../types/sql.js';
 // Database access via pg adapter
 
 interface ConversationRow {
   id: string;
   merchant_id: string;
-  customer_whatsapp: string | null;
+  customer_phone: string | null;
   customer_instagram: string | null;
   customer_name: string | null;
-  platform: 'instagram';
+  platform: 'instagram' | 'whatsapp';
   conversation_stage: string;
   session_data: string;
   message_count: string;
@@ -22,6 +23,7 @@ interface ConversationRow {
   created_at: string;
   updated_at: string;
   ended_at: string | null;
+  [key: string]: unknown;
 }
 
 interface ConversationStatsRow {
@@ -31,10 +33,12 @@ interface ConversationStatsRow {
   conversation_stage: string | null;
   avg_messages: string;
   avg_duration_minutes: string;
+  [key: string]: unknown;
 }
 
 interface CountRow {
   count: string;
+  [key: string]: unknown;
 }
 
 export interface Conversation {
@@ -43,7 +47,7 @@ export interface Conversation {
   customerWhatsapp?: string;
   customerInstagram?: string;
   customerName?: string;
-  platform: 'instagram';
+  platform: 'instagram' | 'whatsapp';
   conversationStage: string;
   sessionData: Record<string, any>;
   messageCount: number;
@@ -55,10 +59,11 @@ export interface Conversation {
 
 export interface CreateConversationRequest {
   merchantId: string;
+  /** لواتساب نخزنها في عمود customer_phone */
   customerWhatsapp?: string;
   customerInstagram?: string;
   customerName?: string;
-  platform: 'instagram';
+  platform: 'instagram' | 'whatsapp';
   conversationStage?: string;
   sessionData?: Record<string, any>;
 }
@@ -72,7 +77,7 @@ export interface UpdateConversationRequest {
 
 export interface ConversationFilters {
   merchantId?: string;
-  platform?: 'instagram';
+  platform?: 'instagram' | 'whatsapp';
   conversationStage?: string;
   isActive?: boolean;
   customerQuery?: string;
@@ -95,51 +100,100 @@ export class ConversationRepository {
   private db = getDatabase();
 
   /**
+   * Helper method to safely get first row from SQL result
+   */
+  private getFirstRow<T>(rows: T[]): T | null {
+    return rows.length > 0 ? rows[0]! : null;
+  }
+
+  /**
    * Create new conversation
    */
   async create(
     data: CreateConversationRequest
   ): Promise<{ conversation: Conversation; isNew: boolean }> {
     const sql: Sql = this.db.getSQL();
-
-    const inserted = await sql<ConversationRow[]>`
-      INSERT INTO conversations (
-        merchant_id,
-        customer_whatsapp,
-        customer_instagram,
-        customer_name,
-        platform,
-        conversation_stage,
-        session_data,
-        last_message_at
-      ) VALUES (
-        ${data.merchantId}::uuid,
-        ${data.customerWhatsapp || null},
-        ${data.customerInstagram || null},
-        ${data.customerName || null},
-        ${data.platform},
-        ${data.conversationStage || 'GREETING'},
-        ${JSON.stringify(data.sessionData || {})},
-        NOW()
-      )
-      ON CONFLICT (merchant_id, customer_instagram, platform)
-      DO NOTHING
-      RETURNING *
-    `;
+    
+    // نفرّع بحسب المنصة لضمان مفتاح تعارض صحيح
+    const inserted =
+      data.platform === 'whatsapp'
+        ? await sql<ConversationRow>`
+            INSERT INTO conversations (
+              merchant_id,
+              customer_phone,
+              customer_instagram,
+              customer_name,
+              platform,
+              conversation_stage,
+              session_data,
+              last_message_at
+            ) VALUES (
+              ${data.merchantId}::uuid,
+              ${data.customerWhatsapp || null},
+              ${data.customerInstagram || null},
+              ${data.customerName || null},
+              ${data.platform},
+              ${data.conversationStage || 'GREETING'},
+              ${JSON.stringify(data.sessionData || {})},
+              NOW()
+            )
+            ON CONFLICT (merchant_id, customer_phone, platform)
+            DO NOTHING
+            RETURNING *
+          `
+        : await sql<ConversationRow>`
+            INSERT INTO conversations (
+              merchant_id,
+              customer_phone,
+              customer_instagram,
+              customer_name,
+              platform,
+              conversation_stage,
+              session_data,
+              last_message_at
+            ) VALUES (
+              ${data.merchantId}::uuid,
+              ${data.customerWhatsapp || null},
+              ${data.customerInstagram || null},
+              ${data.customerName || null},
+              ${data.platform},
+              ${data.conversationStage || 'GREETING'},
+              ${JSON.stringify(data.sessionData || {})},
+              NOW()
+            )
+            ON CONFLICT (merchant_id, customer_instagram, platform)
+            DO NOTHING
+            RETURNING *
+          `;
 
     if (inserted.length > 0) {
-      return { conversation: this.mapToConversation(inserted[0]), isNew: true };
+      return { conversation: this.mapToConversation(inserted[0]!), isNew: true };
     }
 
-    const [existing] = await sql<ConversationRow[]>`
-      SELECT * FROM conversations
-      WHERE merchant_id = ${data.merchantId}::uuid
-        AND customer_instagram = ${data.customerInstagram || null}
-        AND platform = ${data.platform}
-      LIMIT 1
-    `;
+    const existingRows =
+      data.platform === 'whatsapp'
+        ? await sql<ConversationRow>`
+            SELECT * FROM conversations
+            WHERE merchant_id = ${data.merchantId}::uuid
+              AND customer_phone = ${data.customerWhatsapp || null}
+              AND platform = ${data.platform}
+            ORDER BY last_message_at DESC
+            LIMIT 1
+          `
+        : await sql<ConversationRow>`
+            SELECT * FROM conversations
+            WHERE merchant_id = ${data.merchantId}::uuid
+              AND customer_instagram = ${data.customerInstagram || null}
+              AND platform = ${data.platform}
+            ORDER BY last_message_at DESC
+            LIMIT 1
+          `;
 
-    return { conversation: this.mapToConversation(existing), isNew: false };
+    if (existingRows.length > 0) {
+      return { conversation: this.mapToConversation(existingRows[0]!), isNew: false };
+    }
+
+    throw new Error('Failed to create or find conversation');
   }
 
   /**
@@ -148,11 +202,12 @@ export class ConversationRepository {
   async findById(id: string): Promise<Conversation | null> {
     const sql: Sql = this.db.getSQL();
     
-    const [conversation] = await sql<ConversationRow[]>`
+    const rows = await sql<ConversationRow>`
       SELECT * FROM conversations
       WHERE id = ${id}::uuid
     `;
 
+    const conversation = this.getFirstRow(rows);
     return conversation ? this.mapToConversation(conversation) : null;
   }
 
@@ -166,19 +221,31 @@ export class ConversationRepository {
   ): Promise<Conversation | null> {
     const sql: Sql = this.db.getSQL();
     
-    const whereField = platform === 'whatsapp' ? 'customer_whatsapp' : 'customer_instagram';
-    
-    const [conversation] = await sql<ConversationRow[]>`
-      SELECT * FROM conversations
-      WHERE merchant_id = ${merchantId}::uuid
-      AND ${sql(whereField)} = ${customerIdentifier}
-      AND platform = ${platform}
-      AND ended_at IS NULL
-      ORDER BY last_message_at DESC
-      LIMIT 1
-    `;
-
-    return conversation ? this.mapToConversation(conversation) : null;
+    if (platform === 'whatsapp') {
+      const rows = await sql<ConversationRow>`
+        SELECT * FROM conversations
+        WHERE merchant_id = ${merchantId}::uuid
+        AND customer_phone = ${customerIdentifier}
+        AND platform = ${platform}
+        AND ended_at IS NULL
+        ORDER BY last_message_at DESC
+        LIMIT 1
+      `;
+      const conversation = this.getFirstRow(rows);
+      return conversation ? this.mapToConversation(conversation) : null;
+    } else {
+      const rows = await sql<ConversationRow>`
+        SELECT * FROM conversations
+        WHERE merchant_id = ${merchantId}::uuid
+        AND customer_instagram = ${customerIdentifier}
+        AND platform = ${platform}
+        AND ended_at IS NULL
+        ORDER BY last_message_at DESC
+        LIMIT 1
+      `;
+      const conversation = this.getFirstRow(rows);
+      return conversation ? this.mapToConversation(conversation) : null;
+    }
   }
 
   /**
@@ -225,8 +292,8 @@ export class ConversationRepository {
     updateValues.push(id);
 
     const sql: Sql = this.db.getSQL();
-    const rows = await sql.unsafe<ConversationRow[]>(query, updateValues);
-    const [conversation] = rows;
+    const rows = await sql.unsafe<ConversationRow>(query, updateValues);
+    const conversation = this.getFirstRow(rows);
     return conversation ? this.mapToConversation(conversation) : null;
   }
 
@@ -278,7 +345,7 @@ export class ConversationRepository {
     }
 
     if (filters.customerQuery) {
-      whereConditions.push(`(customer_name ILIKE $${paramIndex++} OR customer_whatsapp LIKE $${paramIndex++} OR customer_instagram LIKE $${paramIndex++})`);
+      whereConditions.push(`(customer_name ILIKE $${paramIndex++} OR customer_phone LIKE $${paramIndex++} OR customer_instagram LIKE $${paramIndex++})`);
       const searchQuery = `%${filters.customerQuery}%`;
       params.push(searchQuery, searchQuery, searchQuery);
       paramIndex += 2; // Added 2 more params
@@ -310,7 +377,7 @@ export class ConversationRepository {
     `;
 
     const sql: Sql = this.db.getSQL();
-    const conversations = await sql.unsafe<ConversationRow[]>(query, params);
+    const conversations = await sql.unsafe<ConversationRow>(query, params);
     return conversations.map(c => this.mapToConversation(c));
   }
 
@@ -354,7 +421,7 @@ export class ConversationRepository {
     `;
 
     const sql: Sql = this.db.getSQL();
-    const results = await sql.unsafe<ConversationStatsRow[]>(statsQuery, params);
+    const results = await sql.unsafe<ConversationStatsRow>(statsQuery, params);
     
     const stats: ConversationStats = {
       total: 0,
@@ -366,19 +433,20 @@ export class ConversationRepository {
     };
 
     for (const row of results) {
-      if (!row.platform && !row.conversation_stage) {
+      const statsRow = row as ConversationStatsRow;
+      if (!statsRow.platform && !statsRow.conversation_stage) {
         // Overall totals
-        stats.total = parseInt(row.total);
-        stats.active = parseInt(row.active);
-        stats.avgMessagesPerConversation = parseFloat(row.avg_messages) || 0;
-        stats.avgDurationMinutes = parseFloat(row.avg_duration_minutes) || 0;
-      } else if (row.platform && !row.conversation_stage) {
+        stats.total = parseInt(statsRow.total);
+        stats.active = parseInt(statsRow.active);
+        stats.avgMessagesPerConversation = parseFloat(statsRow.avg_messages) || 0;
+        stats.avgDurationMinutes = parseFloat(statsRow.avg_duration_minutes) || 0;
+      } else if (statsRow.platform && !statsRow.conversation_stage) {
         // Platform totals
-        stats.byPlatform[row.platform] = parseInt(row.total);
-      } else if (row.platform && row.conversation_stage) {
+        stats.byPlatform[statsRow.platform] = parseInt(statsRow.total);
+      } else if (statsRow.platform && statsRow.conversation_stage) {
         // Stage totals
-        const key = `${row.platform}:${row.conversation_stage}`;
-        stats.byStage[key] = parseInt(row.total);
+        const key = `${statsRow.platform}:${statsRow.conversation_stage}`;
+        stats.byStage[key] = parseInt(statsRow.total);
       }
     }
 
@@ -430,9 +498,9 @@ export class ConversationRepository {
 
     const query = `SELECT COUNT(*) as count FROM conversations ${whereClause}`;
     const sql: Sql = this.db.getSQL();
-    const rows = await sql.unsafe<CountRow[]>(query, params);
-    const [result] = rows;
-    return parseInt(result.count);
+    const rows = await sql.unsafe<CountRow>(query, params);
+    const result = this.getFirstRow(rows);
+    return result ? parseInt(result.count) : 0;
   }
 
   /**
@@ -451,12 +519,9 @@ export class ConversationRepository {
    * Map database row to Conversation object
    */
   private mapToConversation(row: ConversationRow): Conversation {
-    return {
+    const conversation: Conversation = {
       id: row.id,
       merchantId: row.merchant_id,
-      customerWhatsapp: row.customer_whatsapp ?? undefined,
-      customerInstagram: row.customer_instagram ?? undefined,
-      customerName: row.customer_name ?? undefined,
       platform: row.platform,
       conversationStage: row.conversation_stage,
       sessionData: typeof row.session_data === 'string' ? JSON.parse(row.session_data) : row.session_data,
@@ -464,8 +529,13 @@ export class ConversationRepository {
       lastMessageAt: new Date(row.last_message_at),
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
-      endedAt: row.ended_at ? new Date(row.ended_at) : undefined
+      ...(row.customer_phone ? { customerWhatsapp: row.customer_phone } : {}),
+      ...(row.customer_instagram ? { customerInstagram: row.customer_instagram } : {}),
+      ...(row.customer_name ? { customerName: row.customer_name } : {}),
+      ...(row.ended_at ? { endedAt: new Date(row.ended_at) } : {})
     };
+    
+    return conversation;
   }
 }
 

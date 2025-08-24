@@ -1,14 +1,12 @@
 import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
-import { Resource } from '@opentelemetry/resources';
-import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
-import type { DIContainer } from '../container/index.js';
-import type { AppConfig } from '../config/environment.js';
+// import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions'; // unused
+import type { AppConfig } from '../config/index.js';
 
 let _inited = false;
 let meterProvider: MeterProvider | null = null;
 
-export async function initTelemetry(config?: AppConfig): Promise<void> {
+export async function initTelemetry(_config?: AppConfig): Promise<void> {
   if (_inited) return;
   
   // Set up diagnostics
@@ -16,18 +14,16 @@ export async function initTelemetry(config?: AppConfig): Promise<void> {
   diag.setLogger(new DiagConsoleLogger(), diagLevel);
   
   // Create resource with service information
-  const resource = Resource.default().merge(
-    new Resource({
-      [SemanticResourceAttributes.SERVICE_NAME]: 'ai-sales-platform',
-      [SemanticResourceAttributes.SERVICE_VERSION]: process.env.npm_package_version || '1.0.0',
-      [SemanticResourceAttributes.SERVICE_NAMESPACE]: 'production',
-      [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: process.env.NODE_ENV || 'development',
-    })
-  );
+  // TODO: Use this resource when initializing the meter provider
+  // const _resource = {
+  //   [SemanticResourceAttributes.SERVICE_NAME]: 'ai-sales-platform',
+  //   [SemanticResourceAttributes.SERVICE_VERSION]: process.env.npm_package_version || '1.0.0',
+  //   [SemanticResourceAttributes.SERVICE_NAMESPACE]: 'production',
+  //   [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: process.env.NODE_ENV || 'development',
+  // };
   
-  // Initialize meter provider with resource
+  // Initialize meter provider without resource for now
   meterProvider = new MeterProvider({ 
-    resource,
     // Add readers/exporters here for Prometheus, etc.
   });
   
@@ -45,7 +41,9 @@ const counters = new Map<string, ReturnType<ReturnType<typeof getMeter>['createC
 export function counter(name: string, description?: string) {
   if (!counters.has(name)) {
     const m = getMeter();
-    counters.set(name, m.createCounter(name, { description, unit: 'count' }));
+    const options: Record<string, string> = { unit: 'count' };
+    if (description) options.description = description;
+    counters.set(name, m.createCounter(name, options));
   }
   return counters.get(name)!;
 }
@@ -55,7 +53,10 @@ const histograms = new Map<string, ReturnType<ReturnType<typeof getMeter>['creat
 export function histogram(name: string, description?: string, unit?: string) {
   if (!histograms.has(name)) {
     const m = getMeter();
-    histograms.set(name, m.createHistogram(name, { description, unit }));
+    const options: Record<string, string> = {};
+    if (description) options.description = description;
+    if (unit) options.unit = unit;
+    histograms.set(name, m.createHistogram(name, options));
   }
   return histograms.get(name)!;
 }
@@ -65,7 +66,10 @@ const gauges = new Map<string, ReturnType<ReturnType<typeof getMeter>['createGau
 export function gauge(name: string, description?: string, unit?: string) {
   if (!gauges.has(name)) {
     const m = getMeter();
-    gauges.set(name, m.createGauge(name, { description, unit }));
+    const options: Record<string, string> = {};
+    if (description) options.description = description;
+    if (unit) options.unit = unit;
+    gauges.set(name, m.createGauge(name, options));
   }
   return gauges.get(name)!;
 }

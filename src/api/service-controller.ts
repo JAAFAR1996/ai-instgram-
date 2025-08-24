@@ -8,16 +8,12 @@
 import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
 import { zValidator } from '@hono/zod-validator';
-import type { BlankEnv } from 'hono/types';
 import { getServiceController } from '../services/service-controller.js';
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
 import { z } from 'zod';
-import { getConfig } from '../config/environment.js';
-import { ToggleService, ToggleServiceSchema } from '../types/service-control.js';
+import { getConfig } from '../config/index.js';
+import { ToggleServiceSchema } from '../types/service-control.js';
 
-const MerchantIdSchema = z.object({
-  merchantId: z.string().uuid('معرف التاجر يجب أن يكون UUID صالح')
-});
 
 export class ServiceControlAPI {
   private app: Hono;

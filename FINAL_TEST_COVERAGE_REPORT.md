@@ -85,7 +85,7 @@
 ### Configuration Files (Tested via Integration)
 - `src/config/graph-api.ts` - Tested via Instagram API tests
 - `src/config/RedisConfigurationFactory.ts` - Tested via Redis integration tests
-- `src/config/RedisProductionConfig.ts` - Tested via production integration
+- `src/config/ProductionRedisConfigurationFactory.ts` - Tested via production integration
 
 ### Integration Files (Tested via End-to-End Tests)
 - `src/production-index.ts` - Production entry point (tested via integration)

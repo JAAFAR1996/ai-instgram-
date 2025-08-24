@@ -1,11 +1,15 @@
 import { Redis } from 'ioredis';
 import {
   RedisUsageType,
-  Environment,
+  RedisEnvironment as Environment,
   ProductionRedisConfigurationFactory,
   RedisConfiguration
 } from '../config/RedisConfigurationFactory.js';
-import RedisHealthMonitor from './RedisHealthMonitor.js';
+import { 
+  isConnectionHealthy as healthCheck, 
+  validateConnection as validateConn, 
+  performHealthCheck 
+} from './RedisSimpleHealthCheck.js';
 import {
   RedisConnectionError,
   RedisValidationError,
@@ -50,16 +54,14 @@ export class RedisConnectionManager {
   
   // Redis availability flag - set to false when quota exceeded
   private redisEnabled: boolean = true;
-  private healthMonitor: RedisHealthMonitor;
+  // Simplified health monitoring methods
   private errorHandler: RedisErrorHandler;
   private healthCheckInterval?: NodeJS.Timeout;
   private poolConfig: ConnectionPoolConfig;
   private rateLimitResetAt?: Date;
   private pauseReconnectionsUntil?: Date;
-  
-  // Rate limiting for log messages to reduce noise
-  private lastRateLimitLogTime: number = 0;
-  private readonly RATE_LIMIT_LOG_INTERVAL_MS = 60000; // 1 minute
+  private lastRateLimitLogTime = 0;
+  private readonly RATE_LIMIT_LOG_INTERVAL_MS = 300000; // 5 minutes
 
   constructor(
     private redisUrl: string,
@@ -68,66 +70,58 @@ export class RedisConnectionManager {
     poolConfig?: Partial<ConnectionPoolConfig>
   ) {
     this.configFactory = new ProductionRedisConfigurationFactory();
-    this.healthMonitor = new RedisHealthMonitor(logger);
+    // Health monitoring integrated in this class now
     this.errorHandler = new RedisErrorHandler(logger);
     
+    const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
+    
     this.poolConfig = {
-      maxConnections: 10,
-      connectionTimeout: 10000,
-      healthCheckInterval: 30000, // 30 ثانية
-      reconnectDelay: 5000,
-      maxReconnectAttempts: 5,
+      maxConnections: isRender ? 5 : 10, // أقل لـ Render
+      connectionTimeout: isRender ? 15000 : 10000, // أكثر تسامحاً لـ Render
+      healthCheckInterval: isRender ? 60000 : 30000, // أقل تكراراً لـ Render
+      reconnectDelay: isRender ? 10000 : 5000, // أطول لـ Render
+      maxReconnectAttempts: 3,
       ...poolConfig
     };
 
     // this.startHealthChecking(); // DISABLED: Using centralized health check instead
   }
 
-  private setRateLimitReset(): Date {
-    const now = new Date();
-    const reset = new Date(now);
-    reset.setHours(reset.getHours() + 1, 0, 0, 0);
-    this.rateLimitResetAt = reset;
-    return reset;
+  // Simple health check methods
+  async isConnectionHealthy(connection: Redis, timeoutMs: number = 2000): Promise<boolean> {
+    return healthCheck(connection, timeoutMs);
   }
 
-  private isRateLimited(): boolean {
-    return !!this.rateLimitResetAt && this.rateLimitResetAt > new Date();
+  async validateConnection(connection: Redis): Promise<void> {
+    return validateConn(connection);
+  }
+
+  async performHealthCheck(connection: Redis) {
+    return performHealthCheck(connection);
   }
 
   /**
-   * Check if Redis operations should be skipped due to rate limiting
+   * Get Redis connection for specific usage type
    */
-  private shouldSkipOperation(): { skip: boolean; reason?: string } {
-    if (this.pauseReconnectionsUntil && Date.now() < this.pauseReconnectionsUntil.getTime()) {
-      return { skip: true, reason: 'rate_limited' };
-    }
-    if (!this.redisEnabled) {
-      return { skip: true, reason: 'disabled' };
-    }
-    return { skip: false };
-  }
-
   async getConnection(usageType: RedisUsageType): Promise<Redis> {
-    if (this.isRateLimited()) {
-      const error = new RedisRateLimitError('Rate limit exceeded', {
-        retryAt: this.rateLimitResetAt
-      });
-      this.logger?.warn('Redis rate limit active - connection blocked', {
-        usageType,
-        retryAt: this.rateLimitResetAt
-      });
-      throw error;
+    // Rate limiting check
+    if (!this.redisEnabled || this.isRateLimited()) {
+      throw new RedisRateLimitError(
+        'Redis connections paused due to rate limiting',
+        { 
+          retryAt: this.rateLimitResetAt
+        }
+      );
     }
 
-    // التحقق من وجود اتصال صحي
+    // Check if connection already exists and is healthy
     if (this.connections.has(usageType)) {
       const connection = this.connections.get(usageType)!;
       const info = this.connectionInfo.get(usageType);
       
       if (info?.status === 'connected') {
         // فحص سريع للصحة
-        const isHealthy = await this.healthMonitor.isConnectionHealthy(connection, 1000);
+        const isHealthy = await this.isConnectionHealthy(connection, 1000);
         if (isHealthy) {
           return connection;
         } else {
@@ -138,72 +132,127 @@ export class RedisConnectionManager {
       }
     }
 
+    // Create new connection
     return await this.createConnection(usageType);
   }
 
-  async createConnection(usageType: RedisUsageType): Promise<Redis> {
-    // Short-circuit if Redis is paused due to rate limiting
-    if (this.pauseReconnectionsUntil && Date.now() < this.pauseReconnectionsUntil.getTime()) {
-      throw new RedisConnectionError(
-        'Redis operations paused due to rate limiting',
-        { 
-          reason: 'rate_limited',
-          pausedUntil: this.pauseReconnectionsUntil.toISOString(),
-          usageType
-        }
-      );
+  /**
+   * Check if Redis is currently rate limited
+   */
+  private isRateLimited(): boolean {
+    if (!this.rateLimitResetAt) return false;
+    
+    const now = new Date();
+    const isLimited = now < this.rateLimitResetAt;
+    
+    // Auto-reset if time has passed
+    if (!isLimited) {
+      delete this.rateLimitResetAt;
+      this.redisEnabled = true;
+    }
+    
+    return isLimited;
+  }
+
+  /**
+   * Set rate limit reset time (usually next hour)
+   */
+  private setRateLimitReset(): Date {
+    const resetTime = new Date();
+    resetTime.setHours(resetTime.getHours() + 1, 0, 0, 0);
+    this.rateLimitResetAt = resetTime;
+    return resetTime;
+  }
+
+  /**
+   * Get current connection statistics
+   */
+  getConnectionStats(): ConnectionStats {
+    const stats: ConnectionStats = {
+      totalConnections: this.connections.size,
+      activeConnections: 0,
+      errorConnections: 0,
+      totalReconnects: 0,
+      averageHealthScore: 0,
+      connectionsByType: {} as Record<RedisUsageType, number>
+    };
+
+    let totalHealthScore = 0;
+    
+    for (const [usageType, info] of this.connectionInfo) {
+      stats.connectionsByType[usageType] = 1;
+      
+      if (info.status === 'connected') {
+        stats.activeConnections++;
+      } else if (info.status === 'error') {
+        stats.errorConnections++;
+      }
+      
+      stats.totalReconnects += info.reconnectAttempts;
+      totalHealthScore += info.healthScore;
     }
 
-    if (this.connections.size >= this.poolConfig.maxConnections) {
-      throw new RedisConnectionError(
-        'Connection pool limit exceeded',
-        { 
-          currentConnections: this.connections.size, 
-          maxConnections: this.poolConfig.maxConnections 
-        }
-      );
+    if (this.connectionInfo.size > 0) {
+      stats.averageHealthScore = Math.round(totalHealthScore / this.connectionInfo.size);
     }
 
-    const info: ConnectionInfo = {
+    return stats;
+  }
+
+  /**
+   * Create new Redis connection
+   */
+  private async createConnection(usageType: RedisUsageType): Promise<Redis> {
+    const info: ConnectionInfo = this.connectionInfo.get(usageType) || {
       usageType,
       status: 'connecting',
-      connectedAt: undefined,
       reconnectAttempts: 0,
       healthScore: 0
     };
 
-    this.connectionInfo.set(usageType, info);
-
     try {
-      const config = this.configFactory.createConfiguration(
-        usageType,
-        this.environment,
-        this.redisUrl
-      );
+      this.logger?.info('Creating Redis connection', { usageType });
 
-      info.host = config.host;
-      info.port = config.port;
+      // Get configuration for this usage type
+      const config = this.configFactory.createConfiguration(usageType, this.environment, this.redisUrl);
+      
+      // تحسينات خاصة لـ Render
+      const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
+      if (isRender) {
+        config.maxRetriesPerRequest = 2; // أقل للحفاظ على الموارد
+        config.connectTimeout = 15000; // أكثر تسامحاً
+        config.commandTimeout = 10000;
+        config.keepAlive = 30000; // Keep alive أقل
+      }
 
-      this.logger?.info('Creating Redis connection', {
-        usageType,
-        host: config.host,
-        port: config.port,
-        environment: this.environment
+      // Create Redis connection
+      const connection = new Redis({
+        ...config,
+        lazyConnect: true,
+        maxRetriesPerRequest: 2,
+        connectTimeout: this.poolConfig.connectionTimeout,
+        enableReadyCheck: true,
+        enableOfflineQueue: false
       });
 
-      const connection = new Redis(config);
-
-      // إعداد مراقبة الأحداث أولاً
+      // Set up connection monitoring
       this.setupConnectionMonitoring(connection, usageType, info);
 
-      // التحقق من صحة الاتصال مباشرة (بدون انتظار ready state)
-      // العمليات ستنجح إذا كان الاتصال يعمل، حتى لو status !== 'ready'
-      await this.healthMonitor.validateConnection(connection);
+      // Connect with timeout
+      await Promise.race([
+        connection.connect(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), this.poolConfig.connectionTimeout)
+        )
+      ]);
 
-      // تحديث معلومات الاتصال
+      // Validate connection
+      await this.validateConnection(connection);
+
+      // Update connection info
       info.status = 'connected';
       info.connectedAt = new Date();
-      info.lastError = undefined;
+              delete info.lastError;
       info.healthScore = 100;
 
       this.connections.set(usageType, connection);
@@ -222,6 +271,7 @@ export class RedisConnectionManager {
         usageType,
         operation: 'createConnection'
       });
+      
       if (redisError instanceof RedisRateLimitError) {
         const retryAt = this.setRateLimitReset();
         info.status = 'error';
@@ -244,30 +294,6 @@ export class RedisConnectionManager {
           this.lastRateLimitLogTime = now;
         }
         
-        // قطع الاتصال فوراً لتوفير الطلبات
-        if (this.connections.has(usageType)) {
-          await this.connections.get(usageType)?.disconnect();
-          this.connections.delete(usageType);
-        }
-        
-        // جدولة إعادة المحاولة تلقائياً مرة واحدة في بداية الساعة
-        const delayMs = retryAt.getTime() - Date.now();
-        setTimeout(async () => {
-          this.logger?.info('Rate limit reset - re-enabling Redis integration', { usageType });
-          try {
-            this.redisEnabled = true; // Re-enable Redis
-            await this.getConnection(usageType);
-          } catch (error) {
-            this.logger?.warn('Auto-reconnect failed after rate limit reset', { 
-              error: error instanceof Error ? error.message : String(error) 
-            });
-            // Only disable again if it's another rate limit error
-            if (error instanceof Error && error.message.includes('max requests limit')) {
-              this.redisEnabled = false;
-            }
-          }
-        }, delayMs);
-        
         throw redisError;
       }
 
@@ -286,6 +312,8 @@ export class RedisConnectionManager {
         { usageType },
         redisError
       );
+    } finally {
+      this.connectionInfo.set(usageType, info);
     }
   }
 
@@ -298,260 +326,163 @@ export class RedisConnectionManager {
       info.status = 'connected';
       info.connectedAt = new Date();
       info.healthScore = 100;
-      
-      this.logger?.info('Redis connection established', { 
-        usageType,
-        host: info.host,
-        port: info.port 
-      });
+      this.logger?.info('Redis connection established', { usageType });
     });
 
-    connection.on('ready', () => {
-      info.status = 'connected';
-      info.healthScore = 100;
-      
-      this.logger?.info('Redis connection ready', { usageType });
-    });
-
-    connection.on('error', (error: any) => {
-      const redisError = this.errorHandler.handleError(error, { usageType });
+    connection.on('error', (error) => {
       info.status = 'error';
-      info.lastError = redisError.message;
+      info.lastError = error.message;
       info.healthScore = 0;
-
+      
       this.logger?.error('Redis connection error', {
         usageType,
-        error: redisError.message,
-        host: info.host,
-        port: info.port
+        error: error.message
       });
-
-      if (redisError instanceof RedisRateLimitError) {
-        const retryAt = this.setRateLimitReset();
-        this.logger?.warn('Redis rate limit exceeded, disconnecting', {
-          usageType,
-          retryAt
-        });
-        connection.disconnect();
-        // pause reconnection until the limit resets
-        this.scheduleReconnection(usageType, info);
-        return;
-      }
-
-      if (isConnectionError(redisError) || isTimeoutError(redisError)) {
-        this.scheduleReconnection(usageType, info);
-      }
     });
 
     connection.on('close', () => {
       info.status = 'disconnected';
       info.healthScore = 0;
-      
-      this.logger?.warn('Redis connection closed', { 
-        usageType,
-        host: info.host,
-        port: info.port 
-      });
+      this.logger?.warn('Redis connection closed', { usageType });
     });
 
-    connection.on('reconnecting', (delay: number) => {
+    connection.on('reconnecting', () => {
       info.status = 'connecting';
       info.reconnectAttempts++;
-      
       this.logger?.info('Redis reconnecting', { 
         usageType, 
-        delay, 
-        attempt: info.reconnectAttempts 
+        attempts: info.reconnectAttempts 
       });
     });
-
-    connection.on('end', () => {
-      info.status = 'disconnected';
-      info.healthScore = 0;
-      
-      this.logger?.warn('Redis connection ended', { usageType });
-      this.connections.delete(usageType);
-    });
-  }
-
-  private async scheduleReconnection(usageType: RedisUsageType, info: ConnectionInfo): Promise<void> {
-    if (this.isRateLimited()) {
-      const delay = this.rateLimitResetAt!.getTime() - Date.now();
-      this.logger?.warn('Reconnection paused due to rate limit', {
-        usageType,
-        retryAt: this.rateLimitResetAt
-      });
-      setTimeout(() => {
-        info.reconnectAttempts = 0;
-        this.createConnection(usageType).catch(error => {
-          this.logger?.error('Reconnection after rate limit failed', {
-            usageType,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        });
-      }, delay);
-      return;
-    }
-
-    if (info.reconnectAttempts >= this.poolConfig.maxReconnectAttempts) {
-      this.logger?.error('Max reconnection attempts exceeded', {
-        usageType,
-        attempts: info.reconnectAttempts
-      });
-      return;
-    }
-
-    const delay = Math.min(
-      this.poolConfig.reconnectDelay * Math.pow(2, info.reconnectAttempts),
-      30000 // أقصى تأخير 30 ثانية
-    );
-
-    setTimeout(async () => {
-      try {
-        this.logger?.info('Attempting reconnection', { usageType, attempt: info.reconnectAttempts + 1 });
-        await this.closeConnection(usageType);
-        await this.createConnection(usageType);
-      } catch (error) {
-        this.logger?.error('Reconnection failed', { usageType, error });
-        // ستحاول مرة أخرى بناءً على error event
-      }
-    }, delay);
-  }
-
-  async closeConnection(usageType: RedisUsageType): Promise<void> {
-    const connection = this.connections.get(usageType);
-    const info = this.connectionInfo.get(usageType);
-
-    if (connection) {
-      try {
-        await connection.disconnect();
-        this.connections.delete(usageType);
-        
-        if (info) {
-          info.status = 'disconnected';
-          info.healthScore = 0;
-        }
-
-        this.logger?.info('Redis connection closed successfully', { usageType });
-        
-      } catch (error) {
-        this.logger?.warn('Error closing Redis connection', { 
-          usageType, 
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-    }
-
-    this.connectionInfo.delete(usageType);
   }
 
   /**
-   * Check if Redis integration is available
+   * Safe Redis operation with fallback handling
    */
-  public isRedisEnabled(): boolean {
-    return this.redisEnabled;
-  }
-
-  /**
-   * Get Redis status for health checks
-   */
-  public getRedisStatus() {
-    return {
-      available: this.redisEnabled,
-      rateLimited: !this.redisEnabled,
-      connectionCount: this.connections.size,
-      pausedUntil: this.pauseReconnectionsUntil?.toISOString() || null
-    };
-  }
-
-  /**
-   * Safe Redis operation wrapper that short-circuits when rate limited
-   */
-  public async safeRedisOperation<T>(
+  async safeRedisOperation<T>(
     operation: string,
     usageType: RedisUsageType,
-    fn: (connection: Redis) => Promise<T>
-  ): Promise<{ ok: boolean; result?: T; skipped?: boolean; reason?: string }> {
-    const skipCheck = this.shouldSkipOperation();
-    if (skipCheck.skip) {
-      return { ok: false, skipped: true, reason: skipCheck.reason };
+    callback: (redis: Redis) => Promise<T>
+  ): Promise<{ ok: boolean; result?: T; reason?: string; skipped?: boolean }> {
+    
+    // Check rate limiting first
+    if (!this.redisEnabled || this.isRateLimited()) {
+      return {
+        ok: false,
+        skipped: true,
+        reason: 'rate_limited'
+      };
     }
 
     try {
       const connection = await this.getConnection(usageType);
-      const result = await fn(connection);
+      const result = await callback(connection);
       return { ok: true, result };
-    } catch (error) {
-      // Don't log errors for rate limited operations to reduce noise
-      if (error instanceof Error && error.message.includes('rate limit')) {
-        return { ok: false, skipped: true, reason: 'rate_limited' };
-      }
-      
-      this.logger?.error(`Redis ${operation} failed`, {
+    } catch (error: any) {
+      const processedError = this.errorHandler.handleError(error, {
         usageType,
-        error: error instanceof Error ? error.message : String(error)
+        operation
       });
-      return { ok: false, reason: 'error' };
+
+      if (processedError instanceof RedisRateLimitError) {
+        this.redisEnabled = false;
+        this.setRateLimitReset();
+        
+        return {
+          ok: false,
+          skipped: true,
+          reason: 'rate_limit_exceeded'
+        };
+      }
+
+      return {
+        ok: false,
+        reason: processedError.message
+      };
     }
   }
 
+  /**
+   * Close specific connection
+   */
+  async closeConnection(usageType: RedisUsageType): Promise<void> {
+    const connection = this.connections.get(usageType);
+    if (connection) {
+      try {
+        await connection.quit();
+      } catch (error) {
+        // Force disconnect if quit fails
+        await connection.disconnect();
+      }
+      
+      this.connections.delete(usageType);
+      
+      const info = this.connectionInfo.get(usageType);
+      if (info) {
+        info.status = 'disconnected';
+        info.healthScore = 0;
+      }
+      
+      this.logger?.info('Redis connection closed', { usageType });
+    }
+  }
+
+  /**
+   * Close all connections
+   */
   async closeAllConnections(): Promise<void> {
-    this.logger?.info('Closing all Redis connections', { 
-      totalConnections: this.connections.size 
-    });
-
-    const closePromises = Array.from(this.connections.keys()).map(
-      usageType => this.closeConnection(usageType)
+    const closePromises = Array.from(this.connections.keys()).map(usageType => 
+      this.closeConnection(usageType)
     );
-
-    await Promise.all(closePromises);
-
-    // إيقاف مراقبة الصحة
+    
+    await Promise.allSettled(closePromises);
+    
     if (this.healthCheckInterval) {
       clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = undefined;
+      clearInterval(this.healthCheckInterval!);
+    this.healthCheckInterval = undefined as unknown as NodeJS.Timeout;
     }
-
+    
     this.logger?.info('All Redis connections closed');
   }
 
-  getConnectionInfo(usageType: RedisUsageType): ConnectionInfo | undefined {
-    return this.connectionInfo.get(usageType);
-  }
-
-  getAllConnectionsInfo(): Map<RedisUsageType, ConnectionInfo> {
-    return new Map(this.connectionInfo);
-  }
-
-  getConnectionStats(): ConnectionStats {
-    const connections = Array.from(this.connectionInfo.values());
-    
-    const stats: ConnectionStats = {
-      totalConnections: connections.length,
-      activeConnections: connections.filter(c => c.status === 'connected').length,
-      errorConnections: connections.filter(c => c.status === 'error').length,
-      totalReconnects: connections.reduce((sum, c) => sum + c.reconnectAttempts, 0),
-      averageHealthScore: connections.length > 0 
-        ? Math.round(connections.reduce((sum, c) => sum + c.healthScore, 0) / connections.length)
-        : 0,
-      connectionsByType: {} as Record<RedisUsageType, number>
+  /**
+   * Get Redis status for monitoring
+   */
+  getRedisStatus() {
+    return {
+      enabled: this.redisEnabled,
+      rateLimited: this.isRateLimited(),
+      rateLimitResetAt: this.rateLimitResetAt?.toISOString(),
+      connections: this.getConnectionStats(),
+      connectionDetails: Array.from(this.connectionInfo.values())
     };
-
-    // حساب عدد الاتصالات لكل نوع
-    Object.values(RedisUsageType).forEach(type => {
-      stats.connectionsByType[type] = connections.filter(c => c.usageType === type).length;
-    });
-
-    return stats;
   }
 
-  private startHealthChecking(): void {
-    // DISABLED: Background health checking disabled in favor of centralized health check
-    // The new health-check.ts service handles health monitoring with proper timeout handling
-    this.logger?.debug('Background health checking disabled - using centralized service');
+  /**
+   * Enable Redis (reset rate limiting)
+   */
+  enableRedis(): void {
+    this.redisEnabled = true;
+            delete this.rateLimitResetAt;
+          delete this.pauseReconnectionsUntil;
+    this.logger?.info('Redis re-enabled');
   }
 
-  private async performHealthChecks(): Promise<void> {
+  /**
+   * Disable Redis temporarily
+   */
+  disableRedis(reason: string = 'manual'): void {
+    this.redisEnabled = false;
+    this.logger?.warn('Redis disabled', { reason });
+  }
+
+  /**
+   * Manual health check for all connections
+   */
+  async performHealthCheckOnAllConnections(): Promise<void> {
+    this.logger?.debug('Starting health check for all Redis connections...');
+    
     const connections = Array.from(this.connections.entries());
     
     for (const [usageType, connection] of connections) {
@@ -559,202 +490,60 @@ export class RedisConnectionManager {
       if (!info) continue;
 
       try {
-        const isHealthy = await this.healthMonitor.isConnectionHealthy(connection, 2000);
+        const isHealthy = await this.isConnectionHealthy(connection, 2000);
         
         if (isHealthy) {
           info.healthScore = Math.min(100, info.healthScore + 5); // تحسن تدريجي
           if (info.status === 'error') {
             info.status = 'connected';
-            info.lastError = undefined;
+            this.logger?.info('Connection recovered', { usageType });
           }
         } else {
           info.healthScore = Math.max(0, info.healthScore - 10); // تدهور تدريجي
-          
           if (info.healthScore <= 20) {
             info.status = 'error';
-            this.logger?.warn('Connection health degraded', { 
+            this.logger?.warn('Connection marked as unhealthy', { 
               usageType, 
               healthScore: info.healthScore 
             });
-            
-            // إعادة الاتصال إذا كانت الصحة سيئة جداً
-            if (info.healthScore === 0) {
-              this.scheduleReconnection(usageType, info);
-            }
           }
         }
-
-      } catch (error) {
+      } catch (error: any) {
         info.status = 'error';
         info.healthScore = 0;
-        info.lastError = error instanceof Error ? error.message : String(error);
+        info.lastError = error.message;
         
-        this.logger?.error('Health check failed', { 
-          usageType, 
-          error: info.lastError 
-        });
-      }
-    }
-  }
-
-  async validateAllConnections(): Promise<{
-    valid: boolean;
-    results: Array<{
-      usageType: RedisUsageType;
-      valid: boolean;
-      error?: string;
-    }>;
-  }> {
-    const results: Array<{
-      usageType: RedisUsageType;
-      valid: boolean;
-      error?: string;
-    }> = [];
-
-    for (const [usageType, connection] of this.connections.entries()) {
-      try {
-        await this.healthMonitor.validateConnection(connection);
-        results.push({ usageType, valid: true });
-      } catch (error) {
-        results.push({
+        this.logger?.error('Health check failed for connection', {
           usageType,
-          valid: false,
-          error: error instanceof Error ? error.message : String(error)
+          error: error.message
         });
       }
     }
 
-    const allValid = results.every(r => r.valid);
-
-    return {
-      valid: allValid,
-      results
-    };
+    this.logger?.debug('Health check completed for all connections');
   }
 
-  // الحصول على اتصال محدد للاستخدام المباشر (للحالات الخاصة)
-  getDirectConnection(usageType: RedisUsageType): Redis | undefined {
-    return this.connections.get(usageType);
-  }
-
-  private async waitForConnection(connection: Redis, timeoutMs: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new RedisConnectionError(
-          'Connection timeout waiting for ready state',
-          { 
-            status: connection.status,
-            timeout: timeoutMs,
-            options: {
-              host: connection.options.host,
-              port: connection.options.port
-            }
-          }
-        ));
-      }, timeoutMs);
-
-      const cleanup = () => {
-        clearTimeout(timeout);
-        connection.removeListener('ready', onReady);
-        connection.removeListener('error', onError);
-      };
-
-      const onReady = () => {
-        cleanup();
-        resolve();
-      };
-
-      const onError = (error: Error) => {
-        cleanup();
-        reject(new RedisConnectionError(
-          'Connection error while waiting for ready state',
-          { error: error.message }
-        ));
-      };
-
-      if (connection.status === 'ready') {
-        cleanup();
-        resolve();
-        return;
-      }
-
-      connection.once('ready', onReady);
-      connection.once('error', onError);
-    });
-  }
-
-  // إنشاء اتصال مؤقت للعمليات الخاصة
-  async createTemporaryConnection(
-    usageType: RedisUsageType,
-    ttl: number = 60000 // 60 ثانية افتراضياً
-  ): Promise<Redis> {
-    const config = this.configFactory.createConfiguration(
-      usageType,
-      this.environment,
-      this.redisUrl
-    );
-
-    const connection = new Redis(config);
-    
-    // اختبار سريع للاتصال بدون انتظار ready state
-    try {
-      await connection.ping();
-      this.logger?.debug('Temporary connection established', { usageType });
-    } catch (error) {
-      this.logger?.warn({ err: error, usageType }, 'Temporary connection ping failed');
-    }
-    
-    // إعداد إغلاق تلقائي
-    setTimeout(async () => {
-      try {
-        await connection.disconnect();
-        this.logger?.debug('Temporary connection closed', { usageType });
-      } catch (error) {
-        this.logger?.warn({ err: error }, 'Error closing temporary connection');
-      }
-    }, ttl);
-
-    return connection;
-  }
+  // removed unused method
 }
 
-// Singleton instance for global access
-let globalRedisManager: RedisConnectionManager | null = null;
-
-function toEnv(): Environment {
-  const n = (process.env.NODE_ENV || 'production').toLowerCase();
-  if (n === 'development' || n === 'dev') return Environment.DEVELOPMENT;
-  if (n === 'test' || n === 'testing') return Environment.STAGING; // Using STAGING for test
-  return Environment.PRODUCTION;
-}
+// Singleton instance
+let connectionManager: RedisConnectionManager | null = null;
 
 export function getRedisConnectionManager(): RedisConnectionManager {
-  if (!globalRedisManager) {
-    const url = process.env.REDIS_URL; // الزامي في الإنتاج
-    if (!url && toEnv() === Environment.PRODUCTION) {
-      throw new Error('REDIS_URL is required in production');
-    }
-    globalRedisManager = new RedisConnectionManager(
-      url || 'redis://localhost:6379',
-      toEnv()
-    );
+  if (!connectionManager) {
+    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+    const environment = (process.env.NODE_ENV === 'production') ? Environment.PRODUCTION : Environment.DEVELOPMENT;
+    connectionManager = new RedisConnectionManager(redisUrl, environment);
   }
-  return globalRedisManager;
+  return connectionManager;
 }
 
-// Patch 6: اتصال واحد مُدار
-import { Redis as RedisClient } from 'ioredis';
-let _client: RedisClient | null = null;
+export default RedisConnectionManager;
 
-export async function connectRedis() {
-  if (_client) return _client;
-  const url = process.env.REDIS_URL;
-  if (!url) throw new Error('REDIS_URL missing');
-  _client = new RedisClient(url, { lazyConnect: true, enableAutoPipelining: true });
-  await _client.connect();
-  // optional: set up listeners and logging
-  return _client;
-}
+// Simple Redis client for basic operations (kept for compatibility)
+let _client: Redis | null = null;
+
+// removed unused function
 
 export function getRedis() {
   if (!_client) throw new Error('Redis not connected');
@@ -767,5 +556,3 @@ export async function closeRedis() {
     _client = null;
   }
 }
-
-export default RedisConnectionManager;

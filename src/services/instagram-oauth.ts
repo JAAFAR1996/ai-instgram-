@@ -7,8 +7,8 @@
  */
 
 import crypto from 'crypto';
-import { getConfig } from '../config/environment.js';
-import { getEncryptionService } from './encryption.js';
+import { getConfig } from '../config/index.js';
+// إزالة الاستيراد غير المستخدم
 import { getDatabase } from '../db/adapter.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
@@ -17,11 +17,12 @@ import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { requireMerchantId } from '../utils/merchant.js';
 import { telemetry } from './telemetry.js';
 import { createLogger } from './logger.js';
-import type { InstagramOAuthCredentials } from '../types/instagram.js';
-export type { InstagramOAuthCredentials } from '../types/instagram.js';
+import type { InstagramOAuthCredentials, DBRow } from '../types/instagram.js';
+import { must } from '../utils/safety.js';
+export type { InstagramAPICredentials } from '../types/instagram.js';
 
-// safe JSON helper for non-typed responses
-const jsonAny = async (r: any): Promise<any> => {
+// Safe JSON helper for non-typed responses
+const jsonSafe = async (r: Response): Promise<unknown> => {
   try { return await r.json(); } catch { return {}; }
 };
 
@@ -66,8 +67,8 @@ export class InstagramOAuthService {
   private async graphRequest<T>(
     method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH',
     path: string,
-    params?: Record<string, any>,
-    body?: Record<string, any>,
+    params?: Record<string, string | number | boolean | undefined>,
+    body?: unknown,
     merchantId?: string
   ): Promise<T> {
     const resolvedMerchantId = merchantId ?? requireMerchantId();
@@ -81,11 +82,11 @@ export class InstagramOAuthService {
     const rateKey = `ig-oauth:${resolvedMerchantId}:${method}:${path}`;
 
     let check: { allowed: boolean; remaining: number; resetTime: number };
-    let rateLimitCheckSkipped = false;
+    let _rateLimitCheckSkipped = false;
     try {
       check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
     } catch (error) {
-      rateLimitCheckSkipped = true;
+      _rateLimitCheckSkipped = true;
       this.logger.warn(
         `⚠️ Redis rate limit check failed for ${rateKey}:`,
         { err: error }
@@ -109,20 +110,28 @@ export class InstagramOAuthService {
     }
 
     if (params) {
-      const paramString = new URLSearchParams(params).toString();
-      url += (url.includes('?') ? '&' : '?') + paramString;
+      const usp = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) {
+        if (v === undefined) continue;
+        usp.append(k, String(v));
+      }
+      const paramString = usp.toString();
+      if (paramString) url += (url.includes('?') ? '&' : '?') + paramString;
     }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
 
     try {
-      const res = await fetch(url, {
+      const init: RequestInit = {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal
-      });
+      };
+      if (body !== undefined) {
+        (init as Record<string, unknown>).body = JSON.stringify(body);
+      }
+      const res = await fetch(url, init);
 
       clearTimeout(timeout);
 
@@ -134,18 +143,17 @@ export class InstagramOAuthService {
 
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
-        const e = new Error(`Instagram OAuth Graph error ${res.status}: ${errBody}`);
-        (e as any).status = res.status;
-        throw e;
+        throw new Error(`Instagram OAuth Graph error ${res.status}: ${errBody}`);
       }
 
-      return res.json() as Promise<T>;
-    } catch (err: any) {
+      return (await res.json()) as T;
+    } catch (err: unknown) {
       clearTimeout(timeout);
-      if (err?.name === 'AbortError') {
+      if ((err as { name?: string } | undefined)?.name === 'AbortError') {
         throw new Error('Instagram OAuth Graph request timed out');
       }
-      throw new Error(`Instagram OAuth Graph request failed: ${err?.message || err}`);
+      const msg = (err as { message?: string } | undefined)?.message ?? String(err);
+      throw new Error(`Instagram OAuth Graph request failed: ${msg}`);
     }
   }
 
@@ -161,7 +169,7 @@ export class InstagramOAuthService {
    * Using new Instagram Business Login API with PKCE security enhancement
    * https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/
    */
-  async generateAuthorizationUrl(merchantId: string, state?: string): Promise<{
+  async generateAuthorizationUrl(_merchantId: string, state?: string): Promise<{
     oauthUrl: string;
     codeVerifier: string;
     state: string
@@ -286,10 +294,10 @@ export class InstagramOAuthService {
         throw new Error(`Token exchange failed: ${response.status} ${errorText}`);
       }
 
-      const jsonAny = async (r: Response): Promise<any> => { try { return await r.json(); } catch { return {}; } };
-      const data: any = await jsonAny(response);
+      type TokenExchangeResponse = { access_token?: string; user_id?: string | number };
+      const data = (await jsonSafe(response)) as TokenExchangeResponse;
       
-      if (!data.access_token || !data.user_id) {
+      if (!data?.access_token || !data?.user_id) {
         this.logger.error('❌ Invalid token response:', data);
         throw new Error('Invalid token response from Instagram');
       }
@@ -330,20 +338,22 @@ export class InstagramOAuthService {
     try {
       this.logger.debug('🔄 Converting to long-lived token');
 
-      const params = {
+      const params: Record<string, string> = {
         grant_type: 'ig_exchange_token',
         client_secret: this.config.instagram.appSecret,
         access_token: shortLivedToken
       };
 
-      const data: any = await this.graphRequest<any>(
+      const data = await this.graphRequest<{
+        access_token: string; token_type: string; expires_in: number;
+      }>(
         'GET',
         'https://graph.instagram.com/access_token',
         params
       );
       this.logger.info('✅ Long-lived token obtained successfully');
       
-      return data as { access_token: string; token_type: string; expires_in: number; };
+      return data;
 
     } catch (error) {
       this.logger.error('❌ Long-lived token conversion failed:', error);
@@ -363,12 +373,14 @@ export class InstagramOAuthService {
     try {
       this.logger.debug('🔄 Refreshing long-lived token');
 
-      const params = {
+      const params: Record<string, string> = {
         grant_type: 'ig_refresh_token',
         access_token: currentToken
       };
 
-      const data: any = await this.graphRequest<any>(
+      const data = await this.graphRequest<{
+        access_token: string; token_type: string; expires_in: number;
+      }>(
         'GET',
         'https://graph.instagram.com/refresh_access_token',
         params,
@@ -377,7 +389,7 @@ export class InstagramOAuthService {
       );
       this.logger.info('✅ Token refreshed successfully');
       
-      return data as { access_token: string; token_type: string; expires_in: number; };
+      return data;
 
     } catch (error) {
       this.logger.error('❌ Token refresh failed:', error);
@@ -397,7 +409,10 @@ export class InstagramOAuthService {
         access_token: accessToken
       };
 
-      const data: any = await this.graphRequest<any>(
+      const data = await this.graphRequest<{
+        id: string; username: string; account_type: 'BUSINESS' | 'CREATOR';
+        media_count?: number; followers_count?: number; follows_count?: number;
+      }>(
         'GET',
         'https://graph.instagram.com/me',
         params
@@ -437,8 +452,8 @@ export class InstagramOAuthService {
         throw new Error('Failed to fetch permissions');
       }
 
-      const data: any = await jsonAny(response);
-      const grantedPerms = (data.data ?? []).map((p: any) => p.permission);
+      const data = (await jsonSafe(response)) as { data?: Array<{ permission?: string }> };
+      const grantedPerms = (data.data ?? []).map((p) => p.permission || '').filter(Boolean) as string[];
       const grantedPermissions = grantedPerms;
 
       // Updated required scopes for 2025 Instagram Business Login
@@ -502,7 +517,7 @@ export class InstagramOAuthService {
         throw new Error('Failed to fetch Facebook pages');
       }
 
-      const pagesData: any = await jsonAny(pagesResponse);
+      const pagesData = (await jsonSafe(pagesResponse)) as { data?: Array<{ id: string; access_token: string; name?: string }> };
       const pages = pagesData.data || [];
 
       if (pages.length === 0) {
@@ -517,7 +532,7 @@ export class InstagramOAuthService {
           );
 
           if (igResponse.ok) {
-            const igData: any = await jsonAny(igResponse);
+            const igData = (await jsonSafe(igResponse)) as { instagram_business_account?: { id: string } };
             
             if (igData.instagram_business_account) {
               const igAccountId = igData.instagram_business_account.id;
@@ -528,16 +543,16 @@ export class InstagramOAuthService {
               );
 
               if (accountResponse.ok) {
-                const accountData: any = await jsonAny(accountResponse);
+                const accountData = (await jsonSafe(accountResponse)) as { id: string; name?: string; username: string; profile_picture_url?: string; followers_count?: number };
                 
                 this.logger.info('✅ Found Instagram Business Account', { username: accountData.username });
                 
                 return {
                   id: accountData.id,
                   name: accountData.name || accountData.username,
-                  username: accountData.username,
-                  profile_picture_url: accountData.profile_picture_url,
-                  followers_count: accountData.followers_count
+                  username: accountData.username ?? '',
+                  profile_picture_url: accountData.profile_picture_url ?? '',
+                  followers_count: accountData.followers_count ?? 0
                 };
               }
             }
@@ -641,7 +656,7 @@ export class InstagramOAuthService {
     const randomBytes = crypto.randomBytes(32).toString('hex');
     const timestamp = Date.now().toString();
     const signature = crypto.createHmac('sha256', this.config.security.encryptionKey)
-      .update(randomBytes + timestamp)
+      .update(must(randomBytes, 'missing randomBytes') + must(timestamp, 'missing timestamp'))
       .digest('hex');
     
     return `${randomBytes}.${timestamp}.${signature.substring(0, 16)}`;
@@ -661,7 +676,7 @@ export class InstagramOAuthService {
       const [randomBytes, timestamp, signature] = parts;
       
       // Check timestamp (state should not be older than 1 hour)
-      const stateTimestamp = parseInt(timestamp);
+      const stateTimestamp = parseInt(must(timestamp, 'missing timestamp'));
       const oneHourAgo = Date.now() - (60 * 60 * 1000);
       
       if (stateTimestamp < oneHourAgo) {
@@ -671,16 +686,16 @@ export class InstagramOAuthService {
 
       // Verify signature
       const expectedSignature = crypto.createHmac('sha256', this.config.security.encryptionKey)
-        .update(randomBytes + timestamp)
+        .update(must(randomBytes, 'missing randomBytes') + must(timestamp, 'missing timestamp'))
         .digest('hex')
         .substring(0, 16);
 
-      if (signature.length !== expectedSignature.length) {
+      if (must(signature, 'missing signature').length !== must(expectedSignature, 'missing expectedSignature').length) {
         this.logger.error('❌ State signature length mismatch');
         return false;
       }
 
-      if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+      if (!crypto.timingSafeEqual(Buffer.from(must(signature)), Buffer.from(must(expectedSignature)))) {
         this.logger.error('❌ State signature verification failed');
         return false;
       }
@@ -768,7 +783,7 @@ export class InstagramOAuthService {
       if (result.length > 0) {
         await sql`DELETE FROM pkce_verifiers WHERE state = ${state}`;
         this.logger.info('💾 PKCE verifier retrieved from database fallback');
-        return result[0].code_verifier as string;
+        return (result[0]?.code_verifier as string | undefined) ?? null;
       }
     } catch (dbError) {
       this.logger.error('❌ Failed to retrieve PKCE verifier from database fallback:', dbError);
@@ -838,7 +853,13 @@ export class InstagramOAuthService {
     try {
       const sql = this.db.getSQL();
 
-      const result = await sql`
+      type SessionRow = DBRow<{
+        merchant_id: string;
+        code_verifier: string;
+        redirect_uri: string;
+        scopes: string[];
+      }>;
+      const result = await sql.unsafe<SessionRow>(`
         SELECT 
           merchant_id,
           code_verifier,
@@ -848,25 +869,25 @@ export class InstagramOAuthService {
         WHERE state = ${state}
         AND expires_at > NOW()
         AND used = false
-      `;
+      `);
 
       if (result.length === 0) {
         return null;
       }
 
       // Mark session as used
-      await sql`
+      await sql.unsafe(`
         UPDATE oauth_sessions 
         SET used = true 
         WHERE state = ${state}
-      `;
+      `);
 
-      const session = result[0];
+      const session = (result as SessionRow[])[0];
       return {
-        merchantId: session.merchant_id,
-        codeVerifier: session.code_verifier,
-        redirectUri: session.redirect_uri,
-        scopes: session.scopes || []
+        merchantId: must(session, 'missing session').merchant_id,
+        codeVerifier: must(session).code_verifier,
+        redirectUri: must(session).redirect_uri,
+        scopes: must(session).scopes || []
       };
     } catch (error) {
       this.logger.error('❌ Failed to retrieve OAuth session:', error);
@@ -877,9 +898,7 @@ export class InstagramOAuthService {
   /**
    * توليد webhook verify token
    */
-  private generateWebhookVerifyToken(): string {
-    return 'ig_webhook_' + crypto.randomBytes(16).toString('hex');
-  }
+  // removed unused method
 
   /**
    * التحقق من انتهاء صلاحية التوكن
@@ -900,7 +919,11 @@ export class InstagramOAuthService {
       const sql = this.db.getSQL();
       
       // Find tokens expiring in the next 7 days
-      const expiringTokens = await sql`
+      const expiringTokens = await sql.unsafe<{
+        merchant_id: string;
+        instagram_access_token: string;
+        token_expires_at: string;
+      }>(`
         SELECT 
           merchant_id,
           instagram_access_token,
@@ -909,7 +932,7 @@ export class InstagramOAuthService {
         WHERE instagram_access_token IS NOT NULL
         AND token_expires_at <= NOW() + INTERVAL '7 days'
         AND token_expires_at > NOW()
-      `;
+      `);
 
       const refreshPromises = expiringTokens.map(async (record) => {
         const refreshedToken = await this.refreshLongLivedToken(
@@ -935,7 +958,7 @@ export class InstagramOAuthService {
 
       let refreshedCount = 0;
       results.forEach((result, index) => {
-        const merchantId = expiringTokens[index].merchant_id;
+        const merchantId = expiringTokens[index]!.merchant_id;
         if (result.status === 'fulfilled') {
           refreshedCount++;
           this.logger.info('✅ Token refreshed for merchant', { merchant: mask(merchantId) });
@@ -1002,8 +1025,12 @@ export class InstagramOAuthService {
       }
 
       const record = result[0];
+      if (!record) {
+        return { isAuthorized: false };
+      }
+      
       const now = new Date();
-      const expiresAt = new Date(record.token_expires_at);
+      const expiresAt = new Date(record.token_expires_at as string);
       
       // Check if token is expired
       if (expiresAt <= now) {
@@ -1012,10 +1039,10 @@ export class InstagramOAuthService {
 
       return {
         isAuthorized: true,
-        igUserId: record.instagram_user_id,
-        username: record.instagram_username,
+        igUserId: record.instagram_user_id as string,
+        username: record.instagram_username as string,
         tokenExpiresAt: expiresAt,
-        scopes: JSON.parse(record.instagram_scopes || '[]')
+        scopes: JSON.parse((record.instagram_scopes as string | undefined) ?? '[]') as string[]
       };
 
     } catch (error) {

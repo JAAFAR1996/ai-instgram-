@@ -2,7 +2,7 @@ import type { Hono } from 'hono';
 
 // Development-only utilities and endpoints
 class MockDatabase {
-  private data: Map<string, any> = new Map();
+  // private data: Map<string, any> = new Map();
   private currentMerchantId: string | null = null;
 
   setMerchantContext(merchantId: string): void {

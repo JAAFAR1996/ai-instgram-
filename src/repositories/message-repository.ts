@@ -6,8 +6,10 @@
  */
 
 import { getDatabase } from '../db/adapter.js';
+import type { Sql } from '../types/sql.js';
+import type { DatabaseRow } from '../types/db.js';
 
-interface MessageRow {
+interface MessageDbRow extends DatabaseRow {
   id: string;
   conversation_id: string;
   direction: 'INCOMING' | 'OUTGOING';
@@ -24,13 +26,15 @@ interface MessageRow {
   media_metadata: string | null;
   created_at: string;
   updated_at: string;
+  [key: string]: unknown;
 }
 
-interface CountRow {
+interface CountRow extends DatabaseRow {
   count: string;
+  [key: string]: unknown;
 }
 
-interface MessageStatsRow {
+interface MessageStatsRow extends DatabaseRow {
   total: string;
   incoming: string;
   outgoing: string;
@@ -39,9 +43,10 @@ interface MessageStatsRow {
   delivery_status: string | null;
   avg_processing_time: string;
   avg_ai_confidence: string;
+  [key: string]: unknown;
 }
 
-interface ConversationHistoryRow {
+interface ConversationHistoryRow extends DatabaseRow {
   id: string;
   conversation_id: string;
   direction: 'INCOMING' | 'OUTGOING';
@@ -58,6 +63,7 @@ interface ConversationHistoryRow {
   media_metadata: string | null;
   created_at: string;
   updated_at: string;
+  [key: string]: unknown;
 }
 
 export interface Message {
@@ -140,12 +146,19 @@ export class MessageRepository {
   private db = getDatabase();
 
   /**
+   * Helper method to safely get first row from SQL result
+   */
+  private getFirstRow<T>(rows: T[]): T | null {
+    return rows.length > 0 ? rows[0]! : null;
+  }
+
+  /**
    * Create new message
    */
   async create(data: CreateMessageRequest): Promise<Message> {
     const sql: Sql = this.db.getSQL();
     
-    const [message] = await sql<MessageRow[]>`
+    const rows = await sql<MessageDbRow>`
       INSERT INTO message_logs (
         conversation_id,
         direction,
@@ -178,6 +191,10 @@ export class MessageRepository {
       RETURNING *
     `;
 
+    const message = this.getFirstRow(rows);
+    if (!message) {
+      throw new Error('Failed to create message');
+    }
     return this.mapToMessage(message);
   }
 
@@ -187,11 +204,12 @@ export class MessageRepository {
   async findById(id: string): Promise<Message | null> {
     const sql: Sql = this.db.getSQL();
     
-    const [message] = await sql<MessageRow[]>`
+    const rows = await sql<MessageDbRow>`
       SELECT * FROM message_logs
       WHERE id = ${id}::uuid
     `;
 
+    const message = this.getFirstRow(rows);
     return message ? this.mapToMessage(message) : null;
   }
 
@@ -200,46 +218,25 @@ export class MessageRepository {
    */
   async update(id: string, data: UpdateMessageRequest): Promise<Message | null> {
     const sql: Sql = this.db.getSQL();
-    
-    const updateFields: Fragment[] = [];
+    const fields: string[] = [];
+    const params: any[] = [];
+    let i = 1;
 
-    if (data.deliveryStatus !== undefined) {
-      updateFields.push(sql`delivery_status = ${data.deliveryStatus}`);
-    }
+    if (data.deliveryStatus !== undefined) { fields.push(`delivery_status = $${i++}`); params.push(data.deliveryStatus); }
+    if (data.aiProcessed     !== undefined) { fields.push(`ai_processed = $${i++}`);     params.push(data.aiProcessed); }
+    if (data.aiConfidence    !== undefined) { fields.push(`ai_confidence = $${i++}`);    params.push(data.aiConfidence); }
+    if (data.aiIntent        !== undefined) { fields.push(`ai_intent = $${i++}`);        params.push(data.aiIntent); }
+    if (data.processingTimeMs!== undefined) { fields.push(`processing_time_ms = $${i++}`); params.push(data.processingTimeMs); }
+    if (data.platformMessageId!== undefined){ fields.push(`platform_message_id = $${i++}`); params.push(data.platformMessageId); }
+    fields.push(`updated_at = NOW()`);
 
-    if (data.aiProcessed !== undefined) {
-      updateFields.push(sql`ai_processed = ${data.aiProcessed}`);
-    }
+    if (fields.length === 1) return await this.findById(id);
 
-    if (data.aiConfidence !== undefined) {
-      updateFields.push(sql`ai_confidence = ${data.aiConfidence}`);
-    }
-
-    if (data.aiIntent !== undefined) {
-      updateFields.push(sql`ai_intent = ${data.aiIntent}`);
-    }
-
-    if (data.processingTimeMs !== undefined) {
-      updateFields.push(sql`processing_time_ms = ${data.processingTimeMs}`);
-    }
-
-    if (data.platformMessageId !== undefined) {
-      updateFields.push(sql`platform_message_id = ${data.platformMessageId}`);
-    }
-
-    updateFields.push(sql`updated_at = NOW()`);
-
-    if (updateFields.length === 1) {
-      return await this.findById(id);
-    }
-
-    const [message] = await this.db.query<MessageRow>`
-      UPDATE message_logs
-      SET ${(sql as any).join(updateFields, sql`, `)}
-      WHERE id = ${id}::uuid
-      RETURNING *
-    `;
-    return message ? this.mapToMessage(message) : null;
+    const q = `UPDATE message_logs SET ${fields.join(', ')} WHERE id = $${i}::uuid RETURNING *`;
+    params.push(id);
+    const rows = await sql.unsafe<MessageDbRow>(q, params);
+    const row = rows[0];
+    return row ? this.mapToMessage(row) : null;
   }
 
   /**
@@ -247,60 +244,28 @@ export class MessageRepository {
    */
   async findMany(filters: MessageFilters = {}): Promise<Message[]> {
     const sql: Sql = this.db.getSQL();
-    
-    const conditions: Fragment[] = [];
+    const where: string[] = [];
+    const params: any[] = [];
+    let i = 1;
 
-    if (filters.conversationId) {
-      conditions.push(sql`conversation_id = ${filters.conversationId}::uuid`);
-    }
+    if (filters.conversationId) { where.push(`conversation_id = $${i++}::uuid`); params.push(filters.conversationId); }
+    if (filters.direction)      { where.push(`direction = $${i++}`);             params.push(filters.direction); }
+    if (filters.platform)       { where.push(`platform = $${i++}`);              params.push(filters.platform); }
+    if (filters.messageType)    { where.push(`message_type = $${i++}`);          params.push(filters.messageType); }
+    if (filters.aiProcessed!==undefined){ where.push(`ai_processed = $${i++}`);  params.push(filters.aiProcessed); }
+    if (filters.deliveryStatus) { where.push(`delivery_status = $${i++}`);       params.push(filters.deliveryStatus); }
+    if (filters.dateFrom)       { where.push(`created_at >= $${i++}`);           params.push(filters.dateFrom); }
+    if (filters.dateTo)         { where.push(`created_at <= $${i++}`);           params.push(filters.dateTo); }
+    if (filters.contentSearch)  { where.push(`content ILIKE $${i++}`);           params.push(`%${filters.contentSearch}%`); }
 
-    if (filters.direction) {
-      conditions.push(sql`direction = ${filters.direction}`);
-    }
+    let query = 'SELECT * FROM message_logs';
+    if (where.length) query += ' WHERE ' + where.join(' AND ');
+    query += ' ORDER BY created_at DESC';
+    if (filters.limit)  query += ` LIMIT ${filters.limit}`;
+    if (filters.offset) query += ` OFFSET ${filters.offset}`;
 
-    if (filters.platform) {
-      conditions.push(sql`platform = ${filters.platform}`);
-    }
-
-    if (filters.messageType) {
-      conditions.push(sql`message_type = ${filters.messageType}`);
-    }
-
-    if (filters.aiProcessed !== undefined) {
-      conditions.push(sql`ai_processed = ${filters.aiProcessed}`);
-    }
-
-    if (filters.deliveryStatus) {
-      conditions.push(sql`delivery_status = ${filters.deliveryStatus}`);
-    }
-
-    if (filters.dateFrom) {
-      conditions.push(sql`created_at >= ${filters.dateFrom}`);
-    }
-
-    if (filters.dateTo) {
-      conditions.push(sql`created_at <= ${filters.dateTo}`);
-    }
-
-    if (filters.contentSearch) {
-      const search = `%${filters.contentSearch}%`;
-      conditions.push(sql`content ILIKE ${search}`);
-    }
-
-    const whereClause = conditions.length
-      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
-      : sql``;
-    const limitClause = filters.limit ? sql`LIMIT ${filters.limit}` : sql``;
-    const offsetClause = filters.offset ? sql`OFFSET ${filters.offset}` : sql``;
-
-    const messages = await this.db.query<MessageRow>`
-      SELECT * FROM message_logs
-      ${whereClause}
-      ORDER BY created_at DESC
-      ${limitClause}
-      ${offsetClause}
-    `;
-    return messages.map((m: MessageRow) => this.mapToMessage(m));
+    const messages = await sql.unsafe<MessageDbRow>(query, params);
+    return messages.map((m: MessageDbRow) => this.mapToMessage(m));
   }
 
   /**
@@ -314,7 +279,7 @@ export class MessageRepository {
     const sql: Sql = this.db.getSQL();
     
     // Get messages
-    const messages = await sql<ConversationHistoryRow[]>`
+    const messages = await sql<ConversationHistoryRow>`
       SELECT * FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
       ORDER BY created_at ASC
@@ -323,12 +288,13 @@ export class MessageRepository {
     `;
 
     // Get total count
-    const [countResult] = await sql<CountRow[]>`
+    const countRows = await sql<CountRow>`
       SELECT COUNT(*) as count FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
     `;
 
-    const totalCount = parseInt(countResult.count);
+    const countResult = this.getFirstRow(countRows);
+    const totalCount = countResult ? parseInt(countResult.count) : 0;
     const hasMore = offset + messages.length < totalCount;
 
     return {
@@ -348,7 +314,7 @@ export class MessageRepository {
   ): Promise<Message[]> {
     const sql: Sql = this.db.getSQL();
     
-    const messages = await sql<MessageRow[]>`
+    const messages = await sql<MessageDbRow>`
       SELECT * FROM message_logs
       WHERE conversation_id = ${conversationId}::uuid
       ORDER BY created_at DESC
@@ -406,27 +372,15 @@ export class MessageRepository {
     dateTo?: Date
   ): Promise<MessageStats> {
     const sql: Sql = this.db.getSQL();
-    
-    const conditions: Fragment[] = [];
+    const where: string[] = [];
+    const params: any[] = [];
+    let i = 1;
+    if (conversationId) { where.push(`conversation_id = $${i++}::uuid`); params.push(conversationId); }
+    if (dateFrom)       { where.push(`created_at >= $${i++}`);           params.push(dateFrom); }
+    if (dateTo)         { where.push(`created_at <= $${i++}`);           params.push(dateTo); }
 
-    if (conversationId) {
-      conditions.push(sql`conversation_id = ${conversationId}::uuid`);
-    }
-
-    if (dateFrom) {
-      conditions.push(sql`created_at >= ${dateFrom}`);
-    }
-
-    if (dateTo) {
-      conditions.push(sql`created_at <= ${dateTo}`);
-    }
-
-    const whereClause = conditions.length
-      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
-      : sql``;
-
-    const results = await this.db.query<MessageStatsRow>`
-      SELECT 
+    let q = `
+      SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE direction = 'INCOMING') as incoming,
         COUNT(*) FILTER (WHERE direction = 'OUTGOING') as outgoing,
@@ -434,12 +388,13 @@ export class MessageRepository {
         message_type,
         delivery_status,
         AVG(processing_time_ms) FILTER (WHERE processing_time_ms IS NOT NULL) as avg_processing_time,
-        AVG(ai_confidence) FILTER (WHERE ai_confidence IS NOT NULL) as avg_ai_confidence
-      FROM message_logs
-      ${whereClause}
-      GROUP BY ROLLUP(platform, message_type, delivery_status)
-      ORDER BY platform, message_type, delivery_status
-    `;
+        AVG(ai_confidence)      FILTER (WHERE ai_confidence IS NOT NULL)      as avg_ai_confidence
+      FROM message_logs`;
+    if (where.length) q += ` WHERE ${where.join(' AND ')}`;
+    q += ` GROUP BY ROLLUP(platform, message_type, delivery_status)
+           ORDER BY platform, message_type, delivery_status`;
+
+    const results = await sql.unsafe<MessageStatsRow>(q, params);
     
     const stats: MessageStats = {
       total: 0,
@@ -504,12 +459,12 @@ export class MessageRepository {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
     
-    const result = await sql`
+    const rows = await sql<{ id: string }>`
       DELETE FROM message_logs
       WHERE created_at < ${cutoffDate}
+      RETURNING id
     `;
-
-    return result.count || 0;
+    return rows.length;
   }
 
   /**
@@ -517,61 +472,49 @@ export class MessageRepository {
    */
   async count(filters: MessageFilters = {}): Promise<number> {
     const sql: Sql = this.db.getSQL();
-    
-    const conditions: Fragment[] = [];
-
-    if (filters.conversationId) {
-      conditions.push(sql`conversation_id = ${filters.conversationId}::uuid`);
-    }
-
-    if (filters.direction) {
-      conditions.push(sql`direction = ${filters.direction}`);
-    }
-
-    if (filters.platform) {
-      conditions.push(sql`platform = ${filters.platform}`);
-    }
-
-    if (filters.deliveryStatus) {
-      conditions.push(sql`delivery_status = ${filters.deliveryStatus}`);
-    }
-
-    const whereClause = conditions.length
-      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
-      : sql``;
-
-    const [result] = await this.db.query<CountRow>`
-      SELECT COUNT(*) as count FROM message_logs ${whereClause}
-    `;
-    
-    return parseInt(result.count);
+    const where: string[] = [];
+    const params: any[] = [];
+    let i = 1;
+    if (filters.conversationId) { where.push(`conversation_id = $${i++}::uuid`); params.push(filters.conversationId); }
+    if (filters.direction)      { where.push(`direction = $${i++}`);             params.push(filters.direction); }
+    if (filters.platform)       { where.push(`platform = $${i++}`);              params.push(filters.platform); }
+    if (filters.deliveryStatus) { where.push(`delivery_status = $${i++}`);       params.push(filters.deliveryStatus); }
+    let q = 'SELECT COUNT(*) as count FROM message_logs';
+    if (where.length) q += ' WHERE ' + where.join(' AND ');
+    const rows = await sql.unsafe<CountRow>(q, params);
+    return rows.length ? parseInt(String(rows[0]?.count ?? 0)) : 0;
   }
 
   /**
    * Map database row to Message object
    */
-  private mapToMessage(row: MessageRow | ConversationHistoryRow): Message {
-    const mediaMetadata = row.media_metadata ?? undefined;
-    return {
+  private mapToMessage(row: MessageDbRow | ConversationHistoryRow): Message {
+    const message: Message = {
       id: row.id,
       conversationId: row.conversation_id,
       direction: row.direction,
       platform: row.platform,
       messageType: row.message_type,
       content: row.content,
-      mediaUrl: row.media_url ?? undefined,
-      platformMessageId: row.platform_message_id ?? undefined,
       aiProcessed: row.ai_processed,
       deliveryStatus: row.delivery_status,
-      aiConfidence: row.ai_confidence ?? undefined,
-      aiIntent: row.ai_intent ?? undefined,
-      processingTimeMs: row.processing_time_ms ?? undefined,
-      mediaMetadata: mediaMetadata
-        ? (typeof mediaMetadata === 'string' ? JSON.parse(mediaMetadata) : mediaMetadata)
-        : undefined,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at)
     };
+    
+    if (row.media_url) message.mediaUrl = row.media_url;
+    if (row.platform_message_id) message.platformMessageId = row.platform_message_id;
+    if (row.ai_confidence !== null && row.ai_confidence !== undefined) message.aiConfidence = row.ai_confidence;
+    if (row.ai_intent) message.aiIntent = row.ai_intent;
+    if (row.processing_time_ms !== null && row.processing_time_ms !== undefined) message.processingTimeMs = row.processing_time_ms;
+    
+    if (row.media_metadata) {
+      message.mediaMetadata = typeof row.media_metadata === 'string' 
+        ? JSON.parse(row.media_metadata) 
+        : row.media_metadata;
+    }
+    
+    return message;
   }
 }
 

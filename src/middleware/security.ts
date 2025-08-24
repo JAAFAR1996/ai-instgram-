@@ -5,18 +5,21 @@
  * ===============================================
  */
 
-import { Context, Next } from 'hono';
-import { RateLimiterRedis, RateLimiterRes } from 'rate-limiter-flexible';
+import type { MiddlewareHandler, Context, Next } from 'hono';
+import { RateLimiterRedis } from 'rate-limiter-flexible';
 import crypto from 'crypto';
 import { getMessageWindowService } from '../services/message-window.js';
 import { getDatabase } from '../db/adapter.js';
 import type { Platform } from '../types/database.js';
 import { getRedisConnectionManager } from '../services/RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
-import { getEnvVar, getConfig } from '../config/environment.js';
+import { getConfig } from '../config/index.js';
+
+const clean = (v?: string | null) =>
+  (v ?? '').replace(/[\r\n]/g, '').trim();
 
 // Redis connection for distributed rate limiting
-const redisUrl = getEnvVar('REDIS_URL');
+const config = getConfig();
 const redisClient = await getRedisConnectionManager()
   .getConnection(RedisUsageType.CACHING);
 
@@ -75,32 +78,36 @@ export function generateTraceId(): string {
   return crypto.randomUUID();
 }
 
-/**
- * Extract IP address from request
- */
-export function getClientIP(c: Context): string {
-  const forwarded = c.req.header('x-forwarded-for');
-  const real = c.req.header('x-real-ip');
-  const remoteAddr = c.req.header('remote-addr');
-  
-  if (forwarded) {
-    return forwarded.split(',')[0].trim().replace(/[\r\n]/g, '');
+
+
+export const securityHeaders: MiddlewareHandler = async (c, next) => {
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('X-Frame-Options', 'DENY');
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  c.header('Content-Security-Policy', "default-src 'self'");
+  if (clean(c.req.header('x-forwarded-proto')) === 'https') {
+    c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
-  
-  return (real || remoteAddr || 'unknown').replace(/[\r\n]/g, '');
+  await next();
+};
+
+export function getClientIP(forwarded?: string): string | undefined {
+  if (!forwarded) return undefined;
+  const first = forwarded.split(',')[0];
+  return first ? first.trim().replace(/[\r\n]/g, '') : undefined;
 }
 
 /**
  * Basic rate limiting middleware
  */
 export function rateLimitMiddleware(limiterType: keyof typeof rateLimiters = 'general') {
-  return async (c: Context, next: Next) => {
+  return async (c: Context, next: Next): Promise<Response | void> => {
     const limiter = rateLimiters[limiterType];
-    const key = getClientIP(c);
+    const key = getClientIP(c.req.header('x-forwarded-for')) || 'unknown';
     
     try {
       await limiter.consume(key);
-      await next();
+      return await next();
     } catch (rejRes: any) {
       const secs = Math.round(rejRes.msBeforeNext / 1000) || 1;
       
@@ -122,7 +129,7 @@ export function rateLimitMiddleware(limiterType: keyof typeof rateLimiters = 'ge
  * Per-merchant rate limiting middleware
  */
 export function merchantRateLimitMiddleware() {
-  return async (c: Context, next: Next) => {
+  return async (c: Context, next: Next): Promise<Response | void> => {
     const merchantId = c.get('merchantId') || c.req.query('merchantId');
     
     if (!merchantId) {
@@ -137,7 +144,7 @@ export function merchantRateLimitMiddleware() {
     
     try {
       await limiter.consume(key);
-      await next();
+      return await next();
     } catch (rejRes: any) {
       const secs = Math.round(rejRes.msBeforeNext / 1000) || 1;
       
@@ -155,7 +162,7 @@ export function merchantRateLimitMiddleware() {
  * 24-hour window enforcement middleware for messaging
  */
 export function windowEnforcementMiddleware() {
-  return async (c: Context, next: Next) => {
+  return async (c: Context, next: Next): Promise<Response | void> => {
     const merchantId = c.get('merchantId') || c.req.query('merchantId');
     const platform = (c.req.query('platform') || 'instagram') as Platform;
     
@@ -201,7 +208,7 @@ export function windowEnforcementMiddleware() {
       // Store window info in context for logging
       c.set('windowStatus', windowStatus);
       
-      await next();
+      return await next();
     } catch (error) {
       console.error('❌ Window enforcement error:', error);
       return c.json({
@@ -216,7 +223,7 @@ export function windowEnforcementMiddleware() {
  * Messaging rate limiting with customer-specific limits
  */
 export function messagingRateLimitMiddleware() {
-  return async (c: Context, next: Next) => {
+  return async (c: Context, next: Next): Promise<Response | void> => {
     const merchantId = c.get('merchantId') || c.req.query('merchantId');
     
     const body = await c.req.json().catch(() => ({}));
@@ -237,7 +244,7 @@ export function messagingRateLimitMiddleware() {
     
     try {
       await limiter.consume(key);
-      await next();
+      return await next();
     } catch (rejRes: any) {
       const secs = Math.round(rejRes.msBeforeNext / 1000) || 1;
       
@@ -257,7 +264,7 @@ export function messagingRateLimitMiddleware() {
 export function securityContextMiddleware() {
   return async (c: Context, next: Next) => {
     const traceId = generateTraceId();
-    const ipAddress = getClientIP(c);
+    const ipAddress = getClientIP(c.req.header('x-forwarded-for')) || 'unknown';
     const userAgent = c.req.header('user-agent') || 'unknown';
     const startTime = Date.now();
     
@@ -275,7 +282,7 @@ export function securityContextMiddleware() {
     // Add trace header to response
     c.header('X-Trace-ID', traceId);
     
-    await next();
+    return await next();
   };
 }
 
@@ -349,7 +356,7 @@ export function auditLogMiddleware() {
  * Webhook signature verification middleware
  */
 export function webhookSignatureMiddleware(secretKey: string) {
-  return async (c: Context, next: Next) => {
+  return async (c: Context, next: Next): Promise<Response | void> => {
     const signature = c.req.header('X-Hub-Signature-256') || c.req.header('X-Signature');
     
     if (!signature) {
@@ -412,7 +419,7 @@ export function webhookSignatureMiddleware(secretKey: string) {
       });
       c.req.raw = newRequest;
 
-      await next();
+      return await next();
     } catch (error) {
       console.error('❌ Webhook signature verification failed:', error);
       return c.json({
@@ -428,9 +435,9 @@ export function webhookSignatureMiddleware(secretKey: string) {
  */
 export function corsSecurityMiddleware() {
   const config = getConfig();
-  return async (c: Context, next: Next) => {
+  return async (c: Context, next: Next): Promise<Response | void> => {
     const origin = c.req.header('origin');
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [config.baseUrl];
+    const allowedOrigins = config.security.corsOrigins;
     
     if (origin && allowedOrigins.includes(origin)) {
       c.header('Access-Control-Allow-Origin', origin);
@@ -444,12 +451,19 @@ export function corsSecurityMiddleware() {
       return c.text('');
     }
     
-    await next();
+    return await next();
   };
 }
 
 /**
- * Security headers middleware - Production Ready
+ * Helper function to clean header values
+ */
+// removed unused _clean
+
+
+
+/**
+ * Legacy function for backward compatibility
  */
 export function securityHeadersMiddleware() {
   return async (c: Context, next: Next) => {
@@ -470,11 +484,11 @@ export function securityHeadersMiddleware() {
     c.header('Content-Security-Policy', csp);
     
     // HSTS for all environments (development uses HTTP, production HTTPS)
-    if (process.env.NODE_ENV === 'production') {
+    if (config.environment === 'production') {
       c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
     }
     
-    await next();
+    return await next();
   };
 }
 
@@ -482,7 +496,7 @@ export function securityHeadersMiddleware() {
  * Request validation middleware
  */
 export function requestValidationMiddleware() {
-  return async (c: Context, next: Next) => {
+  return async (c: Context, next: Next): Promise<Response | void> => {
     const contentType = c.req.header('content-type');
     const method = c.req.method;
     
@@ -507,12 +521,11 @@ export function requestValidationMiddleware() {
       }, 413);
     }
     
-    await next();
+    return await next();
   };
 }
 
 // Create shorthand exports for common usage
-export const securityHeaders = securityHeadersMiddleware();
 export const rateLimiter = rateLimitMiddleware();
 
 // Export all middleware functions

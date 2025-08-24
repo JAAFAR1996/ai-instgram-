@@ -1,17 +1,19 @@
 import { RedisOptions } from 'ioredis';
+import { getEnv } from './env.js';
 
 export enum RedisUsageType {
   HEALTH_CHECK = 'health_check',
-  QUEUE_SYSTEM = 'queue_system',
+  QUEUE_SYSTEM = 'queue_system', 
   CACHING = 'caching',
+  CACHE = 'cache',
+  RATE_LIMITER = 'rate_limiter',
   SESSION = 'session',
   PUBSUB = 'pubsub',
-  OAUTH = 'oauth',
-  RATE_LIMITER = 'rate_limiter',
-  IDEMPOTENCY = 'idempotency'
+  IDEMPOTENCY = 'idempotency',
+  OAUTH = 'oauth'
 }
 
-export enum Environment {
+export enum RedisEnvironment {
   DEVELOPMENT = 'development',
   STAGING = 'staging',
   PRODUCTION = 'production',
@@ -60,28 +62,31 @@ export interface SessionRedisConfig extends RedisOptions {
   lazyConnect: boolean;
   maxRetriesPerRequest: number;
   family: number;
-  keepAlive: number;
+  enableReadyCheck: boolean;
+  enableOfflineQueue: boolean;
 }
 
 export interface PubSubRedisConfig extends RedisOptions {
   connectTimeout: number;
   lazyConnect: boolean;
-  family: number;
-  enableOfflineQueue: boolean;
   maxRetriesPerRequest: number;
+  family: number;
+  enableReadyCheck: boolean;
+  enableOfflineQueue: boolean;
 }
 
+// Simplified: Only essential configurations
 export type RedisConfiguration = 
   | HealthCheckRedisConfig 
   | QueueRedisConfig 
-  | CachingRedisConfig 
-  | SessionRedisConfig 
+  | CachingRedisConfig
+  | SessionRedisConfig
   | PubSubRedisConfig;
 
 export interface RedisConfigurationFactory {
   createConfiguration(
     usageType: RedisUsageType,
-    environment: Environment,
+    environment: RedisEnvironment,
     redisUrl: string
   ): RedisConfiguration;
 }
@@ -90,7 +95,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
 
   createConfiguration(
     usageType: RedisUsageType,
-    environment: Environment,
+    environment: RedisEnvironment,
     redisUrl: string
   ): RedisConfiguration {
 
@@ -104,7 +109,14 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
         return this.createHealthCheckConfiguration(baseConfig);
 
       case RedisUsageType.CACHING:
+      case RedisUsageType.CACHE:
         return this.createCachingConfiguration(baseConfig);
+      
+      case RedisUsageType.RATE_LIMITER:
+        return this.createRateLimiterConfiguration(baseConfig);
+        
+      case RedisUsageType.IDEMPOTENCY:
+        return this.createIdempotencyConfiguration(baseConfig);
 
       case RedisUsageType.SESSION:
         return this.createSessionConfiguration(baseConfig);
@@ -117,7 +129,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
     }
   }
 
-  private getBaseConfiguration(redisUrl: string, environment: Environment): BaseRedisConfig {
+  private getBaseConfiguration(redisUrl: string, environment: RedisEnvironment): BaseRedisConfig {
     const isSecure = redisUrl.startsWith('rediss://');
     
     // استخراج معلومات الاتصال من URL
@@ -128,7 +140,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       parsedConfig = {
         host: url.hostname,
         port: parseInt(url.port) || 6379,
-        password: url.password || undefined,
+        ...(url.password && { password: url.password }),
         keyPrefix: this.getKeyPrefix(environment),
         ...(isSecure && {
           tls: {
@@ -155,9 +167,9 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
                      baseConfig.host?.includes('redis.upstash.com');
     
     return {
-      host: baseConfig.host,
-      port: baseConfig.port,
-      password: baseConfig.password,
+      host: baseConfig.host || 'localhost',
+      port: baseConfig.port || 6379,
+      ...(baseConfig.password && { password: baseConfig.password }),
       connectTimeout: this.getTimeoutByEnvironment(10000, 15000),
       lazyConnect: true,
       family: 4,
@@ -167,10 +179,12 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       // Upstash rate limit configuration
       maxRetriesPerRequest: isUpstash ? 1 : 3,
       autoResendUnfulfilledCommands: isUpstash ? false : true,
-      reconnectOnError: isUpstash ? (err: Error) => {
-        // Return false for rate limit errors to prevent reconnection spinning
-        return err.message.includes('max requests limit exceeded') ? false : 1;
-      } : undefined,
+      ...(isUpstash && {
+        reconnectOnError: (err: Error) => {
+          // Return false for rate limit errors to prevent reconnection spinning
+          return err.message.includes('max requests limit exceeded') ? false : 1;
+        }
+      }),
       ...(baseConfig.tls && { tls: baseConfig.tls })
     };
   }
@@ -180,9 +194,9 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
                      baseConfig.host?.includes('redis.upstash.com');
     
     return {
-      host: baseConfig.host,
-      port: baseConfig.port,
-      password: baseConfig.password,
+      host: baseConfig.host || 'localhost',
+      port: baseConfig.port || 6379,
+      ...(baseConfig.password && { password: baseConfig.password }),
       connectTimeout: 5000,
       lazyConnect: true,
       maxRetriesPerRequest: isUpstash ? 1 : 3,
@@ -191,33 +205,71 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       keyPrefix: `${baseConfig.keyPrefix}health:`,
       // Upstash rate limit handling
       autoResendUnfulfilledCommands: isUpstash ? false : true,
-      reconnectOnError: isUpstash ? (err: Error) => {
-        return err.message.includes('max requests limit exceeded') ? false : 1;
-      } : undefined,
+      ...(isUpstash && {
+        reconnectOnError: (err: Error) => {
+          return err.message.includes('max requests limit exceeded') ? false : 1;
+        }
+      }),
       ...(baseConfig.tls && { tls: baseConfig.tls })
     };
   }
 
   private createCachingConfiguration(baseConfig: BaseRedisConfig): CachingRedisConfig {
-    return {
-      host: baseConfig.host,
-      port: baseConfig.port,
-      password: baseConfig.password,
+    const config: CachingRedisConfig = {
       connectTimeout: 8000,
       lazyConnect: true,
       maxRetriesPerRequest: 3,
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}cache:`,
-      enableOfflineQueue: true, // ✅ تغيير لضمان التوافق مع Upstash
-      ...(baseConfig.tls && { tls: baseConfig.tls })
+      enableOfflineQueue: true
     };
+    
+    if (baseConfig.host) config.host = baseConfig.host;
+    if (baseConfig.port) config.port = baseConfig.port;
+    if (baseConfig.password) config.password = baseConfig.password;
+    if (baseConfig.tls) config.tls = baseConfig.tls;
+    
+    return config;
+  }
+
+  private createRateLimiterConfiguration(baseConfig: BaseRedisConfig): CachingRedisConfig {
+    const config: CachingRedisConfig = {
+      connectTimeout: 8000,
+      lazyConnect: true,
+      maxRetriesPerRequest: 3,
+      family: 4,
+      keyPrefix: `${baseConfig.keyPrefix}ratelimit:`,
+      enableOfflineQueue: true
+    };
+    
+    if (baseConfig.host) config.host = baseConfig.host;
+    if (baseConfig.port) config.port = baseConfig.port;
+    if (baseConfig.password) config.password = baseConfig.password;
+    if (baseConfig.tls) config.tls = baseConfig.tls;
+    
+    return config;
+  }
+
+  private createIdempotencyConfiguration(baseConfig: BaseRedisConfig): CachingRedisConfig {
+    const config: CachingRedisConfig = {
+      connectTimeout: 8000,
+      lazyConnect: true,
+      maxRetriesPerRequest: 3,
+      family: 4,
+      keyPrefix: `${baseConfig.keyPrefix}idempotency:`,
+      enableOfflineQueue: true
+    };
+    
+    if (baseConfig.host) config.host = baseConfig.host;
+    if (baseConfig.port) config.port = baseConfig.port;
+    if (baseConfig.password) config.password = baseConfig.password;
+    if (baseConfig.tls) config.tls = baseConfig.tls;
+    
+    return config;
   }
 
   private createSessionConfiguration(baseConfig: BaseRedisConfig): SessionRedisConfig {
-    return {
-      host: baseConfig.host,
-      port: baseConfig.port,
-      password: baseConfig.password,
+    const config: SessionRedisConfig = {
       connectTimeout: 10000,
       lazyConnect: true,
       maxRetriesPerRequest: 5, // مهم للsessions
@@ -225,38 +277,49 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       keyPrefix: `${baseConfig.keyPrefix}session:`,
       keepAlive: 30000, // 30 ثانية للsessions
       enableOfflineQueue: true, // مسموح للsessions
-      ...(baseConfig.tls && { tls: baseConfig.tls })
+      enableReadyCheck: true // إضافة enableReadyCheck
     };
+    
+    if (baseConfig.host) config.host = baseConfig.host;
+    if (baseConfig.port) config.port = baseConfig.port;
+    if (baseConfig.password) config.password = baseConfig.password;
+    if (baseConfig.tls) config.tls = baseConfig.tls;
+    
+    return config;
   }
 
   private createPubSubConfiguration(baseConfig: BaseRedisConfig): PubSubRedisConfig {
-    return {
-      host: baseConfig.host,
-      port: baseConfig.port,
-      password: baseConfig.password,
+    const config: PubSubRedisConfig = {
       connectTimeout: 5000,
       lazyConnect: true,
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}pubsub:`,
       enableOfflineQueue: true, // ✅ تغيير للتوافق مع Upstash (سيتم تجاهلها للpubsub)
       maxRetriesPerRequest: 0, // لا نريد إعادة محاولة للpubsub
-      ...(baseConfig.tls && { tls: baseConfig.tls })
+      enableReadyCheck: true // إضافة enableReadyCheck
     };
+    
+    if (baseConfig.host) config.host = baseConfig.host;
+    if (baseConfig.port) config.port = baseConfig.port;
+    if (baseConfig.password) config.password = baseConfig.password;
+    if (baseConfig.tls) config.tls = baseConfig.tls;
+    
+    return config;
   }
 
-  private getKeyPrefix(environment: Environment): string {
+  private getKeyPrefix(environment: RedisEnvironment): string {
     switch (environment) {
-      case Environment.DEVELOPMENT:
+      case RedisEnvironment.DEVELOPMENT:
         return 'ai-sales-dev:';
-      case Environment.STAGING:
+      case RedisEnvironment.STAGING:
         return 'ai-sales-staging:';
-      case Environment.PRODUCTION:
+      case RedisEnvironment.PRODUCTION:
         return 'ai-sales-prod:';
-      case Environment.DOCKER:
+      case RedisEnvironment.DOCKER:
         return 'ai-sales-docker:';
-      case Environment.RENDER:
+      case RedisEnvironment.RENDER:
         return 'ai-sales-render:';
-      case Environment.HEROKU:
+      case RedisEnvironment.HEROKU:
         return 'ai-sales-heroku:';
       default:
         return 'ai-sales:';
@@ -267,42 +330,42 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
     const environment = this.detectEnvironment();
     
     // البيئات السحابية تحتاج timeout أطول
-    if (environment === Environment.RENDER || 
-        environment === Environment.HEROKU) {
+    if (environment === RedisEnvironment.RENDER || 
+        environment === RedisEnvironment.HEROKU) {
       return cloudTimeout;
     }
     
     return defaultTimeout;
   }
 
-  private detectEnvironment(): Environment {
-    const nodeEnv = process.env.NODE_ENV;
+  private detectEnvironment(): RedisEnvironment {
+    const nodeEnv = getEnv('NODE_ENV');
     
     if (nodeEnv === 'development') {
-      return Environment.DEVELOPMENT;
+      return RedisEnvironment.DEVELOPMENT;
     }
     
     if (nodeEnv === 'test') {
-      return Environment.DEVELOPMENT; // Treat test as development
+      return RedisEnvironment.DEVELOPMENT; // Treat test as development
     }
     
-    if (process.env.ENVIRONMENT === 'staging') {
-      return Environment.STAGING;
+    if (getEnv('ENVIRONMENT') === 'staging') {
+      return RedisEnvironment.STAGING;
     }
     
-    if (process.env.RENDER || process.env.RENDER_SERVICE_ID) {
-      return Environment.RENDER;
+    if (getEnv('RENDER') || getEnv('RENDER_SERVICE_ID')) {
+      return RedisEnvironment.RENDER;
     }
     
-    if (process.env.DYNO) {
-      return Environment.HEROKU;
+    if (getEnv('DYNO')) {
+      return RedisEnvironment.HEROKU;
     }
     
-    if (process.env.DOCKER || process.env.IS_DOCKER) {
-      return Environment.DOCKER;
+    if (getEnv('DOCKER') || getEnv('IS_DOCKER')) {
+      return RedisEnvironment.DOCKER;
     }
     
-    return Environment.PRODUCTION;
+    return RedisEnvironment.PRODUCTION;
   }
 
   static validateConfiguration(config: RedisConfiguration): {
@@ -357,7 +420,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
   ): RedisConfiguration {
     const factory = new ProductionRedisConfigurationFactory();
     const environment = factory.detectEnvironment();
-    const url = redisUrl || process.env.REDIS_URL || 'redis://localhost:6379';
+    const url = redisUrl || getEnv('REDIS_URL') || 'redis://localhost:6379';
 
     return factory.createConfiguration(usageType, environment, url);
   }

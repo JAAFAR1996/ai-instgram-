@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/db/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/db/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/db/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/**)",
+      "Read(//mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/config/**)"
+    ],
+    "deny": [],
+    "ask": [],
+    "additionalDirectories": [
+      "/mnt/c/Users/jaafa/Desktop/New folder"
+    ]
+  }
+}

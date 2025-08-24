@@ -1,0 +1,19 @@
+--- /mnt/data/work/src4/src/services/message-window.ts
++++ /mnt/data/work/src4/src/services/message-window.ts
+@@ -6,6 +6,7 @@
+  */
+ 
+ import { getDatabase } from '../db/adapter.js';
++import { logger } from 'logger.js';
+ 
+ export interface MessageWindowStatus {
+   canSendMessage: boolean;
+@@ -292,7 +293,7 @@
+       `);
+ 
+       const count = ((result[0] as unknown) as DeleteCountRow)?.count ?? 0;
+-      console.log(`🧹 Cleaned up ${count} expired message windows`);
++      logger.info(`🧹 Cleaned up ${count} expired message windows`);
+       return count;
+     } catch (error) {
+       console.error('❌ Error cleaning up expired windows:', error);

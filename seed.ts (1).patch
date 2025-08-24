@@ -1,0 +1,146 @@
+--- /mnt/data/work/src4/src/database/seed.ts
++++ /mnt/data/work/src4/src/database/seed.ts
+@@ -8,6 +8,7 @@
+ import { getDatabase } from '../db/adapter.js';
+ import { getConfig } from '../config/index.js';
+ import type { Merchant, Product, Order, Conversation } from '../types/database.js';
++import { logger } from '../services/logger.js';
+ 
+ export class DatabaseSeeder {
+   private db = getDatabase();
+@@ -17,7 +18,7 @@
+    */
+   public async seed(): Promise<void> {
+     try {
+-      console.log('🌱 Starting database seeding...');
++      logger.info('🌱 Starting database seeding...');
+       
+       // Ensure database connection
+       if (!this.db.isReady()) {
+@@ -36,7 +37,7 @@
+       await this.seedOrders(merchants, conversations);
+       await this.seedMessageLogs(conversations);
+ 
+-      console.log('✅ Database seeding completed successfully');
++      logger.info('✅ Database seeding completed successfully');
+     } catch (error) {
+       console.error('❌ Database seeding failed:', error);
+       throw error;
+@@ -47,7 +48,7 @@
+    * Clear existing test data
+    */
+   public async clearData(): Promise<void> {
+-    console.log('🗑️ Clearing existing test data...');
++    logger.info('🗑️ Clearing existing test data...');
+     
+     const sql = this.db.getSQL();
+     await this.db.transaction(async (trx) => {
+@@ -58,14 +59,14 @@
+       await trx`DELETE FROM merchants`;
+     });
+     
+-    console.log('✅ Test data cleared');
++    logger.info('✅ Test data cleared');
+   }
+ 
+   /**
+    * Seed merchants
+    */
+   private async seedMerchants(): Promise<string[]> {
+-    console.log('👥 Seeding merchants...');
++    logger.info('👥 Seeding merchants...');
+     
+     const sql = this.db.getSQL() as any;
+     
+@@ -127,7 +128,7 @@
+       RETURNING id
+     `;
+ 
+-    console.log(`✅ Created ${merchants.length} merchants`);
++    logger.info(`✅ Created ${merchants.length} merchants`);
+     return merchants.map((m: any) => m.id);
+   }
+ 
+@@ -135,7 +136,7 @@
+    * Seed products
+    */
+   private async seedProducts(merchantIds: string[]): Promise<void> {
+-    console.log('📱 Seeding products...');
++    logger.info('📱 Seeding products...');
+     
+     const sql = this.db.getSQL() as any;
+     
+@@ -310,14 +311,14 @@
+       ])}
+     `;
+ 
+-    console.log(`✅ Created ${allProducts.length} products`);
++    logger.info(`✅ Created ${allProducts.length} products`);
+   }
+ 
+   /**
+    * Seed conversations
+    */
+   private async seedConversations(merchantIds: string[]): Promise<string[]> {
+-    console.log('💬 Seeding conversations...');
++    logger.info('💬 Seeding conversations...');
+     
+     const sql = this.db.getSQL() as any;
+     
+@@ -403,7 +404,7 @@
+       RETURNING id
+     `;
+ 
+-    console.log(`✅ Created ${conversations.length} conversations`);
++    logger.info(`✅ Created ${conversations.length} conversations`);
+     return conversations.map((c: any) => c.id);
+   }
+ 
+@@ -411,7 +412,7 @@
+    * Seed orders
+    */
+   private async seedOrders(merchantIds: string[], conversationIds: string[]): Promise<void> {
+-    console.log('📦 Seeding orders...');
++    logger.info('📦 Seeding orders...');
+     
+     const sql = this.db.getSQL() as any;
+     
+@@ -512,14 +513,14 @@
+       ])}
+     `;
+ 
+-    console.log(`✅ Created ${ordersData.length} orders`);
++    logger.info(`✅ Created ${ordersData.length} orders`);
+   }
+ 
+   /**
+    * Seed message logs
+    */
+   private async seedMessageLogs(conversationIds: string[]): Promise<void> {
+-    console.log('📨 Seeding message logs...');
++    logger.info('📨 Seeding message logs...');
+     
+     const sql = this.db.getSQL() as any;
+     
+@@ -586,7 +587,7 @@
+       ])}
+     `;
+ 
+-    console.log(`✅ Created ${messagesData.length} message logs`);
++    logger.info(`✅ Created ${messagesData.length} message logs`);
+   }
+ }
+ 
+@@ -615,9 +616,9 @@
+         await clearDatabase();
+         break;
+       default:
+-        console.log('📖 Available commands:');
+-        console.log('  seed  - Seed database with test data');
+-        console.log('  clear - Clear all test data');
++        logger.info('📖 Available commands:');
++        logger.info('  seed  - Seed database with test data');
++        logger.info('  clear - Clear all test data');
+     }
+   } catch (error) {
+     console.error('❌ Command failed:', error);

@@ -8,28 +8,20 @@
 import { getInstagramClient, clearInstagramClient, type InstagramAPICredentials } from './instagram-api.js';
 import { ExpiringMap } from '../utils/expiring-map.js';
 import { getDatabase } from '../db/adapter.js';
+import type { Sql } from '../types/sql.js';
+import type { QuickReply } from '../types/instagram.js';
+import type { ConversationStage } from '../types/database.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramContext } from './instagram-ai.js';
 import { hashMerchantAndBody } from '../middleware/idempotency.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { createLogger } from './logger.js';
+import type {
+  StoryInteraction
+} from '../types/social.js';
 
-export interface StoryInteraction {
-  id: string;
-  type: 'story_reply' | 'story_mention' | 'story_view' | 'story_reaction';
-  storyId: string;
-  userId: string;
-  username?: string;
-  content?: string;
-  mediaUrl?: string;
-  timestamp: Date;
-  metadata?: {
-    reactionType?: string;
-    storyType?: 'photo' | 'video' | 'reel';
-    isPrivate?: boolean;
-  };
-}
+// Using imported StoryInteraction from types/social.js
 
 export interface StoryResponse {
   type: 'text' | 'media' | 'template';
@@ -78,12 +70,12 @@ export interface StoryTemplate {
   responseTemplate?: StoryResponse;
 }
 
-interface TopInteractionTimeRow {
+interface TopInteractionTimeRow extends Record<string, unknown> {
   hour: number;
   count: number;
 }
 
-interface StoryTemplateRow {
+interface StoryTemplateRow extends Record<string, unknown> {
   id: string;
   name: string;
   category: string;
@@ -91,7 +83,7 @@ interface StoryTemplateRow {
   response_template: string | null;
 }
 
-interface MessageHistoryRow {
+interface MessageHistoryRow extends Record<string, unknown> {
   role: string;
   content: string;
   timestamp: Date;
@@ -160,7 +152,9 @@ export class InstagramStoriesManager {
         type: interaction.type,
         userId: interaction.userId,
         content: interaction.content,
-        timestamp: interaction.timestamp.toISOString()
+        timestamp: (interaction.timestamp instanceof Date
+          ? interaction.timestamp
+          : new Date(interaction.timestamp as unknown as string)).toISOString()
       };
       const idempotencyKey = `ig:story_process:${hashMerchantAndBody(merchantId, bodyForHash)}`;
       
@@ -310,8 +304,8 @@ export class InstagramStoriesManager {
 
       const sendResult = await instagramClient.sendMessage(credentials, merchantId, {
         recipientId: interaction.userId,
-        messageType: 'text',
-        content: personalizedResponse,
+        messagingType: 'RESPONSE',
+        text: personalizedResponse,
         quickReplies: this.generateQuickReplies(interaction)
       });
 
@@ -390,7 +384,7 @@ export class InstagramStoriesManager {
     dateRange?: { from: Date; to: Date }
   ): Promise<StoryAnalytics> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql: Sql = this.db.getSQL();
 
       const dateFilter = dateRange 
         ? sql`AND created_at BETWEEN ${dateRange.from.toISOString()} AND ${dateRange.to.toISOString()}`
@@ -426,11 +420,11 @@ export class InstagramStoriesManager {
       `;
 
       const responseRate = responseData.length > 0 
-        ? (Number(responseData[0].responses) / Number(responseData[0].total)) * 100
+        ? (Number(responseData[0]!.responses) / Number(responseData[0]!.total)) * 100
         : 0;
 
       // Get peak interaction times
-      const timeData = await sql<TopInteractionTimeRow[]>`
+      const timeData = await sql<TopInteractionTimeRow>`
         SELECT 
           EXTRACT(HOUR FROM created_at) as hour,
           COUNT(*) as count
@@ -442,7 +436,7 @@ export class InstagramStoriesManager {
         LIMIT 3
       `;
 
-      const topInteractionTimes = timeData.map((time: TopInteractionTimeRow) => `${time.hour}:00`);
+      const topInteractionTimes = timeData.map((time) => `${time.hour}:00`);
 
       // Calculate engagement score (0-100)
       const userEngagementScore = Math.min(100, 
@@ -476,7 +470,7 @@ export class InstagramStoriesManager {
     template: Omit<StoryTemplate, 'id'>
   ): Promise<string> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql: Sql = this.db.getSQL();
 
       const result = await sql`
         INSERT INTO story_templates (
@@ -497,9 +491,13 @@ export class InstagramStoriesManager {
         RETURNING id
       `;
 
+      if (result.length === 0 || !result[0]) {
+        throw new Error('Failed to create story template - no ID returned');
+      }
+
       const templateId = result[0].id;
       this.logger.info('Story template created', { name: template.name, templateId });
-      return templateId;
+      return String(templateId);
     } catch (error) {
       this.logger.error('Story template creation failed', error, { merchantId, name: template.name });
       throw error;
@@ -514,13 +512,13 @@ export class InstagramStoriesManager {
     category?: string
   ): Promise<StoryTemplate[]> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql: Sql = this.db.getSQL();
 
       const categoryFilter = category 
         ? sql`AND category = ${category}`
         : sql``;
 
-      const templates = await sql<StoryTemplateRow[]>`
+      const templates = await sql<StoryTemplateRow>`
         SELECT *
         FROM story_templates
         WHERE merchant_id = ${merchantId}::uuid
@@ -528,10 +526,10 @@ export class InstagramStoriesManager {
         ORDER BY created_at DESC
       `;
 
-      return templates.map((template: StoryTemplateRow) => ({
+      return templates.map((template) => ({
         id: template.id,
         name: template.name,
-        category: template.category,
+        category: template.category as StoryTemplate['category'],
         template: JSON.parse(template.template_data),
         responseTemplate: template.response_template 
           ? JSON.parse(template.response_template) 
@@ -551,7 +549,7 @@ export class InstagramStoriesManager {
     merchantId: string
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql: Sql = this.db.getSQL();
 
       await sql`
         INSERT INTO story_interactions (
@@ -597,7 +595,7 @@ export class InstagramStoriesManager {
     username?: string
   ): Promise<{ id: string; isNew: boolean } | null> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql: Sql = this.db.getSQL();
 
       // Try to find existing conversation
       const existing = await sql`
@@ -611,12 +609,12 @@ export class InstagramStoriesManager {
         LIMIT 1
       `;
 
-      if (existing.length > 0) {
-        return { id: existing[0].id, isNew: false };
+      if (existing.length > 0 && existing[0]) {
+        return { id: String(existing[0].id), isNew: false };
       }
 
       // Create new conversation for story interaction
-      const newConversation = await sql`
+      const newConversation = await sql<{ id: string; [key: string]: unknown }>`
         INSERT INTO conversations (
           merchant_id,
           customer_instagram,
@@ -639,7 +637,12 @@ export class InstagramStoriesManager {
         RETURNING id
       `;
 
-      return { id: newConversation[0].id, isNew: true };
+      if (newConversation.length === 0 || !newConversation[0]) {
+        throw new Error('Failed to create new conversation for story interaction');
+      }
+
+      const firstRow = newConversation[0];
+      return { id: String(firstRow.id), isNew: true };
     } catch (error) {
       this.logger.error('Failed to find/create story conversation', error, {
         merchantId,
@@ -658,7 +661,7 @@ export class InstagramStoriesManager {
     conversationId: string
   ): Promise<InstagramContext> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql: Sql = this.db.getSQL();
 
       // Get merchant and conversation data
       const data = await sql`
@@ -672,54 +675,60 @@ export class InstagramStoriesManager {
       `;
 
       const conversation = data[0];
+      if (!conversation) {
+        throw new Error(`Conversation not found: ${conversationId}`);
+      }
 
-        // Get recent conversation history
-        const messageHistory = await sql<MessageHistoryRow[]>`
-        SELECT 
-          CASE 
-            WHEN direction = 'INCOMING' THEN 'user'
-            ELSE 'assistant'
-          END as role,
-          content,
-          created_at as timestamp
-        FROM message_logs
-        WHERE conversation_id = ${conversationId}::uuid
-        ORDER BY created_at DESC
-        LIMIT 5
-        `;
+      // Get recent conversation history
+      const messageHistory = await sql<MessageHistoryRow>`
+      SELECT 
+        CASE 
+          WHEN direction = 'INCOMING' THEN 'user'
+          ELSE 'assistant'
+        END as role,
+        content,
+        created_at as timestamp
+      FROM message_logs
+      WHERE conversation_id = ${conversationId}::uuid
+      ORDER BY created_at DESC
+      LIMIT 5
+      `;
 
-        let session: any = {};
-        try {
-          session = typeof conversation.session_data === 'string'
-            ? JSON.parse(conversation.session_data)
-            : conversation.session_data || {};
-        } catch (error) {
-          this.logger.error('Failed to parse session data for conversation', error, { conversationId });
-        }
+      let session: Record<string, unknown> = {};
+      try {
+        session = typeof conversation.session_data === 'string'
+          ? JSON.parse(conversation.session_data)
+          : conversation.session_data || {};
+      } catch (error) {
+        this.logger.error('Failed to parse session data for conversation', error, { conversationId });
+      }
 
-        return {
-        merchantId,
-        customerId: interaction.userId,
-        platform: 'instagram',
-        stage: conversation.conversation_stage,
-        cart: session.cart || [],
-        preferences: session.preferences || {},
-        conversationHistory: messageHistory.reverse().map((msg: MessageHistoryRow) => ({
-          role: msg.role,
-          content: msg.content,
-          timestamp: new Date(msg.timestamp)
-        })),
-        interactionType: 'story_mention',
-        mediaContext: { mediaId: interaction.storyId },
-        merchantSettings: {
-          businessName: conversation.business_name,
-          businessCategory: conversation.business_category,
-          workingHours: {},
-          paymentMethods: [],
-          deliveryFees: {},
-          autoResponses: {}
-        }
-      };
+      return {
+      merchantId,
+      customerId: interaction.userId,
+      platform: 'instagram',
+      stage: conversation.conversation_stage as ConversationStage,
+      cart: (session.cart as Record<string, unknown>[]) || [],
+      preferences: (session.preferences as Record<string, unknown>) || {},
+      conversationHistory: (messageHistory as MessageHistoryRow[]).reverse().map((msg) => ({
+        role: msg.role as 'user' | 'assistant' | 'system',
+        content: msg.content,
+        timestamp: new Date(msg.timestamp)
+      })),
+      // ✅ فلترة لأنواع التفاعل المدعومة فقط
+      interactionType: (['story_reply','story_mention','story_reaction'] as const).includes(interaction.type as unknown as 'story_reply' | 'story_mention' | 'story_reaction')
+        ? (interaction.type as 'story_reply' | 'story_mention' | 'story_reaction')
+        : 'story_mention',
+      mediaContext: { mediaId: interaction.storyId },
+      merchantSettings: {
+        businessName: String(conversation.business_name),
+        businessCategory: String(conversation.business_category),
+        workingHours: {},
+        paymentMethods: [],
+        deliveryFees: {},
+        autoResponses: {}
+      }
+    };
     } catch (error) {
       this.logger.error('Build story context failed', error, { merchantId, conversationId });
       throw error;
@@ -755,7 +764,7 @@ export class InstagramStoriesManager {
     response: string,
     interaction: StoryInteraction
   ): string {
-    let personalizedResponse = response;
+    let personalizedResponse = (response || '').trim();
 
     // Add user mention if available
     if (interaction.username) {
@@ -776,7 +785,7 @@ export class InstagramStoriesManager {
   /**
    * Private: Generate quick replies for story interactions
    */
-  private generateQuickReplies(interaction: StoryInteraction): Array<{content_type: 'text', title: string, payload: string}> {
+  private generateQuickReplies(interaction: StoryInteraction): QuickReply[] {
     const baseReplies = [
       { content_type: 'text' as const, title: 'منتجاتنا 🛍️', payload: 'SHOW_PRODUCTS' },
       { content_type: 'text' as const, title: 'أسعار 💰', payload: 'SHOW_PRICES' }
@@ -804,7 +813,7 @@ export class InstagramStoriesManager {
     messageId?: string
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql: Sql = this.db.getSQL();
 
       await sql`
         INSERT INTO message_logs (
@@ -950,12 +959,12 @@ export class InstagramStoriesManager {
 
       await instagramClient.sendMessage(credentials, merchantId, {
         recipientId: interaction.userId,
-        messageType: 'text',
-        content: assistanceMessage,
+        messagingType: 'RESPONSE',
+        text: assistanceMessage,
         quickReplies: [
-          { content_type: 'text', title: 'كتالوج المنتجات 📋', payload: 'CATALOG' },
-          { content_type: 'text', title: 'الأسعار 💰', payload: 'PRICES' },
-          { content_type: 'text', title: 'التوصيل 🚚', payload: 'DELIVERY' }
+          { title: 'كتالوج المنتجات 📋', payload: 'CATALOG' },
+          { title: 'الأسعار 💰', payload: 'PRICES' },
+          { title: 'التوصيل 🚚', payload: 'DELIVERY' }
         ]
       });
 

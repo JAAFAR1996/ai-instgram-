@@ -46,7 +46,8 @@ export class AnalyticsService {
         WHERE event_type = ${event.type}
       `;
 
-      return { success: true, total: parseInt(row.count) };
+      const c = Number((row as { count: string }).count);
+      return { success: true, total: c };
     } catch (error) {
       console.error('❌ Analytics event recording failed:', error);
       return {

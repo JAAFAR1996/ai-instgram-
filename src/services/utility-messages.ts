@@ -8,27 +8,17 @@
 
 import { getInstagramClient } from './instagram-api.js';
 import { getPool } from '../db/index.js';
-import { getConfig } from '../config/environment.js';
+// import { getConfig } from '../config/index.js'; // Reserved for future use
 import type { SendMessageRequest } from '../types/instagram.js';
 import type { DIContainer } from '../container/index.js';
 import type { Pool } from 'pg';
-import type { AppConfig } from '../config/environment.js';
-import crypto from 'crypto';
+// import type { AppConfig } from '../config/index.js'; // Reserved for future use
 import { getLogger } from './logger.js';
 import * as TemplateRepo from '../repos/template.repo.js';
 import * as MessageRepo from '../repos/message.repo.js';
 import { getTemplateCache } from '../cache/index.js';
 
-interface UtilityMessageTemplateRow {
-  id: string;
-  name: string;
-  type: string;
-  content: string;
-  variables: string;
-  approved: boolean;
-  created_at: string;
-  updated_at: string;
-}
+// Unused interface removed
 
 // Escape special characters for use in RegExp
 function escapeRegex(str: string): string {
@@ -68,14 +58,14 @@ export interface UtilityMessageResult {
 }
 
 export class UtilityMessagesService {
-  private pool: Pool;
-  private config: AppConfig;
-  private logger: any;
+  private pool!: Pool;
+  // private config!: AppConfig; // Reserved for future use
+  private logger!: any;
 
-  constructor(private container?: DIContainer) {
+  constructor(container?: DIContainer) {
     if (container) {
       this.pool = container.get<Pool>('pool');
-      this.config = container.get<AppConfig>('config');
+      // this.config = container.get<AppConfig>('config'); // Reserved for future use
       this.logger = container.get('logger');
     } else {
       // Legacy fallback
@@ -85,7 +75,7 @@ export class UtilityMessagesService {
 
   private initializeLegacy(): void {
     this.pool = getPool();
-    this.config = getConfig();
+    // this.config = getConfig(); // Reserved for future use
     this.logger = getLogger({ component: 'UtilityMessagesService' });
   }
 
@@ -144,8 +134,8 @@ export class UtilityMessagesService {
       // Send via Instagram Messaging API with utility flag (2025)
       const req: SendMessageRequest = {
         recipientId: String(payload.recipient_id),
-        messageType: 'text',
-        content: messageContent
+        messagingType: 'RESPONSE',
+        text: messageContent
       };
 
       
@@ -180,7 +170,7 @@ export class UtilityMessagesService {
         });
         return {
           success: false,
-          error: response.error ? JSON.stringify(response.error) : undefined,
+          error: response.error ? JSON.stringify(response.error) : 'Unknown error',
           timestamp: new Date()
         };
       }
@@ -281,7 +271,9 @@ export class UtilityMessagesService {
   private containsMarketingContent(content: string): boolean {
     const marketingKeywords = [
       'sale', 'discount', 'offer', 'promotion', 'deal', 'limited time',
-      'buy now', 'shop', 'purchase', 'خصم', 'عرض', 'تخفيض', 'اشتري الآن'
+      'buy now', 'shop', 'purchase', 'خصم', 'عرض', 'تخفيض', 'اشتري الآن',
+      'free shipping', 'flash sale', 'clearance', 'special price', 'mega sale',
+      'توصيل مجاني', 'تصفية', 'سعر خاص', 'تخفيضات هائلة', 'العرض الأفضل'
     ];
 
     const lowerContent = content.toLowerCase();

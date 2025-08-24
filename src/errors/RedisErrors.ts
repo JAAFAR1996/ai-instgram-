@@ -1,17 +1,19 @@
 export abstract class RedisBaseError extends Error {
   abstract readonly code: string;
   public readonly timestamp: Date;
-  public readonly context?: Record<string, any>;
+  public readonly context?: Record<string, unknown>;
 
   constructor(
-    message: string, 
-    context?: Record<string, any>, 
+    message: string,
+    context?: Record<string, unknown>,
     cause?: Error
   ) {
     super(message);
     this.name = this.constructor.name;
     this.timestamp = new Date();
-    this.context = context;
+    if (context) {
+      this.context = context;
+    }
     
     if (cause) {
       this.stack = `${this.stack}\nCaused by: ${cause.stack}`;
@@ -38,7 +40,7 @@ export abstract class RedisBaseError extends Error {
 export class RedisConnectionError extends RedisBaseError {
   readonly code = 'REDIS_CONNECTION_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
@@ -46,7 +48,7 @@ export class RedisConnectionError extends RedisBaseError {
 export class RedisValidationError extends RedisBaseError {
   readonly code = 'REDIS_VALIDATION_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
@@ -54,7 +56,7 @@ export class RedisValidationError extends RedisBaseError {
 export class RedisHealthCheckError extends RedisBaseError {
   readonly code = 'REDIS_HEALTH_CHECK_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
@@ -62,7 +64,7 @@ export class RedisHealthCheckError extends RedisBaseError {
 export class RedisMetricsError extends RedisBaseError {
   readonly code = 'REDIS_METRICS_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
@@ -70,7 +72,7 @@ export class RedisMetricsError extends RedisBaseError {
 export class RedisQueueError extends RedisBaseError {
   readonly code = 'REDIS_QUEUE_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
@@ -78,7 +80,7 @@ export class RedisQueueError extends RedisBaseError {
 export class RedisConfigurationError extends RedisBaseError {
   readonly code = 'REDIS_CONFIGURATION_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
@@ -86,7 +88,7 @@ export class RedisConfigurationError extends RedisBaseError {
 export class RedisTimeoutError extends RedisBaseError {
   readonly code = 'REDIS_TIMEOUT_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
@@ -94,7 +96,7 @@ export class RedisTimeoutError extends RedisBaseError {
 export class RedisCircuitBreakerError extends RedisBaseError {
   readonly code = 'REDIS_CIRCUIT_BREAKER_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
@@ -102,7 +104,7 @@ export class RedisCircuitBreakerError extends RedisBaseError {
 export class RedisAuthenticationError extends RedisBaseError {
   readonly code = 'REDIS_AUTHENTICATION_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
@@ -110,7 +112,7 @@ export class RedisAuthenticationError extends RedisBaseError {
 export class RedisNetworkError extends RedisBaseError {
   readonly code = 'REDIS_NETWORK_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
@@ -118,7 +120,7 @@ export class RedisNetworkError extends RedisBaseError {
 export class RedisMemoryError extends RedisBaseError {
   readonly code = 'REDIS_MEMORY_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
@@ -126,53 +128,65 @@ export class RedisMemoryError extends RedisBaseError {
 export class RedisRateLimitError extends RedisBaseError {
   readonly code = 'REDIS_RATE_LIMIT_ERROR';
 
-  constructor(message: string, context?: Record<string, any>, cause?: Error) {
+  constructor(message: string, context?: Record<string, unknown>, cause?: Error) {
     super(message, context, cause);
   }
 }
 
 // Error Factory لإنشاء الأخطاء بناءً على نوع المشكلة
+type IoRedisErrorLike = {
+  message?: unknown;
+  code?: unknown;
+  name?: unknown;
+};
+
+function getString(v: unknown, fallback = ''): string {
+  return typeof v === 'string' ? v : fallback;
+}
+
 export class RedisErrorFactory {
-  static createFromIORedisError(error: any, context?: Record<string, any>): RedisBaseError {
-    const message = error.message || 'Unknown Redis error';
+  static createFromIORedisError(error: unknown, context?: Record<string, unknown>): RedisBaseError {
+    const err = (error as IoRedisErrorLike) || {};
+    const message = getString(err.message, 'Unknown Redis error');
     
-    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+    if (getString(err.code) === 'ECONNREFUSED' || getString(err.code) === 'ENOTFOUND') {
       return new RedisConnectionError(
         `Connection failed: ${message}`,
-        { ...context, originalCode: error.code },
-        error
+        { ...context, originalCode: getString(err.code) },
+        error instanceof Error ? error : undefined
       );
     }
 
-    if (error.code === 'NOAUTH' || error.message?.includes('AUTH')) {
+    if (getString(err.code) === 'NOAUTH' || getString(err.message).includes('AUTH')) {
       return new RedisAuthenticationError(
         `Authentication failed: ${message}`,
         context,
-        error
+        error instanceof Error ? error : undefined
       );
     }
 
-    if (error.code === 'TIMEOUT' || error.message?.includes('timeout')) {
+    if (getString(err.code) === 'TIMEOUT' || getString(err.message).toLowerCase().includes('timeout')) {
       return new RedisTimeoutError(
         `Operation timeout: ${message}`,
         context,
-        error
+        error instanceof Error ? error : undefined
       );
     }
 
-    if (error.code === 'ECONNRESET' || error.code === 'EPIPE') {
+    if (getString(err.code) === 'ECONNRESET' || getString(err.code) === 'EPIPE') {
       return new RedisNetworkError(
         `Network error: ${message}`,
-        { ...context, originalCode: error.code },
-        error
+        { ...context, originalCode: getString(err.code) },
+        error instanceof Error ? error : undefined
       );
     }
 
-    if (error.message?.includes('OOM') || error.message?.includes('memory')) {
+    const errMsg = getString(err.message).toLowerCase();
+    if (errMsg.includes('oom') || errMsg.includes('memory')) {
       return new RedisMemoryError(
         `Memory error: ${message}`,
         context,
-        error
+        error instanceof Error ? error : undefined
       );
     }
 
@@ -180,21 +194,21 @@ export class RedisErrorFactory {
       return new RedisRateLimitError(
         `Rate limit exceeded: ${message}`,
         context,
-        error
+        error instanceof Error ? error : undefined
       );
     }
 
     // Default Redis connection error
     return new RedisConnectionError(
       message,
-      { ...context, originalError: error.code || error.name },
-      error
+      { ...context, originalError: getString(err.code) || getString(err.name) },
+      error instanceof Error ? error : undefined
     );
   }
 
   static createValidationError(
     field: string, 
-    value: any, 
+    value: unknown,
     expectedType?: string
   ): RedisValidationError {
     const message = expectedType 
@@ -206,7 +220,7 @@ export class RedisErrorFactory {
 
   static createHealthCheckError(
     checkType: string, 
-    details?: Record<string, any>
+    details?: Record<string, unknown>
   ): RedisHealthCheckError {
     return new RedisHealthCheckError(
       `Health check failed: ${checkType}`,
@@ -251,9 +265,9 @@ export function isAuthenticationError(error: unknown): error is RedisAuthenticat
 
 // Error Handler Utility
 export class RedisErrorHandler {
-  constructor(private logger?: any) {}
+  constructor(private logger?: { error: (...args: unknown[]) => void }) {}
 
-  handleError(error: unknown, context?: Record<string, any>): RedisBaseError {
+  handleError(error: unknown, context?: Record<string, unknown>): RedisBaseError {
     let redisError: RedisBaseError;
 
     if (isRedisError(error)) {

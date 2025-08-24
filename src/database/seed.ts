@@ -5,8 +5,10 @@
  * ===============================================
  */
 
-import { getDatabase } from './connection.js';
-import type { Merchant, Product, Order, Conversation } from '../types/database.js';
+import { getDatabase } from '../db/adapter.js';
+import { getConfig } from '../config/index.js';
+
+import { logger } from '../services/logger.js';
 
 export class DatabaseSeeder {
   private db = getDatabase();
@@ -16,15 +18,15 @@ export class DatabaseSeeder {
    */
   public async seed(): Promise<void> {
     try {
-      console.log('🌱 Starting database seeding...');
+      logger.info('🌱 Starting database seeding...');
       
       // Ensure database connection
       if (!this.db.isReady()) {
         await this.db.connect();
       }
 
-      // Clear existing data in development
-      if (process.env.NODE_ENV === 'development') {
+      // Clear existing data في التطوير فقط
+      if (getConfig().environment === 'development') {
         await this.clearData();
       }
 
@@ -35,7 +37,7 @@ export class DatabaseSeeder {
       await this.seedOrders(merchants, conversations);
       await this.seedMessageLogs(conversations);
 
-      console.log('✅ Database seeding completed successfully');
+      logger.info('✅ Database seeding completed successfully');
     } catch (error) {
       console.error('❌ Database seeding failed:', error);
       throw error;
@@ -46,26 +48,25 @@ export class DatabaseSeeder {
    * Clear existing test data
    */
   public async clearData(): Promise<void> {
-    console.log('🗑️ Clearing existing test data...');
+    logger.info('🗑️ Clearing existing test data...');
     
-    const sql = this.db.getSQL() as any;
-    
-    await sql.begin(async (sql: any) => {
-      await sql`DELETE FROM message_logs WHERE 1=1`;
-      await sql`DELETE FROM orders WHERE 1=1`;
-      await sql`DELETE FROM conversations WHERE 1=1`;
-      await sql`DELETE FROM products WHERE 1=1`;
-      await sql`DELETE FROM merchants WHERE 1=1`;
+    // no direct SQL usage here; rely on adapter methods
+    await this.db.transaction(async (trx) => {
+      await trx`DELETE FROM message_logs`;
+      await trx`DELETE FROM orders`;
+      await trx`DELETE FROM conversations`;
+      await trx`DELETE FROM products`;
+      await trx`DELETE FROM merchants`;
     });
     
-    console.log('✅ Test data cleared');
+    logger.info('✅ Test data cleared');
   }
 
   /**
    * Seed merchants
    */
   private async seedMerchants(): Promise<string[]> {
-    console.log('👥 Seeding merchants...');
+    logger.info('👥 Seeding merchants...');
     
     const sql = this.db.getSQL() as any;
     
@@ -118,16 +119,16 @@ export class DatabaseSeeder {
         instagram_user_id, email, subscription_status, 
         subscription_tier, subscription_expires_at
       ) 
-      SELECT * FROM ${sql(merchantsData.map((m: any) => [
+      VALUES ${merchantsData.map((m: any) => [
         m.business_name, m.business_category, m.business_address,
         m.whatsapp_number, m.whatsapp_number_id, m.instagram_username,
         m.instagram_user_id, m.email, m.subscription_status,
         m.subscription_tier, m.subscription_expires_at
-      ]))}
+      ])}
       RETURNING id
     `;
 
-    console.log(`✅ Created ${merchants.length} merchants`);
+    logger.info(`✅ Created ${merchants.length} merchants`);
     return merchants.map((m: any) => m.id);
   }
 
@@ -135,7 +136,7 @@ export class DatabaseSeeder {
    * Seed products
    */
   private async seedProducts(merchantIds: string[]): Promise<void> {
-    console.log('📱 Seeding products...');
+    logger.info('📱 Seeding products...');
     
     const sql = this.db.getSQL() as any;
     
@@ -302,22 +303,22 @@ export class DatabaseSeeder {
         price_usd, cost_usd, stock_quantity, min_stock_alert,
         attributes, variants, images, tags, is_featured, is_on_sale, sale_price_usd
       )
-      SELECT * FROM ${sql(allProducts.map(p => [
-        p.merchant_id, p.sku, p.name_ar, (p as any).name_en || null, p.description_ar, p.category,
-        p.price_usd, p.cost_usd, p.stock_quantity, p.min_stock_alert,
-        p.attributes || '{}', (p as any).variants || '[]', (p as any).images || '[]', 
-        (p as any).tags || [], (p as any).is_featured || false, (p as any).is_on_sale || false, (p as any).sale_price_usd || null
-      ]))}
+      VALUES ${allProducts.map(p => [
+        p.merchant_id, p.sku, p.name_ar, (p as any).name_en ?? null, p.description_ar, p.category,
+        p.price_usd, p.cost_usd ?? null, p.stock_quantity, p.min_stock_alert,
+        p.attributes ?? '{}', (p as any).variants ?? '[]', (p as any).images ?? '[]', 
+        (p as any).tags ?? [], (p as any).is_featured ?? false, (p as any).is_on_sale ?? false, (p as any).sale_price_usd ?? null
+      ])}
     `;
 
-    console.log(`✅ Created ${allProducts.length} products`);
+    logger.info(`✅ Created ${allProducts.length} products`);
   }
 
   /**
    * Seed conversations
    */
   private async seedConversations(merchantIds: string[]): Promise<string[]> {
-    console.log('💬 Seeding conversations...');
+    logger.info('💬 Seeding conversations...');
     
     const sql = this.db.getSQL() as any;
     
@@ -395,15 +396,15 @@ export class DatabaseSeeder {
         platform, conversation_stage, session_data, message_count,
         ai_response_count, converted_to_order, last_message_at
       )
-      SELECT * FROM ${sql(conversationsData.map(c => [
+      VALUES ${conversationsData.map(c => [
         c.merchant_id, c.customer_phone, c.customer_name || null, c.customer_instagram || null,
         c.platform, c.conversation_stage, c.session_data, c.message_count,
         c.ai_response_count, c.converted_to_order || false, c.last_message_at
-      ]))}
+      ])}
       RETURNING id
     `;
 
-    console.log(`✅ Created ${conversations.length} conversations`);
+    logger.info(`✅ Created ${conversations.length} conversations`);
     return conversations.map((c: any) => c.id);
   }
 
@@ -411,7 +412,7 @@ export class DatabaseSeeder {
    * Seed orders
    */
   private async seedOrders(merchantIds: string[], conversationIds: string[]): Promise<void> {
-    console.log('📦 Seeding orders...');
+    logger.info('📦 Seeding orders...');
     
     const sql = this.db.getSQL() as any;
     
@@ -504,22 +505,22 @@ export class DatabaseSeeder {
         items, subtotal_amount, delivery_fee, total_amount, status, payment_method,
         order_source, delivery_date, confirmed_at, shipped_at, delivered_at, tracking_number
       )
-      SELECT * FROM ${sql(ordersData.map(o => [
+      VALUES ${ordersData.map(o => [
         o.merchant_id, o.conversation_id || null, o.customer_phone, o.customer_name, o.customer_address,
         o.items, o.subtotal_amount, o.delivery_fee, o.total_amount, o.status, o.payment_method,
         o.order_source, o.delivery_date || null, o.confirmed_at || null, o.shipped_at || null, 
         o.delivered_at || null, o.tracking_number || null
-      ]))}
+      ])}
     `;
 
-    console.log(`✅ Created ${ordersData.length} orders`);
+    logger.info(`✅ Created ${ordersData.length} orders`);
   }
 
   /**
    * Seed message logs
    */
   private async seedMessageLogs(conversationIds: string[]): Promise<void> {
-    console.log('📨 Seeding message logs...');
+    logger.info('📨 Seeding message logs...');
     
     const sql = this.db.getSQL() as any;
     
@@ -580,13 +581,13 @@ export class DatabaseSeeder {
         conversation_id, direction, platform, content, ai_processed,
         ai_response_time_ms, delivery_status, created_at
       )
-      SELECT * FROM ${sql(messagesData.map((m: any) => [
+      VALUES ${messagesData.map((m: any) => [
         m.conversation_id, m.direction, m.platform, m.content, m.ai_processed,
         m.ai_response_time_ms || null, m.delivery_status || 'DELIVERED', m.created_at
-      ]))}
+      ])}
     `;
 
-    console.log(`✅ Created ${messagesData.length} message logs`);
+    logger.info(`✅ Created ${messagesData.length} message logs`);
   }
 }
 
@@ -615,9 +616,9 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
         await clearDatabase();
         break;
       default:
-        console.log('📖 Available commands:');
-        console.log('  seed  - Seed database with test data');
-        console.log('  clear - Clear all test data');
+        logger.info('📖 Available commands:');
+        logger.info('  seed  - Seed database with test data');
+        logger.info('  clear - Clear all test data');
     }
   } catch (error) {
     console.error('❌ Command failed:', error);

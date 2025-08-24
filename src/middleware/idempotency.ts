@@ -99,12 +99,11 @@ export function createIdempotencyMiddleware(
 ) {
   const finalConfig = { ...DEFAULT_CONFIG, ...config };
   
-  return async (c: Context, next: Next) => {
+  return async (c: Context, next: Next): Promise<Response | void> => {
     try {
       // Skip idempotency check for certain methods
       if (finalConfig.skipMethods?.includes(c.req.method)) {
-        await next();
-        return;
+        return await next();
       }
       
       const idempotencyKey = await generateIdempotencyKey(c, finalConfig);
@@ -177,7 +176,9 @@ export function markIdempotent<T>(
   headers?: Record<string, string>
 ): void {
   c.set(K_CACHE_FLAG, true);
-  const response: IdempotencyResponse<T> = { status, body, headers };
+  const response: IdempotencyResponse<T> = headers 
+    ? { status, body, headers }
+    : { status, body };
   c.set(K_RESP, response);
 }
 

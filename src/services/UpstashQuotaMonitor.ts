@@ -26,8 +26,8 @@ export class UpstashQuotaMonitor {
       thresholds?: [number, number];
     }
   ) {
-    this.restUrl = options?.restUrl || process.env.UPSTASH_REDIS_REST_URL;
-    this.restToken = options?.restToken || process.env.UPSTASH_REDIS_REST_TOKEN;
+    this.restUrl = options?.restUrl ?? process.env.UPSTASH_REDIS_REST_URL ?? '';
+    this.restToken = options?.restToken ?? process.env.UPSTASH_REDIS_REST_TOKEN ?? '';
     this.thresholds = options?.thresholds || [0.8, 0.95];
   }
 

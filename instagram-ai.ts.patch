@@ -1,0 +1,56 @@
+--- /mnt/data/work/src4/src/services/instagram-ai.ts
++++ /mnt/data/work/src4/src/services/instagram-ai.ts
+@@ -9,6 +9,7 @@
+ import { getDatabase } from '../db/adapter.js';
+ import { createLogger } from './logger.js';
+ import OpenAI from 'openai';
++import { getEnv } from '../config/env.js';
+ 
+ // Simple merchant configuration interface
+ interface MerchantAIConfig {
+@@ -66,17 +67,17 @@
+   private db = getDatabase();
+ 
+   constructor() {
+-    const apiKey = process.env.OPENAI_API_KEY;
++    const apiKey = getEnv('OPENAI_API_KEY');
+     if (!apiKey) {
+       // فشل مبكر آمن في بيئات الإنتاج
+       const msg = 'OPENAI_API_KEY is missing';
+-      if (process.env.NODE_ENV === 'production') throw new Error(msg);
++      if (getEnv('NODE_ENV') === 'production') throw new Error(msg);
+       this.logger.warn(`⚠️ ${msg} – running in degraded mode (fallbacks only).`);
+     }
+     this.openai = new OpenAI({
+       apiKey: apiKey ?? 'DEGRADED',
+-      timeout: Number.isFinite(parseInt(process.env.OPENAI_TIMEOUT || '', 10))
+-        ? parseInt(process.env.OPENAI_TIMEOUT!, 10)
++      timeout: Number.isFinite(parseInt(getEnv('OPENAI_TIMEOUT') || '', 10))
++        ? parseInt(getEnv('OPENAI_TIMEOUT')!, 10)
+         : InstagramAIService.DEFAULT_TIMEOUT_MS,
+     });
+   }
+@@ -103,12 +104,12 @@
+       }
+ 
+       // Default configuration
+-      const maxTokensEnv = parseInt(process.env.OPENAI_MAX_TOKENS || '600', 10);
++      const maxTokensEnv = parseInt(getEnv('OPENAI_MAX_TOKENS') || '600', 10);
+       const maxTokensRaw = Number.isFinite(maxTokensEnv) ? maxTokensEnv : 600;
+       const maxTokens = Math.min(maxTokensRaw, InstagramAIService.MAX_TOKENS_HARD_CAP);
+ 
+       return {
+-        aiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
++        aiModel: getEnv('OPENAI_MODEL') || 'gpt-4o-mini',
+         maxTokens,
+         temperature: 0.8,
+         language: 'ar'
+@@ -290,7 +291,7 @@
+       const prompt = this.buildStoryReplyPrompt(storyReaction, storyContext, context);
+ 
+       const completion = await this.openai.chat.completions.create({
+-        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
++        model: getEnv('OPENAI_MODEL') || 'gpt-4o-mini',
+         messages: prompt,
+         temperature: 0.9, // Very creative for story interactions
+         max_tokens: 200,

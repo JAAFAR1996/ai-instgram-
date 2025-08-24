@@ -73,16 +73,17 @@ export async function createTemplate(
   );
 
   const row = rows[0];
+  if (!row) throw new Error('Template not found');
   return {
-    id: row.id,
-    merchantId: row.merchant_id,
-    name: row.name,
-    type: row.type as UtilityMessageType,
-    content: row.content,
-    variables: row.variables,
-    approved: row.approved,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
+    id: row!.id,
+    merchantId: row!.merchant_id,
+    name: row!.name,
+    type: row!.type as UtilityMessageType,
+    content: row!.content,
+    variables: row!.variables,
+    approved: row!.approved,
+    createdAt: row!.created_at,
+    updatedAt: row!.updated_at
   };
 }
 
@@ -119,6 +120,8 @@ export async function getTemplateById(
   if (rows.length === 0) return null;
 
   const row = rows[0];
+  if (!row) return null;
+  
   return {
     id: row.id,
     merchantId: row.merchant_id,
@@ -268,6 +271,8 @@ export async function updateTemplate(
   if (rows.length === 0) return null;
 
   const row = rows[0];
+  if (!row) return null;
+  
   return {
     id: row.id,
     merchantId: row.merchant_id,

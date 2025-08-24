@@ -1,4 +1,4 @@
-import type { Job } from 'bull';
+import type { Job } from 'bullmq';
 import { withMerchantContext } from '../database/rls-wrapper.js';
 import { z } from 'zod';
 
@@ -10,12 +10,12 @@ export function withTenantJob<T>(
   fn: (job: Job, token?: string) => Promise<T>
 ) {
   return async (job: Job, token?: string): Promise<T | void> => {
-    const data: any = (job as any).data ?? (job as any).payload;
+    const data: unknown = (job as unknown as { data?: unknown; payload?: unknown }).data ?? (job as unknown as { data?: unknown; payload?: unknown }).payload;
     const parsed = JobSchema.safeParse(data);
 
     if (!parsed.success) {
-      if (typeof (job as any).moveToFailed === 'function') {
-        await (job as any).moveToFailed(
+      if (typeof (job as unknown as { moveToFailed?: Function }).moveToFailed === 'function') {
+        await (job as unknown as { moveToFailed: (error: Error, token?: string, ignoreMaxAttempts?: boolean) => Promise<void> }).moveToFailed(
           new Error('MISSING_MERCHANT_ID'),
           token,
           false

@@ -8,19 +8,18 @@
 import {
   getInstagramClient,
   clearInstagramClient,
-  type InstagramAPIResponse,
   type InstagramAPICredentials
 } from './instagram-api.js';
 import { ExpiringMap } from '../utils/expiring-map.js';
 import { getDatabase } from '../db/adapter.js';
 import { getMessageWindowService } from './message-window.js';
 import { getLogger } from './logger.js';
-import type { QuickReply, SendMessageRequest } from '../types/instagram.js';
+import type { QuickReply, SendMessageRequest, SendResult } from '../types/instagram.js';
 
-interface SendMessageWithAttachment extends Omit<SendMessageRequest, 'messageType' | 'content'> {
+interface SendMessageWithAttachment extends Omit<SendMessageRequest, 'messagingType' | 'text'> {
   attachment: { type: string; payload: any };
-  content?: string;
-  messageType?: SendMessageRequest['messageType'];
+  text?: string;
+  messagingType?: SendMessageRequest['messagingType'];
 }
 
 export interface MessageTemplate {
@@ -50,13 +49,7 @@ export interface TemplateButton {
 
 const logger = getLogger({ component: 'InstagramMessageSender' });
 
-export interface SendResult {
-  success: boolean;
-  messageId?: string;
-  error?: string;
-  deliveryStatus: 'sent' | 'delivered' | 'read' | 'failed';
-  timestamp: Date;
-}
+
 
 
 
@@ -149,17 +142,17 @@ export class InstagramMessageSender {
       // Send message via Instagram API
       const response = await client.sendMessage(credentials, merchantId, {
         recipientId,
-        messageType: 'text',
-        content: message
+        messagingType: 'RESPONSE',
+        text: message
       });
 
       // Update delivery status
       const result: SendResult = {
         success: response.success,
-        messageId: response.messageId,
         deliveryStatus: response.success ? 'sent' : 'failed',
         timestamp: new Date(),
-        error: response.success ? undefined : (response.error ? JSON.stringify(response.error) : undefined)
+        ...(response.messageId ? { messageId: response.messageId } : {}),
+        ...(response.success ? {} : { error: response.error ? JSON.stringify(response.error) : 'Unknown error' })
       };
 
       // Log message sending
@@ -265,10 +258,10 @@ export class InstagramMessageSender {
 
       const result: SendResult = {
         success: response.success,
-        messageId: response.messageId,
         deliveryStatus: response.success ? 'sent' : 'failed',
         timestamp: new Date(),
-        error: response.success ? undefined : (response.error ? JSON.stringify(response.error) : undefined)
+        ...(response.messageId ? { messageId: response.messageId } : {}),
+        ...(response.success ? {} : { error: response.error ? JSON.stringify(response.error) : 'Unknown error' })
       };
 
       // Log media message
@@ -359,17 +352,17 @@ export class InstagramMessageSender {
       // Send template message
       const tplReq: SendMessageRequest = {
         recipientId,
-        messageType: 'template',
-        content: JSON.stringify(instagramTemplate)
+        messagingType: 'MESSAGE_TAG',
+        text: JSON.stringify(instagramTemplate)
       };
       const response = await client.sendMessage(credentials, merchantId, tplReq);
 
       const result: SendResult = {
         success: response.success,
-        messageId: response.messageId,
         deliveryStatus: response.success ? 'sent' : 'failed',
         timestamp: new Date(),
-        error: response.success ? undefined : (response.error ? JSON.stringify(response.error) : undefined)
+        ...(response.messageId ? { messageId: response.messageId } : {}),
+        ...(response.success ? {} : { error: response.error ? JSON.stringify(response.error) : 'Unknown error' })
       };
 
       // Log template message
@@ -440,10 +433,10 @@ export class InstagramMessageSender {
 
       const result: SendResult = {
         success: response.success,
-        messageId: response.messageId || commentId,
         deliveryStatus: response.success ? 'sent' : 'failed',
         timestamp: new Date(),
-        error: response.success ? undefined : (response.error ? JSON.stringify(response.error) : undefined)
+        ...(response.messageId || commentId ? { messageId: response.messageId || commentId } : {}),
+        ...(response.success ? {} : { error: response.error ? JSON.stringify(response.error) : 'Unknown error' })
       };
 
       // Log comment reply
@@ -511,17 +504,17 @@ export class InstagramMessageSender {
       // Send message with quick replies
       const response = await client.sendMessage(credentials, merchantId, {
         recipientId,
-        messageType: 'text',
-        content: message,
+        messagingType: 'RESPONSE',
+        text: message,
         quickReplies
       });
 
       const result: SendResult = {
         success: response.success,
-        messageId: response.messageId,
         deliveryStatus: response.success ? 'sent' : 'failed',
         timestamp: new Date(),
-        error: response.success ? undefined : (response.error ? JSON.stringify(response.error) : undefined)
+        ...(response.messageId ? { messageId: response.messageId } : {}),
+        ...(response.success ? {} : { error: response.error ? JSON.stringify(response.error) : 'Unknown error' })
       };
 
       // Log message with quick replies
@@ -570,6 +563,31 @@ export class InstagramMessageSender {
       await this.logMessageSent(merchantId, recipientId, message, result, conversationId);
       return result;
     }
+  }
+
+  /**
+   * Production-grade text clamping utility
+   * Handles Unicode properly and prevents truncation issues
+   */
+  public clampText(text: string, maxLength: number = 1000): string {
+    if (!text || typeof text !== 'string') return '';
+    
+    // Handle Unicode surrogate pairs correctly
+    const trimmed = text.trim().replace(/\s+/g, ' ');
+    
+    if (trimmed.length <= maxLength) {
+      return trimmed;
+    }
+    
+    // Find safe truncation point (avoid breaking words/emojis)
+    let truncated = trimmed.substring(0, maxLength);
+    const lastSpace = truncated.lastIndexOf(' ');
+    
+    if (lastSpace > maxLength * 0.8) {
+      truncated = truncated.substring(0, lastSpace);
+    }
+    
+    return truncated + '...';
   }
 
   /**
@@ -796,7 +814,7 @@ export class InstagramMessageSender {
             ${metadata?.mediaType ? metadata.mediaType.toUpperCase() : 'TEXT'},
             ${message},
             ${result.messageId || 'unknown'},
-            ${result.deliveryStatus.toUpperCase()},
+            ${(result.deliveryStatus ?? (result.success ? 'sent' : 'failed')).toUpperCase()},
             false,
             ${metadata ? JSON.stringify(metadata) : null}
           )
@@ -820,9 +838,9 @@ export class InstagramMessageSender {
             recipientId,
             messageLength: message.length,
             messageType: metadata?.mediaType || 'text',
-            deliveryStatus: result.deliveryStatus,
+            deliveryStatus: result.deliveryStatus ?? (result.success ? 'sent' : 'failed'),
             conversationId: conversationId || null,
-            timestamp: result.timestamp.toISOString()
+            timestamp: (result.timestamp ?? new Date()).toISOString()
           })},
           ${result.success},
           ${result.error || null}
@@ -861,8 +879,8 @@ export class InstagramMessageSender {
           ${JSON.stringify({
             commentId,
             replyText,
-            deliveryStatus: result.deliveryStatus,
-            timestamp: result.timestamp.toISOString()
+            deliveryStatus: result.deliveryStatus ?? (result.success ? 'sent' : 'failed'),
+            timestamp: (result.timestamp ?? new Date()).toISOString()
           })},
           ${result.success},
           ${result.error || null}

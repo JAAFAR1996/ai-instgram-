@@ -1,0 +1,307 @@
+src/container/index.ts:31:  aiService?: any;
+src/container/index.ts:32:  instagramService?: any;
+src/container/index.ts:33:  webhookService?: any;
+src/container/index.ts:34:  utilityMessagesService?: any;
+src/database/rls-wrapper.ts:225:  private async logAudit(action: string, userId?: string, details?: any): Promise<void> {
+src/db/index.ts:187:  params?: any[]
+src/errors/RedisErrors.ts:254:  constructor(private logger?: any) {}
+src/services/conversation-ai-orchestrator.ts:634:  private analyzeResponsePatterns(interactions: InteractionRow[]): any {
+src/services/cross-platform-conversation-manager.ts:835:  private selectPrimaryConversation(conversations: any[], strategy: string): any {
+src/services/instagram-ai.ts:49:    [k: string]: any;
+src/services/instagram-api.ts:621:  private buildMessagePayload(request: SendMessageRequest): any {
+src/services/instagram-message-sender.ts:750:  private convertToInstagramTemplate(template: MessageTemplate): any {
+src/services/instagram-message-sender.ts:799:    metadata?: any
+src/services/instagram-message-sender.ts:911:    metadata?: any
+src/services/instagram-setup.ts:36:  details?: any;
+src/services/instagram-setup.ts:364:    healthStatus?: any;
+src/services/instagram-testing-orchestrator.ts:196:    context?: any
+src/services/instagram-testing-orchestrator.ts:717:    context?: any
+src/services/instagram-testing-orchestrator.ts:718:  ): Promise<{ success: boolean; output?: any; error?: string }> {
+src/services/instagram-webhook.ts:1249:    const typeMapping: { [key: string]: any } = {
+src/services/logger.ts:20:  [key: string]: any;
+src/services/logger.ts:112:  error(arg1: string | LogContext, arg2?: any, arg3?: LogContext): void {
+src/services/logger.ts:130:  fatal(arg1: string | LogContext, arg2?: any, arg3?: LogContext): void {
+src/services/logger.ts:146:  private log(level: LogLevel, message: string, context?: LogContext & { err?: any; error?: any }): void {
+src/services/logger.ts:149:    const ctx = this.redactSensitiveData({ ...this.context, ...(context || {}) }) as LogContext & { err?: any; error?: any };
+src/services/logger.ts:208:  private redactSensitiveData(data: any): any {
+src/services/ProductionQueueManager.ts:75:  connectionInfo?: any;
+src/services/ProductionQueueManager.ts:77:    redisConnection?: any;
+src/services/ProductionQueueManager.ts:78:    queueHealth?: any;
+src/services/ProductionQueueManager.ts:79:    circuitBreaker?: any;
+src/services/redis-monitoring.ts:53:  constructor(redisConnection?: any) {
+src/services/redis-monitoring.ts:204:export function getRedisMonitor(redisConnection?: any): RedisMonitor {
+src/services/RedisConnectionManager.ts:69:    private logger?: any,
+src/services/service-controller.ts:398:    context?: any
+src/services/utility-messages.ts:72:  private logger!: any;
+src/startup/validation.ts:17:  details?: any;
+src/tests/instagram-message-sender.test.ts:125:      sendMessage: mock(async (_cred: any, _merchant: string, { recipientId }: any) => {
+src/types/shims.d.ts:19:  [k: string]: any; 
+src/api/instagram-auth.ts:256:    }, statusCode as any);
+src/api/instagram-auth.ts:312:    const account = integration[0] as any;
+src/api/instagram-auth.ts:418:    const currentToken = (result[0] as any).instagram_access_token;
+src/api/instagram-auth.ts:484:    const expiresAt = new Date((record as any).token_expires_at);
+src/api/instagram-auth.ts:496:    const isValid = await oauthService.validateToken((record as any).instagram_access_token);
+src/api/utility-messages.ts:315:      const sql = db.getSQL() as any;
+src/container/index.ts:238:    const existingTokens = (Reflect as any).getMetadata?.('inject-tokens', target) || [];
+src/container/index.ts:240:    (Reflect as any).defineMetadata?.('inject-tokens', existingTokens, target);
+src/database/migrate.ts:265:    const sql = this.db.getSQL() as any;
+src/database/migrate.ts:296:    const sql = this.db.getSQL() as any;
+src/database/rls-wrapper.ts:31:    const sql = this.db.getSQL() as any;
+src/database/rls-wrapper.ts:60:    const sql = this.db.getSQL() as any;
+src/database/rls-wrapper.ts:80:    const sql = this.db.getSQL() as any;
+src/database/rls-wrapper.ts:103:    const sql = this.db.getSQL() as any;
+src/database/rls-wrapper.ts:141:    return await (sql as any)(strings, ...params);
+src/database/rls-wrapper.ts:151:    const sql = this.db.getSQL() as any;
+src/database/rls-wrapper.ts:227:      const sql = this.db.getSQL() as any;
+src/database/seed.ts:70:    const sql = this.db.getSQL() as any;
+src/database/seed.ts:140:    const sql = this.db.getSQL() as any;
+src/database/seed.ts:306:        p.merchant_id, p.sku, p.name_ar, (p as any).name_en ?? null, p.description_ar, p.category,
+src/database/seed.ts:308:        p.attributes ?? '{}', (p as any).variants ?? '[]', (p as any).images ?? '[]', 
+src/database/seed.ts:309:        (p as any).tags ?? [], (p as any).is_featured ?? false, (p as any).is_on_sale ?? false, (p as any).sale_price_usd ?? null
+src/database/seed.ts:322:    const sql = this.db.getSQL() as any;
+src/database/seed.ts:416:    const sql = this.db.getSQL() as any;
+src/database/seed.ts:524:    const sql = this.db.getSQL() as any;
+src/middleware/auto-tenant-context.ts:127:      }) as any;
+src/middleware/rls-merchant-isolation.ts:43:      const h1 = (c.req as any).header?.(name);
+src/middleware/rls-merchant-isolation.ts:47:      const h3 = (c.req as any).headers?.get?.(name);
+src/middleware/rls-merchant-isolation.ts:60:      const q = (c.req as any).query?.(name);
+src/middleware/security.test.ts:115:      } as any as Context;
+src/middleware/security.test.ts:129:      } as any as Context;
+src/middleware/security.test.ts:140:      } as any as Context;
+src/middleware/security.test.ts:154:      } as any as Context;
+src/production-index.ts:92:        (c as any).rawBody = Buffer.from(body);
+src/queue/db-spool.ts:206:      const deletedCount = (result as any).count || 0;
+src/queue/db-spool.ts:232:    return ((result as any).count || 0) > 0;
+src/repos/message.repo.ts:88:    status: row.status as any,
+src/repos/message.repo.ts:229:    status: row.status as any,
+src/repositories/merchant-repository.test.ts:618:          subscriptionTier: data.tier as any
+src/repositories/merchant-repository.ts:260:      SET ${(sql as any).join(updateFields, sql`, `)}
+src/repositories/merchant-repository.ts:373:      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
+src/repositories/merchant-repository.ts:382:        WHERE ${(sql as any).join(conditions, sql` AND `)}
+src/repositories/merchant-repository.ts:520:      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
+src/routes/webhooks.ts:137:      const rawBody = (c as any).rawBody;
+src/services/ai.test.ts:98:    (OpenAI as jest.MockedClass<typeof OpenAI>).mockImplementation(() => mockOpenAI as any);
+src/services/ai.test.ts:601:        const response = (aiService as any).getFallbackResponse(sampleContext);
+src/services/ai.test.ts:610:      const response = (aiService as any).getFallbackResponse(sampleContext);
+src/services/ai.test.ts:634:      (require('./ai.js') as any).aiServiceInstance = null;
+src/services/ai.ts:212:      const response = (completion as any).choices?.[0]?.message?.content;
+src/services/ai.ts:275:      const response = (completion as any).choices?.[0]?.message?.content;
+src/services/ai.ts:314:      const response = (completion as any).choices?.[0]?.message?.content;
+src/services/CircuitBreaker.test.ts:487:      await expect(circuitBreaker.execute(null as any))
+src/services/CircuitBreaker.test.ts:490:      await expect(circuitBreaker.execute(undefined as any))
+src/services/CircuitBreaker.test.ts:495:      await expect(circuitBreaker.execute('not a function' as any))
+src/services/CircuitBreaker.test.ts:498:      await expect(circuitBreaker.execute(123 as any))
+src/services/CircuitBreaker.test.ts:505:      (originalError as any).statusCode = 500;
+src/services/conversation-ai-orchestrator.ts:268:      const sql = this.db.getSQL() as any;
+src/services/conversation-ai-orchestrator.ts:324:      const sql = this.db.getSQL() as any;
+src/services/conversation-ai-orchestrator.ts:673:      const sql = this.db.getSQL() as any;
+src/services/conversation-ai-orchestrator.ts:724:            stage: (context as any).stage,
+src/services/conversation-ai-orchestrator.ts:734:            message: baseMsg, messageAr: baseMsg, intent: 'SUPPORT', stage: (context as any).stage,
+src/services/health-check.ts:50:  const ok = (redis as any).ok === true;
+src/services/health-check.ts:69:  (timer as any).unref?.();
+src/services/instagram-ai.test.ts:109:    (OpenAI as jest.MockedClass<typeof OpenAI>).mockImplementation(() => mockOpenAI as any);
+src/services/instagram-ai.test.ts:658:      const hashtags = await (instagramAIService as any).generateRelevantHashtags(
+src/services/instagram-ai.test.ts:678:      const hashtags = await (instagramAIService as any).generateRelevantHashtags(
+src/services/instagram-ai.test.ts:689:      const hashtags = await (instagramAIService as any).generateRelevantHashtags(
+src/services/instagram-ai.test.ts:700:      const storyReplyFallback = (instagramAIService as any).getContextualFallback(
+src/services/instagram-ai.test.ts:705:      const dmFallback = (instagramAIService as any).getContextualFallback(
+src/services/instagram-ai.test.ts:715:      const rateLimitFallback = (instagramAIService as any).getContextualFallback(
+src/services/instagram-ai.test.ts:720:      const networkErrorFallback = (instagramAIService as any).getContextualFallback(
+src/services/instagram-ai.test.ts:730:      const storyFallback = (instagramAIService as any).getContextualFallback(
+src/services/instagram-ai.test.ts:735:      const dmFallback = (instagramAIService as any).getContextualFallback(
+src/services/instagram-ai.test.ts:825:      const results = await (instagramAIService as any).processCommentBatch(operations);
+src/services/instagram-ai.test.ts:837:      const results = await (instagramAIService as any).processCommentBatch(operations);
+src/services/instagram-ai.test.ts:854:      const results = await (instagramAIService as any).getProductsForShowcase(
+src/services/instagram-ai.test.ts:875:      (require('./instagram-ai.js') as any).instagramAIServiceInstance = null;
+src/services/instagram-ai.test.ts:886:        interactionType: 'unknown_type' as any
+src/services/instagram-ai.test.ts:889:      const fallback = (instagramAIService as any).getContextualFallback(
+src/services/instagram-ai.ts:96:        const config = result[0].ai_config as any;
+src/services/instagram-api.ts:224:        (e as any).status = res.status;
+src/services/instagram-api.ts:265:      const status = typeof (error as any)?.status === 'number'
+src/services/instagram-api.ts:266:        ? (error as any).status
+src/services/instagram-api.ts:268:      const message = typeof (error as any)?.message === 'string'
+src/services/instagram-api.ts:269:        ? (error as any).message
+src/services/instagram-hashtag-mention-processor.ts:366:          influencerMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'influencer') as any)?.count ?? 0),
+src/services/instagram-hashtag-mention-processor.ts:367:          customerMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'customer') as any)?.count ?? 0),
+src/services/instagram-hashtag-mention-processor.ts:368:          competitorMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'competitor') as any)?.count ?? 0)
+src/services/instagram-hashtag-mention-processor.ts:874:        ) VALUES ${(sql as any).join(values, sql`, `)}
+src/services/instagram-oauth.ts:138:        (e as any).status = res.status;
+src/services/instagram-setup.ts:218:        const grantedPerms = (permissions as any).data?.map((p: any) => p.permission) ?? [];
+src/services/instagram-stories-manager.ts:394:      const sql = this.db.getSQL() as any;
+src/services/instagram-stories-manager.ts:480:      const sql = this.db.getSQL() as any;
+src/services/instagram-stories-manager.ts:518:      const sql = this.db.getSQL() as any;
+src/services/instagram-stories-manager.ts:555:      const sql = this.db.getSQL() as any;
+src/services/instagram-stories-manager.ts:601:      const sql = this.db.getSQL() as any;
+src/services/instagram-stories-manager.ts:662:      const sql = this.db.getSQL() as any;
+src/services/instagram-stories-manager.ts:714:        interactionType: (['story_reply','story_mention','story_reaction'] as const).includes(interaction.type as any)
+src/services/instagram-stories-manager.ts:811:      const sql = this.db.getSQL() as any;
+src/services/instagram-stories-manager.ts:864:      const sql = this.db.getSQL() as any;
+src/services/instagram-stories-manager.ts:911:      const sql = this.db.getSQL() as any;
+src/services/instagram-testing-orchestrator.ts:986:        suiteCategories.includes(cat as any)
+src/services/instagram-webhook.ts:507:          postType: event.value.media.media_product_type as any,
+src/services/logger.test.ts:498:      logger.info(null as any);
+src/services/logger.test.ts:499:      logger.info(undefined as any);
+src/services/logger.ts:150:    const { err, error, ...safeCtx } = ctx as any;
+src/services/logger.ts:169:      delete (entry as any).timestamp;
+src/services/monitoring.ts:117:      const sql = this.db.getSQL() as any;
+src/services/monitoring.ts:205:      const sql = this.db.getSQL() as any;
+src/services/monitoring.ts:289:      const sql = this.db.getSQL() as any;
+src/services/monitoring.ts:405:      const sql = this.db.getSQL() as any;
+src/services/monitoring.ts:478:      const sql = this.db.getSQL() as any;
+src/services/monitoring.ts:532:      const sql = this.db.getSQL() as any;
+src/services/monitoring.ts:679:      const sql = this.db.getSQL() as any;
+src/services/monitoring.ts:764:      const sql = this.db.getSQL() as any;
+src/services/service-controller.ts:85:    this.pool = (this.db as any).poolInstance;
+src/services/service-controller.ts:291:          service: service as any,
+src/services/service-controller.ts:327:          service: service as any,
+src/services/service-controller.ts:427:          service: service as any,
+src/services/telemetry.test.ts:63:    } as any;
+src/services/telemetry.test.ts:628:      (require('./telemetry.js') as any).telemetryServiceInstance = null;
+src/services/utility-messages.test.ts:549:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:559:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:569:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:579:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:589:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:599:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:611:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:627:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:642:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:658:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:676:      (require('./utility-messages.js') as any).utilityMessagesServiceInstance = null;
+src/services/utility-messages.test.ts:745:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:755:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:762:      const service = utilityMessagesService as any;
+src/services/utility-messages.test.ts:772:      const service = utilityMessagesService as any;
+src/startup/validation.test.ts:111:global.fetch = mockFetch as any;
+src/startup/validation.ts:594:    const sql = db.getSQL() as any;
+src/tests/hashtag-growth.test.ts:5:  const sqlStub = { unsafe: async () => [result] } as any;
+src/tests/hashtag-growth.test.ts:9:  } as any;
+src/tests/hashtag-growth.test.ts:15:    const growth = await (InstagramHashtagMentionProcessor.prototype as any).calculateHashtagGrowth.call(
+src/tests/hashtag-growth.test.ts:26:    const growth = await (InstagramHashtagMentionProcessor.prototype as any).calculateHashtagGrowth.call(
+src/tests/hashtag-growth.test.ts:37:    const growth = await (InstagramHashtagMentionProcessor.prototype as any).calculateHashtagGrowth.call(
+src/tests/hashtag-growth.test.ts:48:    const growth = await (InstagramHashtagMentionProcessor.prototype as any).calculateHashtagGrowth.call(
+src/tests/instagram-integration.test.ts:503:      (router as any).processInstagramEntry = async () => { processed++; };
+src/tests/instagram-integration.test.ts:534:      (router as any).processInstagramEntry = async () => {};
+src/tests/instagram-media-manager.test.ts:40:      (manager as any).getMediaTemplate = async () => ({
+src/tests/instagram-media-manager.test.ts:50:      (manager as any).incrementTemplateUsage = async () => {};
+src/tests/instagram-media-manager.test.ts:51:      (manager as any).generateTemplateCaption = () => 'generated caption';
+src/tests/instagram-message-sender.test.ts:41:    })) as any;
+src/tests/instagram-message-sender.test.ts:62:    })) as any;
+src/tests/instagram-messaging.test.ts:15:      return 0 as any;
+src/tests/instagram-messaging.test.ts:46:      return 0 as any;
+src/tests/instagram-oauth.test.ts:102:  delete (globalThis as any).fetch;
+src/tests/instagram-oauth.test.ts:121:    (globalThis as any).fetch = mock(async () => ({
+src/tests/instagram-oauth.test.ts:133:    (service as any).exchangeForLongLivedToken = mock(async () => ({
+src/tests/instagram-oauth.test.ts:138:    (globalThis as any).fetch = mock(async () => ({
+src/tests/instagram-token-retrieval.test.ts:33:    (globalThis as any).requireMerchantId = () => 'merchant1';
+src/tests/instagram-token-retrieval.test.ts:39:    (client as any).db = { getSQL: () => mock(async () => [{
+src/tests/instagram-token-retrieval.test.ts:43:    }]) } as any;
+src/tests/instagram-token-retrieval.test.ts:51:    (globalThis as any).fetch = fetchMock;
+src/tests/instagram-token-retrieval.test.ts:73:    (service as any).db = { getSQL: () => sqlMock } as any;
+src/tests/instagram-token-retrieval.test.ts:75:    (service as any).getMerchantInstagramUserId = async () => 'ig_user_1';
+src/tests/instagram-token-retrieval.test.ts:76:    (service as any).getMessageContext = async () => ({ conversationId: '', withinWindow: true });
+src/tests/instagram-token-retrieval.test.ts:77:    (service as any).logSentMessage = async () => {};
+src/tests/instagram-token-retrieval.test.ts:78:    (service as any).logFailedMessage = async () => {};
+src/tests/instagram-token-retrieval.test.ts:82:      return { ok: true, json: async () => ({ message_id: 'mid1' }) } as any;
+src/tests/instagram-token-retrieval.test.ts:84:    (globalThis as any).fetch = fetchMock;
+src/tests/instagram-webhook.test.ts:16:    (globalThis as any).createLogger = () => logger;
+src/tests/instagram-webhook.test.ts:30:    (handler as any).findOrCreateConversation = mock(async () => ({ id: 'conv1', isNew: false }));
+src/tests/instagram-webhook.test.ts:31:    (handler as any).storeIncomingMessage = mock(async () => {});
+src/tests/instagram-webhook.test.ts:32:    (handler as any).generateAIResponse = mock(async () => {});
+src/tests/instagram-webhook.test.ts:37:    delete (globalThis as any).createLogger;
+src/tests/instagram-webhook.test.ts:49:    const ret = await (handler as any).processMessagingEvent(event, 'merchant1', result);
+src/tests/instagram-webhook.test.ts:57:    (handler as any).findOrCreateConversation = mock(async () => null);
+src/tests/instagram-webhook.test.ts:66:    await expect((handler as any).processMessagingEvent(event, 'merchant1', result)).rejects.toThrow('Failed to create conversation');
+src/tests/instagram-webhook.test.ts:90:    (globalThis as any).createLogger = () => logger;
+src/tests/instagram-webhook.test.ts:107:    delete (globalThis as any).createLogger;
+src/tests/instagram-webhook.test.ts:111:    await (handler as any).inviteCommentToDM('merchant1', 'comment1', 'user1');
+src/tests/instagram-webhook.test.ts:118:    await (handler as any).inviteCommentToDM('merchant1', 'comment1', 'user1');
+src/tests/media-id-uniqueness.test.ts:11:    (handler as any).mediaManager = {
+src/tests/media-id-uniqueness.test.ts:26:      await (handler as any).processMediaAttachment(
+src/tests/meta-rate-limiter.test.ts:56:    (limiter as any).redis = new FakeRedisManager();
+src/tests/meta-rate-limiter.test.ts:65:    const store = (limiter as any).redis.connection.store as Map<string, Set<string>>;
+src/tests/oauth-session-pkce.test.ts:99:  delete (global as any).fetch;
+src/tests/oauth-session-pkce.test.ts:129:    (service as any).exchangeForLongLivedToken = mock(async () => ({
+src/tests/oauth-session-pkce.test.ts:137:    (global as any).fetch = mock(async (url: any, options: any) => {
+src/tests/oauth-session-pkce.test.ts:143:        } as any;
+src/tests/oauth-session-pkce.test.ts:145:      return { ok: false, text: async () => '', status: 500 } as any;
+src/tests/rls-wrapper.test.ts:10:      const id = (db as any).generateSessionId();
+src/db/adapter.ts:18:  query<T>(sql: string, params?: unknown[]): Promise<T[]>;
+src/db/adapter.ts:19:  queryOne<T>(sql: string, params?: unknown[]): Promise<T | null>;
+src/db/adapter.ts:40:  async query<T>(sql: string, params?: unknown[]): Promise<T[]> {
+src/db/adapter.ts:62:  async queryOne<T>(sql: string, params?: unknown[]): Promise<T | null> {
+src/infrastructure/db/sql-compat.ts:8:    (text: string, params?: unknown[]): Promise<unknown[]>;
+src/queue/index.ts:18:      messaging?: unknown[];
+src/queue/index.ts:19:      comments?: unknown[];
+src/queue/index.ts:20:      mentions?: unknown[];
+src/queue/withTenantJob.ts:13:    const data: unknown = (job as unknown as { data?: unknown; payload?: unknown }).data ?? (job as unknown as { data?: unknown; payload?: unknown }).payload;
+src/services/instagram-testing-orchestrator.ts:77:  input?: unknown;
+src/services/instagram-testing-orchestrator.ts:78:  expectedOutput?: unknown;
+src/services/instagram-testing-orchestrator.ts:92:        actualOutput?: unknown;
+src/types/database.ts:14:    public params?: unknown[]
+src/types/db.ts:3:  [key: string]: unknown;
+src/types/db.ts:50:  [key: string]: unknown;
+src/queue/withTenantJob.ts:13:    const data: unknown = (job as unknown as { data?: unknown; payload?: unknown }).data ?? (job as unknown as { data?: unknown; payload?: unknown }).payload;
+src/queue/withTenantJob.ts:17:      if (typeof (job as unknown as { moveToFailed?: Function }).moveToFailed === 'function') {
+src/queue/withTenantJob.ts:18:        await (job as unknown as { moveToFailed: (error: Error, token?: string, ignoreMaxAttempts?: boolean) => Promise<void> }).moveToFailed(
+src/services/instagram-comments-manager.ts:541:      const stats = ((basicStats[0] as unknown) as { total_comments: string; avg_sentiment: string; positive: string; neutral: string; negative: string; sales_inquiries: string });
+src/services/instagram-comments-manager.ts:542:      const responseData = ((responseStats[0] as unknown) as { responses: string; avg_response_time: string });
+src/services/instagram-comments-manager.ts:558:          username: ((user as unknown) as { username: string; comment_count: string; engagement_score: string })?.username ?? '',
+src/services/instagram-comments-manager.ts:559:          commentCount: Number(((user as unknown) as { username: string; comment_count: string; engagement_score: string })?.comment_count ?? 0),
+src/services/instagram-comments-manager.ts:560:          engagementScore: Number(((user as unknown) as { username: string; comment_count: string; engagement_score: string })?.engagement_score ?? 0)
+src/services/instagram-comments-manager.ts:563:          const statData = (stat as unknown) as { post_type: string; comments: string; responses: string; conversions: string };
+src/services/instagram-comments-manager.ts:607:      const ruleId = ((result[0] as unknown) as { id: string })?.id ?? '';
+src/services/instagram-comments-manager.ts:862:        const ruleDataTyped = (ruleData as unknown) as { id: string; name: string; trigger_config: string; action_config: string; is_active: boolean };
+src/services/instagram-hashtag-mention-processor.ts:211:        const trendData = (trend as unknown) as { hashtag: string; total_usage: string; avg_sentiment: string; positive_count: string; neutral_count: string; negative_count: string; usage_hours: number[] };
+src/services/instagram-hashtag-mention-processor.ts:273:      const strategyId = ((result[0] as unknown) as { id: string })?.id ?? '';
+src/services/instagram-hashtag-mention-processor.ts:359:          hashtag: ((stat as unknown) as { hashtag: string; usage_count: string; avg_engagement: string; sentiment_score: string })?.hashtag ?? '',
+src/services/instagram-hashtag-mention-processor.ts:360:          usage: Number(((stat as unknown) as { hashtag: string; usage_count: string; avg_engagement: string; sentiment_score: string })?.usage_count ?? 0),
+src/services/instagram-hashtag-mention-processor.ts:361:          engagement: Number(((stat as unknown) as { hashtag: string; usage_count: string; avg_engagement: string; sentiment_score: string })?.avg_engagement ?? 0),
+src/services/instagram-hashtag-mention-processor.ts:362:          sentiment: Number(((stat as unknown) as { hashtag: string; usage_count: string; avg_engagement: string; sentiment_score: string })?.sentiment_score ?? 0)
+src/services/instagram-hashtag-mention-processor.ts:365:          totalMentions: mentionStats.reduce((sum, stat) => sum + Number(((stat as unknown) as { mention_type: string; count: string })?.count ?? 0), 0),
+src/services/instagram-hashtag-mention-processor.ts:366:          influencerMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'influencer') as any)?.count ?? 0),
+src/services/instagram-hashtag-mention-processor.ts:367:          customerMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'customer') as any)?.count ?? 0),
+src/services/instagram-hashtag-mention-processor.ts:368:          competitorMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'competitor') as any)?.count ?? 0)
+src/services/instagram-hashtag-mention-processor.ts:733:      return Number(((result[0] as unknown) as { frequency: string })?.frequency || 0);
+src/services/instagram-hashtag-mention-processor.ts:760:      const current = Number(((result[0] as unknown) as { current_count: string })?.current_count || 0);
+src/services/instagram-hashtag-mention-processor.ts:761:      const previous = Number(((result[0] as unknown) as { previous_count: string })?.previous_count || 0);
+src/services/instagram-hashtag-mention-processor.ts:943:      return related.map(row => ((row as unknown) as { hashtag: string })?.hashtag ?? '');
+src/services/instagram-media-manager.ts:400:      const templateId = ((result[0] as unknown) as { id: string })?.id ?? '';
+src/services/instagram-media-manager.ts:478:      const totalMedia = mediaStats.reduce((sum: number, stat: any) => sum + Number(((stat as unknown) as { type_count: string })?.type_count ?? 0), 0);
+src/services/instagram-media-manager.ts:479:      const totalResponses = mediaStats.reduce((sum: number, stat: any) => sum + Number(((stat as unknown) as { responses: string })?.responses ?? 0), 0);
+src/services/instagram-media-manager.ts:484:          const statData = (stat as unknown) as { total_media: string; responses: string; media_type: string; type_count: string };
+src/services/instagram-media-manager.ts:489:        productInquiries: Number(((inquiryStats[0] as unknown) as { product_inquiries: string })?.product_inquiries || 0),
+src/services/instagram-media-manager.ts:492:          name: ((template as unknown) as { name: string; usage_count: string; category: string })?.name ?? '',
+src/services/instagram-media-manager.ts:493:          usageCount: Number(((template as unknown) as { name: string; usage_count: string; category: string })?.usage_count ?? 0),
+src/services/instagram-media-manager.ts:494:          category: ((template as unknown) as { name: string; usage_count: string; category: string })?.category ?? ''
+src/services/instagram-media-manager.ts:764:        session = typeof ((conversation as unknown) as { session_data: string | object })?.session_data === 'string'
+src/services/instagram-media-manager.ts:765:          ? JSON.parse(((conversation as unknown) as { session_data: string | object })?.session_data as string)
+src/services/instagram-media-manager.ts:766:          : ((conversation as unknown) as { session_data: string | object })?.session_data || {};
+src/services/instagram-media-manager.ts:775:        stage: ((conversation as unknown) as { conversation_stage: string })?.conversation_stage ?? 'greeting',
+src/services/instagram-media-manager.ts:788:          businessName: ((conversation as unknown) as { business_name: string })?.business_name ?? '',
+src/services/instagram-media-manager.ts:789:          businessCategory: ((conversation as unknown) as { business_category: string })?.business_category ?? '',
+src/services/instagram-media-manager.ts:862:        overlayElements = JSON.parse(((template as unknown) as { overlay_elements: string })?.overlay_elements || '{}');
+src/services/instagram-media-manager.ts:864:        console.warn(`⚠️ Failed to parse overlay elements for template ${((template as unknown) as { id: string })?.id}:`, error);
+src/services/instagram-media-manager.ts:868:        id: ((template as unknown) as { id: string })?.id ?? '',
+src/services/instagram-media-manager.ts:869:        name: ((template as unknown) as { name: string })?.name ?? '',
+src/services/instagram-media-manager.ts:872:        templateUrl: ((template as unknown) as { template_url: string })?.template_url ?? '',
+src/services/instagram-media-manager.ts:873:        attachmentId: ((template as unknown) as { attachment_id: string })?.attachment_id ?? '',
+src/services/instagram-media-manager.ts:875:        usageCount: ((template as unknown) as { usage_count: number })?.usage_count ?? 0,
+src/services/instagram-media-manager.ts:876:        isActive: ((template as unknown) as { is_active: boolean })?.is_active ?? false
+src/services/instagram-webhook.ts:767:      const [conversation] = (conversationData as unknown as ConversationRow[]) ?? [];
+src/services/message-window.ts:112:      const window = (result[0] as unknown) as MessageWindowRow;
+src/services/message-window.ts:269:        id: ((window as unknown) as ActiveWindowRow)?.id ?? '',
+src/services/message-window.ts:270:        customerId: ((window as unknown) as ActiveWindowRow)?.customer_id ?? '',
+src/services/message-window.ts:271:        platform: ((window as unknown) as ActiveWindowRow)?.platform ?? '',
+src/services/message-window.ts:272:        expiresAt: new Date(((window as unknown) as ActiveWindowRow)?.expires_at ?? new Date()),
+src/services/message-window.ts:273:        messageCount: ((window as unknown) as ActiveWindowRow)?.message_count ?? 0,
+src/services/message-window.ts:274:        merchantResponseCount: ((window as unknown) as ActiveWindowRow)?.merchant_response_count ?? 0
+src/services/message-window.ts:294:      const count = ((result[0] as unknown) as DeleteCountRow)?.count ?? 0;
+src/services/message-window.ts:334:      const result = ((stats[0] as unknown) as WindowStatsRow);
+src/services/message-window.ts:385:        customerId: ((window as unknown) as ExpiringWindowRow)?.customer_id ?? '',
+src/services/message-window.ts:386:        platform: ((window as unknown) as ExpiringWindowRow)?.platform ?? '',
+src/services/message-window.ts:387:        expiresAt: new Date(((window as unknown) as ExpiringWindowRow)?.expires_at ?? new Date()),
+src/services/message-window.ts:388:        minutesRemaining: Math.floor(((window as unknown) as ExpiringWindowRow)?.minutes_remaining ?? 0)
+src/services/message-window.ts:417:      return windows.length > 0 ? ((windows[0] as unknown) as MessageWindowRecord) : null;
+src/tests/instagram-messaging.test.ts:12:    // @ts-ignore - setTimeout override for test
+src/tests/instagram-messaging.test.ts:43:    // @ts-ignore - setTimeout override for test

@@ -1,12 +1,13 @@
 /**
  * ===============================================
  * Instagram Messaging API - Production Ready
- * Implements Instagram Graph API messaging within 24h window
- * POST graph.instagram.com/{v}/{ig_user_id}/messages
  * ===============================================
  */
+// Node بيئات بدون DOM: نُصرّح Response من undici لتجنب أخطاء الـ TS
+// (لا يغيّر التنفيذ لأننا نتعامل مع response من rateLimiter)
+// Type for Response to avoid undici dependency issues
 
-import { getConfig } from '../config/environment.js';
+import { getConfig } from '../config/index.js';
 import { getDatabase } from '../db/adapter.js';
 import { hashMerchantAndBody } from '../middleware/idempotency.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
@@ -21,10 +22,10 @@ import { getLogger } from './logger.js';
 const logger = getLogger({ component: 'InstagramMessagingService' });
 
 export async function retryFetch(
-  fetchFn: () => Promise<Response>,
+  fetchFn: () => Promise<any>,
   maxAttempts = 3,
   initialDelayMs = 500
-): Promise<Response> {
+): Promise<any> {
   let attempt = 0;
   let delay = initialDelayMs;
   while (attempt < maxAttempts) {
@@ -45,6 +46,11 @@ export async function retryFetch(
   }
   logger.error(`retryFetch: exhausted ${maxAttempts} attempts`);
   throw new Error(`Network request failed after ${maxAttempts} attempts`);
+}
+
+// Normalization بسيطة للنص تمنع اختلاف المفاتيح لمحتوى متطابق بصياغة مختلفة
+function normalizeMessageText(s: string) {
+  return (s || '').trim().replace(/\s+/g, ' ').slice(0, 1000);
 }
 
 export interface InstagramMessage {
@@ -71,7 +77,7 @@ export interface MessageContext {
 }
 
 export class InstagramMessagingService {
-  private config = getConfig();
+  // removed unused __config
   private db = getDatabase();
   private redis = getRedisConnectionManager();
   private encryptionService = getEncryptionService();
@@ -152,8 +158,8 @@ export class InstagramMessagingService {
       const messageBody = {
         merchantId,
         recipientId,
-        messageText,
-        options, // Include options to differentiate requests with different parameters
+        messageText: normalizeMessageText(messageText),
+        conversationId: options.conversationId || 'unknown',
         timestamp: new Date().toISOString().split('T')[0] // Date only for deduplication
       };
       const idempotencyKey = `msg_send:${hashMerchantAndBody(merchantId, messageBody)}`;
@@ -168,7 +174,7 @@ export class InstagramMessagingService {
         } catch (parseError) {
           logger.warn(
             `⚠️ Failed to parse cached message result for ${idempotencyKey}, proceeding with new send`,
-            parseError
+            (parseError as unknown as LogContext | undefined)
           );
         }
       }
@@ -250,7 +256,7 @@ export class InstagramMessagingService {
           options
         );
       } catch (logError) {
-        logger.warn('⚠️ Failed to log failed Instagram message', logError);
+        logger.warn('⚠️ Failed to log failed Instagram message', logError as unknown as LogContext | undefined);
       }
 
       return failureResult;
@@ -354,7 +360,7 @@ export class InstagramMessagingService {
           options
         );
       } catch (logError) {
-        logger.warn('⚠️ Failed to log failed Instagram message', logError);
+        logger.warn('⚠️ Failed to log failed Instagram message', logError as unknown as LogContext | undefined);
       }
 
       return failureResult;
@@ -470,7 +476,7 @@ export class InstagramMessagingService {
           options
         );
       } catch (logError) {
-        logger.warn('⚠️ Failed to log failed Instagram message', logError);
+        logger.warn('⚠️ Failed to log failed Instagram message', logError as unknown as LogContext | undefined);
       }
 
       return failureResult;
@@ -719,7 +725,7 @@ export class InstagramMessagingService {
         return {
           available: false,
           reason: 'Outside 24-hour messaging window',
-          windowExpiresAt: context.windowExpiresAt
+          ...(context.windowExpiresAt ? { windowExpiresAt: context.windowExpiresAt } : {})
         };
       }
 
@@ -762,9 +768,9 @@ export class InstagramMessagingService {
       `;
 
       const record = stats[0];
-      const totalSent = parseInt(record.total_sent) || 0;
-      const totalFailed = parseInt(record.total_failed) || 0;
-      const totalAttempts = parseInt(record.total_attempts) || 0;
+      const totalSent = parseInt(String(record!.total_sent)) || 0;
+      const totalFailed = parseInt(String(record!.total_failed)) || 0;
+      const totalAttempts = parseInt(String(record!.total_attempts)) || 0;
       
       const successRate = totalAttempts > 0 ? (totalSent / totalAttempts) * 100 : 0;
 

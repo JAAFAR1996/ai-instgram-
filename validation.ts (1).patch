@@ -1,0 +1,101 @@
+--- /mnt/data/work/src4/src/startup/validation.ts
++++ /mnt/data/work/src4/src/startup/validation.ts
+@@ -8,6 +8,8 @@
+ import { getConfig, EnvironmentValidationError } from '../config/index.js';
+ import { getDatabase } from '../db/adapter.js';
+ import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
++import { getEnv } from '../config/env.js';
++import { logger } from '../services/logger.js';
+ 
+ export interface ValidationResult {
+   success: boolean;
+@@ -28,7 +30,7 @@
+  * Run comprehensive startup validation
+  */
+ export async function runStartupValidation(): Promise<StartupValidationReport> {
+-  console.log('🔍 Running startup validation checks...');
++  logger.info('🔍 Running startup validation checks...');
+   const startTime = Date.now();
+   
+   const results: ValidationResult[] = [];
+@@ -128,10 +130,10 @@
+ 
+     // Check for placeholder values that shouldn't be in production
+     const placeholderChecks = [
+-      { var: 'IG_APP_SECRET', value: process.env.IG_APP_SECRET, placeholder: 'your_app_secret_here' },
+-      { var: 'OPENAI_API_KEY', value: process.env.OPENAI_API_KEY, placeholder: 'sk-your_openai_api_key_here' },
+-      { var: 'ENCRYPTION_KEY', value: process.env.ENCRYPTION_KEY, placeholder: 'your_32_character_encryption_key_here' },
+-      { var: 'IG_VERIFY_TOKEN', value: process.env.IG_VERIFY_TOKEN, placeholder: 'your_webhook_verify_token_here' }
++      { var: 'IG_APP_SECRET', value: getEnv('IG_APP_SECRET'), placeholder: 'your_app_secret_here' },
++      { var: 'OPENAI_API_KEY', value: getEnv('OPENAI_API_KEY'), placeholder: 'sk-your_openai_api_key_here' },
++      { var: 'ENCRYPTION_KEY', value: getEnv('ENCRYPTION_KEY'), placeholder: 'your_32_character_encryption_key_here' },
++      { var: 'IG_VERIFY_TOKEN', value: getEnv('IG_VERIFY_TOKEN'), placeholder: 'your_webhook_verify_token_here' }
+     ];
+ 
+     const placeholderLeaks = placeholderChecks.filter(check => 
+@@ -550,39 +552,39 @@
+  * Log validation report with proper formatting
+  */
+ function logValidationReport(report: StartupValidationReport): void {
+-  console.log('\n' + '='.repeat(60));
+-  console.log('🔍 STARTUP VALIDATION REPORT');
+-  console.log('='.repeat(60));
++  logger.info('\n' + '='.repeat(60));
++  logger.info('🔍 STARTUP VALIDATION REPORT');
++  logger.info('='.repeat(60));
+ 
+   report.results.forEach(result => {
+     const icon = result.success ? '✅' : '❌';
+     const status = result.success ? 'PASS' : 'FAIL';
+-    console.log(`${icon} ${result.service}: ${status} (${result.duration}ms)`);
+-    console.log(`   ${result.message}`);
++    logger.info(`${icon} ${result.service}: ${status} (${result.duration}ms)`);
++    logger.info(`   ${result.message}`);
+     
+     if (result.details) {
+       const detailsStr = Object.entries(result.details)
+         .map(([key, value]) => `${key}: ${value}`)
+         .join(', ');
+-      console.log(`   Details: ${detailsStr}`);
+-    }
+-    console.log();
++      logger.info(`   Details: ${detailsStr}`);
++    }
++    logger.info();
+   });
+ 
+-  console.log('='.repeat(60));
++  logger.info('='.repeat(60));
+   
+   if (report.overallSuccess) {
+-    console.log(`✅ ALL CHECKS PASSED (${report.totalDuration}ms total)`);
+-    console.log('🚀 Application is ready to start');
++    logger.info(`✅ ALL CHECKS PASSED (${report.totalDuration}ms total)`);
++    logger.info('🚀 Application is ready to start');
+   } else {
+-    console.log(`❌ CRITICAL ERRORS FOUND (${report.criticalErrors.length})`);
++    logger.info(`❌ CRITICAL ERRORS FOUND (${report.criticalErrors.length})`);
+     report.criticalErrors.forEach(error => {
+-      console.log(`   • ${error}`);
++      logger.info(`   • ${error}`);
+     });
+-    console.log('🛑 Application startup blocked');
+-  }
+-  
+-  console.log('='.repeat(60) + '\n');
++    logger.info('🛑 Application startup blocked');
++  }
++  
++  logger.info('='.repeat(60) + '\n');
+ }
+ 
+ /**
+@@ -610,7 +612,7 @@
+       return false;
+     }
+ 
+-    console.log(`✅ Merchant validation passed: ${merchant.business_name}`);
++    logger.info(`✅ Merchant validation passed: ${merchant.business_name}`);
+     return true;
+   } catch (error) {
+     console.error(`❌ Merchant validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);

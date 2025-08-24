@@ -9,6 +9,7 @@ import { Pool, PoolClient } from 'pg';
 import { query } from '../db/index.js';
 import { UtilityMessageType } from './template.repo.js';
 import * as crypto from 'node:crypto';
+import { must } from '../utils/safety.js';
 
 export interface MessageLog {
   id: string;
@@ -79,18 +80,18 @@ export async function logUtilityMessage(
 
   const row = rows[0];
   return {
-    id: row.id,
-    merchantId: row.merchant_id,
-    recipientId: row.recipient_id,
-    templateId: row.template_id,
-    messageId: row.message_id,
-    messageType: row.message_type as UtilityMessageType,
-    status: row.status as any,
-    sentAt: row.sent_at,
-    deliveredAt: row.delivered_at,
-    readAt: row.read_at,
-    errorMessage: row.error_message,
-    createdAt: row.created_at
+    id: must(row).id,
+    merchantId: must(row).merchant_id,
+    recipientId: must(row).recipient_id,
+    templateId: must(row).template_id,
+    messageId: must(row).message_id,
+    messageType: must(row).message_type as UtilityMessageType,
+    status: must(row).status as any,
+    sentAt: must(row).sent_at,
+    deliveredAt: must(row).delivered_at,
+    readAt: must(row).read_at,
+    errorMessage: must(row).error_message,
+    createdAt: must(row).created_at
   };
 }
 

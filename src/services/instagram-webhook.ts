@@ -14,16 +14,16 @@ import { getRepositories } from '../repositories/index.js';
 import { getInstagramStoriesManager } from './instagram-stories-manager.js';
 import { getInstagramCommentsManager } from './instagram-comments-manager.js';
 import { getInstagramMediaManager } from './instagram-media-manager.js';
-import { getServiceController } from './service-controller.js';
+// import { getServiceController } from './service-controller.js';
 import { verifyHMACRaw } from './encryption.js';
 import { createLogger } from './logger.js';
+import type { ConversationRow, MessageHistoryRow as DBMessageHistoryRow } from '../types/database-rows.js';
 import type { DIContainer } from '../container/index.js';
 import type { Pool } from 'pg';
-import type { InstagramMessage, InstagramComment, InstagramStoryMention } from './instagram-api.js';
+import type { Sql } from '../types/sql.js';
+// import type { InstagramMessage, InstagramComment, InstagramStoryMention } from './instagram-api.js';
 import type { InstagramContext } from './instagram-ai.js';
-import type { StoryInteraction } from './instagram-stories-manager.js';
-import type { CommentInteraction } from './instagram-comments-manager.js';
-import type { MediaContent } from './instagram-media-manager.js';
+import type { StoryInteraction, CommentInteraction, MediaContent } from '../types/social.js';
 
 
 export function verifySignature(
@@ -116,27 +116,33 @@ export interface ProcessedWebhookResult {
   errors: string[];
 }
 
-interface MessageHistoryRow {
+interface _MessageHistoryRow {
   role: string;
   content: string;
   timestamp: Date;
 }
 
-export class InstagramWebhookHandler {
-  private logger: ReturnType<typeof createLogger>;
-  private db: ReturnType<typeof getDatabase>;
-  private repositories: ReturnType<typeof getRepositories>;
-  private messageWindowService: ReturnType<typeof getMessageWindowService>;
-  private aiOrchestrator: ReturnType<typeof getConversationAIOrchestrator>;
-  private storiesManager: ReturnType<typeof getInstagramStoriesManager>;
-  private commentsManager: ReturnType<typeof getInstagramCommentsManager>;
-  private mediaManager: ReturnType<typeof getInstagramMediaManager>;
-  private pool: Pool;
+interface Logger {
+  info: (message: string, context?: Record<string, unknown>) => void;
+  error: (message: string, error?: Error | unknown, context?: Record<string, unknown>) => void;
+  warn: (message: string, context?: Record<string, unknown>) => void;
+}
 
-  constructor(private container?: DIContainer) {
-    if (container) {
-      this.pool = container.get<Pool>('pool');
-      this.logger = container.get<ReturnType<typeof createLogger>>('logger');
+export class InstagramWebhookHandler {
+  private logger!: Logger;
+  private db!: { getSQL: () => Sql };
+  private repositories!: ReturnType<typeof getRepositories>;
+  private messageWindowService!: ReturnType<typeof getMessageWindowService>;
+  private aiOrchestrator!: ReturnType<typeof getConversationAIOrchestrator>;
+  private storiesManager!: ReturnType<typeof getInstagramStoriesManager>;
+  private commentsManager!: ReturnType<typeof getInstagramCommentsManager>;
+  private mediaManager!: ReturnType<typeof getInstagramMediaManager>;
+  private _pool!: Pool;
+
+  constructor(private _container?: DIContainer) {
+    if (_container) {
+      this._pool = _container.get<Pool>('pool');
+      this.logger = _container.get<ReturnType<typeof createLogger>>('logger');
       this.initializeFromContainer();
     } else {
       this.initializeLegacy();
@@ -496,7 +502,7 @@ export class InstagramWebhookHandler {
         timestamp: timestamp,
         isReply: false, // Top-level comment
         metadata: {
-          postType: event.value.media.media_product_type as any,
+          postType: event.value.media.media_product_type as 'photo' | 'video' | 'reel' | 'carousel',
           isInfluencerComment: false, // Could be enhanced with user analysis
           hasHashtags: commentText.includes('#'),
           mentionsCount: (commentText.match(/@\w+/g) || []).length
@@ -558,7 +564,7 @@ export class InstagramWebhookHandler {
         storyId: mediaId,
         userId: customerId,
         username: customerUsername,
-        mediaUrl: mediaUrl,
+        ...(mediaUrl ? { mediaUrl } : {}),
         timestamp: timestamp,
         metadata: {
           isPrivate: false,
@@ -606,7 +612,6 @@ export class InstagramWebhookHandler {
       const { conversation, isNew } = await this.repositories.conversation.create({
         merchantId,
         customerInstagram: customerId,
-        customerName: username,
         platform,
         conversationStage: 'GREETING',
         sessionData: {
@@ -614,7 +619,8 @@ export class InstagramWebhookHandler {
           preferences: {},
           context: {},
           interaction_count: 1
-        }
+        },
+        ...(username ? { customerName: username } : {})
       });
 
       return { id: conversation.id, isNew };
@@ -637,21 +643,21 @@ export class InstagramWebhookHandler {
     mediaUrl?: string,
     platformMessageId?: string,
     timestamp?: Date,
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ): Promise<void> {
     try {
       // Store message using repository
       await this.repositories.message.create({
         conversationId,
-        direction: 'INCOMING',
-        platform: 'instagram',
+        direction: 'INCOMING' as const,
+        platform: 'instagram' as const,
         messageType,
         content,
-        mediaUrl,
-        platformMessageId,
-        aiProcessed: false,
-        deliveryStatus: 'DELIVERED',
-        mediaMetadata: metadata
+        aiProcessed: false as const,
+        deliveryStatus: 'DELIVERED' as const,
+        ...(mediaUrl ? { mediaUrl } : {}),
+        ...(platformMessageId ? { platformMessageId } : {}),
+        ...(metadata ? { mediaMetadata: metadata } : {})
       });
 
       // Update conversation's last message time using repository
@@ -734,14 +740,14 @@ export class InstagramWebhookHandler {
     customerId: string,
     messageContent: string,
     interactionType: 'dm' | 'comment' | 'story_reply' | 'story_mention',
-    messageId?: string,
+    _messageId?: string,
     mediaContext?: { mediaId?: string; isPublic?: boolean }
   ): Promise<void> {
     try {
       this.logger.info('Generating Instagram AI response', { interactionType });
 
       // Get conversation context
-      const sql = this.db.getSQL() as any;
+      const sql = this.db.getSQL();
       const conversationData = await sql`
         SELECT 
           c.*,
@@ -756,10 +762,10 @@ export class InstagramWebhookHandler {
         throw new Error('Conversation not found');
       }
 
-      const conversation = conversationData[0];
+      const [conversation] = (conversationData as unknown as ConversationRow[]) ?? [];
       
-      // Get recent conversation history
-      const messageHistory = await sql<MessageHistoryRow[]>`
+      // Get recent conversation history  
+      const messageHistory = await sql<DBMessageHistoryRow>`
         SELECT 
           CASE 
             WHEN direction = 'INCOMING' THEN 'user'
@@ -774,11 +780,13 @@ export class InstagramWebhookHandler {
       `;
 
       // Build Instagram context
-      let session: any = {};
+      let session: Record<string, unknown> = {};
       try {
-        session = typeof conversation.session_data === 'string'
-          ? JSON.parse(conversation.session_data)
-          : conversation.session_data || {};
+        if (conversation) {
+          session = typeof conversation.session_data === 'string'
+            ? JSON.parse(conversation.session_data)
+            : conversation.session_data || {};
+        }
       } catch (error) {
         this.logger.error('Failed to parse session data for conversation', error, { conversationId });
       }
@@ -787,19 +795,19 @@ export class InstagramWebhookHandler {
         merchantId,
         customerId,
         platform: 'instagram',
-        stage: conversation.conversation_stage,
-        cart: session.cart || [],
-        preferences: session.preferences || {},
-        conversationHistory: messageHistory.reverse().map((msg: MessageHistoryRow) => ({
-          role: msg.role,
+        stage: conversation?.conversation_stage as any,
+        cart: (session.cart as any) || [],
+        preferences: (session.preferences as any) ?? {},
+        conversationHistory: messageHistory.reverse().map((msg: DBMessageHistoryRow) => ({
+          role: msg.role as 'user' | 'assistant' | 'system',
           content: msg.content,
           timestamp: new Date(msg.timestamp)
         })),
         interactionType,
-        mediaContext,
+        ...(mediaContext ? { mediaContext } : {}),
         merchantSettings: {
-          businessName: conversation.business_name,
-          businessCategory: conversation.business_category,
+          businessName: String(conversation?.business_name ?? ''),
+          businessCategory: String(conversation?.business_category ?? ''),
           workingHours: {},
           paymentMethods: [],
           deliveryFees: {},
@@ -857,14 +865,13 @@ export class InstagramWebhookHandler {
 
         const sendResult = await instagramClient.sendMessage(credentials, merchantId, {
           recipientId: customerId,
-          messageType: 'text',
-          content: aiResponse.message
+          text: aiResponse.message
         });
 
         if (sendResult.success) {
           await sql`
             UPDATE message_logs
-            SET delivery_status = 'SENT', platform_message_id = ${sendResult.messageId}
+            SET delivery_status = 'SENT', platform_message_id = ${sendResult.messageId ?? null}
             WHERE conversation_id = ${conversationId}::uuid AND platform_message_id = ${platformMessageId}
           `;
         } else {
@@ -883,7 +890,7 @@ export class InstagramWebhookHandler {
       }
 
       // Update conversation stage if changed
-      if (aiResponse.stage !== conversation.conversation_stage) {
+      if (conversation && aiResponse.stage !== conversation.conversation_stage) {
         await sql`
           UPDATE conversations
           SET conversation_stage = ${aiResponse.stage}
@@ -918,7 +925,7 @@ export class InstagramWebhookHandler {
       
       // Store fallback response
       try {
-        const sql = this.db.getSQL() as any;
+        const sql = this.db.getSQL();
         const fallbackMessage = interactionType === 'comment' 
           ? 'شكراً للتعليق! راسلنا خاص للمزيد 📱💕'
           : 'اهلاً وسهلاً! كيف أقدر أساعدك؟ 😊';
@@ -963,7 +970,7 @@ export class InstagramWebhookHandler {
     result: ProcessedWebhookResult
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql = this.db.getSQL();
 
       await sql`
         INSERT INTO audit_logs (
@@ -1176,7 +1183,7 @@ export class InstagramWebhookHandler {
    * Private: Process media attachment with Media Manager
    */
   private async processMediaAttachment(
-    attachment: any,
+    attachment: { type: string; payload: { url: string } },
     conversationId: string,
     merchantId: string,
     userId: string,
@@ -1191,11 +1198,7 @@ export class InstagramWebhookHandler {
         id: `media_${Date.now()}_${crypto.randomUUID()}`,
         type: this.mapInstagramMediaType(attachment.type),
         url: attachment.payload.url,
-        caption: textContent || undefined,
-        metadata: {
-          format: this.extractFileFormat(attachment.payload.url),
-          originalFileName: attachment.payload.url.split('/').pop()
-        },
+        ...(textContent ? { caption: textContent } : {}),
         uploadStatus: 'uploaded',
         createdAt: timestamp
       };
@@ -1238,7 +1241,7 @@ export class InstagramWebhookHandler {
    * Private: Map Instagram media type to our media type
    */
   private mapInstagramMediaType(instagramType: string): 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'gif' {
-    const typeMapping: { [key: string]: any } = {
+    const typeMapping: Record<string, 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'gif'> = {
       'image': 'image',
       'photo': 'image',
       'video': 'video',
@@ -1246,7 +1249,7 @@ export class InstagramWebhookHandler {
       'file': 'document',
       'document': 'document',
       'sticker': 'sticker',
-      'gif': 'gif'
+      'gif': 'image'
     };
 
     return typeMapping[instagramType.toLowerCase()] || 'document';
@@ -1258,8 +1261,8 @@ export class InstagramWebhookHandler {
   private extractFileFormat(url: string): string {
     try {
       const urlParts = url.split('.');
-      const extension = urlParts[urlParts.length - 1].split('?')[0]; // Remove query params
-      return extension.toLowerCase();
+      const last = (urlParts[urlParts.length - 1] ?? '').split('?')[0] ?? '';
+      return last.toLowerCase();
     } catch {
       return 'unknown';
     }
@@ -1269,7 +1272,7 @@ export class InstagramWebhookHandler {
    * Private: Legacy media attachment processing (fallback)
    */
   private async legacyProcessMediaAttachment(
-    attachment: any,
+    attachment: { type: string; payload: { url: string } },
     conversationId: string,
     textContent: string
   ): Promise<void> {
@@ -1278,7 +1281,7 @@ export class InstagramWebhookHandler {
         type: attachment.type
       });
 
-      const sql = this.db.getSQL() as any;
+      const sql = this.db.getSQL();
 
       // Store as basic message log
       await sql`

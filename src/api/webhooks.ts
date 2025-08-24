@@ -6,14 +6,14 @@
  */
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { logger } from 'hono/logger';
-import { InstagramWebhookHandler, type InstagramWebhookEvent } from '../services/instagram-webhook.js';
+import { InstagramWebhookHandler, type InstagramWebhookEvent, type InstagramWebhookEntry } from '../services/instagram-webhook.js';
 import { getServiceController } from '../services/service-controller.js';
 // removed unused imports
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
-import { getPool } from '../db/index.js';
-import { getConfig } from '../config/environment.js';
-import { verifyHMAC, verifyHMACRaw, type HmacVerifyResult } from '../services/encryption.js';
+import { getConfig } from '../config/index.js';
+import { verifyHMACRaw } from '../services/encryption.js';
 import { pushDLQ } from '../queue/dead-letter.js';
 import { z } from 'zod';
 import crypto from 'node:crypto';
@@ -30,22 +30,33 @@ const InstagramWebhookVerificationSchema = z.object({
   'hub.challenge': z.string()
 });
 
+function mapRawToInstagramEvent(raw: any): InstagramWebhookEvent {
+  // تحقق بنيوي مبسط ثم بناء النوع الدوميني
+  if (!Array.isArray(raw?.entry)) throw new Error('invalid webhook payload');
+  for (const e of raw.entry) {
+    if (e.messaging) {
+      for (const m of e.messaging) {
+        if (!m.sender || !m.recipient || !m.timestamp) {
+          throw new Error('invalid messaging entry');
+        }
+      }
+    }
+  }
+  return raw as InstagramWebhookEvent;
+}
+
 
 const WebhookEventSchema = z.object({
   object: z.string(),
   entry: z.array(z.object({
     id: z.string(),
     time: z.number(),
-    messaging: z.array(z.any()).optional(),
-    changes: z.array(z.any()).optional()
+    messaging: z.array(z.record(z.unknown())).optional(),
+    changes: z.array(z.record(z.unknown())).optional()
   }))
 });
 
-const WhatsAppWebhookVerificationSchema = z.object({
-  'hub.mode': z.string(),
-  'hub.verify_token': z.string(),
-  'hub.challenge': z.string()
-});
+// WhatsAppWebhookVerificationSchema removed - WhatsApp disabled
 
 // Redis cache for mapping Instagram page IDs to merchant IDs
 const merchantCache = getMerchantCache();
@@ -54,7 +65,7 @@ export class WebhookRouter {
   private app: Hono;
   private instagramHandler: InstagramWebhookHandler;
   private serviceController = getServiceController();
-  private pool = getPool();
+  // pool removed - not used
   private config = getConfig();
   private logger = getLogger({ component: 'WebhookRouter' });
   private db = getDatabase();
@@ -80,12 +91,7 @@ export class WebhookRouter {
     this.app.use('/webhooks/*', rateLimiter);
   }
 
-  /**
-   * Get unified app secret from config or environment
-   */
-  private getAppSecret(): string {
-    return (this.config.instagram.metaAppSecret || process.env.META_APP_SECRET || '').trim();
-  }
+  // getAppSecret removed - not used
 
   /**
    * Setup webhook routes - Instagram only
@@ -135,7 +141,9 @@ export class WebhookRouter {
             return c.text('no dumps', 404);
           }
 
-          const dumpPath = p.join(dir, sorted[0].f);
+          const first = sorted?.[0];
+          if (!first) throw new Error('No webhook files found to dump');
+          const dumpPath = p.join(dir, first.f);
           const raw = await fs.promises.readFile(dumpPath);
           const exp = crypto.createHmac('sha256', (process.env.META_APP_SECRET || '').trim())
             .update(raw)
@@ -168,7 +176,7 @@ export class WebhookRouter {
   /**
    * Handle Instagram webhook verification (GET request)
    */
-  private async handleInstagramVerification(c: any) {
+  private async handleInstagramVerification(c: Context) {
     try {
       this.logger.info('Instagram webhook verification request received');
       
@@ -207,7 +215,7 @@ export class WebhookRouter {
   /**
    * Handle Instagram webhook events (POST request)
    */
-  private async handleInstagramWebhook(c: any) {
+  private async handleInstagramWebhook(c: Context) {
     let merchantId: string | undefined;
     try {
       this.logger.info('Instagram webhook event received');
@@ -224,8 +232,8 @@ export class WebhookRouter {
       // Get critical headers and config
       const sigHeader = c.req.header('x-hub-signature-256') ?? '';
       const appId = c.req.header('x-app-id') ?? '';
-      const appSecret = (process.env.META_APP_SECRET || '').trim();
-      const metaAppId = (process.env.META_APP_ID || '').trim();
+      const appSecret = (this.config.instagram?.appSecret || this.config.instagram?.metaAppSecret || '').trim();
+      const metaAppId = (this.config.instagram?.appId || '').trim();
 
       if (!metaAppId) {
         this.logger.warn('META_APP_ID not configured');
@@ -299,7 +307,10 @@ export class WebhookRouter {
       // Parse JSON only after successful verification
       let event: InstagramWebhookEvent;
       try {
-        event = JSON.parse(rawBuf.toString('utf8')) as InstagramWebhookEvent;
+        const parsedData = JSON.parse(rawBuf.toString('utf8'));
+        // استخدم Zod للتحقق بدلاً من type assertion
+        const parsed = WebhookEventSchema.parse(parsedData);
+        event = mapRawToInstagramEvent(parsed); // دالة تحويل
       } catch (parseError) {
         this.logger.error('Invalid Instagram webhook JSON', parseError);
         return c.text('Invalid JSON', 400);
@@ -336,11 +347,10 @@ export class WebhookRouter {
       const windowMs = 60000; // 1 minute window
       const maxRequests = 100; // 100 requests per minute per merchant
       let rateCheck: { allowed: boolean; remaining: number; resetTime: number };
-      let skipRateLimitCheck = false;
+      // skipRateLimitCheck removed - not used
       try {
         rateCheck = await rateLimiter.checkRedisRateLimit(rateLimitKey, windowMs, maxRequests);
       } catch (error) {
-        skipRateLimitCheck = true;
         this.logger.warn('Failed to check Redis rate limit', { err: error, merchantId });
         telemetry.recordRateLimitStoreFailure('instagram', 'webhook');
         rateCheck = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
@@ -401,7 +411,7 @@ export class WebhookRouter {
   /**
    * Process Instagram webhook entry
    */
-  private async processInstagramEntry(entry: any): Promise<void> {
+  private async processInstagramEntry(entry: InstagramWebhookEntry): Promise<void> {
     try {
       // Get merchant ID from entry ID (Page ID)
       const pageId = entry.id;
@@ -464,15 +474,7 @@ export class WebhookRouter {
     }
   }
 
-  /**
-   * Process WhatsApp webhook entry - DISABLED
-   */
-  private async processWhatsAppEntry(entry: any): Promise<void> {
-    this.logger.info('WhatsApp processing disabled - entry ignored');
-    await this.logWebhookEvent('whatsapp', 'disabled', 'ERROR', {
-      error: 'WhatsApp features are disabled'
-    });
-  }
+  // processWhatsAppEntry removed - WhatsApp disabled
 
   /**
    * Verify webhook token against stored credentials
@@ -527,7 +529,14 @@ export class WebhookRouter {
       interface MerchantResult {
         merchant_id: string;
       }
-      const merchantId = (result[0] as MerchantResult)?.merchant_id || null;
+      
+      function toMerchantResult(r: Record<string, unknown>): MerchantResult {
+        return {
+          merchant_id: String(r.merchant_id ?? '')
+        };
+      }
+      
+      const merchantId = result[0] ? toMerchantResult(result[0]).merchant_id || null : null;
 
       // Cache the result in Redis
       if (merchantId) {
@@ -548,7 +557,7 @@ export class WebhookRouter {
     platform: 'instagram' | 'whatsapp',
     merchantId: string,
     status: 'SUCCESS' | 'ERROR',
-    details: any
+    details: Record<string, unknown>
   ): Promise<void> {
     try {
       const sql = this.db.getSQL();
@@ -579,7 +588,7 @@ export class WebhookRouter {
   /**
    * Generate hash for merchant and body (idempotency)
    */
-  private generateMerchantBodyHash(merchantId: string, body: any): string {
+  private generateMerchantBodyHash(merchantId: string, body: unknown): string {
     const content = `${merchantId}:${JSON.stringify(body)}`;
     return crypto.createHash('sha256').update(content).digest('hex');
   }
@@ -589,7 +598,7 @@ export class WebhookRouter {
    */
   private async checkWebhookIdempotency(
     merchantId: string, 
-    body: any,
+    body: unknown,
     platform: 'instagram' | 'whatsapp'
   ): Promise<{ isDuplicate: boolean; eventId: string }> {
     const eventId = this.generateMerchantBodyHash(merchantId, body);
@@ -653,11 +662,15 @@ export class WebhookRouter {
   /**
    * Get webhook statistics
    */
-  private async getWebhookStats(): Promise<any> {
+  private async getWebhookStats(): Promise<{
+    summary: WebhookLogSummaryRow[];
+    hourlyStats: WebhookLogHourlyRow[];
+    lastUpdated: string;
+  }> {
     try {
       const sql = this.db.getSQL();
       
-      const stats = await sql`
+      const stats = await sql<WebhookLogHourlyRow>`
         SELECT 
           platform,
           status,
@@ -669,7 +682,7 @@ export class WebhookRouter {
         ORDER BY hour DESC
       `;
 
-      const summary = await sql`
+      const summary = await sql<WebhookLogSummaryRow>`
         SELECT 
           platform,
           COUNT(*) as total_events,
@@ -684,9 +697,10 @@ export class WebhookRouter {
         GROUP BY platform
       `;
 
+      // Flatten the results since sql returns T[]
       return {
-        summary: summary,
-        hourlyStats: stats,
+        summary: summary.flat() as WebhookLogSummaryRow[],
+        hourlyStats: stats.flat() as WebhookLogHourlyRow[],
         lastUpdated: new Date().toISOString()
       };
 
@@ -715,3 +729,21 @@ export function getWebhookRouter(): WebhookRouter {
 }
 
 export default WebhookRouter;
+
+// --- Types ---
+interface WebhookLogHourlyRow {
+  platform: 'instagram' | 'whatsapp';
+  status: 'SUCCESS' | 'ERROR';
+  count: string;
+  hour: string;
+  [key: string]: unknown;
+}
+
+interface WebhookLogSummaryRow {
+  platform: 'instagram' | 'whatsapp';
+  total_events: string;
+  successful_events: string;
+  failed_events: string;
+  success_rate: string;
+  [key: string]: unknown;
+}

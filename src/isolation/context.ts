@@ -3,14 +3,19 @@ import { Pool } from 'pg';
 import { z } from 'zod';
 
 // Error serialization helper
-export function serr(e: any) {
-  return { 
-    name: e?.name, 
-    message: e?.message, 
-    code: e?.code, 
-    stack: e?.stack, 
-    cause: e?.cause?.message 
-  };
+export function serr(e: unknown): { name?: string; message?: string; code?: unknown; stack?: string; cause?: string } {
+  const err = e as { name?: string; message?: string; code?: unknown; stack?: string; cause?: unknown };
+  const result: { name?: string; message?: string; code?: unknown; stack?: string; cause?: string } = {};
+  
+  if (err?.name !== undefined) result.name = err.name;
+  if (err?.message !== undefined) result.message = err.message;
+  if (err?.code !== undefined) result.code = err.code;
+  if (err?.stack !== undefined) result.stack = err.stack;
+  
+  const causeMessage = (err?.cause as { message?: string } | undefined)?.message;
+  if (causeMessage !== undefined) result.cause = causeMessage;
+  
+  return result;
 }
 
 // Base job data schema validation
@@ -52,7 +57,7 @@ export type CleanupJobData = z.infer<typeof CleanupJobSchema>;
 export async function withDbTenant<T>(
   pool: Pool,
   merchantId: string,
-  fn: (client: any) => Promise<T>
+  fn: (client: { query: (sql: string, params?: unknown[]) => Promise<unknown> }) => Promise<T>
 ): Promise<T> {
   if (!merchantId) {
     throw new Error('MISSING_MERCHANT_ID');
@@ -79,7 +84,7 @@ export async function withDbTenant<T>(
     try {
       await client.query('ROLLBACK');
     } catch (rollbackError) {
-      console.error('Failed to rollback transaction:', rollbackError);
+      // use logger upstream
     }
     
     // Re-throw original error
@@ -95,10 +100,10 @@ export async function withDbTenant<T>(
 // Worker job wrapper with tenant isolation
 export function withTenantJob<T>(
   pool: Pool,
-  logger: any,
-  handler: (job: any, data: JobData, client: any) => Promise<T>
+  logger: { debug: (msg: string, ctx?: unknown) => void; error: (ctx: unknown, msg?: string) => void },
+  handler: (job: { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> }, data: JobData, client: { query: (sql: string, params?: unknown[]) => Promise<unknown> }) => Promise<T>
 ) {
-  return async (job: any) => {
+  return async (job: { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> }) => {
     try {
       // Validate job data schema
       const data = JobSchema.parse(job.data);
@@ -128,7 +133,7 @@ export function withTenantJob<T>(
         throw validationError;
       }
       
-      if (error?.message === 'MISSING_MERCHANT_ID') {
+      if (error && typeof error === 'object' && 'message' in error && error.message === 'MISSING_MERCHANT_ID') {
         logger.error({
           err: serr(error),
           jobId: job.id,
@@ -136,7 +141,8 @@ export function withTenantJob<T>(
           merchantId: null
         }, 'Merchant isolation failed - missing ID');
         
-        await job.moveToFailed(error, false); // no retry
+        const err = error instanceof Error ? error : new Error('MISSING_MERCHANT_ID');
+        await job.moveToFailed(err, false); // no retry
         throw error;
       }
       
@@ -144,7 +150,7 @@ export function withTenantJob<T>(
         err: serr(error),
         jobId: job.id,
         jobName: job.name,
-        merchantId: job.data?.merchantId
+        merchantId: (job.data as { merchantId?: string } | undefined)?.merchantId
       }, 'Job execution failed');
       
       throw error;
@@ -155,10 +161,10 @@ export function withTenantJob<T>(
 // Webhook-specific tenant job wrapper
 export function withWebhookTenantJob<T>(
   pool: Pool,
-  logger: any,
-  handler: (job: any, data: WebhookJobData, client: any) => Promise<T>
+  logger: { debug: (msg: string, ctx?: unknown) => void; error: (ctx: unknown, msg?: string) => void },
+  handler: (job: { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> }, data: WebhookJobData, client: { query: (sql: string, params?: unknown[]) => Promise<unknown> }) => Promise<T>
 ) {
-  return async (job: any) => {
+  return async (job: { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> }) => {
     try {
       // Validate webhook job data schema
       const data = WebhookJobSchema.parse(job.data);
@@ -185,10 +191,10 @@ export function withWebhookTenantJob<T>(
 // AI-specific tenant job wrapper
 export function withAITenantJob<T>(
   pool: Pool,
-  logger: any,
-  handler: (job: any, data: AIJobData, client: any) => Promise<T>
+  logger: { debug: (msg: string, ctx?: unknown) => void; error: (ctx: unknown, msg?: string) => void },
+  handler: (job: { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> }, data: AIJobData, client: { query: (sql: string, params?: unknown[]) => Promise<unknown> }) => Promise<T>
 ) {
-  return async (job: any) => {
+  return async (job: { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> }) => {
     try {
       // Validate AI job data schema
       const data = AIJobSchema.parse(job.data);
@@ -213,7 +219,11 @@ export function withAITenantJob<T>(
 }
 
 // Common error handler for tenant jobs
-async function handleTenantJobError(error: any, job: any, logger: any) {
+async function handleTenantJobError(
+  error: unknown,
+  job: { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> },
+  logger: { error: (ctx: unknown, msg?: string) => void }
+) {
   if (error instanceof z.ZodError) {
     const validationError = new Error('INVALID_JOB_DATA');
     logger.error({
@@ -227,7 +237,7 @@ async function handleTenantJobError(error: any, job: any, logger: any) {
     throw validationError;
   }
   
-  if (error?.message === 'MISSING_MERCHANT_ID') {
+  if (error instanceof Error && error.message === 'MISSING_MERCHANT_ID') {
     logger.error({
       err: serr(error),
       jobId: job.id,
@@ -239,11 +249,12 @@ async function handleTenantJobError(error: any, job: any, logger: any) {
     throw error;
   }
   
+  const errorToLog = error instanceof Error ? error : new Error(String(error));
   logger.error({
-    err: serr(error),
+    err: serr(errorToLog),
     jobId: job.id,
     jobName: job.name,
-    merchantId: job.data?.merchantId
+    merchantId: (job.data as any)?.merchantId
   }, 'Job execution failed');
   
   throw error;

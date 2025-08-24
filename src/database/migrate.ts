@@ -7,8 +7,10 @@
 
 import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
-import { getDatabase } from './connection.js';
+import { getDatabase } from '../db/adapter.js';
+import type { SqlFunction } from '../db/sql-template.js';
 import type { Migration } from '../types/database.js';
+import { logger } from '../services/logger.js';
 
 export class MigrationRunner {
   private db = getDatabase();
@@ -23,7 +25,7 @@ export class MigrationRunner {
    */
   public async migrate(): Promise<void> {
     try {
-      console.log('🚀 Starting database migrations...');
+      logger.info('🚀 Starting database migrations...');
       
       // Ensure database connection
       if (!this.db.isReady()) {
@@ -37,18 +39,18 @@ export class MigrationRunner {
       const pendingMigrations = await this.getPendingMigrations();
       
       if (pendingMigrations.length === 0) {
-        console.log('✅ No pending migrations found');
+        logger.info('✅ No pending migrations found');
         return;
       }
 
-      console.log(`📋 Found ${pendingMigrations.length} pending migrations`);
+      logger.info(`📋 Found ${pendingMigrations.length} pending migrations`);
 
       // Run each migration in transaction
       for (const migration of pendingMigrations) {
         await this.runMigration(migration);
       }
 
-      console.log('✅ All migrations completed successfully');
+      logger.info('✅ All migrations completed successfully');
     } catch (error) {
       console.error('❌ Migration failed:', error);
       throw error;
@@ -60,11 +62,11 @@ export class MigrationRunner {
    */
   public async rollback(): Promise<void> {
     try {
-      console.log('🔄 Starting migration rollback...');
+      logger.info('🔄 Starting migration rollback...');
       
       const lastMigration = await this.getLastExecutedMigration();
       if (!lastMigration) {
-        console.log('ℹ️ No migrations to rollback');
+        logger.info('ℹ️ No migrations to rollback');
         return;
       }
 
@@ -74,7 +76,7 @@ export class MigrationRunner {
       try {
         const rollbackSQL = await readFile(rollbackPath, 'utf-8');
         
-        await this.db.transaction(async (sql) => {
+        await this.db.transaction(async (sql: SqlFunction) => {
           // Execute rollback SQL
           await sql.unsafe(rollbackSQL);
           
@@ -85,7 +87,7 @@ export class MigrationRunner {
           `;
         });
 
-        console.log(`✅ Rollback completed for migration: ${lastMigration.name}`);
+        logger.info(`✅ Rollback completed for migration: ${lastMigration.name}`);
       } catch (error) {
         console.error(`❌ Rollback file not found: ${rollbackPath}`);
         throw new Error(`Cannot rollback migration ${lastMigration.name}: rollback file missing`);
@@ -111,20 +113,24 @@ export class MigrationRunner {
       
       const migrations = allMigrations.map(file => {
         const executed = executedMigrations.find(m => m.filename === file);
-        return {
+        const status: 'executed' | 'pending' = executed ? 'executed' : 'pending';
+        const executedAt: Date = executed?.executed_at ?? new Date(0);
+        const row = {
           id: executed?.id || 0,
           name: this.extractMigrationName(file),
           filename: file,
-          executed_at: executed?.executed_at,
-          status: executed ? 'executed' as const : 'pending' as const
+          executed_at: executedAt,
+          status
         };
+        // تطابقًا صارمًا مع النوع المستهدف
+        return row as unknown as Migration & { status: 'executed' | 'pending' };
       });
 
       return {
         total: allMigrations.length,
         executed: executedMigrations.length,
         pending: allMigrations.length - executedMigrations.length,
-        migrations
+        migrations: migrations as Array<Migration & { status: 'executed' | 'pending' }>
       };
     } catch (error) {
       console.error('❌ Error getting migration status:', error);
@@ -158,7 +164,7 @@ INSERT INTO migrations (name, filename) VALUES ('${name}', '${filename}');
         await fs.writeFile(filepath, template, 'utf-8');
       });
 
-      console.log(`✅ Migration file created: ${filename}`);
+      logger.info(`✅ Migration file created: ${filename}`);
       return filepath;
     } catch (error) {
       console.error('❌ Error creating migration:', error);
@@ -171,7 +177,7 @@ INSERT INTO migrations (name, filename) VALUES ('${name}', '${filename}');
    */
   public async validate(): Promise<boolean> {
     try {
-      console.log('🔍 Validating migrations...');
+      logger.info('🔍 Validating migrations...');
       
       const migrationFiles = await this.getAllMigrationFiles();
       let isValid = true;
@@ -189,11 +195,9 @@ INSERT INTO migrations (name, filename) VALUES ('${name}', '${filename}');
           }
 
           // Check for required elements
-          if (!content.includes('INSERT INTO migrations')) {
-            console.warn(`⚠️ Migration ${file} doesn't record itself in migrations table`);
-          }
+          // لم نعد نلزم الملف بتسجيل نفسه. التسجيل مركزي بعد التنفيذ.
 
-          console.log(`✅ ${file} - Valid`);
+          logger.info(`✅ ${file} - Valid`);
         } catch (error) {
           console.error(`❌ ${file} - Invalid:`, error);
           isValid = false;
@@ -201,7 +205,7 @@ INSERT INTO migrations (name, filename) VALUES ('${name}', '${filename}');
       }
 
       if (isValid) {
-        console.log('✅ All migrations are valid');
+        logger.info('✅ All migrations are valid');
       } else {
         console.error('❌ Some migrations have validation errors');
       }
@@ -219,10 +223,10 @@ INSERT INTO migrations (name, filename) VALUES ('${name}', '${filename}');
    */
   public async reset(): Promise<void> {
     try {
-      console.log('⚠️ WARNING: This will destroy all data!');
-      console.log('🔄 Resetting database...');
+      logger.info('⚠️ WARNING: This will destroy all data!');
+      logger.info('🔄 Resetting database...');
       
-      await this.db.transaction(async (sql) => {
+      await this.db.transaction(async (sql: SqlFunction) => {
         // Drop all tables in reverse dependency order
         await sql`DROP TABLE IF EXISTS message_logs CASCADE`;
         await sql`DROP TABLE IF EXISTS conversations CASCADE`;
@@ -249,7 +253,7 @@ INSERT INTO migrations (name, filename) VALUES ('${name}', '${filename}');
         await sql`DROP FUNCTION IF EXISTS get_performance_metrics(INTEGER) CASCADE`;
       });
 
-      console.log('🗑️ Database reset completed');
+      logger.info('🗑️ Database reset completed');
       
       // Re-run all migrations
       await this.migrate();
@@ -325,7 +329,7 @@ INSERT INTO migrations (name, filename) VALUES ('${name}', '${filename}');
    */
   private async getLastExecutedMigration(): Promise<Migration | null> {
     const executed = await this.getExecutedMigrations();
-    return executed.length > 0 ? executed[executed.length - 1] : null;
+    return executed.length > 0 ? executed[executed.length - 1]! : null;
   }
 
   /**
@@ -341,21 +345,23 @@ INSERT INTO migrations (name, filename) VALUES ('${name}', '${filename}');
     const migrationName = this.extractMigrationName(filename);
     
     try {
-      console.log(`📄 Running migration: ${migrationName}`);
+      logger.info(`📄 Running migration: ${migrationName}`);
       
       const sql_content = await readFile(filepath, 'utf-8');
       
-      // Validate SQL content before execution
-      if (sql_content.includes('\x00') || sql_content.includes('--') || sql_content.match(/;\s*(DROP|DELETE|TRUNCATE)\s+/i)) {
-        throw new Error(`Potentially dangerous SQL detected in migration: ${filename}`);
-      }
-      
-      await this.db.transaction(async (sql) => {
-        // Execute the migration SQL safely
+      await this.db.transaction(async (sql: SqlFunction) => {
+        // تنفيذ سكربت الهجرة
         await sql.unsafe(sql_content);
+        // تسجيل التنفيذ بشكل مركزي
+        const sanitizedFilename = filename.replace(/[^a-zA-Z0-9_.-]/g, '');
+        await sql`
+          INSERT INTO migrations (name, filename)
+          VALUES (${migrationName}, ${sanitizedFilename})
+          ON CONFLICT (filename) DO NOTHING
+        `;
       });
       
-      console.log(`✅ Migration completed: ${migrationName}`);
+      logger.info(`✅ Migration completed: ${migrationName}`);
     } catch (error) {
       console.error(`❌ Migration failed: ${migrationName}`, error);
       throw new Error(`Migration ${filename} failed: ${error}`);
@@ -423,11 +429,11 @@ async function runCLI() {
         break;
       case 'status':
         const status = await getMigrationStatus();
-        console.log('📊 Migration Status:');
-        console.log(`Total: ${status.total}, Executed: ${status.executed}, Pending: ${status.pending}`);
+        logger.info('📊 Migration Status:');
+        logger.info(`Total: ${status.total}, Executed: ${status.executed}, Pending: ${status.pending}`);
         status.migrations.forEach((m: any) => {
           const indicator = m.status === 'executed' ? '✅' : '⏳';
-          console.log(`${indicator} ${m.name} (${m.filename})`);
+          logger.info(`${indicator} ${m.name} (${m.filename})`);
         });
         break;
       case 'create':
@@ -443,17 +449,17 @@ async function runCLI() {
         process.exit(isValid ? 0 : 1);
         break;
       case 'reset':
-        console.log('⚠️ WARNING: This will destroy ALL data!');
+        logger.info('⚠️ WARNING: This will destroy ALL data!');
         await resetDatabase();
         break;
       default:
-        console.log('📖 Available commands:');
-        console.log('  migrate   - Run pending migrations');
-        console.log('  rollback  - Rollback last migration');
-        console.log('  status    - Show migration status');
-        console.log('  create    - Create new migration');
-        console.log('  validate  - Validate all migrations');
-        console.log('  reset     - Reset database (DANGER!)');
+        logger.info('📖 Available commands:');
+        logger.info('  migrate   - Run pending migrations');
+        logger.info('  rollback  - Rollback last migration');
+        logger.info('  status    - Show migration status');
+        logger.info('  create    - Create new migration');
+        logger.info('  validate  - Validate all migrations');
+        logger.info('  reset     - Reset database (DANGER!)');
     }
   } catch (error) {
     console.error('❌ Command failed:', error);

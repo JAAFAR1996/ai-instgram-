@@ -6,6 +6,7 @@
  */
 
 import crypto from 'crypto';
+import { getConfig, type LogLevel } from '../config/index.js';
 
 // serr function moved to isolation/context.ts to avoid duplicates
 
@@ -16,10 +17,9 @@ export interface LogContext {
   merchantId?: string;
   userId?: string;
   sessionId?: string;
-  [key: string]: any;
+  // Additional contextual fields should be JSON-safe primitives/objects
+  [key: string]: unknown;
 }
-
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
 export interface LogEntry {
   level: LogLevel;
@@ -108,9 +108,9 @@ export class Logger {
   /**
    * Log at error level
    */
-  error(message: string, err?: Error | any, context?: LogContext): void;
+  error(message: string, err?: Error | unknown, context?: LogContext): void;
   error(context: LogContext, message: string): void;
-  error(arg1: string | LogContext, arg2?: any, arg3?: LogContext): void {
+  error(arg1: string | LogContext, arg2?: unknown, arg3?: LogContext): void {
     if (typeof arg1 === 'string') {
       const message = arg1;
       const err = arg2;
@@ -126,9 +126,9 @@ export class Logger {
   /**
    * Log at fatal level
    */
-  fatal(message: string, err?: Error | any, context?: LogContext): void;
+  fatal(message: string, err?: Error | unknown, context?: LogContext): void;
   fatal(context: LogContext, message: string): void;
-  fatal(arg1: string | LogContext, arg2?: any, arg3?: LogContext): void {
+  fatal(arg1: string | LogContext, arg2?: unknown, arg3?: LogContext): void {
     if (typeof arg1 === 'string') {
       const message = arg1;
       const err = arg2;
@@ -144,11 +144,11 @@ export class Logger {
   /**
    * Core logging method with top-level context and error
    */
-  private log(level: LogLevel, message: string, context?: LogContext & { err?: any; error?: any }): void {
+  private log(level: LogLevel, message: string, context?: LogContext & { err?: unknown; error?: unknown }): void {
     if (!this.shouldLog(level)) return;
 
-    const ctx = this.redactSensitiveData({ ...this.context, ...(context || {}) }) as LogContext & { err?: any; error?: any };
-    const { err, error, ...safeCtx } = ctx as any;
+    const ctx = this.redactSensitiveData({ ...this.context, ...(context ?? {}) }) as LogContext & { err?: unknown; error?: unknown };
+    const { err, error, ...safeCtx } = ctx as Record<string, unknown>;
     const finalError = err ?? error;
 
     const entry: LogEntry = {
@@ -158,18 +158,23 @@ export class Logger {
       context: safeCtx,
       ...(finalError ? {
         error: (finalError instanceof Error)
-          ? { name: finalError.name, message: finalError.message, stack: finalError.stack }
-          : (typeof finalError === 'object' ? finalError : { message: String(finalError) })
+          ? { name: finalError.name, message: String(finalError.message), ...(finalError.stack ? { stack: finalError.stack } : {}) }
+          : (typeof finalError === 'object' && finalError !== null) 
+            ? { name: String((finalError as any)?.name ?? 'Error'), message: String((finalError as any)?.message ?? finalError) }
+            : { name: String((finalError as any)?.name ?? 'Error'), message: String((finalError as any)?.message ?? finalError) }
       } : {})
     };
 
+    const config = getConfig();
+    
     // Remove timestamp from production output since Render adds its own
-    if (process.env.NODE_ENV === 'production') {
-      delete (entry as any).timestamp;
+    if (config.environment === 'production') {
+      const entryObj: Record<string, unknown> = { ...entry };
+      delete entryObj.timestamp;
     }
 
     const out = (level === 'error' || level === 'fatal') ? process.stderr : process.stdout;
-    if (process.env.NODE_ENV === 'production') {
+    if (config.environment === 'production') {
       out.write(JSON.stringify(entry) + '\n');
     } else {
       out.write(`${entry.timestamp} ${level.toUpperCase().padEnd(5)} ${message}` +
@@ -198,24 +203,22 @@ export class Logger {
    * Get log level from environment
    */
   private getLogLevel(): LogLevel {
-    const level = process.env.LOG_LEVEL?.toLowerCase() as LogLevel;
-    const validLevels: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
-    return validLevels.includes(level) ? level : 'info';
+    return getConfig().logLevel;
   }
 
   /**
    * Redact sensitive information from logs
    */
-  private redactSensitiveData(data: any): any {
-    if (!data || typeof data !== 'object') return data;
+  private redactSensitiveData(data: unknown): Record<string, unknown> {
+    if (!data || typeof data !== 'object') return data as Record<string, unknown>;
 
-    const redacted = { ...data };
+        const redacted = { ...data } as Record<string, unknown>;
 
     // Redact sensitive fields
     for (const field of SENSITIVE_FIELDS) {
       if (redacted[field] !== undefined) {
         if (typeof redacted[field] === 'string') {
-          redacted[field] = this.maskString(redacted[field]);
+          redacted[field] = this.maskString(redacted[field] as string);
         } else {
           redacted[field] = '[REDACTED]';
         }
@@ -227,15 +230,15 @@ export class Logger {
       if (value && typeof value === 'object' && !Array.isArray(value)) {
         redacted[key] = this.redactSensitiveData(value);
       } else if (Array.isArray(value)) {
-        redacted[key] = value.map(item => 
+        redacted[key] = value.map(item =>
           typeof item === 'object' ? this.redactSensitiveData(item) : item
         );
       }
     }
 
     // Special handling for headers
-    if (redacted.headers) {
-      redacted.headers = this.redactHeaders(redacted.headers);
+    if (redacted.headers && typeof redacted.headers === 'object') {
+      redacted.headers = this.redactHeaders(redacted.headers as Record<string, unknown>);
     }
 
     return redacted;
@@ -244,7 +247,7 @@ export class Logger {
   /**
    * Redact HTTP headers with normalized key matching
    */
-  private redactHeaders(headers: Record<string, any>): Record<string, any> {
+  private redactHeaders(headers: Record<string, unknown>): Record<string, unknown> {
     const redacted = { ...headers };
     
     for (const [key, value] of Object.entries(headers)) {
@@ -335,5 +338,21 @@ function generateTraceId(): string {
 function generateCorrelationId(): string {
   return `corr_${Date.now()}_${crypto.randomUUID()}`;
 }
+
+// Simple logger export for backward compatibility with patches
+export const logger = {
+  debug(msg: string, fields?: Record<string, unknown>) { 
+    getLogger().debug(msg, fields); 
+  },
+  info(msg: string, fields?: Record<string, unknown>) { 
+    getLogger().info(msg, fields); 
+  },
+  warn(msg: string, fields?: Record<string, unknown>) { 
+    getLogger().warn(msg, fields); 
+  },
+  error(msg: string, fields?: Record<string, unknown>) { 
+    getLogger().error(msg, undefined, fields); 
+  },
+};
 
 export default Logger;

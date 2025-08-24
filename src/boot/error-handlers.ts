@@ -7,6 +7,7 @@
 
 import { setTimeout as delay } from 'node:timers/promises';
 import { teardownTimerManagement } from '../utils/timer-manager.js';
+import { logger } from '../services/logger.js';
 
 // Global error counters for monitoring
 let unhandledRejectionCount = 0;
@@ -99,7 +100,7 @@ export async function gracefulShutdown(signal: string, code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   
-  console.log(`🔄 Graceful shutdown initiated by ${signal}...`);
+  logger.info(`🔄 Graceful shutdown initiated by ${signal}...`);
   
   try {
     // Signal all operations to stop
@@ -107,7 +108,7 @@ export async function gracefulShutdown(signal: string, code = 0) {
     
     // Signal queue workers to stop processing
     try {
-      console.log('⚠️ Queue manager shutdown temporarily disabled');
+      logger.info('⚠️ Queue manager shutdown temporarily disabled');
     } catch (error) {
       console.error('❌ Failed to stop queue processing:', error);
     }
@@ -117,7 +118,7 @@ export async function gracefulShutdown(signal: string, code = 0) {
       const { getDatabase } = await import('../db/adapter.js');
       const db = getDatabase();
       await db.close();
-      console.log('✅ Database connections closed');
+      logger.info('✅ Database connections closed');
     } catch (error) {
       console.error('❌ Failed to close database:', error);
     }
@@ -127,7 +128,7 @@ export async function gracefulShutdown(signal: string, code = 0) {
       const { getRedisConnectionManager } = await import('../services/RedisConnectionManager.js');
       const redisManager = getRedisConnectionManager();
       await redisManager.closeAllConnections();
-      console.log('✅ Redis connections closed');
+      logger.info('✅ Redis connections closed');
     } catch (error) {
       console.error('❌ Failed to close Redis connections:', error);
     }
@@ -135,12 +136,12 @@ export async function gracefulShutdown(signal: string, code = 0) {
       // Cancel all registered timers and restore globals
       try {
         teardownTimerManagement();
-        console.log('✅ Timers cleared');
+        logger.info('✅ Timers cleared');
       } catch (error) {
         console.error('❌ Failed to clear timers:', error);
       }
 
-    console.log('✅ Graceful shutdown completed');
+    logger.info('✅ Graceful shutdown completed');
   } catch (error) {
     console.error('❌ Error during graceful shutdown:', error);
   } finally {
@@ -213,4 +214,4 @@ export function getErrorStats() {
   };
 }
 
-console.log('🛡️  Global error handlers initialized');
+logger.info('🛡️  Global error handlers initialized');

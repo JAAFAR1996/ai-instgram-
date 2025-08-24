@@ -62,13 +62,12 @@ export function createMerchantIsolationMiddleware(
     }
   };
   
-  return async (c: Context, next: Next) => {
+  return async (c: Context, next: Next): Promise<Response | void> => {
     try {
       // Skip isolation for OPTIONS and HEAD methods
       const method = c.req.method;
       if (method === 'OPTIONS' || method === 'HEAD') {
-        await next();
-        return;
+        return await next();
       }
 
       // Safe path extraction with fallback
@@ -166,7 +165,7 @@ export function createMerchantIsolationMiddleware(
         await next();
         
       } catch (dbError) {
-        logger.error({ err: serr(dbError), route: c.req.path, merchantId }, 'Merchant isolation failed');
+        logger.error({ err: serr(dbError), route: path, merchantId }, 'Merchant isolation failed');
 
         if (finalConfig.strictMode) {
           return c.json({
@@ -187,7 +186,8 @@ export function createMerchantIsolationMiddleware(
       }
       
     } catch (error) {
-      logger.error({ err: serr(error), route: c.req.path, merchantId: c.get('merchantId') }, 'Merchant isolation failed');
+      const currentPath = c.req.path;
+      logger.error({ err: serr(error), route: currentPath, merchantId: c.get('merchantId') }, 'Merchant isolation failed');
       return c.json({
         error: 'Internal server error',
         code: 'MIDDLEWARE_ERROR'

@@ -1,0 +1,64 @@
+--- /mnt/data/work/src4/src/services/cross-platform-conversation-manager.ts
++++ /mnt/data/work/src4/src/services/cross-platform-conversation-manager.ts
+@@ -10,6 +10,7 @@
+ import { getConversationAIOrchestrator, type CrossPlatformContext } from './conversation-ai-orchestrator.js';
+ import type { Platform } from '../types/database.js';
+ import type { Sql, SqlFragment } from '../types/sql.js';
++import { logger } from 'logger.js';
+ 
+ export interface UnifiedCustomerProfile {
+   customerId: string;
+@@ -220,7 +221,7 @@
+         tags
+       };
+ 
+-      console.log(`📊 Unified profile created for customer with ${totalInteractions} interactions across ${platformProfiles.length} platforms`);
++      logger.info(`📊 Unified profile created for customer with ${totalInteractions} interactions across ${platformProfiles.length} platforms`);
+       
+       return unifiedProfile;
+ 
+@@ -240,7 +241,7 @@
+     reason: 'customer_initiated' | 'merchant_redirect' | 'auto_follow' = 'customer_initiated'
+   ): Promise<PlatformSwitchEvent> {
+     try {
+-      console.log(`🔄 Handling platform switch: ${fromIdentifier.platform} → ${toIdentifier.platform}`);
++      logger.info(`🔄 Handling platform switch: ${fromIdentifier.platform} → ${toIdentifier.platform}`);
+ 
+       const sql: Sql = this.db.getSQL();
+       const timestamp = new Date();
+@@ -316,7 +317,7 @@
+         continuityScore
+       };
+ 
+-      console.log(`✅ Platform switch completed with ${(continuityScore * 100).toFixed(1)}% continuity`);
++      logger.info(`✅ Platform switch completed with ${(continuityScore * 100).toFixed(1)}% continuity`);
+       
+       return switchEvent;
+ 
+@@ -346,7 +347,7 @@
+     }
+   ): Promise<ConversationMergeResult> {
+     try {
+-      console.log('🔗 Merging customer conversations across platforms...');
++      logger.info('🔗 Merging customer conversations across platforms...');
+ 
+       const sql: Sql = this.db.getSQL();
+       const mergeStrategy = options?.mergeStrategy || 'most_complete';
+@@ -443,7 +444,7 @@
+         )
+       `;
+ 
+-      console.log(`✅ Merged ${secondaryConversations.length} conversations into primary conversation`);
++      logger.info(`✅ Merged ${secondaryConversations.length} conversations into primary conversation`);
+ 
+       return {
+         success: true,
+@@ -604,7 +605,7 @@
+         platformAnalysis
+       );
+ 
+-      console.log(`🎯 Platform recommendation: ${recommendedPlatform} (${(confidence * 100).toFixed(1)}% confidence)`);
++      logger.info(`🎯 Platform recommendation: ${recommendedPlatform} (${(confidence * 100).toFixed(1)}% confidence)`);
+ 
+       return {
+         recommendedPlatform,

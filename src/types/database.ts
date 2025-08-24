@@ -5,6 +5,19 @@
  * ===============================================
  */
 
+// Database error handling
+export class DatabaseError extends Error {
+  constructor(
+    message: string,
+    public code?: string,
+    public query?: string,
+    public params?: unknown[]
+  ) {
+    super(message);
+    this.name = 'DatabaseError';
+  }
+}
+
 // Base interfaces
 export interface BaseEntity {
   id: string;
@@ -406,7 +419,7 @@ export interface CustomerAnalytics {
 }
 
 // Database connection and query types
-export interface DatabaseConfig {
+export interface LegacyDatabaseConfig {
   host: string;
   port: number;
   database: string;
@@ -520,3 +533,76 @@ export interface QualityMetrics extends TimestampedEntity {
   status: QualityStatus;
   last_quality_check: Date;
 }
+
+// ===============================================
+// Zod Schemas للتحقق من البيانات على الحدود
+// ===============================================
+import { z } from 'zod';
+
+// Schema للتحقق من Merchant
+export const ZMerchant = z.object({
+  id: z.string().uuid(),
+  business_name: z.string().min(1),
+  business_category: z.string().optional(),
+  whatsapp_number: z.string().optional(),
+  instagram_username: z.string().optional(),
+  subscription_status: z.enum(['ACTIVE', 'SUSPENDED', 'EXPIRED', 'TRIAL']),
+  subscription_tier: z.enum(['BASIC', 'PREMIUM', 'ENTERPRISE']),
+  settings: z.record(z.unknown()).optional(),
+  ai_config: z.record(z.unknown()).optional(),
+  created_at: z.preprocess((v) => (typeof v === 'string' ? new Date(v) : v), z.date()),
+  updated_at: z.preprocess((v) => (typeof v === 'string' ? new Date(v) : v), z.date()),
+  deleted_at: z.preprocess((v) => (typeof v === 'string' ? new Date(v) : v), z.date()).nullable().optional()
+});
+export type TMerchant = z.infer<typeof ZMerchant>;
+
+// Schema للتحقق من Conversation
+export const ZConversation = z.object({
+  id: z.string().uuid(),
+  merchant_id: z.string().uuid(),
+  customer_phone: z.string().optional(),
+  customer_instagram: z.string().optional(),
+  platform: z.enum(['instagram', 'whatsapp']),
+  conversation_stage: z.string(),
+  session_data: z.object({
+    cart: z.array(z.record(z.unknown())).optional(),
+    preferences: z.record(z.unknown()).optional(),
+    context: z.record(z.unknown()).optional()
+  }).optional(),
+  last_message_at: z.preprocess((v) => (typeof v === 'string' ? new Date(v) : v), z.date()).optional(),
+  created_at: z.preprocess((v) => (typeof v === 'string' ? new Date(v) : v), z.date()),
+  updated_at: z.preprocess((v) => (typeof v === 'string' ? new Date(v) : v), z.date())
+});
+export type TConversation = z.infer<typeof ZConversation>;
+
+// Schema للتحقق من Message
+export const ZMessage = z.object({
+  id: z.string().uuid(),
+  conversation_id: z.string().uuid(),
+  direction: z.enum(['INCOMING', 'OUTGOING']),
+  platform: z.enum(['instagram', 'whatsapp']),
+  message_type: z.enum(['TEXT', 'IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT', 'STICKER', 'LOCATION', 'CONTACT']),
+  content: z.string().optional(),
+  media_url: z.string().optional(),
+  platform_message_id: z.string().optional(),
+  delivery_status: z.enum(['PENDING', 'SENT', 'DELIVERED', 'READ', 'FAILED']).optional(),
+  ai_processed: z.boolean(),
+  created_at: z.preprocess((v) => (typeof v === 'string' ? new Date(v) : v), z.date())
+});
+export type TMessage = z.infer<typeof ZMessage>;
+
+// Schema للتحقق من Webhook Request
+export const ZWebhookRequest = z.object({
+  object: z.string(),
+  entry: z.array(z.record(z.unknown()))
+});
+export type TWebhookRequest = z.infer<typeof ZWebhookRequest>;
+
+// Schema للتحقق من API Response
+export const ZAPIResponse = z.object({
+  success: z.boolean(),
+  data: z.unknown().optional(),
+  error: z.string().optional(),
+  message: z.string().optional()
+});
+export type TAPIResponse = z.infer<typeof ZAPIResponse>;

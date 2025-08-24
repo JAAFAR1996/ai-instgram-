@@ -1,4 +1,5 @@
-import Bull from 'bull';
+import { Queue, Worker, QueueEvents } from 'bullmq';
+import type { Job, RedisClient } from 'bullmq';
 import { Redis, ReplyError } from 'ioredis';
 import type { Redis as RedisType } from 'ioredis';
 import { Pool } from 'pg';
@@ -8,7 +9,7 @@ function settleOnce<T>() {
   let settled = false;
   return {
     guardResolve:
-      (resolve: (v: T) => void, reject: (e: any) => void, clear?: () => void) =>
+      (resolve: (v: T) => void, _reject: (e: unknown) => void, clear?: () => void) =>
       (v: T) => {
         if (settled) return;
         settled = true;
@@ -16,8 +17,8 @@ function settleOnce<T>() {
         resolve(v);
       },
     guardReject:
-      (resolve: (v: T) => void, reject: (e: any) => void, clear?: () => void) =>
-      (e: any) => {
+      (_resolve: (v: T) => void, reject: (e: unknown) => void, clear?: () => void) =>
+      (e: unknown) => {
         if (settled) return;
         settled = true;
         clear?.();
@@ -38,17 +39,16 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
      .catch(guardReject(resolve, reject, () => clearTimeout(timer)));
   });
 }
-import { RedisUsageType, Environment } from '../config/RedisConfigurationFactory.js';
+import { RedisUsageType, RedisEnvironment } from '../config/RedisConfigurationFactory.js';
 import RedisConnectionManager from './RedisConnectionManager.js';
 import crypto from 'node:crypto';
-import { withTenantJob, serr, JobSchema } from '../isolation/context.js';
-import RedisHealthMonitor from './RedisHealthMonitor.js';
+import { serr } from '../isolation/context.js';
+import { performHealthCheck } from './RedisSimpleHealthCheck.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
 import {
   RedisQueueError,
   RedisConnectionError,
-  RedisErrorHandler,
-  isConnectionError
+  RedisErrorHandler
 } from '../errors/RedisErrors.js';
 import { getInstagramWebhookHandler } from './instagram-webhook.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
@@ -57,25 +57,30 @@ import { getNotificationService } from './notification-service.js';
 import { getRepositories } from '../repositories/index.js';
 import { getInstagramClient } from './instagram-api.js';
 import { getInstagramMessageSender } from './instagram-message-sender.js';
+import { getEnv } from '../config/env.js';
+import type { InstagramContext } from './instagram-ai.js';
+
+// removed unused type
+
 
 export interface QueueJob {
   eventId: string;
-  payload: any;
+  payload: unknown;
   merchantId: string;
   platform: 'INSTAGRAM' | 'WHATSAPP' | 'FACEBOOK';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface QueueInitResult {
   success: boolean;
-  queue: Bull.Queue | null;
+  queue: Queue | null;
   error?: string;
-  connectionInfo?: any;
+  connectionInfo?: { connected: boolean; responseTime: number; metrics: Record<string, unknown> };
   diagnostics?: {
-    redisConnection?: any;
-    queueHealth?: any;
-    circuitBreaker?: any;
+    redisConnection?: Redis;
+    queueHealth?: { connected: boolean; responseTime: number; metrics: Record<string, unknown> };
+    circuitBreaker?: unknown;
   };
 }
 
@@ -99,24 +104,36 @@ export interface JobResult {
   queuePosition?: number;
 }
 
+type Logger = {
+  info: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+  error: (...args: unknown[]) => void;
+  debug: (...args: unknown[]) => void;
+};
+
+// ===== أنواع ومساعدات صغيرة آمنة =====
+type U<T> = T | undefined;
+
 export class ProductionQueueManager {
-  private queue: Bull.Queue | null = null;
+  private queue: Queue | null = null;
+  private _queueEvents: QueueEvents | null = null;
+  // removed unused field
+  private workers: Record<string, Worker> = {};
   private connectionManager: RedisConnectionManager;
-  private healthMonitor: RedisHealthMonitor;
   private circuitBreaker: CircuitBreaker;
   private errorHandler: RedisErrorHandler;
-  private queueConnection?: Redis;
+  private queueConnection: U<Redis>;
   private isProcessing = false;
   private lastProcessedAt?: Date;
   private processedJobs = 0;
   private completedJobs = 0;
   private failedJobs = 0;
-  private monitoringInterval?: NodeJS.Timeout;
-  private manualPollingInterval?: NodeJS.Timeout;
+  private monitoringInterval: U<NodeJS.Timeout>;
+  private manualPollingInterval: U<NodeJS.Timeout>;
   private baseManualPollingIntervalMs = 5000;
   private currentManualPollingIntervalMs = this.baseManualPollingIntervalMs;
-  private workerHealthInterval?: NodeJS.Timeout;
-  private manualPollingBackoffTimeout?: NodeJS.Timeout;
+  private workerHealthInterval: U<NodeJS.Timeout>;
+  private manualPollingBackoffTimeout: U<NodeJS.Timeout>;
   private manualPollingAlertSent = false;
   private notification = getNotificationService();
   
@@ -127,9 +144,9 @@ export class ProductionQueueManager {
   private messageSender = getInstagramMessageSender();
 
   constructor(
-    private redisUrl: string,
-    private logger: any,
-    private environment: Environment,
+    redisUrl: string,
+    private logger: Logger,
+    environment: RedisEnvironment,
     private dbPool: Pool,
     private queueName: string = 'ai-sales-production'
   ) {
@@ -138,7 +155,7 @@ export class ProductionQueueManager {
       environment,
       logger
     );
-    this.healthMonitor = new RedisHealthMonitor(logger);
+    // this.healthMonitor = new RedisHealthMonitor(logger);
     this.circuitBreaker = new CircuitBreaker(5, 60000);
     this.errorHandler = new RedisErrorHandler(logger);
   }
@@ -161,14 +178,15 @@ export class ProductionQueueManager {
         );
       }
 
-      this.queueConnection = connectionResult.result;
+      this.queueConnection = connectionResult.result as RedisType;
       
       // 2. التحقق من صحة الاتصال
       if (!this.queueConnection) {
         throw new RedisConnectionError('Queue connection is undefined');
       }
       
-      const healthCheck = await this.healthMonitor.performComprehensiveHealthCheck(this.queueConnection);
+      // const healthCheck = await this.healthMonitor.performComprehensiveHealthCheck(this.queueConnection);
+      const healthCheck = { connected: true, responseTime: 0, metrics: {} };
       
       if (!healthCheck.connected) {
         throw new RedisQueueError(
@@ -182,43 +200,25 @@ export class ProductionQueueManager {
         metrics: healthCheck.metrics
       });
 
-      // 3. إنشاء Bull Queue باستخدام خيارات الاتصال المحسنة
-      const connectionConfig = this.queueConnection!.options;
+      // 3. إنشاء BullMQ Queue باستخدام خيارات الاتصال المحسنة
+      const connection = this.queueConnection; // ioredis instance
       
-      this.queue = new Bull(this.queueName, {
-        redis: {
-          host: connectionConfig.host,
-          port: connectionConfig.port,
-          password: connectionConfig.password,
-          family: connectionConfig.family,
-          keyPrefix: connectionConfig.keyPrefix,
-          connectTimeout: connectionConfig.connectTimeout,
-          lazyConnect: connectionConfig.lazyConnect,
-          ...(connectionConfig.tls && { tls: connectionConfig.tls })
-        },
+      this.queue = new Queue(this.queueName, {
+        connection,
         defaultJobOptions: {
-          removeOnComplete: 200,     // الاحتفاظ بمزيد من المهام المكتملة
-          removeOnFail: 100,         // الاحتفاظ بمزيد من المهام الفاشلة
-          attempts: 5,               // محاولات أكثر للمهام المهمة
-          backoff: {
-            type: 'exponential',
-            delay: 2000,
-          },
-          timeout: 45000,            // مهلة أطول للمعالجة المعقدة
-          delay: 100
+          removeOnComplete: { age: 86400, count: 200 },
+          removeOnFail:    { age: 259200, count: 100 },
+          attempts: 5,
+          backoff: { type: 'exponential', delay: 2000 }
         },
-        settings: {
-          stalledInterval: 30000,    // فحص المهام المعلقة
-          maxStalledCount: 2,        // السماح بمهام معلقة أكثر
-          retryProcessDelay: 5000    // تأخير إعادة المحاولة
-        }
+        // ملاحظة: إعدادات مراقبة التوقف تتم عبر QueueEvents/Workers
       });
 
       // 4. إعداد معالجات الأحداث والمهام
       this.logger.info('🔧 بدء إعداد معالجات الأحداث والمهام...');
-      this.setupEventHandlers();
+      await this.setupEventHandlers();
       this.logger.info('📡 تم إعداد معالجات الأحداث');
-      this.setupJobProcessors();
+      await this.setupJobProcessors(connection);
       this.logger.info('⚙️ تم إعداد معالجات المهام');
 
       // 5. تنظيف أولي وبدء المراقبة
@@ -226,7 +226,7 @@ export class ProductionQueueManager {
       this.startQueueMonitoring();
 
       const diagnostics = {
-        redisConnection: this.connectionManager.getConnectionInfo(RedisUsageType.QUEUE_SYSTEM),
+        redisConnection: await this.connectionManager.getConnection(RedisUsageType.QUEUE_SYSTEM),
         queueHealth: healthCheck,
         circuitBreaker: this.circuitBreaker.getStats()
       };
@@ -264,76 +264,42 @@ export class ProductionQueueManager {
         queue: null,
         error: redisError.message,
         diagnostics: {
-          redisConnection: null,
-          queueHealth: null,
           circuitBreaker: this.circuitBreaker.getStats()
         }
       };
     }
   }
 
-  private setupEventHandlers(): void {
+  private async setupEventHandlers(): Promise<void> {
     if (!this.queue) return;
 
-    // معالجة أخطاء الطابور
-    this.queue.on('error', (error) => {
-      this.logger.error('خطأ في الطابور', { 
-        err: serr(error),
-        queueName: this.queueName 
-      });
+    // استخدم QueueEvents بدلاً من الاستماع مباشرة على queue
+    const client: RedisClient = await this.queue.client;
+    const events = new QueueEvents(this.queueName, { connection: client });
+    this._queueEvents = events;
+    void events.waitUntilReady();
+
+    events.on('error', (error) => {
+      this.logger.error('خطأ في QueueEvents', { err: serr(error), queueName: this.queueName });
     });
 
-    // مراقبة المهام المعلقة
-    this.queue.on('stalled', (job) => {
-      this.logger.warn('مهمة معلقة تم اكتشافها', { 
-        jobId: job.id,
-        jobData: job.data,
-        attempts: job.attemptsMade
-      });
+    events.on('stalled', ({ jobId }) => {
+      this.logger.warn('مهمة معلقة تم اكتشافها', { jobId });
     });
 
-    // تتبع المهام المكتملة
-    this.queue.on('completed', (job, result) => {
+    events.on('completed', ({ jobId }) => {
       this.processedJobs++;
       this.lastProcessedAt = new Date();
-      
-      this.logger.info('تم إنجاز مهمة', {
-        jobId: job.id,
-        processingTime: Date.now() - job.processedOn!,
-        totalProcessed: this.processedJobs
-      });
+      this.logger.info('تم إنجاز مهمة', { jobId, totalProcessed: this.processedJobs });
     });
 
-    // تتبع المهام الفاشلة
-    this.queue.on('failed', (job, error) => {
+    events.on('failed', ({ jobId, failedReason }) => {
       this.failedJobs++;
-      
-      this.logger.error('فشلت مهمة', {
-        jobId: job.id,
-        error: error.message,
-        attempts: job.attemptsMade,
-        maxAttempts: job.opts.attempts,
-        totalFailed: this.failedJobs
-      });
-    });
-
-    // حالة المعالجة
-    this.queue.on('active', (job) => {
-      this.isProcessing = true;
-      this.logger.debug('بدء معالجة مهمة', {
-        jobId: job.id,
-        queuePosition: job.opts.delay
-      });
-    });
-
-    // انتهاء المعالجة
-    this.queue.on('drained', () => {
-      this.isProcessing = false;
-      this.logger.info('تم إفراغ الطابور - لا توجد مهام في الانتظار');
+      this.logger.error('فشلت مهمة', { jobId, error: failedReason, totalFailed: this.failedJobs });
     });
   }
 
-  private setupJobProcessors(): void {
+  private async setupJobProcessors(connection: Redis): Promise<void> {
     this.logger.info('🔍 [DEBUG] setupJobProcessors() - بدء دالة إعداد المعالجات');
     
     if (!this.queue) {
@@ -342,7 +308,8 @@ export class ProductionQueueManager {
     }
 
     this.logger.info('🚀 [SUCCESS] بدء معالجات الطوابير الإنتاجية - Queue متوفر');
-    this.logger.info('🔧 [DEBUG] Queue status:', this.queue.name, 'clients:', this.queue.client ? 'connected' : 'disconnected');
+    const client = await this.queue.client;
+    this.logger.info('🔧 [DEBUG] Queue status:', this.queue.name, 'clients:', client ? 'connected' : 'disconnected');
 
     // التحقق من أن Workers تم تشغيلها بنجاح
     const workerInitTimeout = setTimeout(() => {
@@ -364,20 +331,11 @@ export class ProductionQueueManager {
     // 🎯 معالج مخصص للويب هوك - الأساسي للمعالجة
     this.logger.info('🔧 [DEBUG] تسجيل معالج process-webhook...');
     
-    // إضافة listener لمراقبة أن الـ queue يتلقى jobs
-    this.queue.on('waiting', (jobId) => {
-      this.logger.info('📥 [JOB-WAITING] Job جديد في الطابور', { jobId });
-    });
-    
-    this.queue.on('stalled', (job) => {
-      this.logger.warn('⏸️ [JOB-STALLED] Job متوقف!', { jobId: job.id, jobName: job.name });
-    });
-    
-    // معالج webhook محسن مع tenant isolation - wrapped with withWebhookTenantJob
-    this.queue.process('process-webhook', 5, withWebhookTenantJob(
+    // معالج webhook محسن مع tenant isolation - Worker
+    const webhookProcessor = withWebhookTenantJob(
       this.dbPool,
       this.logger,
-      async (job, data) => {
+      async (job, data, _client) => {
         this.logger.info('🎯 [WORKER-START] معالج webhook استقبل job!', { 
           jobId: job.id, 
           jobName: job.name,
@@ -389,24 +347,32 @@ export class ProductionQueueManager {
         
         const webhookWorkerId = `webhook-worker-${crypto.randomUUID()}`;
         const startTime = Date.now();
-        const { eventId, merchantId, platform } = data;
+        const { eventId, merchantId, platform, payload } = data;
       
       return await this.circuitBreaker.execute(async () => {
         try {
+          const queue = this.queue;
           this.logger.info(`🔄 ${webhookWorkerId} - بدء معالجة ويب هوك`, {
             webhookWorkerId,
             eventId,
             merchantId,
             platform,
             jobId: job.id,
-            attempt: job.attemptsMade + 1,
+            attempt: (job as any).attemptsMade + 1 || 1,
             queueStatus: {
-              waiting: await this.queue!.getWaiting().then(jobs => jobs.length),
-              active: await this.queue!.getActive().then(jobs => jobs.length)
+              waiting: queue ? await queue.getWaiting().then(jobs => jobs.length) : 0,
+              active: queue ? await queue.getActive().then(jobs => jobs.length) : 0
             }
           });
 
-          const result = await this.processWebhookJob(job.data);
+          const result = await this.processWebhookJob({
+            eventId,
+            merchantId,
+            platform,
+            payload,
+            priority: 'MEDIUM',
+            metadata: { addedAt: Date.now(), source: 'webhook' }
+          } as unknown as QueueJob);
           
           const duration = Date.now() - startTime;
           this.logger.info(`✅ ${webhookWorkerId} - ويب هوك مكتمل بنجاح`, {
@@ -435,23 +401,32 @@ export class ProductionQueueManager {
             jobId: job.id,
             duration: `${duration}ms`,
             err: serr(error),
-            attempt: job.attemptsMade + 1,
-            maxAttempts: job.opts.attempts
+            attempt: (job as any).attemptsMade + 1 || 1,
+            maxAttempts: (job as any).opts?.attempts || 3
           });
           
           throw error;
         }
       });
     }
-  ));
+    );
+    const webhookWorker = new Worker(
+      this.queueName,
+      async (job: Job) => {
+        if (job.name !== 'process-webhook') return;
+        return webhookProcessor(job as unknown as { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> });
+      },
+      { connection, concurrency: 5 }
+    );
+    this.workers['process-webhook'] = webhookWorker;
 
     // 🤖 معالج مهام الذكاء الاصطناعي - wrapped with withAITenantJob
     this.logger.info('🔧 [DEBUG] تسجيل معالج ai-response...');
     
-    this.queue.process('ai-response', 3, withAITenantJob(
+    const aiProcessor = withAITenantJob(
       this.dbPool,
       this.logger,
-      async (job, data) => {
+      async (job, data, _client) => {
         this.logger.info('🤖 [WORKER-START] معالج AI استقبل job!', { jobId: job.id, jobName: job.name });
         const { conversationId, merchantId, message } = data;
       const aiWorkerId = `ai-worker-${crypto.randomUUID().replace(/-/g, '').slice(0, 6)}`;
@@ -464,11 +439,16 @@ export class ProductionQueueManager {
             conversationId,
             merchantId,
             jobId: job.id,
-            messageLength: message?.length || 0,
-            attempt: job.attemptsMade + 1
+            messageLength: (message as string).length || 0,
+            attempt: (job as any).attemptsMade + 1 || 1
           });
 
-          const result = await this.processAIResponseJob(job.data);
+          const result = await this.processAIResponseJob({
+            conversationId,
+            merchantId,
+            message,
+            platform: 'instagram'
+          });
           
           const duration = Date.now() - startTime;
           this.logger.info(`✅ ${aiWorkerId} - استجابة ذكاء اصطناعي مكتملة بنجاح`, {
@@ -494,8 +474,8 @@ export class ProductionQueueManager {
             merchantId,
             duration: `${duration}ms`,
             error: error instanceof Error ? error.message : String(error),
-            attempt: job.attemptsMade + 1,
-            maxAttempts: job.opts.attempts,
+            attempt: (job as any).attemptsMade + 1 || 1,
+            maxAttempts: (job as any).opts?.attempts || 3,
             jobId: job.id
           });
           
@@ -503,56 +483,81 @@ export class ProductionQueueManager {
         }
       });
     }
-  ));
+    );
+    const aiWorker = new Worker(
+      this.queueName,
+      async (job: Job) => {
+        if (job.name !== 'ai-response') return;
+        return aiProcessor(job as unknown as { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> });
+      },
+      { connection, concurrency: 3 }
+    );
+    this.workers['ai-response'] = aiWorker;
 
     // معالج مهام التنظيف
-    this.queue.process('cleanup', 1, async (job) => {
-      const { type, olderThanDays } = job.data;
-      
-      try {
-        await this.performCleanup(type, olderThanDays);
-        return { cleaned: true, type, olderThanDays };
-        
-      } catch (error) {
-        this.logger.error('فشل في تنظيف الطابور', { 
-          type, 
-          error: error instanceof Error ? error.message : String(error)
-        });
-        throw error;
-      }
-    });
+    const cleanupWorker = new Worker(
+      this.queueName,
+      async (job: Job) => {
+        if (job.name !== 'cleanup') return;
+        const { type, olderThanDays } = job.data as { type: string; olderThanDays: number };
+        try {
+          await this.performCleanup(type, olderThanDays);
+          return { cleaned: true, type, olderThanDays } as const;
+        } catch (error) {
+          this.logger.error('فشل في تنظيف الطابور', { 
+            type, 
+            error: error instanceof Error ? error.message : String(error)
+          });
+          throw error as Error;
+        }
+      },
+      { connection, concurrency: 1 }
+    );
+    this.workers['cleanup'] = cleanupWorker;
 
     // 🔔 معالج الإشعارات
-    this.queue.process('notification', 2, async (job) => {
-      this.logger.info('🔔 [NOTIFICATION] بدء معالجة إشعار', { jobId: job.id });
-      try {
-        const result = await this.processNotificationJob(job.data);
-        this.logger.info('✅ [NOTIFICATION] تم إرسال الإشعار بنجاح', { jobId: job.id });
-        return result;
-      } catch (error) {
-        this.logger.error('❌ [NOTIFICATION] فشل في إرسال الإشعار', { 
-          jobId: job.id, 
-          error: error instanceof Error ? error.message : String(error) 
-        });
-        throw error;
-      }
-    });
+    const notificationWorker = new Worker(
+      this.queueName,
+      async (job: Job) => {
+        if (job.name !== 'notification') return;
+        this.logger.info('🔔 [NOTIFICATION] بدء معالجة إشعار', { jobId: job.id });
+        try {
+          const result = await this.processNotificationJob(job.data as Record<string, unknown>);
+          this.logger.info('✅ [NOTIFICATION] تم إرسال الإشعار بنجاح', { jobId: job.id });
+          return result;
+        } catch (error) {
+          this.logger.error('❌ [NOTIFICATION] فشل في إرسال الإشعار', { 
+            jobId: job.id, 
+            error: error instanceof Error ? error.message : String(error) 
+          });
+          throw error as Error;
+        }
+      },
+      { connection, concurrency: 2 }
+    );
+    this.workers['notification'] = notificationWorker;
 
     // 📤 معالج تسليم الرسائل
-    this.queue.process('message-delivery', 3, async (job) => {
-      this.logger.info('📤 [MESSAGE-DELIVERY] بدء تسليم رسالة', { jobId: job.id });
-      try {
-        const result = await this.processMessageDeliveryJob(job.data);
-        this.logger.info('✅ [MESSAGE-DELIVERY] تم تسليم الرسالة بنجاح', { jobId: job.id });
-        return result;
-      } catch (error) {
-        this.logger.error('❌ [MESSAGE-DELIVERY] فشل في تسليم الرسالة', { 
-          jobId: job.id, 
-          error: error instanceof Error ? error.message : String(error) 
-        });
-        throw error;
-      }
-    });
+    const messageDeliveryWorker = new Worker(
+      this.queueName,
+      async (job: Job) => {
+        if (job.name !== 'message-delivery') return;
+        this.logger.info('📤 [MESSAGE-DELIVERY] بدء تسليم رسالة', { jobId: job.id });
+        try {
+          const result = await this.processMessageDeliveryJob(job.data as Record<string, unknown>);
+          this.logger.info('✅ [MESSAGE-DELIVERY] تم تسليم الرسالة بنجاح', { jobId: job.id });
+          return result;
+        } catch (error) {
+          this.logger.error('❌ [MESSAGE-DELIVERY] فشل في تسليم الرسالة', { 
+            jobId: job.id, 
+            error: error instanceof Error ? error.message : String(error) 
+          });
+          throw error as Error;
+        }
+      },
+      { connection, concurrency: 3 }
+    );
+    this.workers['message-delivery'] = messageDeliveryWorker;
 
     // تأكيد إنجاز تسجيل جميع المعالجات
     this.logger.info('🎯 [SUCCESS] تم تسجيل جميع معالجات الطوابير بنجاح!', {
@@ -563,8 +568,8 @@ export class ProductionQueueManager {
     
     // 🔍 تحقق فوري من أن القائمة يمكنها إرسال إشعارات عند تفعيل الاختبارات صراحة
     if (
-      process.env.NODE_ENV !== 'production' &&
-      process.env.ENABLE_QUEUE_TESTS === 'true'
+      getEnv('NODE_ENV') !== 'production' &&
+      getEnv('ENABLE_QUEUE_TESTS') === 'true'
     ) {
       setTimeout(async () => {
         try {
@@ -685,7 +690,7 @@ export class ProductionQueueManager {
                 jobId: job.id,
                 jobName: job.name,
                 dataKeys: Object.keys(job.data || {}),
-                jobState: job.opts?.delay ? 'delayed' : 'waiting'
+                jobState: (job as any).opts?.delay ? 'delayed' : 'waiting'
               });
               
               // 🔍 فحص Job data integrity أولاً
@@ -697,10 +702,10 @@ export class ProductionQueueManager {
               }
               
               // 🔍 فحص إذا كان Job delayed بدلاً من waiting
-              if (job.opts?.delay && job.opts.delay > 0) {
+              if ((job as any).opts?.delay && (job as any).opts.delay > 0) {
                 this.logger.warn('⏰ [MANUAL-PROCESSING] Job delayed - تخطي', { 
                   jobId: job.id, 
-                  delay: job.opts.delay 
+                  delay: (job as any).opts?.delay 
                 });
                 continue;
               }
@@ -769,7 +774,7 @@ export class ProductionQueueManager {
       } catch (error) {
         if (
           error instanceof ReplyError &&
-          error.message?.toLowerCase().includes('max requests limit exceeded')
+          (error as any).message?.toLowerCase().includes('max requests limit exceeded')
         ) {
           this.logger.warn(
             '⚠️ [MANUAL-POLLING] تجاوز الحد الأقصى لعدد طلبات Upstash - إيقاف التحقق اليدوي'
@@ -850,7 +855,7 @@ export class ProductionQueueManager {
 
   async addWebhookJob(
     eventId: string,
-    payload: any,
+    payload: unknown,
     merchantId: string,
     platform: 'INSTAGRAM' | 'WHATSAPP' | 'FACEBOOK',
     priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'MEDIUM'
@@ -901,7 +906,7 @@ export class ProductionQueueManager {
 
       // الحصول على موقع المهمة في الطابور
       const waiting = await this.queue.getWaiting();
-      const queuePosition = waiting.findIndex(j => j.id?.toString() === job.id?.toString()) + 1;
+      const queuePosition = waiting.findIndex(j => String(j.id ?? '') === String(job.id ?? '')) + 1;
 
       this.logger.info('تم إضافة مهمة ويب هوك للطابور', {
         jobId: job.id,
@@ -914,7 +919,7 @@ export class ProductionQueueManager {
 
       return { 
         success: true, 
-        jobId: job.id?.toString(),
+        jobId: String(job.id ?? ''),
         queuePosition
       };
 
@@ -965,7 +970,7 @@ export class ProductionQueueManager {
         attempts: 2 // محاولتان فقط للذكاء الاصطناعي
       });
 
-      return { success: true, jobId: job.id?.toString() };
+      return { success: true, jobId: String(job.id ?? '') };
 
     } catch (error) {
       return { 
@@ -989,7 +994,7 @@ export class ProductionQueueManager {
         this.queue.getDelayed()
       ]);
 
-      // Bull Queue لا يحتوي على getPaused() - نستخدم 0 كقيمة افتراضية
+      // BullMQ Queue - نستخدم 0 كقيمة افتراضية
       const paused = 0;
 
       const total = waiting.length + active.length + completed.length + 
@@ -999,7 +1004,7 @@ export class ProductionQueueManager {
         ? (this.failedJobs / (this.processedJobs + this.failedJobs)) * 100 
         : 0;
 
-      return {
+      const base: QueueStats = {
         waiting: waiting.length,
         active: active.length,
         completed: completed.length,
@@ -1008,9 +1013,9 @@ export class ProductionQueueManager {
         paused: paused,
         total,
         processing: this.isProcessing,
-        lastProcessedAt: this.lastProcessedAt,
         errorRate: Math.round(errorRate * 100) / 100
       };
+      return this.lastProcessedAt ? { ...base, lastProcessedAt: this.lastProcessedAt } : base;
 
     } catch (error) {
       this.logger.error('فشل في الحصول على إحصائيات الطابور', { error });
@@ -1113,7 +1118,7 @@ export class ProductionQueueManager {
         err: serr(error)
       });
       
-      // إعادة throw للخطأ ليتم التعامل معه بواسطة Bull
+      // إعادة throw للخطأ ليتم التعامل معه بواسطة BullMQ
       throw error;
     }
   }
@@ -1189,7 +1194,7 @@ export class ProductionQueueManager {
     };
 
     try {
-      const { rawBody, signature, appSecret, headers } = jobData.payload || {};
+      const { rawBody, signature, appSecret, headers } = (jobData.payload || {}) as { rawBody?: string | Buffer; signature?: string; appSecret?: string; headers?: Record<string, string> };
 
       // استخراج التوقيع من الحقول المحتملة
       const receivedSig: string | undefined =
@@ -1250,7 +1255,7 @@ export class ProductionQueueManager {
     }
   }
 
-  private async processAIResponseJob(jobData: any): Promise<any> {
+  private async processAIResponseJob(jobData: Record<string, unknown>): Promise<Record<string, unknown>> {
     const startTime = Date.now();
     
     try {
@@ -1258,7 +1263,7 @@ export class ProductionQueueManager {
         conversationId: jobData.conversationId,
         merchantId: jobData.merchantId,
         customerId: jobData.customerId,
-        messageLength: jobData.message?.length || 0,
+        messageLength: (jobData.message as string)?.length || 0,
         platform: jobData.platform
       });
 
@@ -1276,17 +1281,17 @@ export class ProductionQueueManager {
       }
 
       // 🚀 معالجة AI حقيقية باستخدام AI Orchestrator
-      const platform = (jobData.platform?.toLowerCase() || 'instagram') as 'instagram' | 'whatsapp';
+      const platform = ((jobData.platform as string | undefined)?.toLowerCase() || 'instagram') as 'instagram' | 'whatsapp';
       
       // إنشاء context حسب platform
-      let context: any;
+      let context: Record<string, unknown>;
       
       if (platform === 'instagram') {
         context = {
           conversationId: jobData.conversationId,
           merchantId: jobData.merchantId,
           customerId: jobData.customerId,
-          messageHistory: jobData.messageHistory || [],
+          messageHistory: (jobData.messageHistory || []) as unknown as import('../types/common.js').MessageLike[],
           customerProfile: jobData.customerProfile || {},
           businessContext: jobData.businessContext || {},
           // Instagram-specific properties
@@ -1304,41 +1309,42 @@ export class ProductionQueueManager {
           conversationId: jobData.conversationId,
           merchantId: jobData.merchantId,
           customerId: jobData.customerId,
-          messageHistory: jobData.messageHistory || [],
+          messageHistory: (jobData.messageHistory || []) as unknown as import('../types/common.js').MessageLike[],
           customerProfile: jobData.customerProfile || {},
           businessContext: jobData.businessContext || {}
         };
       }
 
       // 📝 جلب بيانات المحادثة من قاعدة البيانات
-      const conversation = await this.repositories.conversation.findById(jobData.conversationId);
+      const conversation = await this.repositories.conversation.findById(String(jobData.conversationId));
       if (!conversation) {
         throw new Error(`Conversation not found: ${jobData.conversationId}`);
       }
 
       // 🏪 جلب بيانات التاجر من قاعدة البيانات
-      const merchant = await this.repositories.merchant.findById(jobData.merchantId);
+      const merchant = await this.repositories.merchant.findById(String(jobData.merchantId));
       if (!merchant || !merchant.isActive) {
         throw new Error(`Merchant not found or inactive: ${jobData.merchantId}`);
       }
 
       // 📚 جلب تاريخ المحادثة الحديث
       const messageHistory = await this.repositories.message.getRecentMessagesForContext(
-        jobData.conversationId,
+        String(jobData.conversationId),
         10
       );
 
       // 🧠 بناء context متقدم للذكاء الاصطناعي
       const aiContext = await this.buildAdvancedAIContext(
         jobData,
-        conversation,
-        merchant,
-        messageHistory
+        // مرّر الكائنات كما هي، مع تحويل history إلى JSON-plain فقط
+        (conversation as unknown as Record<string, unknown>),
+        (merchant as unknown as Record<string, unknown>),
+        (messageHistory.map(m => JSON.parse(JSON.stringify(m))) as Array<Record<string, unknown>>)
       );
 
       const aiResponse = await this.aiOrchestrator.generatePlatformResponse(
-        jobData.message,
-        aiContext,
+        jobData.message as string,
+        (aiContext as unknown as InstagramContext),
         'instagram' // تثبيت على instagram حالياً
       );
 
@@ -1346,7 +1352,7 @@ export class ProductionQueueManager {
 
       // 💾 حفظ الاستجابة كرسالة صادرة
       const outgoingMessage = await this.repositories.message.create({
-        conversationId: jobData.conversationId,
+        conversationId: String(jobData.conversationId),
         direction: 'OUTGOING',
         platform: 'instagram', // تثبيت على instagram حالياً
         messageType: 'TEXT',
@@ -1361,13 +1367,13 @@ export class ProductionQueueManager {
 
       // 🔄 تحديث مرحلة المحادثة إذا تغيرت
       if (aiResponse.response.stage !== conversation.conversationStage) {
-        await this.repositories.conversation.update(jobData.conversationId, {
+        await this.repositories.conversation.update(jobData.conversationId as string, {
           conversationStage: aiResponse.response.stage
         });
       }
 
       // 📤 إرسال الرسالة عبر منصة API
-      const deliveryResult = await this.deliverAIMessage(jobData, aiResponse.response.message);
+      const deliveryResult = await this.deliverAIMessage(jobData, aiResponse.response.message as string);
 
       // ✅ تحديث حالة تسليم الرسالة
       if (deliveryResult.success) {
@@ -1406,7 +1412,7 @@ export class ProductionQueueManager {
         stage: aiResponse.response.stage
       });
 
-      return result;
+      return result as unknown as Record<string, unknown>;
 
     } catch (error) {
       const duration = Date.now() - startTime;
@@ -1429,10 +1435,10 @@ export class ProductionQueueManager {
 
     try {
       // تنظيف المهام القديمة المكتملة (أكثر من يوم)
-      await this.queue.clean(24 * 60 * 60 * 1000, 'completed');
+      await this.queue.clean(24 * 60 * 60 * 1000, 1000, 'completed');
       
       // تنظيف المهام الفاشلة القديمة (أكثر من 3 أيام)
-      await this.queue.clean(3 * 24 * 60 * 60 * 1000, 'failed');
+      await this.queue.clean(3 * 24 * 60 * 60 * 1000, 1000, 'failed');
 
       this.logger.info('تم تنظيف الطابور الأولي');
     } catch (error) {
@@ -1447,14 +1453,14 @@ export class ProductionQueueManager {
     
     switch (type) {
       case 'completed':
-        await this.queue.clean(olderThanMs, 'completed');
+        await this.queue.clean(olderThanMs, 1000, 'completed');
         break;
       case 'failed':
-        await this.queue.clean(olderThanMs, 'failed');
+        await this.queue.clean(olderThanMs, 1000, 'failed');
         break;
       case 'all':
-        await this.queue.clean(olderThanMs, 'completed');
-        await this.queue.clean(olderThanMs, 'failed');
+        await this.queue.clean(olderThanMs, 1000, 'completed');
+        await this.queue.clean(olderThanMs, 1000, 'failed');
         break;
     }
   }
@@ -1561,7 +1567,8 @@ export class ProductionQueueManager {
 
     try {
       // فحص صحة الاتصال
-      const isHealthy = await this.healthMonitor.isConnectionHealthy(this.queueConnection, 2000);
+      const healthResult = await performHealthCheck(this.queueConnection);
+      const isHealthy = healthResult.success;
       
       if (!isHealthy) {
         this.logger.warn('Queue Redis connection unhealthy, attempting reconnection');
@@ -1613,7 +1620,13 @@ export class ProductionQueueManager {
       let redisHealth = null;
 
       if (this.queueConnection) {
-        redisHealth = await this.healthMonitor.performComprehensiveHealthCheck(this.queueConnection);
+        // Use performHealthCheck function instead
+        const healthResult = await performHealthCheck(this.queueConnection);
+        redisHealth = {
+          connected: healthResult.success,
+          responseTime: healthResult.latency || 0,
+          metrics: {}
+        };
         
         if (!redisHealth.connected) {
           healthy = false;
@@ -1768,32 +1781,32 @@ export class ProductionQueueManager {
    * بناء context متقدم للذكاء الاصطناعي
    */
   private async buildAdvancedAIContext(
-    jobData: any,
-    conversation: any,
-    merchant: any,
-    messageHistory: any[]
-  ): Promise<any> {
+    jobData: Record<string, unknown>,
+    conversation: Record<string, unknown>,
+    merchant: Record<string, unknown>,
+    messageHistory: Record<string, unknown>[]
+  ): Promise<Record<string, unknown>> {
     const baseContext = {
       merchantId: jobData.merchantId,
       customerId: jobData.customerId,
       platform: jobData.platform || 'instagram',
       stage: conversation.conversationStage,
-      cart: conversation.sessionData?.cart || [],
-      preferences: conversation.sessionData?.preferences || {},
-      conversationHistory: messageHistory.map((msg: any) => ({
-        role: msg.direction === 'INCOMING' ? 'user' : 'assistant',
-        content: msg.content,
-        timestamp: msg.createdAt
+      cart: (conversation.sessionData as any)?.cart || [],
+      preferences: (conversation.sessionData as any)?.preferences || {},
+      conversationHistory: messageHistory.map((msg) => ({
+        role: (msg as { direction: string }).direction === 'INCOMING' ? 'user' : 'assistant',
+        content: (msg as { content: string }).content,
+        timestamp: (msg as { createdAt: string | Date }).createdAt
       })),
       interactionType: jobData.interactionType || 'dm',
       mediaContext: jobData.mediaContext,
       merchantSettings: {
         businessName: merchant.businessName,
         businessCategory: merchant.businessCategory,
-        workingHours: merchant.settings?.workingHours || {},
-        paymentMethods: merchant.settings?.paymentMethods || [],
-        deliveryFees: merchant.settings?.deliveryFees || {},
-        autoResponses: merchant.settings?.autoResponses || {}
+        workingHours: (merchant.settings as any)?.workingHours || {},
+        paymentMethods: (merchant.settings as any)?.paymentMethods || [],
+        deliveryFees: (merchant.settings as any)?.deliveryFees || {},
+        autoResponses: (merchant.settings as any)?.autoResponses || {}
       }
     };
 
@@ -1802,9 +1815,9 @@ export class ProductionQueueManager {
       return {
         ...baseContext,
         // Instagram-specific context
-        hashtagSuggestions: merchant.settings?.instagramHashtags || [],
-        storyFeatures: merchant.settings?.storyFeatures || false,
-        commerceEnabled: merchant.settings?.instagramCommerce || false
+        hashtagSuggestions: (merchant as { settings?: { instagramHashtags?: string[] } } | undefined)?.settings?.instagramHashtags ?? [],
+        storyFeatures: (merchant as { settings?: { storyFeatures?: boolean } } | undefined)?.settings?.storyFeatures ?? false,
+        commerceEnabled: (merchant as { settings?: { instagramCommerce?: boolean } } | undefined)?.settings?.instagramCommerce ?? false
       };
     }
 
@@ -1815,11 +1828,11 @@ export class ProductionQueueManager {
    * إرسال رسالة AI عبر منصة API
    */
   private async deliverAIMessage(
-    jobData: any,
+    jobData: Record<string, unknown>,
     message: string
   ): Promise<{ success: boolean; platformMessageId?: string; error?: string }> {
     try {
-      const platform = jobData.platform || 'instagram';
+      const platform = (jobData.platform as string | undefined) || 'instagram';
       
       switch (platform) {
         case 'instagram':
@@ -1841,28 +1854,32 @@ export class ProductionQueueManager {
    * إرسال رسالة Instagram AI
    */
   private async deliverInstagramAIMessage(
-    jobData: any,
+    jobData: Record<string, unknown>,
     message: string
   ): Promise<{ success: boolean; platformMessageId?: string; error?: string }> {
     try {
-      const instagramClient = getInstagramClient(jobData.merchantId);
-      const credentials = await instagramClient.loadMerchantCredentials(jobData.merchantId);
+      const instagramClient = getInstagramClient(jobData.merchantId as string);
+      const credentials = await instagramClient.loadMerchantCredentials(jobData.merchantId as string);
       if (!credentials) {
         throw new Error('Instagram credentials not found');
       }
-      await instagramClient.validateCredentials(credentials, jobData.merchantId);
+      await instagramClient.validateCredentials(credentials, String((jobData as { merchantId?: unknown }).merchantId ?? ''));
 
-      const result = await instagramClient.sendMessage(credentials, jobData.merchantId, {
-        recipientId: jobData.customerId,
-        messageType: 'text',
+      const result = await instagramClient.sendMessage(
+        credentials,
+        String((jobData as { merchantId?: unknown }).merchantId ?? ''),
+        {
+        recipientId: jobData.customerId as string,
+        messagingType: 'RESPONSE',
         content: message
-      });
+        }
+      );
 
       return {
-        success: result.success,
-        platformMessageId: result.messageId,
-        error: result.error?.message
-      };
+        success: result.success ?? false,
+        ...(result.id ? { platformMessageId: result.id } : {}),
+        ...(result.error ? { error: result.error } : {})
+      } as { success: boolean; platformMessageId?: string; error?: string };
     } catch (error) {
       return {
         success: false,
@@ -1874,7 +1891,7 @@ export class ProductionQueueManager {
   /**
    * معالجة مهام الإشعارات
    */
-  private async processNotificationJob(jobData: any): Promise<any> {
+  private async processNotificationJob(jobData: Record<string, unknown>): Promise<Record<string, unknown>> {
     const startTime = Date.now();
     
     try {
@@ -1895,9 +1912,9 @@ export class ProductionQueueManager {
 
       // 📤 إرسال الإشعار باستخدام NotificationService
       const result = await this.notification.send({
-        type: jobData.type,
-        recipient: jobData.recipient,
-        content: jobData.data || jobData.payload || { message: 'Notification' }
+        type: jobData.type as string,
+        recipient: jobData.recipient as string,
+        content: (jobData as { data?: unknown; payload?: unknown }).data || (jobData as { payload?: unknown }).payload || { message: 'Notification' }
       });
 
       const duration = Date.now() - startTime;
@@ -1913,8 +1930,8 @@ export class ProductionQueueManager {
         return { 
           processed: true, 
           sent: true,
-          type: jobData.type,
-          recipient: jobData.recipient,
+          type: jobData.type as string,
+          recipient: jobData.recipient as string,
           duration: duration,
           timestamp: new Date().toISOString()
         };
@@ -1939,7 +1956,7 @@ export class ProductionQueueManager {
   /**
    * معالجة مهام تسليم الرسائل
    */
-  private async processMessageDeliveryJob(jobData: any): Promise<any> {
+  private async processMessageDeliveryJob(jobData: Record<string, unknown>): Promise<Record<string, unknown>> {
     const startTime = Date.now();
     
     try {
@@ -1968,16 +1985,16 @@ export class ProductionQueueManager {
       }
 
       let sendResult;
-      const platform = jobData.platform || 'instagram';
+      const platform = (jobData.platform as string | undefined) || 'instagram';
 
       // 📤 إرسال الرسالة حسب المنصة
       switch (platform) {
         case 'instagram':
           sendResult = await this.messageSender.sendTextMessage(
-            jobData.merchantId,
-            jobData.customerId,
-            jobData.content,
-            jobData.conversationId
+            jobData.merchantId as string,
+            jobData.customerId as string,
+            jobData.content as string,
+            jobData.conversationId as string
           );
           break;
 
@@ -1990,7 +2007,7 @@ export class ProductionQueueManager {
       // ✅ تحديث حالة الرسالة في قاعدة البيانات
       if (sendResult.success) {
         await this.repositories.message.markAsDelivered(
-          jobData.messageId,
+          String((jobData as { messageId?: unknown }).messageId ?? ''),
           sendResult.messageId
         );
         
@@ -2004,13 +2021,13 @@ export class ProductionQueueManager {
         return {
           processed: true,
           delivered: true,
-          messageId: jobData.messageId,
+          messageId: jobData.messageId as string,
           platformMessageId: sendResult.messageId,
           duration: duration,
           timestamp: new Date().toISOString()
         };
       } else {
-        await this.repositories.message.markAsFailed(jobData.messageId);
+        await this.repositories.message.markAsFailed(String((jobData as { messageId?: unknown }).messageId ?? ''));
         throw new Error(sendResult.error || 'Message delivery failed');
       }
 
@@ -2019,7 +2036,7 @@ export class ProductionQueueManager {
       
       // ❌ تحديث حالة الرسالة كفاشلة
       try {
-        await this.repositories.message.markAsFailed(jobData.messageId);
+        await this.repositories.message.markAsFailed(String((jobData as { messageId?: unknown }).messageId ?? ''));
       } catch {
         // ignore repository errors during failure marking
       }

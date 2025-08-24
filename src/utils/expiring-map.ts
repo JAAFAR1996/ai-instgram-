@@ -7,7 +7,7 @@ export class ExpiringMap<K, V> {
   private map = new Map<K, CacheEntry<V>>();
   private cleanupInterval: ReturnType<typeof setInterval>;
 
-  constructor(private cleanupMs = 60_000) {
+  constructor(cleanupMs = 60_000) {
     this.cleanupInterval = setInterval(() => this.cleanup(), cleanupMs);
     // Allow process to exit if this is the only active timer
     this.cleanupInterval.unref?.();

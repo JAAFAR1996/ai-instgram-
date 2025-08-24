@@ -10,7 +10,9 @@ import { validator } from 'hono/validator';
 import { getInstagramOAuthService } from '../services/instagram-oauth.js';
 import { getDatabase } from '../db/adapter.js';
 import { z } from 'zod';
-import { getConfig } from '../config/environment.js';
+import { getConfig } from '../config/index.js';
+import { logger } from '../services/logger.js';
+import { firstOrNull } from '../utils/safety.js';
 
 const config = getConfig();
 
@@ -37,13 +39,7 @@ const AuthRequestSchema = z.object({
   redirectUrl: z.string().url().optional()
 });
 
-const CallbackQuerySchema = z.object({
-  code: z.string().optional(),
-  state: z.string().optional(),
-  error: z.string().optional(),
-  error_reason: z.string().optional(),
-  error_description: z.string().optional()
-});
+// CallbackQuerySchema removed - validation done inline in handler
 
 const app = new Hono();
 
@@ -82,7 +78,7 @@ app.post('/auth/instagram/initiate',
         redirectUri: redirectUrl || oauthService.getConfig().instagram.redirectUri
       });
       
-      console.log('🔗 Instagram OAuth initiated for merchant:', merchantId);
+      logger.info(`🔗 Instagram OAuth initiated for merchant: ${merchantId}`);
       
       return c.json({
         success: true,
@@ -165,11 +161,11 @@ app.get('/auth/instagram/callback', async (c) => {
     const { merchantId, codeVerifier } = oauthSession;
     
     // تبديل code بـ access token with PKCE verification (2025)
-    console.log('🔄 Exchanging code for token with PKCE verification...');
+    logger.info('🔄 Exchanging code for token with PKCE verification...');
     const tokenData = await oauthService.exchangeCodeForToken(code, merchantId, codeVerifier, state);
     
     // التحقق من permissions
-    console.log('🔍 Verifying permissions...');
+    logger.info('🔍 Verifying permissions...');
     const permissions = await oauthService.verifyPermissions(tokenData.longLivedToken);
     
     if (!permissions.hasMessageAccess) {
@@ -195,14 +191,14 @@ app.get('/auth/instagram/callback', async (c) => {
     }
     
     // الحصول على معلومات Business Account
-    console.log('📱 Fetching Instagram Business Account info...');
+    logger.info('📱 Fetching Instagram Business Account info...');
     const businessAccountInfo = await oauthService.getBusinessAccountInfo(tokenData.longLivedToken);
     
     // الحصول على معلومات المستخدم
     const userProfile = await oauthService.getUserProfile(tokenData.longLivedToken);
     
     // حفظ البيانات في قاعدة البيانات
-    console.log('💾 Saving credentials...');
+    logger.info('💾 Saving credentials...');
     await oauthService.storeTokens(merchantId, tokenData, userProfile);
     
     // إرجاع النتيجة الناجحة
@@ -282,9 +278,10 @@ app.get('/auth/instagram/status/:merchantId', async (c) => {
       token_expires_at: string | null;
       created_at: string;
       updated_at: string;
+      [key: string]: unknown;
     }
 
-    const integration = await sql<InstagramIntegration[]>`
+    const integration = await sql<InstagramIntegration>`
       SELECT
         business_account_id,
         business_account_name,
@@ -309,7 +306,7 @@ app.get('/auth/instagram/status/:merchantId', async (c) => {
       });
     }
     
-    const account = integration[0];
+    const account = integration[0] as any;
     const isExpired = account.token_expires_at && 
       new Date() >= new Date(account.token_expires_at);
     
@@ -366,12 +363,12 @@ app.delete('/auth/instagram/disconnect/:merchantId', async (c) => {
       }, 404);
     }
     
-    console.log(`🔌 Instagram disconnected for merchant ${merchantId}`);
+    logger.info(`🔌 Instagram disconnected for merchant ${merchantId}`);
     
     return c.json({
       success: true,
       message: 'Instagram account disconnected successfully',
-      disconnectedAccount: result[0].business_account_name
+              disconnectedAccount: firstOrNull(result)?.business_account_name ?? ''
     });
     
   } catch (error) {
@@ -402,9 +399,10 @@ app.post('/auth/instagram/refresh/:merchantId', async (c) => {
 
     interface TokenRow {
       instagram_access_token: string;
+      [key: string]: unknown;
     }
 
-    const result = await sql<TokenRow[]>`
+    const result = await sql<TokenRow>`
       SELECT instagram_access_token
       FROM merchant_credentials
       WHERE merchant_id = ${merchantId}::uuid
@@ -415,7 +413,7 @@ app.post('/auth/instagram/refresh/:merchantId', async (c) => {
       return c.json({ error: 'No token found for merchant' }, 404);
     }
 
-    const currentToken = result[0].instagram_access_token;
+    const currentToken = (result[0] as any).instagram_access_token;
     const refreshedToken = await oauthService.refreshLongLivedToken(currentToken, merchantId);
 
     const newExpiresAt = new Date(Date.now() + (refreshedToken.expires_in * 1000));
@@ -462,9 +460,10 @@ app.post('/auth/instagram/validate/:merchantId', async (c) => {
     interface TokenValidationRow {
       instagram_access_token: string;
       token_expires_at: string;
+      [key: string]: unknown;
     }
 
-    const result = await sql<TokenValidationRow[]>`
+    const result = await sql<TokenValidationRow>`
       SELECT instagram_access_token, token_expires_at
       FROM merchant_credentials
       WHERE merchant_id = ${merchantId}::uuid
@@ -481,7 +480,7 @@ app.post('/auth/instagram/validate/:merchantId', async (c) => {
 
     const record = result[0];
     const now = new Date();
-    const expiresAt = new Date(record.token_expires_at);
+    const expiresAt = new Date((record as any).token_expires_at);
 
     if (expiresAt <= now) {
       return c.json({
@@ -493,7 +492,7 @@ app.post('/auth/instagram/validate/:merchantId', async (c) => {
     }
 
     const oauthService = getInstagramOAuthService();
-    const isValid = await oauthService.validateToken(record.instagram_access_token);
+    const isValid = await oauthService.validateToken((record as any).instagram_access_token);
 
     return c.json({
       success: true,
