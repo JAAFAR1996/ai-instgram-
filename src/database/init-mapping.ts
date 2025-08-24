@@ -1,23 +1,26 @@
 import { Pool } from 'pg';
-// requireMerchantId removed - not used
+import { requireMerchantId } from '../utils/merchant.js';
 import { getConfig } from '../config/index.js';
+import { getLogger } from '../services/logger.js';
+
+const log = getLogger({ component: 'init-mapping' });
 
 export async function ensurePageMapping(): Promise<void> {
   const config = getConfig();
   const { database: { url: dbUrl }, pageId, merchantId } = config;
 
   if (!merchantId) {
-    console.error('❌ Environment variable MERCHANT_ID is missing. Aborting page mapping.');
+    log.error('❌ Environment variable MERCHANT_ID is missing. Aborting page mapping.');
     throw new Error('MERCHANT_ID not set');
   }
 
   if (!pageId) {
-    console.log('⚠️ Environment variable IG_PAGE_ID is missing. Skipping page mapping.');
+    log.warn('⚠️ Environment variable IG_PAGE_ID is missing. Skipping page mapping.');
     return;
   }
 
   if (!dbUrl) {
-    console.log('⚠️ Environment variable DATABASE_URL is missing. Skipping page mapping.');
+    log.warn('⚠️ Environment variable DATABASE_URL is missing. Skipping page mapping.');
     return;
   }
 
@@ -31,6 +34,7 @@ export async function ensurePageMapping(): Promise<void> {
         page_access_token TEXT,
         business_account_id TEXT,
         app_secret TEXT,
+        platform TEXT DEFAULT 'instagram',
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
@@ -43,9 +47,9 @@ export async function ensurePageMapping(): Promise<void> {
           platform = 'instagram'
     `, [merchantId, pageId]);
 
-    console.log(`✅ mapped ${pageId} -> ${merchantId}`);
+    log.info(`✅ mapped ${pageId} -> ${merchantId}`);
   } catch (error) {
-    console.error('❌ Failed to ensure page mapping:', error);
+    log.error('❌ Failed to ensure page mapping:', error);
   } finally {
     await pool.end();
   }

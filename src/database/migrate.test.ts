@@ -7,7 +7,8 @@
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
 import { migrate, rollback, getMigrationStatus, createMigrationTable } from './migrate.js';
-import { initializeDatabase, getDatabase } from './connection.js';
+import { getDatabase } from '../db/adapter.js';
+import { getPool } from '../db/index.js';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
@@ -21,7 +22,7 @@ describe('Database Migration System - Production Tests', () => {
 
   beforeAll(async () => {
     // Initialize database connection
-    db = await initializeDatabase();
+    db = getDatabase();
     sql = db.getSQL();
 
     // Backup existing migration files
@@ -42,18 +43,19 @@ describe('Database Migration System - Production Tests', () => {
     // Clean up test migration files
     if (existsSync(TEST_MIGRATION_DIR)) {
       const files = readdirSync(TEST_MIGRATION_DIR);
-      files.forEach(file => {
-        if (file.includes('test_migration_') || file.includes(BACKUP_SUFFIX)) {
-          try {
-            const filePath = join(TEST_MIGRATION_DIR, file);
-            if (existsSync(filePath)) {
-              require('fs').unlinkSync(filePath);
+              for (const file of files) {
+          if (file.includes('test_migration_') || file.includes(BACKUP_SUFFIX)) {
+            try {
+              const filePath = join(TEST_MIGRATION_DIR, file);
+              if (existsSync(filePath)) {
+                const fs = await import('fs');
+                fs.unlinkSync(filePath);
+              }
+            } catch (error) {
+              // Ignore cleanup errors
             }
-          } catch (error) {
-            // Ignore cleanup errors
           }
         }
-      });
     }
   });
 
@@ -108,10 +110,10 @@ describe('Database Migration System - Production Tests', () => {
     test('should return empty status for new database', async () => {
       const status = await getMigrationStatus();
 
-      expect(Array.isArray(status.applied)).toBe(true);
-      expect(Array.isArray(status.pending)).toBe(true);
-      expect(status.applied.length).toBe(0);
-      expect(status.lastApplied).toBeNull();
+      expect(status.total).toBe(0);
+      expect(status.executed).toBe(0);
+      expect(status.pending).toBe(0);
+      expect(status.migrations).toEqual([]);
     });
 
     test('should track applied migrations', async () => {
@@ -123,10 +125,10 @@ describe('Database Migration System - Production Tests', () => {
 
       const status = await getMigrationStatus();
 
-      expect(status.applied.length).toBe(1);
-      expect(status.applied[0].version).toBe('001_initial_schema.sql');
-      expect(status.applied[0].executionTimeMs).toBe(150);
-      expect(status.lastApplied).toBe('001_initial_schema.sql');
+      expect(status.executed).toBe(1);
+      expect(status.migrations[0]?.name).toBe('001_initial_schema.sql');
+      expect(status.migrations[0]?.status).toBe('executed');
+      expect(status.migrations[0]?.applied_at).toBeTruthy();
     });
 
     test('should identify pending migrations', async () => {
@@ -142,8 +144,8 @@ describe('Database Migration System - Production Tests', () => {
 
       const status = await getMigrationStatus();
 
-      expect(status.pending.length).toBeGreaterThan(0);
-      expect(status.pending.some(m => m.includes('999_test_migration_pending.sql'))).toBe(true);
+      expect(status.pending).toBeGreaterThan(0);
+      expect(status.migrations.some(m => m.name.includes('999_test_migration_pending.sql'))).toBe(true);
     });
   });
 
@@ -175,7 +177,7 @@ describe('Database Migration System - Production Tests', () => {
       writeFileSync(testMigrationFile, migrationContent);
 
       const startTime = Date.now();
-      await migrate('998_test_create_users.sql');
+      await migrate();
       const executionTime = Date.now() - startTime;
 
       // Verify table was created
@@ -254,9 +256,9 @@ describe('Database Migration System - Production Tests', () => {
       });
 
       // Run migrations
-      await migrate('998_test_create_users.sql');
-      await migrate('997_test_create_products.sql');
-      await migrate('996_test_create_orders.sql');
+      await migrate();
+      await migrate();
+      await migrate();
 
       // Verify all tables exist
       const tables = await sql`
@@ -299,7 +301,7 @@ describe('Database Migration System - Production Tests', () => {
       const testMigrationFile = join(TEST_MIGRATION_DIR, '995_test_bad_migration.sql');
       writeFileSync(testMigrationFile, badMigrationContent);
 
-      await expect(migrate('995_test_bad_migration.sql')).rejects.toThrow();
+      await expect(migrate()).rejects.toThrow();
 
       // Verify table was not created
       const tableExists = await sql`
@@ -331,12 +333,10 @@ describe('Database Migration System - Production Tests', () => {
       writeFileSync(testMigrationFile, migrationContent);
 
       // Run migration first time
-      await migrate('994_test_duplicate.sql');
+      await migrate();
 
       // Attempt to run again should be prevented
-      await expect(migrate('994_test_duplicate.sql')).rejects.toThrow(
-        'Migration 994_test_duplicate.sql has already been applied'
-      );
+      await expect(migrate()).rejects.toThrow();
 
       // Verify only one migration record exists
       const migrationRecords = await sql`
@@ -400,7 +400,7 @@ describe('Database Migration System - Production Tests', () => {
       const testMigrationFile = join(TEST_MIGRATION_DIR, '993_test_complex.sql');
       writeFileSync(testMigrationFile, complexMigrationContent);
 
-      await migrate('993_test_complex.sql');
+      await migrate();
 
       // Verify table structure
       const columns = await sql`
@@ -518,7 +518,7 @@ describe('Database Migration System - Production Tests', () => {
       const testMigrationFile = join(TEST_MIGRATION_DIR, '992_test_data_transform.sql');
       writeFileSync(testMigrationFile, dataMigrationContent);
 
-      await migrate('992_test_data_transform.sql');
+      await migrate();
 
       // Verify data transformation
       const transformedData = await sql`
@@ -597,7 +597,7 @@ describe('Database Migration System - Production Tests', () => {
       writeFileSync(testMigrationFile, performanceMigrationContent);
 
       const startTime = Date.now();
-      await migrate('991_test_performance.sql');
+      await migrate();
       const executionTime = Date.now() - startTime;
 
       // Verify migration completed successfully
@@ -642,9 +642,9 @@ describe('Database Migration System - Production Tests', () => {
 
       // Attempt concurrent migrations (should fail gracefully)
       const migrationPromises = [
-        migrate('990_test_concurrent.sql'),
-        migrate('990_test_concurrent.sql'),
-        migrate('990_test_concurrent.sql')
+        migrate(),
+        migrate(),
+        migrate()
       ];
 
       const results = await Promise.allSettled(migrationPromises);
@@ -688,7 +688,7 @@ describe('Database Migration System - Production Tests', () => {
       const testMigrationFile = join(TEST_MIGRATION_DIR, '989_test_rollback.sql');
       writeFileSync(testMigrationFile, failingMigrationContent);
 
-      await expect(migrate('989_test_rollback.sql')).rejects.toThrow();
+      await expect(migrate()).rejects.toThrow();
 
       // Verify table was not created (transaction rolled back)
       const tableExists = await sql`
@@ -771,7 +771,7 @@ describe('Database Migration System - Production Tests', () => {
       const testMigrationFile = join(TEST_MIGRATION_DIR, '988_instagram_tables.sql');
       writeFileSync(testMigrationFile, instagramMigrationContent);
 
-      await migrate('988_instagram_tables.sql');
+      await migrate();
 
       // Verify Instagram tables were created
       const tables = await sql`

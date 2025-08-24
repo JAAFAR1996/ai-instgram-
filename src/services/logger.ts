@@ -5,8 +5,14 @@
  * ===============================================
  */
 
-import crypto from 'crypto';
+import { randomUUID } from 'crypto';
 import { getConfig, type LogLevel } from '../config/index.js';
+import { createWriteStream, existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { gzip } from 'zlib';
+import { promisify } from 'util';
+
+const gzipAsync = promisify(gzip);
 
 // serr function moved to isolation/context.ts to avoid duplicates
 
@@ -17,6 +23,9 @@ export interface LogContext {
   merchantId?: string;
   userId?: string;
   sessionId?: string;
+  component?: string;
+  environment?: string;
+  version?: string;
   // Additional contextual fields should be JSON-safe primitives/objects
   [key: string]: unknown;
 }
@@ -31,6 +40,43 @@ export interface LogEntry {
     message: string;
     stack?: string;
   };
+  metadata?: {
+    pid: number;
+    memoryUsage: NodeJS.MemoryUsage;
+    uptime: number;
+    environment: string;
+    version?: string;
+  };
+}
+
+/**
+ * Log rotation configuration
+ */
+export interface LogRotationConfig {
+  maxFileSize: number; // in bytes
+  maxFiles: number;
+  compressOldFiles: boolean;
+  logDirectory: string;
+  filename: string;
+}
+
+/**
+ * Log batching configuration
+ */
+export interface LogBatchingConfig {
+  enabled: boolean;
+  batchSize: number;
+  flushInterval: number; // in milliseconds
+  maxQueueSize: number;
+}
+
+/**
+ * Memory monitoring configuration
+ */
+export interface MemoryMonitoringConfig {
+  enabled: boolean;
+  threshold: number; // percentage of heap used
+  checkInterval: number; // in milliseconds
 }
 
 /**
@@ -43,15 +89,200 @@ const SENSITIVE_FIELDS = [
 ];
 
 /**
- * Production-grade structured logger
+ * Production-grade structured logger with advanced features
  */
 export class Logger {
   private context: LogContext = {};
   private minLevel: LogLevel = 'info';
+  private logQueue: LogEntry[] = [];
+  private batchTimer: NodeJS.Timeout | null = null;
+  private currentLogFile: string | null = null;
+  private writeStream: NodeJS.WritableStream | null = null;
+  private memoryCheckTimer: NodeJS.Timeout | null = null;
+  private totalLogsWritten = 0;
+  private startTime = Date.now();
 
-  constructor(context: LogContext = {}) {
+  constructor(
+    context: LogContext = {},
+    private rotationConfig?: Partial<LogRotationConfig>,
+    private batchingConfig?: Partial<LogBatchingConfig>,
+    private memoryConfig?: Partial<MemoryMonitoringConfig>
+  ) {
     this.context = context;
     this.minLevel = this.getLogLevel();
+    this.setupLogRotation();
+    this.setupLogBatching();
+    this.setupMemoryMonitoring();
+  }
+
+  /**
+   * Setup log rotation
+   */
+  private setupLogRotation(): void {
+    const config = this.rotationConfig || {};
+    if (!config.logDirectory) return;
+
+    // Create log directory if it doesn't exist
+    if (!existsSync(config.logDirectory)) {
+      mkdirSync(config.logDirectory, { recursive: true });
+    }
+
+    this.currentLogFile = join(config.logDirectory, config.filename || 'app.log');
+    this.writeStream = createWriteStream(this.currentLogFile, { flags: 'a' });
+  }
+
+  /**
+   * Setup log batching
+   */
+  private setupLogBatching(): void {
+    const config = this.batchingConfig || {};
+    if (!config.enabled) return;
+
+    const flushInterval = config.flushInterval || 1000;
+    this.batchTimer = setInterval(() => {
+      this.flushBatch();
+    }, flushInterval);
+  }
+
+  /**
+   * Setup memory monitoring
+   */
+  private setupMemoryMonitoring(): void {
+    const config = this.memoryConfig || {};
+    if (!config.enabled) return;
+
+    const checkInterval = config.checkInterval || 30000; // 30 seconds
+    this.memoryCheckTimer = setInterval(() => {
+      this.checkMemoryUsage();
+    }, checkInterval);
+  }
+
+  /**
+   * Check memory usage and log warning if threshold exceeded
+   */
+  private checkMemoryUsage(): void {
+    const config = this.memoryConfig || {};
+    const threshold = config.threshold || 80; // 80% default
+
+    const memUsage = process.memoryUsage();
+    const heapUsedPercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
+
+    if (heapUsedPercent > threshold) {
+      this.warn('High memory usage detected', {
+        heapUsedPercent: Math.round(heapUsedPercent),
+        threshold,
+        memoryUsage: memUsage
+      });
+    }
+  }
+
+  /**
+   * Flush batched logs
+   */
+  private async flushBatch(): Promise<void> {
+    if (this.logQueue.length === 0) return;
+
+    const batch = this.logQueue.splice(0);
+    const config = this.batchingConfig || {};
+
+    try {
+      if (config.enabled && this.writeStream) {
+        // Write to file
+        const logData = batch.map(entry => JSON.stringify(entry)).join('\n') + '\n';
+        this.writeStream.write(logData);
+      } else {
+        // Write to console
+        for (const entry of batch) {
+          this.writeToConsole(entry);
+        }
+      }
+
+      this.totalLogsWritten += batch.length;
+    } catch (error) {
+      // Fallback to console if file writing fails
+      for (const entry of batch) {
+        this.writeToConsole(entry);
+      }
+    }
+  }
+
+  /**
+   * Write log entry to console
+   */
+  private writeToConsole(entry: LogEntry): void {
+    const config = getConfig();
+    const out = (entry.level === 'error' || entry.level === 'fatal') ? process.stderr : process.stdout;
+    
+    if (config.environment === 'production') {
+      out.write(JSON.stringify(entry) + '\n');
+    } else {
+      const { context, error, metadata, ...rest } = entry;
+      out.write(`${entry.timestamp} ${entry.level.toUpperCase().padEnd(5)} ${entry.message}` +
+                (context && Object.keys(context).length ? ` ${JSON.stringify(context)}` : '') +
+                (error ? ` ${JSON.stringify(error)}` : '') + '\n');
+    }
+  }
+
+  /**
+   * Rotate log file if needed
+   */
+  private async rotateLogFile(): Promise<void> {
+    const config = this.rotationConfig || {};
+    if (!config.maxFileSize || !this.currentLogFile || !this.writeStream) return;
+
+    try {
+      const fs = await import('fs');
+      const stats = await fs.promises.stat(this.currentLogFile);
+      
+      if (stats.size >= config.maxFileSize) {
+        // Close current stream
+        this.writeStream.end();
+        
+        // Rename current file
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const oldFile = this.currentLogFile;
+        const newFile = `${this.currentLogFile}.${timestamp}`;
+        
+        await fs.promises.rename(oldFile, newFile);
+        
+        // Compress old file if enabled
+        if (config.compressOldFiles) {
+          const fileContent = await fs.promises.readFile(newFile);
+          const compressed = await gzipAsync(fileContent);
+          await fs.promises.writeFile(`${newFile}.gz`, compressed);
+          await fs.promises.unlink(newFile);
+        }
+        
+        // Create new log file
+        this.writeStream = createWriteStream(this.currentLogFile, { flags: 'a' });
+        
+                 // Remove old files if max files exceeded
+         if (config.maxFiles && config.logDirectory) {
+           const logDir = config.logDirectory;
+           const files = await fs.promises.readdir(logDir);
+           const logFiles = files.filter(f => f.startsWith(config.filename || 'app.log'));
+             
+           if (logFiles.length > config.maxFiles) {
+             const sortedFiles = logFiles
+               .map(f => ({ name: f, path: join(logDir, f) }))
+               .sort((a, b) => {
+                 const statsA = fs.statSync(a.path);
+                 const statsB = fs.statSync(b.path);
+                 return statsA.mtime.getTime() - statsB.mtime.getTime();
+               });
+             
+             // Remove oldest files
+             const filesToRemove = sortedFiles.slice(0, sortedFiles.length - config.maxFiles);
+             for (const file of filesToRemove) {
+               await fs.promises.unlink(file.path);
+             }
+           }
+         }
+      }
+    } catch (error) {
+      // Log error but don't throw
+      console.error('Log rotation failed:', error);
+    }
   }
 
   /**
@@ -72,7 +303,12 @@ export class Logger {
    * Create child logger with additional context
    */
   child(context: LogContext): Logger {
-    const childLogger = new Logger({ ...this.context, ...context });
+    const childLogger = new Logger(
+      { ...this.context, ...context },
+      this.rotationConfig,
+      this.batchingConfig,
+      this.memoryConfig
+    );
     childLogger.minLevel = this.minLevel;
     return childLogger;
   }
@@ -144,7 +380,7 @@ export class Logger {
   /**
    * Core logging method with top-level context and error
    */
-  private log(level: LogLevel, message: string, context?: LogContext & { err?: unknown; error?: unknown }): void {
+  private async log(level: LogLevel, message: string, context?: LogContext & { err?: unknown; error?: unknown }): Promise<void> {
     if (!this.shouldLog(level)) return;
 
     const ctx = this.redactSensitiveData({ ...this.context, ...(context ?? {}) }) as LogContext & { err?: unknown; error?: unknown };
@@ -156,6 +392,13 @@ export class Logger {
       timestamp: new Date().toISOString(),
       message,
       context: safeCtx,
+             metadata: {
+         pid: process.pid,
+         memoryUsage: process.memoryUsage(),
+         uptime: process.uptime(),
+         environment: getConfig().environment,
+         ...(process.env.npm_package_version && { version: process.env.npm_package_version })
+       },
       ...(finalError ? {
         error: (finalError instanceof Error)
           ? { name: finalError.name, message: String(finalError.message), ...(finalError.stack ? { stack: finalError.stack } : {}) }
@@ -165,6 +408,9 @@ export class Logger {
       } : {})
     };
 
+    // Apply environment-specific filtering
+    if (this.shouldFilterLog(entry)) return;
+
     const config = getConfig();
     
     // Remove timestamp from production output since Render adds its own
@@ -173,14 +419,43 @@ export class Logger {
       delete entryObj.timestamp;
     }
 
-    const out = (level === 'error' || level === 'fatal') ? process.stderr : process.stdout;
-    if (config.environment === 'production') {
-      out.write(JSON.stringify(entry) + '\n');
+    // Add to batch queue or write immediately
+    const batchingConfig = this.batchingConfig || {};
+    if (batchingConfig.enabled && this.logQueue.length < (batchingConfig.maxQueueSize || 1000)) {
+      this.logQueue.push(entry);
     } else {
-      out.write(`${entry.timestamp} ${level.toUpperCase().padEnd(5)} ${message}` +
-                (Object.keys(safeCtx).length ? ` ${JSON.stringify(safeCtx)}` : '') +
-                (entry.error ? ` ${JSON.stringify(entry.error)}` : '') + '\n');
+      if (batchingConfig.enabled) {
+        // Queue is full, flush immediately
+        await this.flushBatch();
+        this.logQueue.push(entry);
+      } else {
+        // No batching, write immediately
+        this.writeToConsole(entry);
+      }
     }
+
+    // Check if log rotation is needed
+    await this.rotateLogFile();
+  }
+
+  /**
+   * Check if log should be filtered based on environment
+   */
+  private shouldFilterLog(entry: LogEntry): boolean {
+    const config = getConfig();
+    const env = config.environment;
+
+    // Filter debug logs in production
+    if (env === 'production' && entry.level === 'debug') {
+      return true;
+    }
+
+    // Filter trace logs in non-development environments
+    if (env !== 'development' && entry.level === 'trace') {
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -212,7 +487,7 @@ export class Logger {
   private redactSensitiveData(data: unknown): Record<string, unknown> {
     if (!data || typeof data !== 'object') return data as Record<string, unknown>;
 
-        const redacted = { ...data } as Record<string, unknown>;
+    const redacted = { ...data } as Record<string, unknown>;
 
     // Redact sensitive fields
     for (const field of SENSITIVE_FIELDS) {
@@ -273,6 +548,48 @@ export class Logger {
     
     return `${start}${middle}${end}`;
   }
+
+  /**
+   * Get logger statistics
+   */
+  getStats(): {
+    totalLogsWritten: number;
+    queueSize: number;
+    uptime: number;
+    memoryUsage: NodeJS.MemoryUsage;
+  } {
+    return {
+      totalLogsWritten: this.totalLogsWritten,
+      queueSize: this.logQueue.length,
+      uptime: Date.now() - this.startTime,
+      memoryUsage: process.memoryUsage()
+    };
+  }
+
+  /**
+   * Cleanup resources
+   */
+  async cleanup(): Promise<void> {
+    // Clear timers
+    if (this.batchTimer) {
+      clearInterval(this.batchTimer);
+      this.batchTimer = null;
+    }
+    
+    if (this.memoryCheckTimer) {
+      clearInterval(this.memoryCheckTimer);
+      this.memoryCheckTimer = null;
+    }
+
+    // Flush remaining logs
+    await this.flushBatch();
+
+    // Close write stream
+    if (this.writeStream) {
+      this.writeStream.end();
+      this.writeStream = null;
+    }
+  }
 }
 
 /**
@@ -293,10 +610,15 @@ export function getLogger(context?: LogContext): Logger {
 }
 
 /**
- * Create logger with specific context
+ * Create logger with specific context and configuration
  */
-export function createLogger(context: LogContext): Logger {
-  return new Logger(context);
+export function createLogger(
+  context: LogContext,
+  rotationConfig?: Partial<LogRotationConfig>,
+  batchingConfig?: Partial<LogBatchingConfig>,
+  memoryConfig?: Partial<MemoryMonitoringConfig>
+): Logger {
+  return new Logger(context, rotationConfig, batchingConfig, memoryConfig);
 }
 
 /**
@@ -329,14 +651,24 @@ export function createRequestLogger(traceId?: string, correlationId?: string): L
  * Generate trace ID
  */
 function generateTraceId(): string {
-  return `trace_${crypto.randomUUID()}`;
+  return `trace_${randomUUID()}`;
 }
 
 /**
  * Generate correlation ID
  */
 function generateCorrelationId(): string {
-  return `corr_${Date.now()}_${crypto.randomUUID()}`;
+  return `corr_${Date.now()}_${randomUUID()}`;
+}
+
+/**
+ * Cleanup global logger
+ */
+export async function cleanupLogger(): Promise<void> {
+  if (globalLogger) {
+    await globalLogger.cleanup();
+    globalLogger = null;
+  }
 }
 
 // Simple logger export for backward compatibility with patches

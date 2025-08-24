@@ -9,7 +9,34 @@ import { describe, test, expect, beforeAll, afterAll, beforeEach, mock } from 'b
 import { RateLimiterMemory } from 'rate-limiter-flexible';
 import { getServiceControlAPI } from './service-controller.js';
 import { getDatabase } from '../db/adapter.js';
-import { createTestMerchant, cleanupTestMerchant } from '../tests/instagram-integration.test.js';
+
+// إضافة test utilities محلية
+async function createTestMerchant(merchantId: string, businessName: string): Promise<void> {
+  const db = getDatabase();
+  const sql = db.getSQL();
+  
+  await sql`
+    INSERT INTO merchants (
+      id, 
+      business_name, 
+      subscription_status,
+      created_at
+    ) VALUES (
+      ${merchantId}::uuid,
+      ${businessName},
+      'ACTIVE',
+      NOW()
+    ) ON CONFLICT (id) DO NOTHING
+  `;
+}
+
+async function cleanupTestMerchant(merchantId: string): Promise<void> {
+  const db = getDatabase();
+  const sql = db.getSQL();
+  
+  await sql`DELETE FROM merchants WHERE id = ${merchantId}::uuid`;
+  await sql`DELETE FROM merchant_service_status WHERE merchant_id = ${merchantId}::uuid`;
+}
 
 async function initializeDatabase() {
   return getDatabase();

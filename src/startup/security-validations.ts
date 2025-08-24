@@ -11,8 +11,11 @@ const REQUIRED: EnvSpec[] = [
   { key: 'REDIS_URL' },
   { key: 'META_APP_ID' },
   { key: 'META_APP_SECRET' },
-  { key: 'META_VERIFY_TOKEN' },
-  { key: 'PUBLIC_BASE_URL' },
+  { key: 'IG_VERIFY_TOKEN' },
+  { key: 'BASE_URL' },
+  { key: 'CORS_ORIGINS' },
+  { key: 'INTERNAL_API_KEY' },
+  { key: 'JWT_SECRET' }
 ];
 
 export function assertEnvStrict(): void {

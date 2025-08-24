@@ -11,8 +11,10 @@ import { getInstagramOAuthService } from '../services/instagram-oauth.js';
 import { getDatabase } from '../db/adapter.js';
 import { z } from 'zod';
 import { getConfig } from '../config/index.js';
-import { logger } from '../services/logger.js';
+import { getLogger } from '../services/logger.js';
 import { firstOrNull } from '../utils/safety.js';
+
+const log = getLogger({ component: "instagram-auth" });
 
 const config = getConfig();
 
@@ -78,7 +80,7 @@ app.post('/auth/instagram/initiate',
         redirectUri: redirectUrl || oauthService.getConfig().instagram.redirectUri
       });
       
-      logger.info(`🔗 Instagram OAuth initiated for merchant: ${merchantId}`);
+      log.info(`🔗 Instagram OAuth initiated for merchant: ${merchantId}`);
       
       return c.json({
         success: true,
@@ -103,7 +105,7 @@ app.post('/auth/instagram/initiate',
       });
       
     } catch (error) {
-      console.error('❌ OAuth initiation error:', error);
+      log.error('❌ OAuth initiation error:', error);
       const err = error instanceof Error ? error : new Error(String(error));
       return c.json({
         error: 'Failed to initiate OAuth',
@@ -123,7 +125,7 @@ app.get('/auth/instagram/callback', async (c) => {
     
     // التحقق من وجود أخطاء OAuth
     if (error) {
-      console.error('❌ OAuth Error:', {
+      log.error('❌ OAuth Error:', {
         error,
         error_reason,
         error_description
@@ -161,15 +163,15 @@ app.get('/auth/instagram/callback', async (c) => {
     const { merchantId, codeVerifier } = oauthSession;
     
     // تبديل code بـ access token with PKCE verification (2025)
-    logger.info('🔄 Exchanging code for token with PKCE verification...');
+    log.info('🔄 Exchanging code for token with PKCE verification...');
     const tokenData = await oauthService.exchangeCodeForToken(code, merchantId, codeVerifier, state);
     
     // التحقق من permissions
-    logger.info('🔍 Verifying permissions...');
+    log.info('🔍 Verifying permissions...');
     const permissions = await oauthService.verifyPermissions(tokenData.longLivedToken);
     
     if (!permissions.hasMessageAccess) {
-      console.warn('⚠️ Missing message access permissions');
+      log.warn('⚠️ Missing message access permissions');
       
       // إنشاء رابط إعادة التفويض
       const reauthUrl = oauthService.buildReauthURL(state);
@@ -191,14 +193,14 @@ app.get('/auth/instagram/callback', async (c) => {
     }
     
     // الحصول على معلومات Business Account
-    logger.info('📱 Fetching Instagram Business Account info...');
+    log.info('📱 Fetching Instagram Business Account info...');
     const businessAccountInfo = await oauthService.getBusinessAccountInfo(tokenData.longLivedToken);
     
     // الحصول على معلومات المستخدم
     const userProfile = await oauthService.getUserProfile(tokenData.longLivedToken);
     
     // حفظ البيانات في قاعدة البيانات
-    logger.info('💾 Saving credentials...');
+    log.info('💾 Saving credentials...');
     await oauthService.storeTokens(merchantId, tokenData, userProfile);
     
     // إرجاع النتيجة الناجحة
@@ -226,7 +228,7 @@ app.get('/auth/instagram/callback', async (c) => {
     });
     
   } catch (error) {
-    console.error('❌ OAuth callback error:', error);
+    log.error('❌ OAuth callback error:', error);
     
     const err = error instanceof Error ? error : new Error(String(error));
     
@@ -330,7 +332,7 @@ app.get('/auth/instagram/status/:merchantId', async (c) => {
     });
     
   } catch (error) {
-    console.error('❌ Status check error:', error);
+    log.error('❌ Status check error:', error);
     const err = error instanceof Error ? error : new Error(String(error));
     return c.json({
       error: 'Failed to check Instagram connection status',
@@ -363,7 +365,7 @@ app.delete('/auth/instagram/disconnect/:merchantId', async (c) => {
       }, 404);
     }
     
-    logger.info(`🔌 Instagram disconnected for merchant ${merchantId}`);
+    log.info(`🔌 Instagram disconnected for merchant ${merchantId}`);
     
     return c.json({
       success: true,
@@ -372,7 +374,7 @@ app.delete('/auth/instagram/disconnect/:merchantId', async (c) => {
     });
     
   } catch (error) {
-    console.error('❌ Disconnect error:', error);
+    log.error('❌ Disconnect error:', error);
     const err = error instanceof Error ? error : new Error(String(error));
     return c.json({
       error: 'Failed to disconnect Instagram account',
@@ -438,7 +440,7 @@ app.post('/auth/instagram/refresh/:merchantId', async (c) => {
     });
 
   } catch (error) {
-    console.error('❌ Token refresh failed:', error);
+    log.error('❌ Token refresh failed:', error);
     const err = error instanceof Error ? error : new Error(String(error));
     return c.json({
       error: 'Token refresh failed',
@@ -502,7 +504,7 @@ app.post('/auth/instagram/validate/:merchantId', async (c) => {
     });
 
   } catch (error) {
-    console.error('❌ Token validation failed:', error);
+    log.error('❌ Token validation failed:', error);
     const err = error instanceof Error ? error : new Error(String(error));
     return c.json({
       error: 'Token validation failed',
@@ -526,7 +528,7 @@ app.post('/auth/instagram/refresh-batch', async (c) => {
     });
 
   } catch (error) {
-    console.error('❌ Batch token refresh failed:', error);
+    log.error('❌ Batch token refresh failed:', error);
     const err = error instanceof Error ? error : new Error(String(error));
     return c.json({
       error: 'Batch token refresh failed',
