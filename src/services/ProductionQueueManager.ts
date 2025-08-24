@@ -157,7 +157,7 @@ export class ProductionQueueManager {
     );
     // this.healthMonitor = new RedisHealthMonitor(logger);
     this.circuitBreaker = new CircuitBreaker(5, 60000);
-    this.errorHandler = new RedisErrorHandler(logger);
+    this.errorHandler = new RedisErrorHandler(logger as any);
   }
 
   async initialize(): Promise<QueueInitResult> {

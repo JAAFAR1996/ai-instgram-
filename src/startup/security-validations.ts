@@ -18,6 +18,14 @@ const REQUIRED: EnvSpec[] = [
   { key: 'JWT_SECRET' }
 ];
 
+const ADDITIONAL_REQUIRED = [
+  'DB_MAX_CONNECTIONS',
+  'REDIS_MAX_RETRIES', 
+  'RATE_LIMIT_MAX',
+  'CORS_ORIGINS',
+  'TRUSTED_PROXY_IPS'
+];
+
 export function assertEnvStrict(): void {
   const missing: string[] = [];
   for (const { key } of REQUIRED) {
@@ -31,5 +39,13 @@ export function assertEnvStrict(): void {
   if (missing.length) {
     const msg = `Missing required environment variables: ${missing.join(', ')}`;
     throw new Error(msg);
+  }
+}
+
+export function validateProductionEnv(): void {
+  for (const key of ADDITIONAL_REQUIRED) {
+    if (!process.env[key]) {
+      throw new Error(`Missing required environment variable: ${key}`);
+    }
   }
 }

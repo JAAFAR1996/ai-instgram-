@@ -16,6 +16,18 @@ const gzipAsync = promisify(gzip);
 
 // serr function moved to isolation/context.ts to avoid duplicates
 
+export const LOG_LEVELS = {
+  error: 0,
+  warn: 1, 
+  info: 2,
+  debug: 3
+} as const;
+
+export function standardizeLogLevel(): LogLevel {
+  const level = process.env.LOG_LEVEL?.toLowerCase();
+  return level && ['error', 'warn', 'info', 'debug'].includes(level) ? level as LogLevel : 'info';
+}
+
 export interface LogContext {
   traceId?: string;
   correlationId?: string;
@@ -478,7 +490,7 @@ export class Logger {
    * Get log level from environment
    */
   private getLogLevel(): LogLevel {
-    return getConfig().logLevel;
+    return standardizeLogLevel();
   }
 
   /**

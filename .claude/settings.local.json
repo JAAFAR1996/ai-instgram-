@@ -6,7 +6,8 @@
       "Bash(timeout 30 npm run build)",
       "Bash(npx tsc:*)",
       "Bash(uuidgen)",
-      "Bash(env:*)"
+      "Bash(env:*)",
+      "Bash(cd:*)"
     ],
     "deny": [],
     "ask": []

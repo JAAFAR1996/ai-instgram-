@@ -6,6 +6,7 @@
  */
 
 import { getDatabase } from '../db/adapter.js';
+import { withTx } from '../db/index.js';
 import type { Sql, SqlFragment } from '../types/sql.js';
 import type { DatabaseRow } from '../types/db.js';
 // Database access via pg adapter
@@ -285,22 +286,66 @@ export class MerchantRepository {
   }
 
   /**
-   * Increment message usage
+   * Increment monthly message usage with transaction safety
    */
   async incrementMessageUsage(id: string, count: number = 1): Promise<boolean> {
-    const sql: Sql = this.db.getSQL();
-    
-    const result = await sql`
-      UPDATE merchants
-      SET 
-        monthly_messages_used = monthly_messages_used + ${count},
-        updated_at = NOW()
-      WHERE id = ${id}::uuid
-      AND monthly_messages_used + ${count} <= monthly_message_limit
-      RETURNING id
-    `;
+    if (count <= 0) {
+      throw new Error('Message count must be positive');
+    }
 
-    return result.length > 0;
+    if (!id || typeof id !== 'string') {
+      throw new Error('Valid merchant ID is required');
+    }
+
+    return await withTx(this.db.getPool(), async (client) => {
+      // First, check current usage and limit with row locking
+      const merchantCheck = await client.query(`
+        SELECT 
+          monthly_messages_used,
+          monthly_message_limit,
+          is_active
+        FROM merchants 
+        WHERE id = $1::uuid 
+        FOR UPDATE
+      `, [id]);
+
+      if (merchantCheck.rows.length === 0) {
+        throw new Error(`Merchant not found: ${id}`);
+      }
+
+      const merchant = merchantCheck.rows[0];
+      
+      if (!merchant.is_active) {
+        throw new Error('Merchant account is not active');
+      }
+
+      const currentUsage = parseInt(merchant.monthly_messages_used) || 0;
+      const limit = parseInt(merchant.monthly_message_limit) || 0;
+      
+      if (currentUsage + count > limit) {
+        throw new Error(`Message limit exceeded: ${currentUsage + count} > ${limit}`);
+      }
+
+      // Perform atomic increment
+      const result = await client.query(`
+        UPDATE merchants
+        SET 
+          monthly_messages_used = monthly_messages_used + $2,
+          updated_at = NOW()
+        WHERE id = $1::uuid
+        RETURNING id, monthly_messages_used
+      `, [id, count]);
+
+      if (result.rows.length === 0) {
+        throw new Error('Failed to increment message usage');
+      }
+
+      // Log successful increment
+      const newUsage = parseInt(result.rows[0].monthly_messages_used) || 0;
+      console.log(`Message usage incremented for merchant ${id}: ${newUsage}/${limit}`);
+
+      return true;
+    });
   }
 
   /**

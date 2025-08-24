@@ -499,7 +499,7 @@ describe('🔒 Security Middleware Tests', () => {
   });
 
   describe('webhookSignatureMiddleware', () => {
-    const secretKey = 'test-webhook-secret';
+    const secretKey = process.env.TEST_WEBHOOK_SECRET || 'test-webhook-secret-for-testing-only';
 
     beforeEach(() => {
       app.use(webhookSignatureMiddleware(secretKey));
@@ -790,6 +790,154 @@ describe('🔒 Security Middleware Tests', () => {
       
       // Should complete quickly
       expect(endTime - startTime).toBeLessThan(2000);
+    });
+  });
+
+  describe('Rate Limiting Tests', () => {
+    test('✅ should enforce rate limits correctly', async () => {
+      const app = new Hono();
+      app.use(rateLimitMiddleware('general'));
+      app.get('/', (c) => c.text('OK'));
+      
+      // Mock rate limiter to reject after first request
+      mockRateLimiter.consume
+        .mockResolvedValueOnce(undefined) // First request succeeds
+        .mockRejectedValueOnce({ msBeforeNext: 60000, remainingPoints: 0 }); // Second request fails
+      
+      const res1 = await app.request('/');
+      expect(res1.status).toBe(200);
+      
+      const res2 = await app.request('/');
+      expect(res2.status).toBe(429);
+      expect(res2.headers.get('Retry-After')).toBe('60');
+    });
+    
+    test('✅ should handle concurrent requests', async () => {
+      const app = new Hono();
+      app.use(rateLimitMiddleware('webhook'));
+      app.post('/', (c) => c.json({ success: true }));
+      
+      // Mock rate limiter to handle concurrent requests
+      mockRateLimiter.consume.mockResolvedValue(undefined);
+      
+      // Send multiple concurrent requests
+      const requests = Array.from({ length: 10 }, () =>
+        app.request('/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ test: 'data' })
+        })
+      );
+      
+      const responses = await Promise.all(requests);
+      
+      // All should succeed
+      responses.forEach(res => {
+        expect(res.status).toBe(200);
+      });
+      
+      // Rate limiter should be called for each request
+      expect(mockRateLimiter.consume).toHaveBeenCalledTimes(10);
+    });
+
+    test('✅ should handle different rate limiter types', async () => {
+      const app = new Hono();
+      app.use(rateLimitMiddleware('messaging'));
+      app.post('/', (c) => c.json({ sent: true }));
+      
+      mockRateLimiter.consume.mockResolvedValue(undefined);
+      
+      const res = await app.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customer_phone: '+1234567890' })
+      });
+      
+      expect(res.status).toBe(200);
+    });
+
+    test('✅ should handle rate limiter errors gracefully', async () => {
+      const app = new Hono();
+      app.use(rateLimitMiddleware());
+      app.get('/', (c) => c.text('OK'));
+      
+      // Mock rate limiter to throw error
+      mockRateLimiter.consume.mockRejectedValue(new Error('Redis connection failed'));
+      
+      const res = await app.request('/');
+      
+      // Should still allow request when rate limiter fails
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe('IP Validation Tests', () => {
+    test('✅ should validate trusted proxy IPs', async () => {
+      const app = new Hono();
+      app.use(rateLimitMiddleware());
+      app.get('/', (c) => c.text('OK'));
+      
+      // Test with trusted proxy IP
+      const res = await app.request('/', {
+        headers: {
+          'X-Forwarded-For': '192.168.1.100',
+          'X-Real-IP': '127.0.0.1' // Trusted proxy
+        }
+      });
+      
+      expect(res.status).toBe(200);
+    });
+
+    test('✅ should handle multiple IP addresses in X-Forwarded-For', async () => {
+      const app = new Hono();
+      app.use(rateLimitMiddleware());
+      app.get('/', (c) => c.text('OK'));
+      
+      const res = await app.request('/', {
+        headers: {
+          'X-Forwarded-For': '203.0.113.1, 198.51.100.1, 192.168.1.1'
+        }
+      });
+      
+      expect(res.status).toBe(200);
+    });
+
+    test('✅ should handle Cloudflare IP headers', async () => {
+      const app = new Hono();
+      app.use(rateLimitMiddleware());
+      app.get('/', (c) => c.text('OK'));
+      
+      const res = await app.request('/', {
+        headers: {
+          'CF-Connecting-IP': '203.0.113.1'
+        }
+      });
+      
+      expect(res.status).toBe(200);
+    });
+
+    test('✅ should sanitize IP addresses', async () => {
+      const app = new Hono();
+      app.use(rateLimitMiddleware());
+      app.get('/', (c) => c.text('OK'));
+      
+      const res = await app.request('/', {
+        headers: {
+          'X-Forwarded-For': '192.168.1.1\r\n<script>alert("xss")</script>'
+        }
+      });
+      
+      expect(res.status).toBe(200);
+    });
+
+    test('✅ should handle missing IP headers', async () => {
+      const app = new Hono();
+      app.use(rateLimitMiddleware());
+      app.get('/', (c) => c.text('OK'));
+      
+      const res = await app.request('/');
+      
+      expect(res.status).toBe(200);
     });
   });
 

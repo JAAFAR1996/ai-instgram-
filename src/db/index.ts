@@ -525,7 +525,9 @@ function isConnectionError(error: Error): boolean {
   const pgError = error as any;
   return connectionCodes.includes(pgError.code) ||
          connectionCodes.includes(pgError.errno) ||
-         (error.message && error.message.includes('connect'));
+         (typeof error === 'object' && error !== null && 'message' in error && 
+          typeof (error as any).message === 'string' && 
+          (error as any).message.includes('connect'));
 }
 
 /**

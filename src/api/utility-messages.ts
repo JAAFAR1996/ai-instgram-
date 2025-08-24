@@ -102,9 +102,9 @@ app.post('/api/utility-messages/:merchantId/send',
         }, 400);
       }
       
-    } catch (error) {
-      console.error('❌ Utility message API error:', error);
+    } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
+      console.error('❌ Utility message API error:', err);
       
       return c.json({
         error: 'فشل في إرسال الرسالة الخدمية',
@@ -167,9 +167,9 @@ app.post('/api/utility-messages/:merchantId/templates',
         }, 400);
       }
       
-    } catch (error) {
-      console.error('❌ Template creation API error:', error);
+    } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
+      console.error('❌ Template creation API error:', err);
       
       return c.json({
         error: 'فشل في إنشاء القالب',

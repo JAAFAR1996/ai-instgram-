@@ -63,7 +63,34 @@ async function bootstrap() {
         throw new Error(`Required environment variable missing: ${envVar}`);
       }
     }
-    log.info('✅ Environment variables validated');
+
+    // Critical JWT Secret validation
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+      throw new Error('JWT_SECRET must be at least 32 characters long for production security');
+    }
+    
+    // Additional security validations for production
+    if (process.env.NODE_ENV === 'production') {
+      if (process.env.ENCRYPTION_KEY_HEX && process.env.ENCRYPTION_KEY_HEX.length < 64) {
+        throw new Error('ENCRYPTION_KEY_HEX must be at least 64 characters (32 bytes) for production');
+      }
+      
+      if (process.env.IG_VERIFY_TOKEN && process.env.IG_VERIFY_TOKEN.length < 20) {
+        throw new Error('IG_VERIFY_TOKEN must be at least 20 characters for production security');
+      }
+    }
+    
+    log.info('✅ Environment variables and security requirements validated');
+
+    // Additional production checks
+    if (process.env.NODE_ENV === 'production') {
+      if (!process.env.DATABASE_URL) {
+        throw new Error('DATABASE_URL required in production');
+      }
+      if (!process.env.REDIS_URL) {
+        log.warn('REDIS_URL not set - Redis disabled');
+      }
+    }
 
     // Initialize database and run migrations
     const pool = getPool();

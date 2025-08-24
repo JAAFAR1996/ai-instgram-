@@ -9,7 +9,7 @@ import { Hono } from 'hono';
 import type { Pool } from 'pg';
 import { getLogger } from '../services/logger.js';
 import { getHealthSnapshot } from '../services/health-check.js';
-// import { verifyEncryption, generateEncryptionKey } from '../services/encryption.js';
+
 import { telemetry } from '../services/telemetry.js';
 import { registerTestRoutes } from '../internal/test/dev-routes.js';
 import { getRedisIntegrationStatus, getQueueManager } from '../startup/redis.js';
@@ -78,14 +78,14 @@ export function registerAdminRoutes(app: Hono, deps: AdminDependencies): void {
     try {
       const snapshot = getHealthSnapshot();
       const redisStatus = getRedisIntegrationStatus();
-      const queueManager = getQueueManager();
+      // const queueManager = getQueueManager(); // Unused variable
 
       const metrics = {
         health: snapshot,
         redis: {
           enabled: redisStatus?.success || false,
           mode: redisStatus?.mode || 'disabled',
-          queueReady: !!queueManager
+          queueReady: !!getQueueManager()
         },
         system: {
           uptime: process.uptime(),

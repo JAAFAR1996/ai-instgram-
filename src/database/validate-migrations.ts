@@ -57,8 +57,8 @@ export async function validateMigrations(): Promise<ValidationResult> {
         return null;
       }
       
-      const number = parseInt(match[1]);
-      const name = match[2];
+      const number = parseInt(match[1] || '0', 10);
+      const name = match[2] || 'unnamed';
       const content = readFileSync(join(migrationsDir, filename), 'utf8');
       
       return { filename, number, name, content };
@@ -75,8 +75,10 @@ export async function validateMigrations(): Promise<ValidationResult> {
     const sortedNumbers = [...new Set(numbers)].sort((a, b) => a - b);
     const missingNumbers: number[] = [];
     for (let i = 1; i < sortedNumbers.length; i++) {
-      if (sortedNumbers[i] !== sortedNumbers[i-1] + 1) {
-        missingNumbers.push(sortedNumbers[i-1] + 1);
+      const current = sortedNumbers[i];
+      const previous = sortedNumbers[i-1];
+      if (current !== undefined && previous !== undefined && current !== previous + 1) {
+        missingNumbers.push(previous + 1);
       }
     }
     if (missingNumbers.length > 0) {

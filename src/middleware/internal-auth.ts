@@ -9,6 +9,21 @@ import crypto from 'crypto';
 
 const logger = getLogger({ component: 'InternalAuth' });
 
+/**
+ * Get trusted client IP address with proxy validation
+ */
+function getTrustedClientIP(c: Context, trustedProxies: string[]): string {
+  const remoteAddress = c.req.header('x-real-ip') || 'unknown';
+  const forwardedFor = c.req.header('x-forwarded-for');
+  
+  if (forwardedFor && trustedProxies.includes(remoteAddress)) {
+    const firstIP = forwardedFor.split(',')[0];
+    return firstIP ? firstIP.trim() : remoteAddress;
+  }
+  
+  return remoteAddress;
+}
+
 export interface InternalAuthConfig {
   enabled: boolean;
   allowedIPs: string[];
@@ -38,7 +53,8 @@ export function createInternalAuthMiddleware(config: Partial<InternalAuthConfig>
       return await next();
     }
 
-    const clientIP = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown';
+    const trustedProxies = process.env.TRUSTED_PROXY_IPS?.split(',') || ['127.0.0.1'];
+    const clientIP = getTrustedClientIP(c, trustedProxies);
     
     if (finalConfig.logAllAttempts) {
       logger.info('Internal route access attempt', { path, ip: clientIP });

@@ -9,8 +9,36 @@ import { Context, Next } from 'hono';
 import { getDatabase } from '../db/adapter.js';
 import { getLogger } from '../services/logger.js';
 import { serr } from '../isolation/context.js';
+import jwt from 'jsonwebtoken';
 
 const log = getLogger({ component: 'rls-merchant-isolation' });
+
+/**
+ * Validate and extract merchant ID from JWT token
+ */
+async function validateAndExtractMerchantId(c: Context, config: MerchantIsolationConfig): Promise<string | null> {
+  const headerValue = c.req.header(config.headerName);
+  if (!headerValue) return null;
+  
+  // التحقق من JWT token بدلاً من header مباشر
+  const authHeader = c.req.header('authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new Error('Missing authentication');
+  }
+  
+  const token = authHeader.slice(7);
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    throw new Error('JWT_SECRET not configured');
+  }
+  
+  try {
+    const payload = jwt.verify(token, jwtSecret);
+    return (payload as any).merchantId || null;
+  } catch (error) {
+    throw new Error('Invalid authentication token');
+  }
+}
 
 export interface MerchantIsolationConfig {
   strictMode: boolean; // Fail if no merchant ID found
@@ -83,7 +111,8 @@ function getClientIP(c: Context): string {
   
   if (forwardedFor) {
     // Take the first IP from X-Forwarded-For
-    return forwardedFor.split(',')[0].trim();
+    const firstIP = forwardedFor.split(',')[0];
+    return firstIP ? firstIP.trim() : (realIP || cfConnectingIP || 'unknown');
   }
   
   return realIP || cfConnectingIP || 'unknown';
@@ -230,10 +259,16 @@ export function createMerchantIsolationMiddleware(
         return;
       }
       
-      // Extract merchant ID from header or query parameter
-      let merchantId = getHeader(c, finalConfig.headerName);
-      if (!merchantId && finalConfig.queryParam) {
-        merchantId = getQuery(c, finalConfig.queryParam);
+      // Extract merchant ID with JWT validation
+      let merchantId: string | null = null;
+      try {
+        merchantId = await validateAndExtractMerchantId(c, finalConfig);
+      } catch (error) {
+        // Fallback to query parameter if JWT validation fails
+        if (finalConfig.queryParam) {
+          const queryValue = getQuery(c, finalConfig.queryParam);
+          merchantId = queryValue || null;
+        }
       }
       
       if (!merchantId) {

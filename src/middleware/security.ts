@@ -24,13 +24,16 @@ const redisClient = await getRedisConnectionManager()
   .getConnection(RedisUsageType.CACHING);
 
 // Rate limiter configurations
+const DEFAULT_RATE_LIMIT = parseInt(process.env.RATE_LIMIT_MAX || '100');
+const DEFAULT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000');
+
 const rateLimiters = {
   // General API endpoints
   general: new RateLimiterRedis({
     storeClient: redisClient,
     keyPrefix: 'api_general',
-    points: 100, // requests
-    duration: 60, // per 60 seconds
+    points: DEFAULT_RATE_LIMIT, // requests
+    duration: DEFAULT_WINDOW_MS / 1000, // per window seconds
     blockDuration: 60, // block for 60 seconds
   }),
 
@@ -38,8 +41,8 @@ const rateLimiters = {
   merchant: new RateLimiterRedis({
     storeClient: redisClient,
     keyPrefix: 'api_merchant',
-    points: 500, // requests per merchant
-    duration: 60, // per 60 seconds
+    points: parseInt(process.env.MERCHANT_RATE_LIMIT || '500'), // requests per merchant
+    duration: parseInt(process.env.MERCHANT_RATE_WINDOW || '60'), // per 60 seconds
     blockDuration: 120, // block for 2 minutes
   }),
 
@@ -47,8 +50,8 @@ const rateLimiters = {
   webhook: new RateLimiterRedis({
     storeClient: redisClient,
     keyPrefix: 'webhook',
-    points: 1000, // requests
-    duration: 60, // per 60 seconds
+    points: parseInt(process.env.WEBHOOK_RATE_LIMIT || '1000'), // requests
+    duration: parseInt(process.env.WEBHOOK_RATE_WINDOW || '60'), // per 60 seconds
     blockDuration: 30, // block for 30 seconds
   }),
 
@@ -56,8 +59,8 @@ const rateLimiters = {
   messaging: new RateLimiterRedis({
     storeClient: redisClient,
     keyPrefix: 'messaging',
-    points: 20, // messages per customer
-    duration: 60, // per 60 seconds
+    points: parseInt(process.env.MESSAGING_RATE_LIMIT || '20'), // messages per customer
+    duration: parseInt(process.env.MESSAGING_RATE_WINDOW || '60'), // per 60 seconds
     blockDuration: 300, // block for 5 minutes
   }),
 };

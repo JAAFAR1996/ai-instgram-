@@ -41,8 +41,15 @@ let dlqStats = {
   totalRetried: 0,
   totalFailed: 0,
   avgLatency: 0,
-  lastCleanup: 0
+  lastCleanup: 0,
+  circuitBreakerOpen: false,
+  circuitBreakerOpenedAt: 0,
+  consecutiveFailures: 0
 };
+
+// Circuit breaker configuration
+const CIRCUIT_BREAKER_THRESHOLD = parseInt(process.env.DLQ_CIRCUIT_BREAKER_THRESHOLD || '5');
+const CIRCUIT_BREAKER_TIMEOUT = parseInt(process.env.DLQ_CIRCUIT_BREAKER_TIMEOUT || '60000'); // 1 minute
 
 /**
  * Enhanced DLQ push with retry logic and categorization
@@ -202,6 +209,26 @@ export async function processRetryableItems(
   retryHandler: (item: DeadLetterItem) => Promise<boolean>
 ): Promise<{ retried: number; succeeded: number; failed: number }> {
   const now = Date.now();
+  
+  // Check circuit breaker
+  if (dlqStats.circuitBreakerOpen) {
+    if (now - dlqStats.circuitBreakerOpenedAt > CIRCUIT_BREAKER_TIMEOUT) {
+      // Reset circuit breaker after timeout
+      dlqStats.circuitBreakerOpen = false;
+      dlqStats.consecutiveFailures = 0;
+      logger.info('DLQ circuit breaker reset after timeout', {
+        timeoutMs: CIRCUIT_BREAKER_TIMEOUT,
+        previousFailures: dlqStats.consecutiveFailures
+      });
+    } else {
+      logger.warn('DLQ circuit breaker is open, skipping retry processing', {
+        openedAt: new Date(dlqStats.circuitBreakerOpenedAt).toISOString(),
+        timeRemainingMs: CIRCUIT_BREAKER_TIMEOUT - (now - dlqStats.circuitBreakerOpenedAt)
+      });
+      return { retried: 0, succeeded: 0, failed: 0 };
+    }
+  }
+  
   const retryableItems = dlq.filter(item => 
     item.nextRetryAt && 
     item.nextRetryAt <= now && 
@@ -212,54 +239,180 @@ export async function processRetryableItems(
   let succeeded = 0;
   let failed = 0;
 
-  for (const item of retryableItems) {
-    try {
-      logger.info('Retrying DLQ item', { 
-        dlqId: item.id, 
-        attempt: item.retryCount + 1,
-        maxRetries: item.maxRetries
-      });
+  // Process items in batches to avoid overwhelming the system
+  const BATCH_SIZE = parseInt(process.env.DLQ_BATCH_SIZE || '5');
+  
+  for (let i = 0; i < retryableItems.length; i += BATCH_SIZE) {
+    const batch = retryableItems.slice(i, i + BATCH_SIZE);
+    
+    await Promise.allSettled(batch.map(async (item) => {
+      const startTime = Date.now();
+      
+      try {
+        logger.info('Retrying DLQ item', { 
+          dlqId: item.id, 
+          attempt: item.retryCount + 1,
+          maxRetries: item.maxRetries,
+          category: item.category,
+          severity: item.severity
+        });
 
-      const success = await withTimeout(
-        retryHandler(item), 
-        30000, 
-        `DLQ retry ${item.id}`
-      );
+        const success = await withTimeout(
+          retryHandler(item), 
+          30000, 
+          `DLQ retry ${item.id}`
+        );
 
-      if (success) {
-        // Remove from DLQ
-        const index = dlq.findIndex(i => i.id === item.id);
-        if (index >= 0) dlq.splice(index, 1);
-        succeeded++;
-        dlqStats.totalRetried++;
+        const processingTime = Date.now() - startTime;
+
+        if (success) {
+          // Remove from DLQ atomically
+          const index = dlq.findIndex(i => i.id === item.id);
+          if (index >= 0) {
+            dlq.splice(index, 1);
+            succeeded++;
+            dlqStats.totalRetried++;
+            dlqStats.avgLatency = (dlqStats.avgLatency + processingTime) / 2;
+            
+            logger.info('DLQ item retry succeeded', { 
+              dlqId: item.id,
+              processingTime,
+              category: item.category,
+              severity: item.severity
+            });
+          } else {
+            logger.warn('DLQ item not found during success removal', { dlqId: item.id });
+          }
+        } else {
+          // Update retry count with exponential backoff
+          item.retryCount++;
+          const backoffMultiplier = Math.pow(2, item.retryCount);
+          const jitter = Math.random() * 1000; // Add jitter to prevent thundering herd
+          
+          if (item.retryCount < item.maxRetries) {
+            item.nextRetryAt = Date.now() + (DLQ_RETRY_DELAY_MS * backoffMultiplier) + jitter;
+          } else {
+            delete item.nextRetryAt; // Max retries reached
+            dlqStats.totalFailed++;
+            
+            // Log permanent failure for monitoring
+            logger.error('DLQ item permanently failed', { 
+              dlqId: item.id,
+              reason: item.reason,
+              category: item.category,
+              severity: item.severity,
+              totalAttempts: item.retryCount,
+              originalError: item.error,
+              traceId: item.traceId
+            });
+            
+            // Mark as critical if originally high/critical severity
+            if (item.severity === 'high' || item.severity === 'critical') {
+              item.severity = 'critical';
+              logger.fatal('Critical DLQ item permanently failed', {
+                dlqId: item.id,
+                reason: item.reason,
+                merchantId: item.merchantId,
+                eventId: item.eventId
+              });
+            }
+          }
+          failed++;
+          
+          logger.warn('DLQ item retry failed', { 
+            dlqId: item.id,
+            retryCount: item.retryCount,
+            maxRetries: item.maxRetries,
+            nextRetryAt: item.nextRetryAt,
+            processingTime,
+            category: item.category,
+            severity: item.severity
+          });
+        }
+        retried++;
+      } catch (error: any) {
+        const processingTime = Date.now() - startTime;
         
-        logger.info('DLQ item retry succeeded', { dlqId: item.id });
-      } else {
-        // Update retry count
+        // Enhanced error logging with context
+        const errorDetails = {
+          dlqId: item.id,
+          retryAttempt: item.retryCount + 1,
+          maxRetries: item.maxRetries,
+          category: item.category,
+          severity: item.severity,
+          processingTime,
+          errorName: error?.name || 'UnknownError',
+          errorMessage: error?.message || 'Unknown error occurred',
+          errorStack: error?.stack,
+          merchantId: item.merchantId,
+          traceId: item.traceId,
+          correlationId: item.correlationId
+        };
+        
+        logger.error('DLQ retry handler error', errorDetails);
+        
+        // Update item with error information
+        item.error = {
+          name: error?.name || 'RetryHandlerError',
+          message: error?.message || 'Retry handler failed',
+          stack: error?.stack
+        };
+        
+        // Increment retry count even on handler error
         item.retryCount++;
         if (item.retryCount < item.maxRetries) {
-          item.nextRetryAt = Date.now() + (DLQ_RETRY_DELAY_MS * Math.pow(2, item.retryCount));
+          const backoffMultiplier = Math.pow(2, item.retryCount);
+          const jitter = Math.random() * 1000;
+          item.nextRetryAt = Date.now() + (DLQ_RETRY_DELAY_MS * backoffMultiplier) + jitter;
         } else {
-          delete item.nextRetryAt; // Max retries reached
+          delete item.nextRetryAt;
           dlqStats.totalFailed++;
+          
+          logger.error('DLQ item failed permanently due to handler errors', errorDetails);
         }
-        failed++;
         
-        logger.warn('DLQ item retry failed', { 
-          dlqId: item.id,
-          retryCount: item.retryCount,
-          maxRetries: item.maxRetries
-        });
+        failed++;
+        retried++;
       }
-      retried++;
-    } catch (error) {
-      logger.error('DLQ retry handler error', error, { dlqId: item.id });
-      failed++;
+    }));
+    
+    // Small delay between batches to prevent overwhelming
+    if (i + BATCH_SIZE < retryableItems.length) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  // Update circuit breaker state
+  if (succeeded > 0) {
+    // Reset consecutive failures on any success
+    dlqStats.consecutiveFailures = 0;
+  } else if (failed > 0) {
+    dlqStats.consecutiveFailures += failed;
+    
+    // Open circuit breaker if threshold exceeded
+    if (dlqStats.consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD && !dlqStats.circuitBreakerOpen) {
+      dlqStats.circuitBreakerOpen = true;
+      dlqStats.circuitBreakerOpenedAt = Date.now();
+      
+      logger.error('DLQ circuit breaker opened due to consecutive failures', {
+        consecutiveFailures: dlqStats.consecutiveFailures,
+        threshold: CIRCUIT_BREAKER_THRESHOLD,
+        timeoutMs: CIRCUIT_BREAKER_TIMEOUT
+      });
     }
   }
 
   if (retried > 0) {
-    logger.info('DLQ retry batch completed', { retried, succeeded, failed });
+    logger.info('DLQ retry batch completed', { 
+      retried, 
+      succeeded, 
+      failed,
+      successRate: succeeded > 0 ? ((succeeded / retried) * 100).toFixed(1) + '%' : '0%',
+      totalQueueSize: dlq.length,
+      avgLatency: dlqStats.avgLatency.toFixed(2) + 'ms',
+      consecutiveFailures: dlqStats.consecutiveFailures,
+      circuitBreakerOpen: dlqStats.circuitBreakerOpen
+    });
   }
 
   return { retried, succeeded, failed };
@@ -391,13 +544,40 @@ setInterval(() => {
 // Auto-retry every 5 minutes (basic handler - override with custom logic)
 setInterval(async () => {
   try {
-    await processRetryableItems(async (item) => {
+    const retryResult = await processRetryableItems(async (item) => {
       // Default retry logic - can be overridden
-      logger.info('Default DLQ retry', { dlqId: item.id });
+      logger.info('Default DLQ retry - placeholder handler', { 
+        dlqId: item.id,
+        category: item.category,
+        severity: item.severity,
+        retryCount: item.retryCount
+      });
       return false; // Return false to keep in queue for custom retry handlers
     });
-  } catch (error) {
-    logger.error('DLQ auto-retry failed', error);
+    
+    if (retryResult.retried > 0) {
+      logger.info('DLQ auto-retry cycle completed', retryResult);
+    }
+  } catch (error: any) {
+    logger.error('DLQ auto-retry interval failed', {
+      error: {
+        name: error?.name || 'UnknownError',
+        message: error?.message || 'Auto-retry interval error',
+        stack: error?.stack
+      },
+      timestamp: new Date().toISOString(),
+      queueSize: dlq.length
+    });
+    
+    // Log critical error if this becomes frequent
+    dlqStats.totalFailed++;
+    if (dlqStats.totalFailed > 10) {
+      logger.fatal('DLQ auto-retry system experiencing frequent failures', {
+        totalFailed: dlqStats.totalFailed,
+        queueSize: dlq.length,
+        lastError: error?.message
+      });
+    }
   }
 }, 5 * 60 * 1000).unref();
 

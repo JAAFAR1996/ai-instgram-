@@ -67,7 +67,7 @@ export async function ensurePageMapping(pool: Pool, pageId: string, businessAcco
     `, [merchantId, pageId, businessAccountId ?? null]);
 
     await client.query('COMMIT');
-    log.info('✅ ensurePageMapping: ok for page', pageId, 'merchant', merchantId);
+    log.info('✅ ensurePageMapping: ok', { pageId, merchantId });
   } catch (e: any) {
     await client.query('ROLLBACK');
     log.error('❌ ensurePageMapping failed:', e.message);

@@ -216,7 +216,7 @@ export class DatabaseAdapter implements IDatabase {
       const result = await this.pool.query(sql, params);
       const duration = Date.now() - startTime;
       
-      this.logQueryMetrics(sql, params, duration, result.rows.length);
+      this.logQueryMetrics(sql, params || [], duration, result.rows.length);
       
       log.debug('✅ Query executed successfully', {
         duration,

@@ -33,6 +33,12 @@ export interface SpoolJobRequest {
 export class DatabaseJobSpool {
   private sql: Sql | null = null;
   private logger = getLogger({ component: 'DatabaseJobSpool' });
+  private metrics = {
+    jobsProcessed: 0,
+    jobsFailed: 0,
+    avgProcessingTime: 0,
+    lastProcessedAt: null as Date | null
+  };
 
   constructor() {
     // تأخير تهيئة SQL حتى أول استخدام
@@ -49,37 +55,64 @@ export class DatabaseJobSpool {
   }
 
   /**
+   * Record job processing metrics
+   */
+  async recordJobMetrics(startTime: number, success: boolean): Promise<void> {
+    const processingTime = Date.now() - startTime;
+    this.metrics.jobsProcessed++;
+    if (!success) this.metrics.jobsFailed++;
+    this.metrics.avgProcessingTime = (this.metrics.avgProcessingTime + processingTime) / 2;
+    this.metrics.lastProcessedAt = new Date();
+  }
+
+  /**
+   * Get current metrics
+   */
+  getMetrics() {
+    return { ...this.metrics };
+  }
+
+  /**
    * Add job to database spool when Redis is unavailable
    */
   async spoolJob(request: SpoolJobRequest): Promise<SpooledJob> {
-    const sql = this.getSQL();
-    const result = await sql`
-      INSERT INTO job_spool (
-        job_id, job_type, job_data, priority, merchant_id, scheduled_at
-      ) VALUES (
-        ${request.jobId},
-        ${request.jobType},
-        ${JSON.stringify(request.jobData)},
-        ${request.priority || 'NORMAL'},
-        ${request.merchantId},
-        ${request.scheduledAt || new Date()}
-      )
-      ON CONFLICT (job_id) DO UPDATE SET
-        job_data = EXCLUDED.job_data,
-        priority = EXCLUDED.priority,
-        scheduled_at = EXCLUDED.scheduled_at
-      RETURNING *
-    `;
+    const startTime = Date.now();
+    let success = false;
+    
+    try {
+      const sql = this.getSQL();
+      const result = await sql`
+        INSERT INTO job_spool (
+          job_id, job_type, job_data, priority, merchant_id, scheduled_at
+        ) VALUES (
+          ${request.jobId},
+          ${request.jobType},
+          ${JSON.stringify(request.jobData)},
+          ${request.priority || 'NORMAL'},
+          ${request.merchantId},
+          ${request.scheduledAt || new Date()}
+        )
+        ON CONFLICT (job_id) DO UPDATE SET
+          job_data = EXCLUDED.job_data,
+          priority = EXCLUDED.priority,
+          scheduled_at = EXCLUDED.scheduled_at
+        RETURNING *
+      `;
 
-    const row = result[0];
-    this.logger.info('Job spooled to database', {
-      jobId: request.jobId,
-      jobType: request.jobType,
-      merchantId: request.merchantId,
-      priority: request.priority
-    });
+      const row = result[0];
+      success = true;
+      
+      this.logger.info('Job spooled to database', {
+        jobId: request.jobId,
+        jobType: request.jobType,
+        merchantId: request.merchantId,
+        priority: request.priority
+      });
 
-    return this.mapSpooledJob(row);
+      return this.mapSpooledJob(row);
+    } finally {
+      await this.recordJobMetrics(startTime, success);
+    }
   }
 
   /**
