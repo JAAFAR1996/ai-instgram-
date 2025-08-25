@@ -60,7 +60,7 @@ export async function initializeRedisIntegration(_pool: Pool): Promise<RedisInte
     const { Redis } = await import('ioredis');
     const testConnection = new Redis(redisUrl, {
       lazyConnect: true,
-      maxRetriesPerRequest: 1,
+      maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || 3),
       connectTimeout: 5000,
       commandTimeout: 3000,
       enableReadyCheck: true

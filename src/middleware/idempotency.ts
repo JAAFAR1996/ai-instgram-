@@ -120,6 +120,13 @@ export function createIdempotencyMiddleware(
       
       const existingResult = redisResult.ok ? redisResult.result : null;
       
+      // إذا كان Redis غير متاح، نستمر بدون idempotency
+      if (redisResult.skipped) {
+        logger.info('Redis not available, continuing without idempotency check');
+        await next();
+        return;
+      }
+      
       if (existingResult) {
         let parsed;
         try {

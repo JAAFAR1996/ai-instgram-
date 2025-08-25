@@ -91,6 +91,11 @@ export class RedisConnectionManager {
    * Get Redis connection for specific usage type
    */
   async getConnection(usageType: RedisUsageType): Promise<Redis> {
+    // Check if Redis is disabled via environment variable
+    if (process.env.DISABLE_REDIS === 'true') {
+      throw new Error('Redis is disabled by DISABLE_REDIS environment variable');
+    }
+    
     // Check if we have a healthy connection
     const existingConnection = this.connections.get(usageType);
     if (existingConnection && await this.isConnectionHealthy(existingConnection)) {
@@ -307,10 +312,20 @@ export class RedisConnectionManager {
       info.lastError = error.message;
       info.healthScore = 0;
       
-      this.logger?.error('Redis connection error', {
-        usageType,
-        error: error.message
-      });
+      // Handle specific error types gracefully
+      if (error.message.includes('MaxRetriesPerRequestError') || 
+          error.message.includes('ECONNRESET') ||
+          error.message.includes('Connection timeout')) {
+        this.logger?.warn('Redis connection error (will retry)', {
+          usageType,
+          error: error.message
+        });
+      } else {
+        this.logger?.error('Redis connection error', {
+          usageType,
+          error: error.message
+        });
+      }
     });
 
     connection.on('close', () => {
@@ -336,6 +351,15 @@ export class RedisConnectionManager {
     usageType: RedisUsageType,
     callback: (redis: Redis) => Promise<T>
   ): Promise<{ ok: boolean; result?: T; reason?: string; skipped?: boolean }> {
+    
+    // Check if Redis is disabled via environment variable
+    if (process.env.DISABLE_REDIS === 'true') {
+      return {
+        ok: false,
+        skipped: true,
+        reason: 'redis_disabled_by_env'
+      };
+    }
     
     // Check rate limiting first
     if (!this.redisEnabled || this.isRateLimited()) {
@@ -364,6 +388,28 @@ export class RedisConnectionManager {
         } catch {
           errorMessage = String(error);
         }
+      }
+
+      // إذا كان Redis غير متاح، نعتبره skipped بدلاً من error
+      if (errorMessage.includes('ECONNREFUSED') || 
+          errorMessage.includes('ENOTFOUND') || 
+          errorMessage.includes('ECONNRESET') ||
+          errorMessage.includes('Connection timeout') ||
+          errorMessage.includes('Connection is closed') ||
+          errorMessage.includes('Failed to create') ||
+          errorMessage.includes('Redis is currently rate limited') ||
+          errorMessage.includes('MaxRetriesPerRequestError')) {
+        
+        this.logger?.warn('Redis not available, skipping operation', {
+          usageType,
+          error: errorMessage
+        });
+        
+        return {
+          ok: false,
+          skipped: true,
+          reason: 'redis_unavailable'
+        };
       }
 
       if (errorMessage.includes('max requests limit exceeded')) {

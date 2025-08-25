@@ -177,7 +177,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       commandTimeout: 8000,
       enableOfflineQueue: true,
       // Upstash rate limit configuration
-      maxRetriesPerRequest: isUpstash ? 1 : 3,
+      maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || (isUpstash ? 3 : 5)),
       autoResendUnfulfilledCommands: isUpstash ? false : true,
       ...(isUpstash && {
         reconnectOnError: (err: Error) => {
@@ -199,7 +199,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       ...(baseConfig.password && { password: baseConfig.password }),
       connectTimeout: 5000,
       lazyConnect: true,
-      maxRetriesPerRequest: isUpstash ? 1 : 3,
+      maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || (isUpstash ? 3 : 5)),
       enableOfflineQueue: true,
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}health:`,
