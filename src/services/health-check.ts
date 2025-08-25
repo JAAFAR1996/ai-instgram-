@@ -49,6 +49,11 @@ let timer: NodeJS.Timeout | null = null;
 
 // Simple Redis health probe using existing function
 async function redisHealthProbe(): Promise<HealthCheckResult> {
+  // إضافة فحص المتغير:
+  if (process.env.SKIP_REDIS_HEALTH_CHECK === 'true') {
+    return { ok: true }; // تجاهل health check
+  }
+  
   try {
     const manager = getRedisConnectionManager();
     const result = await manager.safeRedisOperation(
