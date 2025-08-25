@@ -158,8 +158,13 @@ async function bootstrap() {
     // Rate limiting for webhooks
     app.use('/webhooks/*', rateLimiter);
 
-    // Idempotency middleware for webhooks
-    app.use('/webhooks/*', createIdempotencyMiddleware({ ttlSeconds: 3600, keyPrefix: 'webhook' }));
+    // Conditional Idempotency middleware loading
+    if (redisStatus.success && redisStatus.mode === 'active') {
+      app.use('/webhooks/*', createIdempotencyMiddleware({ ttlSeconds: 3600, keyPrefix: 'webhook' }));
+      log.info('✅ Idempotency middleware enabled');
+    } else {
+      log.info('⚠️ Idempotency middleware disabled - Redis not available');
+    }
 
     // Internal auth middleware for admin endpoints
     app.use('/internal/*', createInternalAuthMiddleware());
