@@ -64,21 +64,42 @@ export function loadAndValidateEnvironment(): AppConfig {
     // Strict HTTPS validation for production URLs
     const urlFields = [
       { key: 'BASE_URL', value: env.BASE_URL, name: 'Base URL' },
-      { key: 'REDIRECT_URI', value: env.REDIRECT_URI, name: 'Redirect URI' },
-      { key: 'DATABASE_URL', value: env.DATABASE_URL, name: 'Database URL' },
-      { key: 'REDIS_URL', value: env.REDIS_URL, name: 'Redis URL' }
+      { key: 'REDIRECT_URI', value: env.REDIRECT_URI, name: 'Redirect URI' }
     ];
 
     for (const field of urlFields) {
       if (field.value) {
         try {
           const url = new URL(field.value);
-          if (url.protocol !== 'https:' && !field.value.startsWith('postgresql://') && !field.value.startsWith('redis://')) {
+          if (url.protocol !== 'https:') {
             errors.push(`${field.name} (${field.key}) must use HTTPS protocol in production`);
           }
         } catch (error) {
           errors.push(`${field.name} (${field.key}) must be a valid URL in production`);
         }
+      }
+    }
+
+    // Database and Redis URL validation (allow non-HTTPS for internal services)
+    if (env.DATABASE_URL) {
+      try {
+        const url = new URL(env.DATABASE_URL);
+        if (!url.protocol.startsWith('postgresql')) {
+          errors.push(`Database URL (DATABASE_URL) must use PostgreSQL protocol in production`);
+        }
+      } catch (error) {
+        errors.push(`Database URL (DATABASE_URL) must be a valid URL in production`);
+      }
+    }
+
+    if (env.REDIS_URL) {
+      try {
+        const url = new URL(env.REDIS_URL);
+        if (!url.protocol.startsWith('redis')) {
+          errors.push(`Redis URL (REDIS_URL) must use Redis protocol in production`);
+        }
+      } catch (error) {
+        errors.push(`Redis URL (REDIS_URL) must be a valid URL in production`);
       }
     }
 
