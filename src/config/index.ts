@@ -61,6 +61,44 @@ export function loadAndValidateEnvironment(): AppConfig {
       errors.push('ENCRYPTION_KEY must be at least 32 characters in production');
     }
 
+    // Strict HTTPS validation for production URLs
+    const urlFields = [
+      { key: 'BASE_URL', value: env.BASE_URL, name: 'Base URL' },
+      { key: 'REDIRECT_URI', value: env.REDIRECT_URI, name: 'Redirect URI' },
+      { key: 'DATABASE_URL', value: env.DATABASE_URL, name: 'Database URL' },
+      { key: 'REDIS_URL', value: env.REDIS_URL, name: 'Redis URL' }
+    ];
+
+    for (const field of urlFields) {
+      if (field.value) {
+        try {
+          const url = new URL(field.value);
+          if (url.protocol !== 'https:' && !field.value.startsWith('postgresql://') && !field.value.startsWith('redis://')) {
+            errors.push(`${field.name} (${field.key}) must use HTTPS protocol in production`);
+          }
+        } catch (error) {
+          errors.push(`${field.name} (${field.key}) must be a valid URL in production`);
+        }
+      }
+    }
+
+    // Validate CORS origins use HTTPS
+    if (env.CORS_ORIGINS && env.CORS_ORIGINS !== '*') {
+      const corsOrigins = env.CORS_ORIGINS.split(',').map(o => o.trim());
+      for (const origin of corsOrigins) {
+        if (origin && origin !== '*') {
+          try {
+            const url = new URL(origin);
+            if (url.protocol !== 'https:') {
+              errors.push(`CORS origin "${origin}" must use HTTPS protocol in production`);
+            }
+          } catch (error) {
+            errors.push(`CORS origin "${origin}" must be a valid URL in production`);
+          }
+        }
+      }
+    }
+
     // Check for insecure defaults in production
     const insecureDefaults = [
       { key: 'JWT_SECRET', patterns: ['secret', 'default', 'changeme'] },

@@ -5,12 +5,127 @@
  * ===============================================
  */
 
-import crypto from 'node:crypto';
+import * as crypto from 'node:crypto';
 import { getEnv } from '../config/env.js';
+import { getLogger } from './logger.js';
 
 export type HmacVerifyResult =
   | { ok: true }
   | { ok: false; reason: 'missing_params' | 'bad_format' | 'mismatch' | 'error' };
+
+/**
+ * Validate encryption key entropy and security
+ */
+export function validateKeyEntropy(key: string): KeyEntropyValidation {
+  const issues: string[] = [];
+  const recommendations: string[] = [];
+  let entropyScore = 0;
+
+  try {
+    // Check key length
+    if (key.length < 32) {
+      issues.push('Key length is too short (minimum 32 characters)');
+      entropyScore -= 30;
+    } else if (key.length >= 64) {
+      entropyScore += 20;
+    } else {
+      entropyScore += 10;
+    }
+
+    // Check for hex format (preferred)
+    if (/^[0-9a-fA-F]{64}$/.test(key)) {
+      entropyScore += 25;
+      recommendations.push('Hex format detected - excellent for entropy');
+    } else if (key.length === 32) {
+      entropyScore += 15;
+      recommendations.push('ASCII format detected - acceptable but hex is preferred');
+    }
+
+    // Check for common weak patterns
+    const weakPatterns = [
+      /^(.)\1+$/, // Repeated characters
+      /^[0-9]+$/, // Only numbers
+      /^[a-zA-Z]+$/, // Only letters
+      /^(password|secret|key|default|changeme|test|admin|root|123456|abcdef)/i, // Common weak values
+      /(password|secret|key|default|changeme|test|admin|root|123456|abcdef)$/i // Common weak values at end
+    ];
+
+    for (const pattern of weakPatterns) {
+      if (pattern.test(key)) {
+        issues.push(`Key contains weak pattern: ${pattern.source}`);
+        entropyScore -= 20;
+      }
+    }
+
+    // Check character diversity
+    const uniqueChars = new Set(key.split('')).size;
+    const diversityRatio = uniqueChars / key.length;
+    
+    if (diversityRatio < 0.3) {
+      issues.push('Low character diversity detected');
+      entropyScore -= 15;
+    } else if (diversityRatio > 0.7) {
+      entropyScore += 15;
+      recommendations.push('High character diversity detected');
+    }
+
+    // Check for sequential patterns
+    const sequentialPatterns = [
+      'abcdefghijklmnopqrstuvwxyz',
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+      '0123456789',
+      'qwertyuiop',
+      'asdfghjkl'
+    ];
+
+    for (const pattern of sequentialPatterns) {
+      if (key.toLowerCase().includes(pattern.toLowerCase())) {
+        issues.push(`Sequential pattern detected: ${pattern}`);
+        entropyScore -= 25;
+      }
+    }
+
+    // Check for repeated substrings
+    for (let len = 3; len <= Math.floor(key.length / 2); len++) {
+      for (let i = 0; i <= key.length - len; i++) {
+        const substring = key.substring(i, i + len);
+        const count = (key.match(new RegExp(substring, 'g')) || []).length;
+        if (count > 2) {
+          issues.push(`Repeated substring detected: "${substring}" (${count} times)`);
+          entropyScore -= 10;
+          break;
+        }
+      }
+    }
+
+    // Final entropy score calculation
+    entropyScore = Math.max(0, Math.min(100, entropyScore + 50)); // Base score + adjustments
+
+    // Determine validity
+    const isValid = entropyScore >= 70 && issues.length <= 2;
+
+    if (!isValid) {
+      recommendations.push('Generate a new key with higher entropy');
+      recommendations.push('Use a cryptographically secure random generator');
+      recommendations.push('Consider using hex format for better entropy');
+    }
+
+    return {
+      isValid,
+      entropyScore,
+      issues,
+      recommendations
+    };
+
+  } catch (error) {
+    return {
+      isValid: false,
+      entropyScore: 0,
+      issues: ['Error during entropy validation'],
+      recommendations: ['Check key format and try again']
+    };
+  }
+}
 
 export function verifyHMACRaw(payload: Buffer, signature: string, secret: string): HmacVerifyResult {
   try {
@@ -113,13 +228,44 @@ export interface DecryptedData {
   timestamp: number;
 }
 
+export interface KeyRotationConfig {
+  rotationIntervalDays: number;
+  maxKeyAgeDays: number;
+  keyVersion: string;
+  lastRotationDate?: Date;
+}
+
+export interface KeyEntropyValidation {
+  isValid: boolean;
+  entropyScore: number;
+  issues: string[];
+  recommendations: string[];
+}
+
 export class EncryptionService {
   private readonly encryptionKey: Buffer;
+  private readonly keyRotationConfig: KeyRotationConfig;
+  private readonly keyVersion: string;
+  private readonly logger = getLogger({ component: 'encryption-service' });
 
-  constructor(masterKey?: string) {
+  constructor(masterKey?: string, rotationConfig?: Partial<KeyRotationConfig>) {
     const key = masterKey || getEnv('ENCRYPTION_KEY');
     if (!key) {
       throw new Error('ENCRYPTION_KEY environment variable required');
+    }
+
+    // Validate key entropy in startup
+    const entropyValidation = validateKeyEntropy(key);
+    if (!entropyValidation.isValid) {
+      this.logger.warn('Encryption key entropy validation failed', {
+        entropyScore: entropyValidation.entropyScore,
+        issues: entropyValidation.issues,
+        recommendations: entropyValidation.recommendations
+      });
+      
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`Encryption key entropy validation failed: ${entropyValidation.issues.join(', ')}`);
+      }
     }
 
     // Accept either 64 hex characters (32 bytes) or 32 ASCII characters
@@ -130,33 +276,167 @@ export class EncryptionService {
     } else {
       throw new Error('ENCRYPTION_KEY must be 32 bytes (64 hex characters) or 32 ASCII characters');
     }
+
+    // Initialize key rotation configuration
+    this.keyRotationConfig = {
+      rotationIntervalDays: rotationConfig?.rotationIntervalDays || 90, // 90 days default
+      maxKeyAgeDays: rotationConfig?.maxKeyAgeDays || 365, // 1 year max
+      keyVersion: rotationConfig?.keyVersion || 'v1',
+      lastRotationDate: rotationConfig?.lastRotationDate || new Date()
+    };
+
+    this.keyVersion = this.keyRotationConfig.keyVersion;
+  }
+
+  /**
+   * Check if key rotation is needed
+   */
+  public shouldRotateKey(): boolean {
+    const now = new Date();
+    const daysSinceRotation = (now.getTime() - this.keyRotationConfig.lastRotationDate!.getTime()) / (1000 * 60 * 60 * 24);
+    return daysSinceRotation >= this.keyRotationConfig.rotationIntervalDays;
+  }
+
+  /**
+   * Get key rotation status
+   */
+  public getKeyRotationStatus(): {
+    shouldRotate: boolean;
+    daysSinceRotation: number;
+    rotationInterval: number;
+    keyVersion: string;
+    lastRotation: Date;
+  } {
+    const now = new Date();
+    const daysSinceRotation = (now.getTime() - this.keyRotationConfig.lastRotationDate!.getTime()) / (1000 * 60 * 60 * 24);
+    
+    return {
+      shouldRotate: daysSinceRotation >= this.keyRotationConfig.rotationIntervalDays,
+      daysSinceRotation: Math.floor(daysSinceRotation),
+      rotationInterval: this.keyRotationConfig.rotationIntervalDays,
+      keyVersion: this.keyVersion,
+      lastRotation: this.keyRotationConfig.lastRotationDate!
+    };
+  }
+
+  /**
+   * Generate new encryption key
+   */
+  public generateNewKey(): string {
+    return crypto.randomBytes(32).toString('hex');
+  }
+
+  /**
+   * Rotate encryption key (returns new key)
+   */
+  public rotateKey(): {
+    newKey: string;
+    oldKeyVersion: string;
+    newKeyVersion: string;
+    rotationDate: Date;
+  } {
+    const newKey = this.generateNewKey();
+    const oldKeyVersion = this.keyVersion;
+    const newKeyVersion = `v${parseInt(this.keyVersion.slice(1)) + 1}`;
+    const rotationDate = new Date();
+
+    // Update rotation config
+    this.keyRotationConfig.keyVersion = newKeyVersion;
+    this.keyRotationConfig.lastRotationDate = rotationDate;
+
+    this.logger.info('Encryption key rotated successfully', {
+      oldKeyVersion,
+      newKeyVersion,
+      rotationDate: rotationDate.toISOString()
+    });
+
+    return {
+      newKey,
+      oldKeyVersion: oldKeyVersion,
+      newKeyVersion: newKeyVersion,
+      rotationDate: rotationDate
+    };
+  }
+
+  /**
+   * Encrypt with key version tracking
+   */
+  public encryptWithVersion(plaintext: string, aad = 'v1'): EncryptedData & { keyVersion: string } {
+    const encrypted = this.encrypt(plaintext, aad);
+    return {
+      ...encrypted,
+      keyVersion: this.keyVersion
+    };
+  }
+
+  /**
+   * Decrypt with key version validation
+   */
+  public decryptWithVersion(encryptedData: EncryptedData & { keyVersion?: string }, aad = 'v1'): string {
+    // Check if key version is too old
+    if (encryptedData.keyVersion && encryptedData.keyVersion !== this.keyVersion) {
+      const versionDiff = parseInt(this.keyVersion.slice(1)) - parseInt(encryptedData.keyVersion.slice(1));
+      if (versionDiff > 2) {
+        throw new Error(`Key version too old: ${encryptedData.keyVersion}, current: ${this.keyVersion}`);
+      }
+    }
+
+    return this.decrypt(encryptedData, aad);
   }
 
   /**
    * Encrypt sensitive data using AES-256-GCM (Production 2025 standard)
    */
   public encrypt(plaintext: string, aad = 'v1'): EncryptedData {
-    const iv = crypto.randomBytes(12); // GCM-recommended 12 bytes
-    const cipher = crypto.createCipheriv('aes-256-gcm', this.encryptionKey, iv);
-    cipher.setAAD(Buffer.from(aad));
-    const ct = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    
-    return { 
-      iv: iv.toString('hex'), 
-      ct: ct.toString('hex'), 
-      tag: tag.toString('hex') 
-    };
+    try {
+      const iv = crypto.randomBytes(12); // GCM-recommended 12 bytes
+      const cipher = crypto.createCipheriv('aes-256-gcm', this.encryptionKey, iv);
+      cipher.setAAD(Buffer.from(aad));
+      const ct = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+      const tag = cipher.getAuthTag();
+      
+      this.logger.debug('Data encrypted successfully', {
+        aad,
+        plaintextLength: plaintext.length,
+        ivLength: iv.length,
+        ctLength: ct.length,
+        tagLength: tag.length
+      });
+      
+      return { 
+        iv: iv.toString('hex'), 
+        ct: ct.toString('hex'), 
+        tag: tag.toString('hex') 
+      };
+    } catch (error) {
+      this.logger.error('Encryption failed', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        aad,
+        plaintextLength: plaintext?.length
+      });
+      throw error;
+    }
   }
 
   /**
    * Decrypt sensitive data using AES-256-GCM
    */
   public decrypt({ iv, ct, tag }: EncryptedData, aad = 'v1'): string {
-    const decipher = crypto.createDecipheriv('aes-256-gcm', this.encryptionKey, Buffer.from(iv, 'hex'));
-    decipher.setAAD(Buffer.from(aad));
-    decipher.setAuthTag(Buffer.from(tag, 'hex'));
-    return Buffer.concat([decipher.update(Buffer.from(ct, 'hex')), decipher.final()]).toString('utf8');
+    try {
+      const decipher = crypto.createDecipheriv('aes-256-gcm', this.encryptionKey, Buffer.from(iv, 'hex'));
+      decipher.setAAD(Buffer.from(aad));
+      decipher.setAuthTag(Buffer.from(tag, 'hex'));
+      return Buffer.concat([decipher.update(Buffer.from(ct, 'hex')), decipher.final()]).toString('utf8');
+    } catch (error) {
+      this.logger.error('Decryption failed', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        aad,
+        ivLength: iv?.length,
+        ctLength: ct?.length,
+        tagLength: tag?.length
+      });
+      throw error;
+    }
   }
 
   /**
@@ -200,43 +480,36 @@ export class EncryptionService {
   }
 
   /**
-   * @deprecated Use verifyHMACRaw(payload: Buffer, signature, secret) instead
-   * HMAC verification for webhooks - kept for backward compatibility
-   */
-  public verifyHMAC(payload: string, signature: string, secret: string): boolean {
-    // Remove common prefix and validate format
-    const sig = signature.startsWith('sha256=') ? signature.slice(7) : signature;
-    if (!/^[a-f0-9]{64}$/i.test(sig)) return false;
-
-    // Calculate expected HMAC
-    const expectedHex = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-
-    // Compare buffers safely
-    const a = Buffer.from(expectedHex, 'hex');
-    const b = Buffer.from(sig, 'hex');
-    if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
-  }
-
-  /**
    * Convenience methods for WhatsApp/Instagram tokens
    */
-  public encryptInstagramToken(token: string): string {
-    return JSON.stringify(this.encrypt(token));
+  public encryptInstagramToken(token: string, identifier: string = 'default'): string {
+    const encrypted = this.encryptToken(token, 'instagram', identifier);
+    return JSON.stringify(encrypted);
   }
 
-  public decryptInstagramToken(encryptedData: string): string {
-    const data = JSON.parse(encryptedData) as EncryptedData;
-    return this.decrypt(data);
+  public decryptInstagramToken(encryptedData: string): { token: string; identifier: string; timestamp: number } {
+    let data: EncryptedData;
+    try {
+      data = JSON.parse(encryptedData) as EncryptedData;
+    } catch {
+      throw new Error('Invalid encrypted data format');
+    }
+    return this.decryptToken(data, 'instagram');
   }
 
-  public encryptWhatsAppToken(token: string): string {
-    return JSON.stringify(this.encrypt(token));
+  public encryptWhatsAppToken(token: string, identifier: string = 'default'): string {
+    const encrypted = this.encryptToken(token, 'whatsapp', identifier);
+    return JSON.stringify(encrypted);
   }
 
-  public decryptWhatsAppToken(encryptedData: string): string {
-    const data = JSON.parse(encryptedData) as EncryptedData;
-    return this.decrypt(data);
+  public decryptWhatsAppToken(encryptedData: string): { token: string; identifier: string; timestamp: number } {
+    let data: EncryptedData;
+    try {
+      data = JSON.parse(encryptedData) as EncryptedData;
+    } catch {
+      throw new Error('Invalid encrypted data format');
+    }
+    return this.decryptToken(data, 'whatsapp');
   }
 }
 
@@ -278,11 +551,48 @@ export function decryptToken(
 }
 
 export function verifyHMAC(
-  payload: string,
+  payload: string | Buffer,
   signature: string,
   secret: string
 ): boolean {
-  return getEncryptionService().verifyHMAC(payload, signature, secret);
+  const buffer = typeof payload === 'string' ? Buffer.from(payload, 'utf8') : payload;
+  return verifyHMACRaw(buffer, signature, secret).ok;
+}
+
+// Key rotation convenience functions
+export function shouldRotateKey(): boolean {
+  return getEncryptionService().shouldRotateKey();
+}
+
+export function getKeyRotationStatus(): {
+  shouldRotate: boolean;
+  daysSinceRotation: number;
+  rotationInterval: number;
+  keyVersion: string;
+  lastRotation: Date;
+} {
+  return getEncryptionService().getKeyRotationStatus();
+}
+
+export function generateNewKey(): string {
+  return getEncryptionService().generateNewKey();
+}
+
+export function rotateKey(): {
+  newKey: string;
+  oldKeyVersion: string;
+  newKeyVersion: string;
+  rotationDate: Date;
+} {
+  return getEncryptionService().rotateKey();
+}
+
+export function encryptWithVersion(plaintext: string, aad?: string): EncryptedData & { keyVersion: string } {
+  return getEncryptionService().encryptWithVersion(plaintext, aad);
+}
+
+export function decryptWithVersion(encryptedData: EncryptedData & { keyVersion?: string }, aad?: string): string {
+  return getEncryptionService().decryptWithVersion(encryptedData, aad);
 }
 
 export default EncryptionService;

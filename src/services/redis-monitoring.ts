@@ -6,6 +6,7 @@
  */
 
 import { getLogger } from './logger.js';
+import type { Redis } from 'ioredis';
 
 const logger = getLogger();
 
@@ -42,7 +43,7 @@ export interface RedisMonitoringReport {
 }
 
 export class RedisMonitor {
-  private redis: any;
+  private redis?: Redis;
   private alerts: RedisAlerts = {
     highMemoryUsage: false,
     slowResponseTime: false,
@@ -50,11 +51,13 @@ export class RedisMonitor {
     highErrorRate: false
   };
 
-  constructor(redisConnection?: any) {
-    this.redis = redisConnection;
+  constructor(redisConnection?: Redis) {
+    if (redisConnection) {
+      this.redis = redisConnection;
+    }
   }
 
-  setRedisConnection(redis: any): void {
+  setRedisConnection(redis: Redis): void {
     this.redis = redis;
   }
 
@@ -108,7 +111,10 @@ export class RedisMonitor {
     } catch (error) {
       this.alerts.connectionIssues = true;
       
-      logger.error('Redis health check failed', error);
+      logger.error('Redis health check failed', error, {
+        component: 'RedisMonitor',
+        method: 'performHealthCheck'
+      });
       
       return {
         timestamp,
@@ -203,7 +209,7 @@ let redisMonitorInstance: RedisMonitor | null = null;
 /**
  * Get Redis monitor instance
  */
-export function getRedisMonitor(redisConnection?: any): RedisMonitor {
+export function getRedisMonitor(redisConnection?: Redis): RedisMonitor {
   if (!redisMonitorInstance) {
     redisMonitorInstance = new RedisMonitor(redisConnection);
   } else if (redisConnection) {

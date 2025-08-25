@@ -12,7 +12,7 @@ import { getServiceController } from '../services/service-controller.js';
 import { securityHeaders, rateLimiter } from '../middleware/security.js';
 import { z } from 'zod';
 import { getConfig } from '../config/index.js';
-import { ToggleServiceSchema } from '../types/service-control.js';
+import { ToggleServiceSchema, ServiceNameSchema } from '../types/service-control.js';
 
 
 export class ServiceControlAPI {
@@ -153,7 +153,7 @@ export class ServiceControlAPI {
         }, 400);
       }
 
-      const serviceValidation = z.enum(['instagram', 'ai_processing', 'auto_reply', 'story_response', 'comment_response', 'dm_processing']).safeParse(service);
+      const serviceValidation = ServiceNameSchema.safeParse(service);
       if (!serviceValidation.success) {
         return c.json({
           error: 'اسم الخدمة غير صحيح'

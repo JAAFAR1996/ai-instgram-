@@ -56,7 +56,7 @@ export class RedisConnectionManager {
   private redisEnabled: boolean = true;
   // Simplified health monitoring methods
   private errorHandler: RedisErrorHandler;
-  private healthCheckInterval?: NodeJS.Timeout;
+  private healthCheckInterval: NodeJS.Timeout | undefined;
   private poolConfig: ConnectionPoolConfig;
   private rateLimitResetAt?: Date;
   private pauseReconnectionsUntil?: Date;
@@ -437,10 +437,10 @@ export class RedisConnectionManager {
     
     await Promise.allSettled(closePromises);
     
+    // ✅ إصلاح مشكلة clearInterval
     if (this.healthCheckInterval) {
       clearInterval(this.healthCheckInterval);
-      clearInterval(this.healthCheckInterval!);
-    this.healthCheckInterval = undefined as unknown as NodeJS.Timeout;
+      this.healthCheckInterval = undefined;
     }
     
     this.logger?.info('All Redis connections closed');
@@ -475,6 +475,14 @@ export class RedisConnectionManager {
   disableRedis(reason: string = 'manual'): void {
     this.redisEnabled = false;
     this.logger?.warn('Redis disabled', { reason });
+    
+    // ✅ إضافة إعادة تفعيل تلقائية بعد 5 دقائق
+    if (reason === 'rate_limit') {
+      setTimeout(() => {
+        this.logger?.info('Redis auto-re-enabling after rate limit cooldown');
+        this.enableRedis();
+      }, 5 * 60 * 1000); // 5 دقائق
+    }
   }
 
   /**

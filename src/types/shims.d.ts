@@ -1,43 +1,109 @@
+/**
+ * ===============================================
+ * TypeScript Declaration File - Module Augmentations
+ * TypeScript interfaces and module declarations for packages without types
+ * 
+ * ✅ Provides type safety for external packages
+ * ✅ Extends global Node.js types
+ * ✅ Centralizes module declarations
+ * ✅ No conflicts with other type files
+ * ===============================================
+ */
+
 export {}; // Make this file a module augmentation only
 
-// Module declarations for packages without types
+// ===============================================
+// MODULE DECLARATIONS FOR PACKAGES WITHOUT TYPES
+// ===============================================
+
+/**
+ * PostgreSQL client library - used throughout the project for database operations
+ * Provides type safety for pg module imports
+ */
 declare module 'pg';
+
+/**
+ * OpenTelemetry API - used in telemetry.ts for observability
+ * Provides type safety for OpenTelemetry API imports
+ */
 declare module '@opentelemetry/api';
+
+/**
+ * OpenTelemetry SDK Metrics - used in telemetry.ts for metrics collection
+ * Provides type safety for OpenTelemetry metrics imports
+ */
 declare module '@opentelemetry/sdk-metrics';
+
+/**
+ * OpenTelemetry SDK Trace Node - used in telemetry.ts for tracing
+ * Provides type safety for OpenTelemetry tracing imports
+ */
 declare module '@opentelemetry/sdk-trace-node';
-declare module '@opentelemetry/resources';
-declare module '@opentelemetry/semantic-conventions';
-declare module '@opentelemetry/auto-instrumentations-node';
 
-// Flexible string maps
-type StringMap = Record<string, string>;
+// ===============================================
+// UTILITY TYPES
+// ===============================================
 
-// API field name corrections
-interface InstagramAPIResponse { 
-  messageId?: string; 
-  message_id?: string;
-  [k: string]: any; 
-}
+/**
+ * Flexible string maps for general use throughout the project
+ * Used for dynamic key-value pairs where both keys and values are strings
+ * 
+ * @example
+ * ```typescript
+ * const headers: StringMap = {
+ *   'Content-Type': 'application/json',
+ *   'Authorization': 'Bearer token'
+ * };
+ * ```
+ */
+export type StringMap = Record<string, string>;
 
+// ===============================================
+// GLOBAL TYPE AUGMENTATIONS
+// ===============================================
 
-
-// Production-only lowercase platform types
-type Platform = 'whatsapp' | 'instagram';
-type ConversationStage = string;
-
-// Action types for WhatsApp
-type ActionType = 'ADD_TO_CART' | 'SHOW_PRODUCT' | 'CREATE_ORDER' | 
-                 'COLLECT_INFO' | 'ESCALATE' | 'SCHEDULE_TEMPLATE' | string;
-
-// Global type augmentations
+/**
+ * Global type augmentations for Node.js environment variables
+ * Extends the ProcessEnv interface to include project-specific environment variables
+ * Provides type safety for process.env usage throughout the project
+ */
 declare global {
   namespace NodeJS {
     interface ProcessEnv {
+      /**
+       * Node.js environment - determines application behavior
+       * @example 'development' | 'production' | 'test'
+       */
       NODE_ENV: 'development' | 'production' | 'test';
+      
+      /**
+       * PostgreSQL database connection URL
+       * @example 'postgresql://user:password@localhost:5432/database'
+       */
       DATABASE_URL?: string;
+      
+      /**
+       * Enable/disable telemetry collection
+       * @example 'true' | 'false'
+       */
       ENABLE_TELEMETRY?: string;
+      
+      /**
+       * Meta (Facebook) application secret for API authentication
+       * Used for Instagram and WhatsApp API integrations
+       */
       META_APP_SECRET?: string;
+      
+      /**
+       * Instagram webhook verification token
+       * Used for webhook signature verification
+       */
       IG_VERIFY_TOKEN?: string;
+      
+      /**
+       * Application port number
+       * @example '3000' | '8080'
+       */
       PORT?: string;
     }
   }

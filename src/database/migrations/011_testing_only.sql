@@ -1,7 +1,30 @@
 -- ===============================================
--- Instagram Testing Infrastructure Migration
--- Adds comprehensive testing and monitoring capabilities
+-- 🚫 TESTING ONLY - DO NOT RUN IN PRODUCTION
+-- Instagram Testing Infrastructure Migration  
+-- This file should be excluded from production builds
 -- ===============================================
+
+-- Production safety check
+DO $$
+BEGIN
+    IF current_setting('app.environment', true) = 'production' THEN
+        RAISE EXCEPTION 'Testing migrations cannot be executed in production environment';
+    END IF;
+END $$;
+
+-- Additional safety check for common production indicators
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_settings 
+        WHERE name = 'shared_preload_libraries' 
+        AND setting LIKE '%pg_stat_statements%'
+        AND current_database() NOT LIKE '%test%'
+        AND current_database() NOT LIKE '%dev%'
+    ) THEN
+        RAISE EXCEPTION 'This appears to be a production database - testing migrations blocked';
+    END IF;
+END $$;
 
 -- Create test_results table for storing individual test scenario results
 CREATE TABLE IF NOT EXISTS test_results (
@@ -104,116 +127,6 @@ CREATE INDEX IF NOT EXISTS idx_api_validation_merchant ON api_validation_results
 CREATE INDEX IF NOT EXISTS idx_api_validation_health ON api_validation_results(api_health);
 CREATE INDEX IF NOT EXISTS idx_api_validation_created ON api_validation_results(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_api_validation_credentials ON api_validation_results(credentials_status);
-
--- Create hashtag_mentions table (if not exists from previous migration)
-CREATE TABLE IF NOT EXISTS hashtag_mentions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    message_id VARCHAR(255) NOT NULL,
-    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-    hashtag VARCHAR(255),
-    mentioned_user VARCHAR(255),
-    content TEXT NOT NULL,
-    source VARCHAR(50) NOT NULL CHECK (source IN ('comment', 'dm', 'story', 'post')),
-    sentiment VARCHAR(20) DEFAULT 'neutral' CHECK (sentiment IN ('positive', 'neutral', 'negative')),
-    category VARCHAR(50) DEFAULT 'generic' CHECK (category IN ('product', 'brand', 'trend', 'event', 'generic')),
-    mention_type VARCHAR(50) DEFAULT 'generic' CHECK (mention_type IN ('customer', 'influencer', 'competitor', 'brand', 'generic')),
-    marketing_value VARCHAR(20) DEFAULT 'medium' CHECK (marketing_value IN ('low', 'medium', 'high')),
-    engagement_potential VARCHAR(20) DEFAULT 'medium' CHECK (engagement_potential IN ('low', 'medium', 'high')),
-    engagement_score DECIMAL(5,2) DEFAULT 50,
-    user_id VARCHAR(255) NOT NULL,
-    processing_status VARCHAR(20) DEFAULT 'processed' CHECK (processing_status IN ('pending', 'processed', 'failed')),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    UNIQUE(message_id, hashtag),
-    UNIQUE(message_id, mentioned_user)
-);
-
--- Create indexes for hashtag_mentions (if not exists)
-CREATE INDEX IF NOT EXISTS idx_hashtag_mentions_merchant ON hashtag_mentions(merchant_id);
-CREATE INDEX IF NOT EXISTS idx_hashtag_mentions_hashtag ON hashtag_mentions(hashtag) WHERE hashtag IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hashtag_mentions_user ON hashtag_mentions(mentioned_user) WHERE mentioned_user IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hashtag_mentions_source ON hashtag_mentions(source);
-CREATE INDEX IF NOT EXISTS idx_hashtag_mentions_sentiment ON hashtag_mentions(sentiment);
-CREATE INDEX IF NOT EXISTS idx_hashtag_mentions_marketing_value ON hashtag_mentions(marketing_value);
-
--- Create hashtag_strategies table for hashtag monitoring strategies
-CREATE TABLE IF NOT EXISTS hashtag_strategies (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    target_hashtags JSONB NOT NULL DEFAULT '[]',
-    monitoring_keywords JSONB NOT NULL DEFAULT '[]',
-    auto_response_rules JSONB NOT NULL DEFAULT '[]',
-    campaign_goals JSONB NOT NULL DEFAULT '[]',
-    success_metrics JSONB NOT NULL DEFAULT '{}',
-    is_active BOOLEAN DEFAULT TRUE,
-    last_executed_at TIMESTAMP WITH TIME ZONE,
-    execution_count INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Create indexes for hashtag_strategies
-CREATE INDEX IF NOT EXISTS idx_hashtag_strategies_merchant ON hashtag_strategies(merchant_id);
-CREATE INDEX IF NOT EXISTS idx_hashtag_strategies_active ON hashtag_strategies(is_active) WHERE is_active = TRUE;
-
--- Create hashtag_trends table for tracking hashtag popularity trends
-CREATE TABLE IF NOT EXISTS hashtag_trends (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-    hashtag VARCHAR(255) NOT NULL,
-    date DATE NOT NULL,
-    usage_count INTEGER DEFAULT 1,
-    unique_users INTEGER DEFAULT 1,
-    engagement_score DECIMAL(5,2) DEFAULT 0,
-    sentiment_breakdown JSONB DEFAULT '{"positive": 0, "neutral": 0, "negative": 0}',
-    growth_rate DECIMAL(5,2) DEFAULT 0, -- percentage change from previous period
-    trending_score DECIMAL(5,2) DEFAULT 0,
-    peak_usage_hour INTEGER, -- 0-23
-    associated_keywords JSONB DEFAULT '[]',
-    competitor_usage INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    UNIQUE(merchant_id, hashtag, date)
-);
-
--- Create indexes for hashtag_trends
-CREATE INDEX IF NOT EXISTS idx_hashtag_trends_merchant ON hashtag_trends(merchant_id);
-CREATE INDEX IF NOT EXISTS idx_hashtag_trends_hashtag ON hashtag_trends(hashtag);
-CREATE INDEX IF NOT EXISTS idx_hashtag_trends_date ON hashtag_trends(date DESC);
-CREATE INDEX IF NOT EXISTS idx_hashtag_trends_trending_score ON hashtag_trends(trending_score DESC);
-CREATE INDEX IF NOT EXISTS idx_hashtag_trends_growth ON hashtag_trends(growth_rate DESC);
-
--- Create marketing_opportunities table for tracking marketing leads
-CREATE TABLE IF NOT EXISTS marketing_opportunities (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-    opportunity_type VARCHAR(100) NOT NULL,
-    source_platform VARCHAR(50) NOT NULL CHECK (source_platform IN ('INSTAGRAM', 'WHATSAPP', 'TELEGRAM')),
-    source_content TEXT,
-    hashtags JSONB DEFAULT '[]',
-    mentions JSONB DEFAULT '[]',
-    priority VARCHAR(20) DEFAULT 'MEDIUM' CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'URGENT')),
-    status VARCHAR(20) DEFAULT 'NEW' CHECK (status IN ('NEW', 'REVIEWING', 'ACTIVE', 'COMPLETED', 'DISMISSED')),
-    estimated_value DECIMAL(10,2),
-    conversion_probability DECIMAL(5,2),
-    assigned_to UUID REFERENCES merchants(id),
-    action_items JSONB DEFAULT '[]',
-    notes TEXT,
-    deadline TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Create indexes for marketing_opportunities
-CREATE INDEX IF NOT EXISTS idx_marketing_opportunities_merchant ON marketing_opportunities(merchant_id);
-CREATE INDEX IF NOT EXISTS idx_marketing_opportunities_priority ON marketing_opportunities(priority);
-CREATE INDEX IF NOT EXISTS idx_marketing_opportunities_status ON marketing_opportunities(status);
-CREATE INDEX IF NOT EXISTS idx_marketing_opportunities_platform ON marketing_opportunities(source_platform);
-CREATE INDEX IF NOT EXISTS idx_marketing_opportunities_created ON marketing_opportunities(created_at DESC);
 
 -- Create test_schedules table for automated testing schedules
 CREATE TABLE IF NOT EXISTS test_schedules (
@@ -399,29 +312,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Create automated test execution trigger
-CREATE OR REPLACE FUNCTION trigger_scheduled_tests()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- This would be called by a cron job or external scheduler
-    -- to execute tests based on test_schedules
-    
-    -- Update next execution time
-    IF NEW.is_active = TRUE THEN
-        NEW.next_execution := NEW.created_at + INTERVAL '1 day'; -- Simplified
-    END IF;
-    
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Create trigger for test schedules
-DROP TRIGGER IF EXISTS trigger_test_schedule_update ON test_schedules;
-CREATE TRIGGER trigger_test_schedule_update
-    BEFORE INSERT OR UPDATE ON test_schedules
-    FOR EACH ROW
-    EXECUTE FUNCTION trigger_scheduled_tests();
-
 -- Create performance monitoring views
 CREATE OR REPLACE VIEW test_performance_summary AS
 SELECT 
@@ -459,45 +349,26 @@ WHERE avr.id IN (
 )
 ORDER BY health_score DESC;
 
--- Insert sample test schedules for merchants with Instagram integration
-INSERT INTO test_schedules (merchant_id, schedule_name, test_suites, cron_expression, notification_settings)
-SELECT 
-    id as merchant_id,
-    'Daily Instagram Health Check',
-    '["stories", "comments", "media"]',
-    '0 9 * * *', -- Daily at 9 AM
-    '{"email": true, "webhook": false, "slack": false}'
-FROM merchants 
-WHERE id IN (SELECT merchant_id FROM merchant_credentials WHERE instagram_token_encrypted IS NOT NULL)
-ON CONFLICT DO NOTHING;
-
-INSERT INTO test_schedules (merchant_id, schedule_name, test_suites, cron_expression, notification_settings)
-SELECT 
-    id as merchant_id,
-    'Weekly Comprehensive Testing',
-    '["stories", "comments", "media", "hashtags", "e2e", "performance"]',
-    '0 10 * * 1', -- Weekly on Monday at 10 AM
-    '{"email": true, "webhook": true, "slack": false}'
-FROM merchants 
-WHERE id IN (SELECT merchant_id FROM merchant_credentials WHERE instagram_token_encrypted IS NOT NULL)
-ON CONFLICT DO NOTHING;
-
 -- Add comments for documentation
-COMMENT ON TABLE test_results IS 'Individual test scenario execution results with detailed metrics';
-COMMENT ON TABLE test_execution_reports IS 'Aggregated test suite execution reports and coverage data';
-COMMENT ON TABLE performance_test_results IS 'Performance and load testing metrics and recommendations';
-COMMENT ON TABLE api_validation_results IS 'API health monitoring and validation results';
-COMMENT ON TABLE hashtag_strategies IS 'Merchant-specific hashtag monitoring and response strategies';
-COMMENT ON TABLE hashtag_trends IS 'Hashtag popularity trends and growth analytics';
-COMMENT ON TABLE marketing_opportunities IS 'Marketing leads and opportunities identified from social interactions';
-COMMENT ON TABLE test_schedules IS 'Automated test execution schedules and configurations';
-COMMENT ON TABLE system_health_metrics IS 'Real-time system health monitoring metrics';
+COMMENT ON TABLE test_results IS 'Individual test scenario execution results with detailed metrics - TESTING ONLY';
+COMMENT ON TABLE test_execution_reports IS 'Aggregated test suite execution reports and coverage data - TESTING ONLY';
+COMMENT ON TABLE performance_test_results IS 'Performance and load testing metrics and recommendations - TESTING ONLY';
+COMMENT ON TABLE api_validation_results IS 'API health monitoring and validation results - TESTING ONLY';
+COMMENT ON TABLE test_schedules IS 'Automated test execution schedules and configurations - TESTING ONLY';
+COMMENT ON TABLE system_health_metrics IS 'Real-time system health monitoring metrics - TESTING ONLY';
 
 -- Migration completion log
 INSERT INTO audit_logs (action, entity_type, details, success)
 VALUES (
     'MIGRATION_EXECUTED',
     'DATABASE_SCHEMA',
-    '{"migration": "010_instagram_testing_infrastructure", "description": "Added comprehensive testing and monitoring infrastructure"}',
+    '{"migration": "011_testing_only", "description": "Added testing infrastructure - DEV/TEST ONLY", "environment": "non-production"}',
     TRUE
 );
+
+-- Final safety reminder
+DO $$
+BEGIN
+    RAISE NOTICE '🚫 This migration contains TESTING ONLY tables and should never run in production';
+    RAISE NOTICE '✅ Testing infrastructure created successfully for development/test environment';
+END $$;

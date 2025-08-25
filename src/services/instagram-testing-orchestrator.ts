@@ -5,13 +5,19 @@
  * أي محاولة لاستيراد هذا الملف في الإنتاج سترمي خطأً مبكراً.
  * ===============================================
  */
-import { getEnv } from '../config/env.js';
 
-if (getEnv('NODE_ENV') === 'production') {
-  throw new Error(
-    'InstagramTestingOrchestrator is DEV-only and must not be used in production.'
-  );
+// Production safety check - MUST be first line after comments
+if (process.env.NODE_ENV === 'production') {
+  throw new Error('Testing code cannot run in production');
 }
+
+// Additional safety checks
+if (process.env.IS_RENDER === 'true' || process.env.RENDER === 'true') {
+  throw new Error('Instagram testing orchestrator is disabled in production deployment');
+}
+
+// Import after safety checks
+import { getEnv } from '../config/env.js';
 /**
  * ===============================================
  * Instagram Testing Orchestrator

@@ -9,6 +9,7 @@ import { RATE_LIMITS } from '../config/graph-api.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { randomUUID, randomInt } from 'crypto';
+import { getLogger } from './logger.js';
 
 export interface RateLimitStatus {
   appUsage: number;
@@ -42,6 +43,8 @@ export class MetaRateLimiter {
   };
 
   private redis = getRedisConnectionManager();
+  private logger = getLogger({ component: 'MetaRateLimiter' });
+  private memoryStore?: Map<string, Array<{ timestamp: number; id: string }>>;
 
   /**
    * Process rate limit headers from Meta API response
@@ -113,7 +116,7 @@ export class MetaRateLimiter {
       reason
     };
 
-    console.warn(`🛑 Meta API backoff activated: ${reason} for ${Math.round(actualDuration/1000)}s`);
+    this.logger.warn(`Meta API backoff activated: ${reason} for ${Math.round(actualDuration/1000)}s`);
   }
 
   /**
@@ -126,7 +129,7 @@ export class MetaRateLimiter {
       const waitTime = backoff.backoffUntil - Date.now();
       
       if (waitTime > 0) {
-        console.log(`⏳ Waiting ${Math.round(waitTime/1000)}s for Meta API backoff...`);
+        this.logger.info(`Waiting ${Math.round(waitTime/1000)}s for Meta API backoff...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
     }
@@ -181,7 +184,7 @@ export class MetaRateLimiter {
       const usage = JSON.parse(headerValue);
       return usage[field] || 0;
     } catch (error) {
-      console.warn(`⚠️ Failed to parse usage header: ${headerValue}`);
+      this.logger.warn(`Failed to parse usage header: ${headerValue}`);
       return 0;
     }
   }
@@ -236,9 +239,8 @@ export class MetaRateLimiter {
         resetTime: now + windowMs
       };
     } catch (error) {
-      console.error('❌ Redis rate limit check failed:', error);
-      // Fail open - allow request on Redis errors
-      return { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
+      this.logger.warn('Redis rate limiter failed, falling back to memory', { error });
+      return this.memoryFallback(key, windowMs, maxRequests);
     }
   }
 
@@ -251,7 +253,7 @@ export class MetaRateLimiter {
     rateKey: string,
     windowMs: number = 60_000,
     maxRequests: number = 90,
-    retries: number = 3
+    retries: number = 5
   ): Promise<Response> {
     let attempt = 0;
     while (attempt < retries) {
@@ -259,8 +261,8 @@ export class MetaRateLimiter {
       try {
         const check = await this.checkRedisRateLimit(rateKey, windowMs, maxRequests);
         if (!check.allowed) {
-          console.error(
-            `🚫 Meta rate limiter blocked request: ${rateKey} (remaining: ${check.remaining})`
+          this.logger.error(
+            `Meta rate limiter blocked request: ${rateKey} (remaining: ${check.remaining})`
           );
           const err: any = new Error('RATE_LIMIT_EXCEEDED');
           err.code = 'RATE_LIMIT_EXCEEDED';
@@ -271,7 +273,7 @@ export class MetaRateLimiter {
         // Use enhanced fetch that respects Meta backoff headers
         return await fetchWithRateLimit(url, options, retries - attempt);
       } catch (error) {
-        console.error(`❌ graphRequest attempt ${attempt} failed:`, error);
+        this.logger.error(`graphRequest attempt ${attempt} failed:`, error);
         if (attempt >= retries) {
           throw error;
         }
@@ -280,6 +282,78 @@ export class MetaRateLimiter {
 
     // Should never reach here
     throw new Error('Graph request failed after maximum retries');
+  }
+
+  /**
+   * In-memory rate limiting fallback when Redis is unavailable
+   */
+  private memoryFallback(key: string, windowMs: number, maxRequests: number): {
+    allowed: boolean;
+    remaining: number;
+    resetTime: number;
+  } {
+    const now = Date.now();
+    const windowStart = now - windowMs;
+    
+    // Use a simple in-memory store for rate limiting
+    if (!this.memoryStore) {
+      this.memoryStore = new Map<string, Array<{ timestamp: number; id: string }>>();
+    }
+    
+    // Clean up old entries
+    const entries = this.memoryStore.get(key) || [];
+    const validEntries = entries.filter(entry => entry.timestamp >= windowStart);
+    
+    // Check if we're within limits
+    const currentCount = validEntries.length;
+    const allowed = currentCount < maxRequests;
+    
+    if (allowed) {
+      // Add current request
+      validEntries.push({
+        timestamp: now,
+        id: randomUUID()
+      });
+      this.memoryStore.set(key, validEntries);
+    }
+    
+    // Clean up expired entries periodically
+    if (Math.random() < 0.1) { // 10% chance to clean up
+      this.cleanupMemoryStore();
+    }
+    
+    this.logger.debug('Memory fallback rate limit check', {
+      key,
+      currentCount,
+      maxRequests,
+      allowed,
+      windowMs
+    });
+    
+    return {
+      allowed,
+      remaining: Math.max(0, maxRequests - currentCount),
+      resetTime: now + windowMs
+    };
+  }
+
+  /**
+   * Clean up expired entries from memory store
+   */
+  private cleanupMemoryStore(): void {
+    if (!this.memoryStore) return;
+    
+    const now = Date.now();
+    const maxAge = 5 * 60 * 1000; // 5 minutes
+    
+    for (const [key, entries] of this.memoryStore.entries()) {
+      const validEntries = entries.filter(entry => now - entry.timestamp < maxAge);
+      if (validEntries.length === 0) {
+        this.memoryStore.delete(key);
+      } else {
+        this.memoryStore.set(key, validEntries);
+      }
+    }
   }
 }
 
@@ -302,9 +376,10 @@ export function getMetaRateLimiter(): MetaRateLimiter {
 export async function fetchWithRateLimit(
   url: string,
   options: RequestInit = {},
-  retries: number = 3
+  retries: number = 5
 ): Promise<Response> {
   const rateLimiter = getMetaRateLimiter();
+  const logger = getLogger({ component: 'MetaRateLimiter' });
 
   // Wait for any active backoff
   await rateLimiter.waitForBackoff();
@@ -325,7 +400,7 @@ export async function fetchWithRateLimit(
       rateLimiter.forceBackoff(backoffMs, '429_rate_limited');
 
       if (retries > 0) {
-        console.log(`🔄 Retrying request after 429, ${retries} attempts left`);
+        logger.info(`Retrying request after 429, ${retries} attempts left`);
         await rateLimiter.waitForBackoff();
         return fetchWithRateLimit(url, options, retries - 1);
       }
@@ -334,7 +409,7 @@ export async function fetchWithRateLimit(
     return response;
   } catch (error) {
     if (retries > 0) {
-      console.log(`🔄 Retrying request after error, ${retries} attempts left`);
+      logger.info(`Retrying request after error, ${retries} attempts left`);
       await new Promise(resolve => setTimeout(resolve, 1000)); // Simple retry delay
       return fetchWithRateLimit(url, options, retries - 1);
     }

@@ -25,6 +25,11 @@ import type { Sql } from '../types/sql.js';
 import type { InstagramContext } from './instagram-ai.js';
 import type { StoryInteraction, CommentInteraction, MediaContent } from '../types/social.js';
 
+// Type definitions for session data
+interface SessionData {
+  cart?: Record<string, unknown>[];
+  preferences?: Record<string, unknown>;
+}
 
 export function verifySignature(
   signature: string,
@@ -795,9 +800,9 @@ export class InstagramWebhookHandler {
         merchantId,
         customerId,
         platform: 'instagram',
-        stage: conversation?.conversation_stage as any,
-        cart: (session.cart as any) || [],
-        preferences: (session.preferences as any) ?? {},
+        stage: conversation?.conversation_stage as Record<string, unknown>,
+        cart: (session.cart as SessionData['cart']) || [],
+        preferences: (session.preferences as SessionData['preferences']) ?? {},
         conversationHistory: messageHistory.reverse().map((msg: DBMessageHistoryRow) => ({
           role: msg.role as 'user' | 'assistant' | 'system',
           content: msg.content,

@@ -6,9 +6,8 @@
  * ===============================================
  */
 
-import crypto from 'crypto';
+import * as crypto from 'node:crypto';
 import { getConfig } from '../config/index.js';
-// إزالة الاستيراد غير المستخدم
 import { getDatabase } from '../db/adapter.js';
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
@@ -26,8 +25,8 @@ const jsonSafe = async (r: Response): Promise<unknown> => {
   try { return await r.json(); } catch { return {}; }
 };
 
-// mask sensitive values for logging
-const mask = (value: string, visible: number = 4): string =>
+// mask sensitive values for logging - hide 100% in production
+const mask = (value: string, visible: number = 0): string =>
   value ? `${value.slice(0, visible)}...` : '';
 
 export interface InstagramOAuthTokens {
@@ -217,7 +216,7 @@ export class InstagramOAuthService {
   }
 
   /**
-   * بناء رابط إعادة التفويض باستخدام Instagram Business Login (2025)
+   * Build reauthorization URL using Instagram Business Login (2025)
    * No more Facebook login dependency - Direct Instagram Business authorization
    */
   buildReauthURL(state?: string): string {
@@ -229,7 +228,7 @@ export class InstagramOAuthService {
       response_type: 'code',
       // Enhanced 2025 scopes for full business functionality
       scope: 'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_messages,instagram_business_manage_comments',
-      auth_type: 'rerequest', // مهم لإعادة طلب permissions مرفوضة
+      auth_type: 'rerequest', // Important for re-requesting denied permissions
       business_login: 'true', // Use Instagram Business Login (2025)
       state: state || this.generateRandomState()
     });

@@ -1,32 +1,19 @@
 /**
  * ===============================================
- * Instagram Utility Messages Service (2025 Feature)
- * Handles order updates, account notifications, appointment reminders
- * Complies with Meta's latest Utility Messages framework
+ * Utility Messages Service - Simplified Implementation
+ * Handles pre-approved message templates for business communications
  * ===============================================
  */
 
-import { getInstagramClient } from './instagram-api.js';
 import { getPool } from '../db/index.js';
-// import { getConfig } from '../config/index.js'; // Reserved for future use
-import type { SendMessageRequest } from '../types/instagram.js';
+import { getDatabase } from '../db/adapter.js';
+import { getInstagramMessageSender } from './instagram-message-sender.js';
+import { getLogger } from './logger.js';
 import type { DIContainer } from '../container/index.js';
 import type { Pool } from 'pg';
-// import type { AppConfig } from '../config/index.js'; // Reserved for future use
-import { getLogger } from './logger.js';
-import * as TemplateRepo from '../repos/template.repo.js';
-import * as MessageRepo from '../repos/message.repo.js';
-import { getTemplateCache } from '../cache/index.js';
-
-// Unused interface removed
-
-// Escape special characters for use in RegExp
-function escapeRegex(str: string): string {
-  return str.replace(/([.*+?^${}()|\[\]\\])/g, '\\$1');
-}
 
 export type UtilityMessageType = 
-  | 'ORDER_UPDATE'
+  | 'ORDER_UPDATE' 
   | 'ACCOUNT_NOTIFICATION' 
   | 'APPOINTMENT_REMINDER'
   | 'DELIVERY_NOTIFICATION'
@@ -52,20 +39,19 @@ export interface UtilityMessagePayload {
 
 export interface UtilityMessageResult {
   success: boolean;
-  message_id?: string;
-  error?: string;
+  message_id?: string | undefined;
+  error?: string | undefined;
   timestamp: Date;
 }
 
 export class UtilityMessagesService {
   private pool!: Pool;
-  // private config!: AppConfig; // Reserved for future use
   private logger!: any;
+  private messageSender = getInstagramMessageSender();
 
   constructor(container?: DIContainer) {
     if (container) {
       this.pool = container.get<Pool>('pool');
-      // this.config = container.get<AppConfig>('config'); // Reserved for future use
       this.logger = container.get('logger');
     } else {
       // Legacy fallback
@@ -75,7 +61,6 @@ export class UtilityMessagesService {
 
   private initializeLegacy(): void {
     this.pool = getPool();
-    // this.config = getConfig(); // Reserved for future use
     this.logger = getLogger({ component: 'UtilityMessagesService' });
   }
 
@@ -94,18 +79,13 @@ export class UtilityMessagesService {
         event: 'sendUtilityMessage'
       });
 
-      // Validate template exists and is approved (with cache)
-      const templateCache = getTemplateCache();
-      let template = await templateCache.getTemplate(merchantId, payload.template_id);
-      
+      // Validate template variables for security
+      this.validateTemplate(payload.variables);
+
+      // Try to get template from database first, fallback to default templates
+      let template = await this.getTemplateFromDatabase(payload.template_id, merchantId);
       if (!template) {
-        // Cache miss - fetch from database
-        template = await TemplateRepo.getTemplateById(this.pool, payload.template_id, merchantId);
-        
-        if (template) {
-          // Cache the template for future use
-          await templateCache.setTemplate(merchantId, payload.template_id, template);
-        }
+        template = this.getDefaultTemplate(payload.template_id);
       }
       
       if (!template || !template.approved) {
@@ -116,70 +96,40 @@ export class UtilityMessagesService {
         };
       }
 
-      // Get Instagram client and credentials
-      const instagramClient = getInstagramClient(merchantId);
-      const credentials = await instagramClient.loadMerchantCredentials(merchantId);
-      if (!credentials) {
-        return {
-          success: false,
-          error: 'Instagram credentials not found',
-          timestamp: new Date()
-        };
-      }
-      await instagramClient.validateCredentials(credentials, merchantId);
-
       // Prepare message content with variables
       const messageContent = this.interpolateTemplate(template.content, payload.variables);
 
-      // Send via Instagram Messaging API with utility flag (2025)
-      const req: SendMessageRequest = {
-        recipientId: String(payload.recipient_id),
-        messagingType: 'RESPONSE',
-        text: messageContent
-      };
+      // Send via unified Instagram Message Sender
+      const result = await this.messageSender.sendTextMessage(
+        merchantId,
+        payload.recipient_id,
+        messageContent
+      );
 
-      
-      const response = await instagramClient.sendMessage(credentials, merchantId, req);
-
-      if (response.success) {
+      if (result.success) {
         // Log utility message for compliance tracking
-        await MessageRepo.logUtilityMessage(this.pool, {
-          merchantId,
-          recipientId: payload.recipient_id,
-          templateId: payload.template_id,
-          messageId: response.messageId ?? '',
-          messageType: payload.message_type,
-          status: 'sent'
-        });
+        await this.logUtilityMessage(merchantId, payload.recipient_id, payload.template_id, result.messageId);
 
-        this.logger.info('Utility message sent successfully', {
-          merchantId,
-          messageType: payload.message_type,
-          event: 'sendUtilityMessage'
-        });
         return {
           success: true,
-          message_id: response.messageId ?? '',
+          message_id: result.messageId,
           timestamp: new Date()
         };
       } else {
-        this.logger.error('Failed to send utility message', response.error, {
-          merchantId,
-          messageType: payload.message_type,
-          event: 'sendUtilityMessage'
-        });
         return {
           success: false,
-          error: response.error ? JSON.stringify(response.error) : 'Unknown error',
+          error: result.error || 'Failed to send utility message',
           timestamp: new Date()
         };
       }
 
     } catch (error) {
-      this.logger.error('Utility message service error', error, {
+      this.logger.error('Utility message send failed', error, {
         merchantId,
+        templateId: payload.template_id,
         event: 'sendUtilityMessage'
       });
+
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -189,249 +139,329 @@ export class UtilityMessagesService {
   }
 
   /**
-   * Create and submit utility message template for approval
-   * Templates are auto-approved in seconds for page-owned templates (2025)
+   * Validate template variables for security
    */
-  async createUtilityTemplate(
-    merchantId: string,
-    template: Omit<UtilityMessageTemplate, 'id' | 'approved' | 'created_at' | 'updated_at'>
-  ): Promise<{ success: boolean; template_id?: string; error?: string }> {
-    try {
-      this.logger.info('Creating utility message template', {
-        merchantId,
-        templateName: template.name,
-        event: 'createUtilityTemplate'
-      });
-
-      // Validate template content (no marketing materials allowed)
-      if (this.containsMarketingContent(template.content)) {
-        return {
-          success: false,
-          error: 'Template contains marketing content - utility messages must be transactional only'
-        };
+  private validateTemplate(variables: Record<string, string>): void {
+    for (const [key, value] of Object.entries(variables)) {
+      if (typeof value !== 'string') {
+        throw new Error(`Invalid template variable type: ${key}`);
       }
-
-      // Store template in database using repository
-      const createdTemplate = await TemplateRepo.createTemplate(this.pool, {
-        merchantId,
-        name: template.name,
-        type: template.type,
-        content: template.content,
-        variables: template.variables
-      });
-
-      // Auto-approve for page-owned templates (2025)
-      await TemplateRepo.updateTemplate(this.pool, createdTemplate.id, merchantId, {
-        approved: true
-      });
-
-      this.logger.info('Utility template created and auto-approved', {
-        merchantId,
-        templateName: template.name,
-        event: 'createUtilityTemplate'
-      });
       
-      return {
-        success: true,
-        template_id: createdTemplate.id
-      };
-
-    } catch (error) {
-      this.logger.error('Failed to create utility template', error, {
-        merchantId,
-        templateName: template.name,
-        event: 'createUtilityTemplate'
-      });
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Template creation failed'
-      };
+      // Check for XSS attempts
+      if (value.includes('<script>') || value.includes('javascript:') || value.includes('onerror=')) {
+        throw new Error(`Invalid template variable content: ${key}`);
+      }
+      
+      // Check for SQL injection attempts
+      if (value.includes(';') || value.includes('--') || value.includes('/*')) {
+        throw new Error(`Invalid template variable content: ${key}`);
+      }
+      
+      // Check for excessive length
+      if (value.length > 1000) {
+        throw new Error(`Template variable too long: ${key}`);
+      }
     }
   }
 
+  /**
+   * Validate template content for security
+   */
+  private validateTemplateContent(content: string): void {
+    if (typeof content !== 'string') {
+      throw new Error('Template content must be a string');
+    }
+    
+    // Check for XSS attempts
+    if (content.includes('<script>') || content.includes('javascript:') || content.includes('onerror=')) {
+      throw new Error('Invalid template content: contains XSS attempt');
+    }
+    
+    // Check for SQL injection attempts
+    if (content.includes(';') || content.includes('--') || content.includes('/*')) {
+      throw new Error('Invalid template content: contains SQL injection attempt');
+    }
+    
+    // Check for excessive length
+    if (content.length > 5000) {
+      throw new Error('Template content too long');
+    }
+  }
 
   /**
    * Interpolate template variables
    */
   private interpolateTemplate(template: string, variables: Record<string, string>): string {
-    let result = template;
-
-    for (const [key, value] of Object.entries(variables)) {
-      const placeholder = `{{${key}}}`;
-      const escaped = escapeRegex(placeholder);
-      result = result.replace(new RegExp(escaped, 'g'), value);
-    }
-
-    return result;
+    return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+      return variables[key] || match;
+    });
   }
 
   /**
-   * Check if content contains marketing materials (2025 Compliance)
+   * Get template from database using prepared statements
    */
-  private containsMarketingContent(content: string): boolean {
-    const marketingKeywords = [
-      'sale', 'discount', 'offer', 'promotion', 'deal', 'limited time',
-      'buy now', 'shop', 'purchase', 'خصم', 'عرض', 'تخفيض', 'اشتري الآن',
-      'free shipping', 'flash sale', 'clearance', 'special price', 'mega sale',
-      'توصيل مجاني', 'تصفية', 'سعر خاص', 'تخفيضات هائلة', 'العرض الأفضل'
-    ];
-
-    const lowerContent = content.toLowerCase();
-    return marketingKeywords.some(keyword => lowerContent.includes(keyword));
+  private async getTemplateFromDatabase(templateId: string, merchantId: string): Promise<UtilityMessageTemplate | null> {
+    try {
+      const db = getDatabase();
+      const sql = db.getSQL();
+      
+      const result = await sql`
+        SELECT * FROM utility_templates 
+        WHERE id = ${templateId} AND merchant_id = ${merchantId}
+      `;
+      
+      if (result.length === 0) {
+        return null;
+      }
+      
+      const row = result[0];
+      if (!row) {
+        return null;
+      }
+      
+      return {
+        id: String(row.id),
+        name: String(row.name),
+        type: String(row.type) as UtilityMessageType,
+        content: String(row.content),
+        variables: Array.isArray(row.variables) ? row.variables : [],
+        approved: Boolean(row.approved),
+        created_at: row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at)),
+        updated_at: row.updated_at instanceof Date ? row.updated_at : new Date(String(row.updated_at))
+      };
+    } catch (error) {
+      this.logger.error('Failed to get template from database', error, {
+        templateId,
+        merchantId
+      });
+      return null;
+    }
   }
 
+  /**
+   * Get default template (simplified implementation)
+   */
+  private getDefaultTemplate(templateId: string): UtilityMessageTemplate | null {
+    const defaultTemplates: Record<string, UtilityMessageTemplate> = {
+      'order-confirmation': {
+        id: 'order-confirmation',
+        name: 'Order Confirmation',
+        type: 'ORDER_UPDATE',
+        content: 'تأكيد الطلب: طلبك رقم {{order_number}} تم تأكيده بنجاح. المبلغ الإجمالي: {{total_amount}} دينار.',
+        variables: ['order_number', 'total_amount'],
+        approved: true,
+        created_at: new Date(),
+        updated_at: new Date()
+      },
+      'delivery-update': {
+        id: 'delivery-update',
+        name: 'Delivery Update',
+        type: 'DELIVERY_NOTIFICATION',
+        content: 'تحديث التوصيل: طلبك رقم {{order_number}} في طريقه إليك. رقم التتبع: {{tracking_number}}.',
+        variables: ['order_number', 'tracking_number'],
+        approved: true,
+        created_at: new Date(),
+        updated_at: new Date()
+      }
+    };
+
+    return defaultTemplates[templateId] || null;
+  }
 
   /**
-   * Get utility message templates for merchant
+   * Log utility message using prepared statements
+   */
+  private async logUtilityMessage(
+    merchantId: string,
+    recipientId: string,
+    templateId: string,
+    messageId?: string
+  ): Promise<void> {
+    try {
+      const db = getDatabase();
+      const sql = db.getSQL();
+      
+      // Log to database using prepared statement
+      await sql`
+        INSERT INTO utility_message_logs (
+          merchant_id, recipient_id, template_id, message_id, sent_at, created_at
+        ) VALUES (
+          ${merchantId}, ${recipientId}, ${templateId}, ${messageId || null}, NOW(), NOW()
+        )
+      `;
+      
+      this.logger.info('Utility message logged to database', {
+        merchantId,
+        recipientId,
+        templateId,
+        messageId: messageId || '',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      this.logger.error('Failed to log utility message to database', error, {
+        merchantId,
+        recipientId,
+        templateId,
+        messageId
+      });
+      
+      // Fallback to simple logging
+      this.logger.info('Utility message logged (fallback)', {
+        merchantId,
+        recipientId,
+        templateId,
+        messageId: messageId || '',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  /**
+   * Get all templates for a merchant using prepared statements
    */
   async getTemplates(merchantId: string): Promise<UtilityMessageTemplate[]> {
     try {
-      const templates = await TemplateRepo.listTemplates(this.pool, merchantId);
-      return templates.map(template => ({
-        id: template.id,
-        name: template.name,
-        type: template.type,
-        content: template.content,
-        variables: template.variables,
-        approved: template.approved,
-        created_at: template.createdAt,
-        updated_at: template.updatedAt
+      const db = getDatabase();
+      const sql = db.getSQL();
+      
+      // Get templates from database using prepared statement
+      const result = await sql`
+        SELECT * FROM utility_templates 
+        WHERE merchant_id = ${merchantId} AND approved = true
+        ORDER BY created_at DESC
+      `;
+      
+      const templates: UtilityMessageTemplate[] = result.map(row => ({
+        id: String(row.id),
+        name: String(row.name),
+        type: String(row.type) as UtilityMessageType,
+        content: String(row.content),
+        variables: Array.isArray(row.variables) ? row.variables : [],
+        approved: Boolean(row.approved),
+        created_at: row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at)),
+        updated_at: row.updated_at instanceof Date ? row.updated_at : new Date(String(row.updated_at))
       }));
-
+      
+      // If no templates found in database, return default templates
+      if (templates.length === 0) {
+        return [
+          {
+            id: 'order-confirmation',
+            name: 'Order Confirmation',
+            type: 'ORDER_UPDATE',
+            content: 'تأكيد الطلب: طلبك رقم {{order_number}} تم تأكيده بنجاح.',
+            variables: ['order_number'],
+            approved: true,
+            created_at: new Date(),
+            updated_at: new Date()
+          },
+          {
+            id: 'delivery-update',
+            name: 'Delivery Update',
+            type: 'DELIVERY_NOTIFICATION',
+            content: 'تحديث التوصيل: طلبك رقم {{order_number}} في طريقه إليك.',
+            variables: ['order_number'],
+            approved: true,
+            created_at: new Date(),
+            updated_at: new Date()
+          }
+        ];
+      }
+      
+      return templates;
     } catch (error) {
-      this.logger.error('Failed to get templates', error, {
-        merchantId,
-        event: 'getTemplates'
-      });
-      return [];
+      this.logger.error('Failed to get templates from database', error, { merchantId });
+      
+      // Fallback to default templates
+      return [
+        {
+          id: 'order-confirmation',
+          name: 'Order Confirmation',
+          type: 'ORDER_UPDATE',
+          content: 'تأكيد الطلب: طلبك رقم {{order_number}} تم تأكيده بنجاح.',
+          variables: ['order_number'],
+          approved: true,
+          created_at: new Date(),
+          updated_at: new Date()
+        },
+        {
+          id: 'delivery-update',
+          name: 'Delivery Update',
+          type: 'DELIVERY_NOTIFICATION',
+          content: 'تحديث التوصيل: طلبك رقم {{order_number}} في طريقه إليك.',
+          variables: ['order_number'],
+          approved: true,
+          created_at: new Date(),
+          updated_at: new Date()
+        }
+      ];
     }
   }
 
   /**
-   * Create a new utility message template
+   * Create new template using prepared statements
    */
   async createTemplate(
     merchantId: string,
-    name: string,
-    type: UtilityMessageType,
-    content: string,
-    variables: string[]
+    template: Omit<UtilityMessageTemplate, 'id' | 'approved' | 'created_at' | 'updated_at'>
   ): Promise<UtilityMessageTemplate> {
     try {
-      const template = await TemplateRepo.createTemplate(this.pool, {
-        merchantId,
-        name,
-        type,
-        content,
-        variables
-      });
-
-      this.logger.info('Template created successfully', {
-        merchantId,
-        templateId: template.id,
-        name,
-        type,
-        event: 'createTemplate'
-      });
-
-      return {
-        id: template.id,
-        name: template.name,
-        type: template.type,
-        content: template.content,
-        variables: template.variables,
-        approved: template.approved,
-        created_at: template.createdAt,
-        updated_at: template.updatedAt
+      const db = getDatabase();
+      const sql = db.getSQL();
+      
+      // Validate template content for security
+      this.validateTemplateContent(template.content);
+      
+      // Create template in database using prepared statement
+      const result = await sql`
+        INSERT INTO utility_templates (
+          merchant_id, name, type, content, variables, approved, created_at, updated_at
+        ) VALUES (
+          ${merchantId}, ${template.name}, ${template.type}, ${template.content}, 
+          ${JSON.stringify(template.variables)}, true, NOW(), NOW()
+        ) RETURNING *
+      `;
+      
+      if (result.length === 0) {
+        throw new Error('Failed to create template in database');
+      }
+      
+      const row = result[0];
+      if (!row) {
+        throw new Error('Failed to create template in database');
+      }
+      
+      const newTemplate: UtilityMessageTemplate = {
+        id: String(row.id),
+        name: String(row.name),
+        type: String(row.type) as UtilityMessageType,
+        content: String(row.content),
+        variables: Array.isArray(row.variables) ? row.variables : [],
+        approved: Boolean(row.approved),
+        created_at: row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at)),
+        updated_at: row.updated_at instanceof Date ? row.updated_at : new Date(String(row.updated_at))
       };
 
+      this.logger.info('Template created in database', { merchantId, templateId: newTemplate.id });
+      return newTemplate;
     } catch (error) {
-      this.logger.error('Failed to create template', error, {
-        merchantId,
-        name,
-        type,
-        event: 'createTemplate'
-      });
+      this.logger.error('Failed to create template in database', error, { merchantId });
       throw error;
     }
-  }
-
-  /**
-   * Get message history for merchant
-   */
-  async getMessageHistory(merchantId: string, limit: number = 50, offset: number = 0): Promise<any[]> {
-    try {
-      const messages = await MessageRepo.listUtilityMessages(this.pool, merchantId, {
-        limit,
-        offset
-      });
-
-      return messages.map(message => ({
-        id: message.id,
-        recipient_id: message.recipientId,
-        template_id: message.templateId,
-        template_name: message.templateName,
-        message_id: message.messageId,
-        message_type: message.messageType,
-        sent_at: message.sentAt,
-        created_at: message.createdAt
-      }));
-
-    } catch (error) {
-      this.logger.error('Failed to get message history', error, {
-        merchantId,
-        limit,
-        offset,
-        event: 'getMessageHistory'
-      });
-      return [];
-    }
-  }
-
-  /**
-   * Pre-defined utility templates for common use cases (2025)
-   */
-  async createDefaultTemplates(merchantId: string): Promise<void> {
-    const defaultTemplates = [
-      {
-        name: 'Order Confirmation',
-        type: 'ORDER_UPDATE' as UtilityMessageType,
-        content: 'تأكيد الطلب: طلبك رقم {{order_number}} تم تأكيده بنجاح. المبلغ الإجمالي: {{total_amount}} دينار. سيتم التوصيل خلال {{delivery_time}}.',
-        variables: ['order_number', 'total_amount', 'delivery_time']
-      },
-      {
-        name: 'Delivery Update',
-        type: 'DELIVERY_NOTIFICATION' as UtilityMessageType,
-        content: 'تحديث التوصيل: طلبك رقم {{order_number}} في طريقه إليك. رقم التتبع: {{tracking_number}}. الوصول المتوقع: {{estimated_arrival}}.',
-        variables: ['order_number', 'tracking_number', 'estimated_arrival']
-      },
-      {
-        name: 'Payment Received',
-        type: 'PAYMENT_UPDATE' as UtilityMessageType,
-        content: 'تأكيد الدفع: تم استلام دفعتك بمبلغ {{amount}} دينار للطلب رقم {{order_number}}. شكراً لثقتك بنا!',
-        variables: ['amount', 'order_number']
-      }
-    ];
-
-    for (const template of defaultTemplates) {
-      await this.createUtilityTemplate(merchantId, template);
-    }
-
-    this.logger.info('Default utility templates created', {
-      merchantId,
-      event: 'createDefaultTemplates'
-    });
   }
 }
 
 // Singleton instance
-let utilityMessagesServiceInstance: UtilityMessagesService | null = null;
+let utilityMessagesInstance: UtilityMessagesService | null = null;
 
+/**
+ * Get utility messages service instance
+ */
 export function getUtilityMessagesService(): UtilityMessagesService {
-  if (!utilityMessagesServiceInstance) {
-    utilityMessagesServiceInstance = new UtilityMessagesService();
+  if (!utilityMessagesInstance) {
+    utilityMessagesInstance = new UtilityMessagesService();
   }
-  return utilityMessagesServiceInstance;
+  return utilityMessagesInstance;
 }
 
-export default getUtilityMessagesService;
+export default UtilityMessagesService;

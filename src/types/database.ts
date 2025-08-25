@@ -5,7 +5,122 @@
  * ===============================================
  */
 
-// Database error handling
+import { z } from 'zod';
+
+// ===============================================
+// CONSTANTS & ENUMS
+// ===============================================
+
+/**
+ * حالات الاشتراك
+ * Subscription statuses
+ */
+export const SUBSCRIPTION_STATUSES = ['ACTIVE', 'SUSPENDED', 'EXPIRED', 'TRIAL'] as const;
+export type SubscriptionStatus = typeof SUBSCRIPTION_STATUSES[number];
+
+/**
+ * مستويات الاشتراك
+ * Subscription tiers
+ */
+export const SUBSCRIPTION_TIERS = ['BASIC', 'PREMIUM', 'ENTERPRISE'] as const;
+export type SubscriptionTier = typeof SUBSCRIPTION_TIERS[number];
+
+/**
+ * حالات المنتج
+ * Product statuses
+ */
+export const PRODUCT_STATUSES = ['ACTIVE', 'INACTIVE', 'DRAFT', 'OUT_OF_STOCK', 'DISCONTINUED'] as const;
+export type ProductStatus = typeof PRODUCT_STATUSES[number];
+
+/**
+ * حالات الطلب
+ * Order statuses
+ */
+export const ORDER_STATUSES = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED'] as const;
+export type OrderStatus = typeof ORDER_STATUSES[number];
+
+/**
+ * طرق الدفع
+ * Payment methods
+ */
+export const PAYMENT_METHODS = ['COD', 'ZAIN_CASH', 'ASIA_HAWALA', 'BANK_TRANSFER'] as const;
+export type PaymentMethod = typeof PAYMENT_METHODS[number];
+
+/**
+ * حالات الدفع
+ * Payment statuses
+ */
+export const PAYMENT_STATUSES = ['PENDING', 'PAID', 'FAILED', 'REFUNDED'] as const;
+export type PaymentStatus = typeof PAYMENT_STATUSES[number];
+
+/**
+ * مصادر الطلب
+ * Order sources
+ */
+export const ORDER_SOURCES = ['instagram', 'MANUAL', 'WEBSITE'] as const;
+export type OrderSource = typeof ORDER_SOURCES[number];
+
+/**
+ * المنصات المدعومة
+ * Supported platforms
+ */
+export const PLATFORMS = ['instagram', 'whatsapp'] as const;
+export type Platform = typeof PLATFORMS[number];
+
+/**
+ * اتجاهات الرسائل
+ * Message directions
+ */
+export const MESSAGE_DIRECTIONS = ['INCOMING', 'OUTGOING'] as const;
+export type MessageDirection = typeof MESSAGE_DIRECTIONS[number];
+
+/**
+ * أنواع الرسائل
+ * Message types
+ */
+export const MESSAGE_TYPES = ['TEXT', 'IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT', 'STICKER', 'LOCATION', 'CONTACT'] as const;
+export type MessageType = typeof MESSAGE_TYPES[number];
+
+/**
+ * حالات التسليم
+ * Delivery statuses
+ */
+export const DELIVERY_STATUSES = ['PENDING', 'SENT', 'DELIVERED', 'READ', 'FAILED'] as const;
+export type DeliveryStatus = typeof DELIVERY_STATUSES[number];
+
+/**
+ * مراحل المحادثة
+ * Conversation stages
+ */
+export const CONVERSATION_STAGES = [
+  'GREETING',
+  'BROWSING',
+  'PRODUCT_INQUIRY',
+  'INTERESTED',
+  'NEGOTIATING',
+  'CONFIRMING',
+  'COLLECTING_INFO',
+  'COMPLETED',
+  'ABANDONED',
+  'SUPPORT'
+] as const;
+export type ConversationStage = typeof CONVERSATION_STAGES[number];
+
+/**
+ * حالات الجودة
+ * Quality statuses
+ */
+export const QUALITY_STATUSES = ['EXCELLENT', 'GOOD', 'MEDIUM', 'LOW', 'CRITICAL'] as const;
+export type QualityStatus = typeof QUALITY_STATUSES[number];
+
+// ===============================================
+// ERROR HANDLING
+// ===============================================
+
+/**
+ * خطأ قاعدة البيانات - يستخدم في جميع أنحاء المشروع
+ * Database error - used throughout the project
+ */
 export class DatabaseError extends Error {
   constructor(
     message: string,
@@ -18,43 +133,37 @@ export class DatabaseError extends Error {
   }
 }
 
-// Base interfaces
+// ===============================================
+// BASE ENTITIES
+// ===============================================
+
+/**
+ * الكيان الأساسي مع المعرف
+ * Base entity with ID
+ */
 export interface BaseEntity {
   id: string;
   created_at: Date;
   updated_at: Date;
 }
 
+/**
+ * الكيان مع الطوابع الزمنية
+ * Entity with timestamps
+ */
 export interface TimestampedEntity extends BaseEntity {
   created_at: Date;
   updated_at: Date;
 }
 
-// Enums for better type safety
-export type SubscriptionStatus = 'ACTIVE' | 'SUSPENDED' | 'EXPIRED' | 'TRIAL';
-export type SubscriptionTier = 'BASIC' | 'PREMIUM' | 'ENTERPRISE';
-export type ProductStatus = 'ACTIVE' | 'INACTIVE' | 'DRAFT' | 'OUT_OF_STOCK' | 'DISCONTINUED';
-export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'REFUNDED';
-export type PaymentMethod = 'COD' | 'ZAIN_CASH' | 'ASIA_HAWALA' | 'BANK_TRANSFER';
-export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
-export type OrderSource = 'instagram' | 'MANUAL' | 'WEBSITE';
-export type Platform = 'instagram' | 'whatsapp';
-export type MessageDirection = 'INCOMING' | 'OUTGOING';
-export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT' | 'STICKER' | 'LOCATION' | 'CONTACT';
-export type DeliveryStatus = 'PENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
-export type ConversationStage = 
-  | 'GREETING' 
-  | 'BROWSING' 
-  | 'PRODUCT_INQUIRY' 
-  | 'INTERESTED' 
-  | 'NEGOTIATING' 
-  | 'CONFIRMING' 
-  | 'COLLECTING_INFO' 
-  | 'COMPLETED' 
-  | 'ABANDONED' 
-  | 'SUPPORT';
+// ===============================================
+// MERCHANT RELATED TYPES
+// ===============================================
 
-// Merchant related types
+/**
+ * إعدادات التاجر
+ * Merchant settings
+ */
 export interface MerchantSettings {
   working_hours: {
     enabled: boolean;
@@ -78,12 +187,20 @@ export interface MerchantSettings {
   };
 }
 
+/**
+ * واجهة برمجة تطبيقات Instagram Graph
+ * Instagram Graph API interface
+ */
 export interface InstagramGraphAPI {
   accessToken: string; // For Graph API
   pageId: string;      // Instagram Business Account ID
   businessAccountId: string; // Instagram Business Account
 }
 
+/**
+ * التاجر - الكيان الرئيسي في النظام
+ * Merchant - main entity in the system
+ */
 export interface Merchant extends TimestampedEntity {
   business_name: string;
   business_category: string;
@@ -108,24 +225,43 @@ export interface Merchant extends TimestampedEntity {
   search_vector?: string; // For full-text search
 }
 
-// Product related types
+// ===============================================
+// PRODUCT RELATED TYPES
+// ===============================================
+
+/**
+ * خصائص المنتج
+ * Product attributes
+ */
 export interface ProductAttributes {
   [key: string]: string | number | boolean;
   // Examples: color: 'أحمر', size: 'L', weight: '1kg', brand: 'Samsung'
 }
 
+/**
+ * متغيرات المنتج
+ * Product variants
+ */
 export interface ProductVariant {
   name: string;
   values: string[];
   // Example: {name: 'Color', values: ['أحمر', 'أزرق']}
 }
 
+/**
+ * صورة المنتج
+ * Product image
+ */
 export interface ProductImage {
   url: string;
   alt: string;
   order: number;
 }
 
+/**
+ * المنتج - الكيان الأساسي للمنتجات
+ * Product - core product entity
+ */
 export interface Product extends TimestampedEntity {
   merchant_id: string;
   
@@ -171,7 +307,14 @@ export interface Product extends TimestampedEntity {
   search_vector?: string;
 }
 
-// Order related types
+// ===============================================
+// ORDER RELATED TYPES
+// ===============================================
+
+/**
+ * عنصر الطلب
+ * Order item
+ */
 export interface OrderItem {
   sku: string;
   product_id: string;
@@ -182,6 +325,10 @@ export interface OrderItem {
   attributes?: ProductAttributes;
 }
 
+/**
+ * الطلب - الكيان الأساسي للطلبات
+ * Order - core order entity
+ */
 export interface Order extends TimestampedEntity {
   order_number: string;
   merchant_id: string;
@@ -227,7 +374,14 @@ export interface Order extends TimestampedEntity {
   cancelled_at?: Date;
 }
 
-// Conversation related types
+// ===============================================
+// CONVERSATION RELATED TYPES
+// ===============================================
+
+/**
+ * بيانات جلسة المحادثة
+ * Conversation session data
+ */
 export interface ConversationSessionData {
   cart: OrderItem[];
   preferences: Record<string, any>;
@@ -237,6 +391,10 @@ export interface ConversationSessionData {
   interaction_count: number;
 }
 
+/**
+ * المحادثة - الكيان الأساسي للمحادثات
+ * Conversation - core conversation entity
+ */
 export interface Conversation extends TimestampedEntity {
   merchant_id: string;
   
@@ -270,7 +428,14 @@ export interface Conversation extends TimestampedEntity {
   ended_at?: Date;
 }
 
-// Message related types
+// ===============================================
+// MESSAGE RELATED TYPES
+// ===============================================
+
+/**
+ * بيانات وصفية للوسائط في الرسائل
+ * Media metadata for messages
+ */
 export interface MessageMediaMetadata {
   filename?: string;
   filesize?: number;
@@ -280,6 +445,10 @@ export interface MessageMediaMetadata {
   duration?: number;
 }
 
+/**
+ * سجل الرسالة - الكيان الأساسي للرسائل
+ * Message log - core message entity
+ */
 export interface MessageLog extends BaseEntity {
   conversation_id: string;
   
@@ -314,7 +483,14 @@ export interface MessageLog extends BaseEntity {
   content_search?: string;
 }
 
-// Analytics and reporting types
+// ===============================================
+// ANALYTICS AND REPORTING TYPES
+// ===============================================
+
+/**
+ * تحليلات التاجر
+ * Merchant analytics
+ */
 export interface MerchantAnalytics {
   merchant_id: string;
   business_name: string;
@@ -354,6 +530,10 @@ export interface MerchantAnalytics {
   last_conversation_at?: Date;
 }
 
+/**
+ * إحصائيات المنصة
+ * Platform statistics
+ */
 export interface PlatformStats {
   date: Date;
   active_merchants: number;
@@ -370,6 +550,10 @@ export interface PlatformStats {
   daily_conversation_conversion_rate: number;
 }
 
+/**
+ * أداء المنتج
+ * Product performance
+ */
 export interface ProductPerformance {
   id: string;
   merchant_id: string;
@@ -393,6 +577,10 @@ export interface ProductPerformance {
   sell_through_rate: number;
 }
 
+/**
+ * تحليلات العميل
+ * Customer analytics
+ */
 export interface CustomerAnalytics {
   customer_phone: string;
   customer_name?: string;
@@ -418,7 +606,14 @@ export interface CustomerAnalytics {
   customer_status: 'ACTIVE' | 'INACTIVE' | 'CHURNED';
 }
 
-// Database connection and query types
+// ===============================================
+// DATABASE CONNECTION AND QUERY TYPES
+// ===============================================
+
+/**
+ * إعدادات قاعدة البيانات القديمة
+ * Legacy database configuration
+ */
 export interface LegacyDatabaseConfig {
   host: string;
   port: number;
@@ -432,13 +627,20 @@ export interface LegacyDatabaseConfig {
   };
 }
 
+/**
+ * نتيجة الاستعلام
+ * Query result
+ */
 export interface QueryResult<T = any> {
   rows: T[];
   rowCount: number;
   command: string;
 }
 
-// Migration types
+/**
+ * الهجرة
+ * Migration
+ */
 export interface Migration {
   id: number;
   name: string;
@@ -446,26 +648,14 @@ export interface Migration {
   executed_at?: Date;
 }
 
-// Error types
-export interface DatabaseError extends Error {
-  code?: string;
-  detail?: string;
-  hint?: string;
-  position?: string;
-  internalPosition?: string;
-  internalQuery?: string;
-  where?: string;
-  schema?: string;
-  table?: string;
-  column?: string;
-  dataType?: string;
-  constraint?: string;
-  file?: string;
-  line?: string;
-  routine?: string;
-}
+// ===============================================
+// SECURITY AND COMPLIANCE TYPES
+// ===============================================
 
-// Security and compliance types
+/**
+ * بيانات اعتماد التاجر
+ * Merchant credentials
+ */
 export interface MerchantCredentials extends TimestampedEntity {
   merchant_id: string;
   platform: Platform;
@@ -481,6 +671,10 @@ export interface MerchantCredentials extends TimestampedEntity {
   last_access_at?: Date;
 }
 
+/**
+ * نافذة الرسائل
+ * Message window
+ */
 export interface MessageWindow extends TimestampedEntity {
   merchant_id: string;
   customer_instagram?: string;
@@ -493,6 +687,10 @@ export interface MessageWindow extends TimestampedEntity {
   merchant_response_count: number;
 }
 
+/**
+ * سجل التدقيق
+ * Audit log
+ */
 export interface AuditLog extends BaseEntity {
   merchant_id?: string;
   action: string;
@@ -512,8 +710,10 @@ export interface AuditLog extends BaseEntity {
   error_code?: string;
 }
 
-export type QualityStatus = 'EXCELLENT' | 'GOOD' | 'MEDIUM' | 'LOW' | 'CRITICAL';
-
+/**
+ * مقاييس الجودة
+ * Quality metrics
+ */
 export interface QualityMetrics extends TimestampedEntity {
   merchant_id: string;
   platform: Platform;
@@ -535,19 +735,21 @@ export interface QualityMetrics extends TimestampedEntity {
 }
 
 // ===============================================
-// Zod Schemas للتحقق من البيانات على الحدود
+// ZOD SCHEMAS للتحقق من البيانات على الحدود
 // ===============================================
-import { z } from 'zod';
 
-// Schema للتحقق من Merchant
+/**
+ * Schema للتحقق من Merchant
+ * Schema for Merchant validation
+ */
 export const ZMerchant = z.object({
   id: z.string().uuid(),
   business_name: z.string().min(1),
   business_category: z.string().optional(),
   whatsapp_number: z.string().optional(),
   instagram_username: z.string().optional(),
-  subscription_status: z.enum(['ACTIVE', 'SUSPENDED', 'EXPIRED', 'TRIAL']),
-  subscription_tier: z.enum(['BASIC', 'PREMIUM', 'ENTERPRISE']),
+  subscription_status: z.enum(SUBSCRIPTION_STATUSES),
+  subscription_tier: z.enum(SUBSCRIPTION_TIERS),
   settings: z.record(z.unknown()).optional(),
   ai_config: z.record(z.unknown()).optional(),
   created_at: z.preprocess((v) => (typeof v === 'string' ? new Date(v) : v), z.date()),
@@ -556,13 +758,16 @@ export const ZMerchant = z.object({
 });
 export type TMerchant = z.infer<typeof ZMerchant>;
 
-// Schema للتحقق من Conversation
+/**
+ * Schema للتحقق من Conversation
+ * Schema for Conversation validation
+ */
 export const ZConversation = z.object({
   id: z.string().uuid(),
   merchant_id: z.string().uuid(),
   customer_phone: z.string().optional(),
   customer_instagram: z.string().optional(),
-  platform: z.enum(['instagram', 'whatsapp']),
+  platform: z.enum(PLATFORMS),
   conversation_stage: z.string(),
   session_data: z.object({
     cart: z.array(z.record(z.unknown())).optional(),
@@ -575,30 +780,39 @@ export const ZConversation = z.object({
 });
 export type TConversation = z.infer<typeof ZConversation>;
 
-// Schema للتحقق من Message
+/**
+ * Schema للتحقق من Message
+ * Schema for Message validation
+ */
 export const ZMessage = z.object({
   id: z.string().uuid(),
   conversation_id: z.string().uuid(),
-  direction: z.enum(['INCOMING', 'OUTGOING']),
-  platform: z.enum(['instagram', 'whatsapp']),
-  message_type: z.enum(['TEXT', 'IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT', 'STICKER', 'LOCATION', 'CONTACT']),
+  direction: z.enum(MESSAGE_DIRECTIONS),
+  platform: z.enum(PLATFORMS),
+  message_type: z.enum(MESSAGE_TYPES),
   content: z.string().optional(),
   media_url: z.string().optional(),
   platform_message_id: z.string().optional(),
-  delivery_status: z.enum(['PENDING', 'SENT', 'DELIVERED', 'READ', 'FAILED']).optional(),
+  delivery_status: z.enum(DELIVERY_STATUSES).optional(),
   ai_processed: z.boolean(),
   created_at: z.preprocess((v) => (typeof v === 'string' ? new Date(v) : v), z.date())
 });
 export type TMessage = z.infer<typeof ZMessage>;
 
-// Schema للتحقق من Webhook Request
+/**
+ * Schema للتحقق من Webhook Request
+ * Schema for Webhook Request validation
+ */
 export const ZWebhookRequest = z.object({
   object: z.string(),
   entry: z.array(z.record(z.unknown()))
 });
 export type TWebhookRequest = z.infer<typeof ZWebhookRequest>;
 
-// Schema للتحقق من API Response
+/**
+ * Schema للتحقق من API Response
+ * Schema for API Response validation
+ */
 export const ZAPIResponse = z.object({
   success: z.boolean(),
   data: z.unknown().optional(),
@@ -606,3 +820,39 @@ export const ZAPIResponse = z.object({
   message: z.string().optional()
 });
 export type TAPIResponse = z.infer<typeof ZAPIResponse>;
+
+// ===============================================
+// HELPER FUNCTIONS
+// ===============================================
+
+/**
+ * دالة للتحقق من صحة حالة الاشتراك
+ * Function to validate subscription status
+ */
+export function isValidSubscriptionStatus(status: string): status is SubscriptionStatus {
+  return SUBSCRIPTION_STATUSES.includes(status as SubscriptionStatus);
+}
+
+/**
+ * دالة للتحقق من صحة مستوى الاشتراك
+ * Function to validate subscription tier
+ */
+export function isValidSubscriptionTier(tier: string): tier is SubscriptionTier {
+  return SUBSCRIPTION_TIERS.includes(tier as SubscriptionTier);
+}
+
+/**
+ * دالة للتحقق من صحة المنصة
+ * Function to validate platform
+ */
+export function isValidPlatform(platform: string): platform is Platform {
+  return PLATFORMS.includes(platform as Platform);
+}
+
+/**
+ * دالة للتحقق من صحة مرحلة المحادثة
+ * Function to validate conversation stage
+ */
+export function isValidConversationStage(stage: string): stage is ConversationStage {
+  return CONVERSATION_STAGES.includes(stage as ConversationStage);
+}

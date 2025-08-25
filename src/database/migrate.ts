@@ -41,8 +41,8 @@ export async function runDatabaseMigrations(): Promise<void> {
 
   if (!migrationDir) {
     log.warn('No migration directory found, skipping migrations');
-    return;
-  }
+        return;
+      }
 
   log.info(`Running migrations from: ${migrationDir}`);
 
@@ -100,16 +100,16 @@ export async function runDatabaseMigrations(): Promise<void> {
     throw error;
   } finally {
     client.release();
+    }
   }
-}
 
-/**
- * Get migration status
- */
+  /**
+   * Get migration status
+   */
 export async function getMigrationStatus(): Promise<{
-  total: number;
-  executed: number;
-  pending: number;
+    total: number;
+    executed: number;
+    pending: number;
   migrations: any[];
 }> {
   const currentPool = getPool();
@@ -175,10 +175,10 @@ export async function getMigrationStatus(): Promise<{
     };
   } finally {
     client.release();
+    }
   }
-}
 
-/**
+  /**
  * Create migration tracking table
  */
 export async function createMigrationTable(): Promise<void> {
@@ -195,10 +195,10 @@ export async function createMigrationTable(): Promise<void> {
     log.info('✅ Migration tracking table created');
   } finally {
     client.release();
+    }
   }
-}
 
-/**
+  /**
  * Rollback last migration
  */
 export async function rollbackMigration(): Promise<void> {

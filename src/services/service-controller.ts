@@ -15,39 +15,13 @@ interface Database {
   getSQL: () => Sql;
 }
 
-export interface ServiceStatus {
-  enabled: boolean;
-  lastToggled: Date;
-  toggledBy: string;
-  reason?: string;
-}
-
-export interface MerchantServices {
-  merchantId: string;
-  instagram: ServiceStatus;
-  aiProcessing: ServiceStatus;
-  autoReply: ServiceStatus;
-  storyResponse: ServiceStatus;
-  commentResponse: ServiceStatus;
-  dmProcessing: ServiceStatus;
-}
-
-export interface ServiceToggleRequest {
-  merchantId: string;
-  service: 'instagram' | 'ai_processing' | 'auto_reply' | 'story_response' | 'comment_response' | 'dm_processing';
-  enabled: boolean;
-  reason?: string;
-  toggledBy?: string;
-}
-
-export interface ServiceHealth {
-  service: string;
-  status: 'healthy' | 'degraded' | 'disabled' | 'error';
-  enabled: boolean;
-  lastCheck: Date;
-  errorCount: number;
-  uptime: number;
-}
+import type { 
+  ServiceStatus, 
+  MerchantServices, 
+  ServiceToggleRequest, 
+  ServiceHealth,
+  ServiceName 
+} from '../types/service-control.js';
 
 export class ServiceController {
   private db!: Database;
@@ -359,7 +333,7 @@ export class ServiceController {
         }
 
         return {
-          service: this.getServiceDisplayName(row.service_name),
+          service: row.service_name as ServiceName,
           status,
           enabled: row.enabled,
           lastCheck: row.last_check,

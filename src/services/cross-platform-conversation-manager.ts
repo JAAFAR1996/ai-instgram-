@@ -8,15 +8,16 @@
 
 import { getDatabase } from '../db/adapter.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
-// removed unused DBRow
-import type {
-  ConversationRow,
+// ✅ تم إزالة DBRow لأنه غير مستخدم في هذا الملف
+import type { 
   ConversationSession,
   UnifiedConversationContext,
-  CustomerPreferences
+  CustomerPreferences,
+  CartItem
 } from '../types/conversations.js';
+import type { ConversationRow } from '../types/database-rows.js';
 import { emptyPreferences } from '../types/conversations.js';
-import { toInt } from '../types/guards.js';
+import { toInt } from '../types/common.js';
 import type { Platform } from '../types/database.js';
 import type { Sql, SqlFragment } from '../types/sql.js';
 import { logger } from './logger.js';
@@ -50,15 +51,7 @@ export interface PlatformProfile {
 
 // Using imported UnifiedConversationContext from conversations.ts
 
-export interface CartItem {
-  productId: string;
-  name: string;
-  price: number;
-  quantity: number;
-  addedAt: Date;
-  platform: Platform;
-  notes?: string;
-}
+// CartItem interface moved to conversations.ts for consistency
 
 // Using imported CustomerPreferences from conversations.ts
 
@@ -375,12 +368,12 @@ export class CrossPlatformConversationManager {
       }
 
       // Select primary conversation based on strategy
-      const primaryConversation = this.selectPrimaryConversation(conversations as ConversationRow[], mergeStrategy);
+      const primaryConversation = this.selectPrimaryConversation(conversations as any[], mergeStrategy);
       const secondaryConversations = conversations.filter(c => c.id !== primaryConversation.id);
 
       // Merge contexts
       const mergedContext = await this.mergeConversationContexts(
-        [primaryConversation as ConversationRow, ...(secondaryConversations as ConversationRow[])]
+        [primaryConversation, ...secondaryConversations] as any[]
       );
 
       // Update primary conversation with merged context

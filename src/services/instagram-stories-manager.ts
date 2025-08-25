@@ -5,8 +5,7 @@
  * ===============================================
  */
 
-import { getInstagramClient, clearInstagramClient, type InstagramAPICredentials } from './instagram-api.js';
-import { ExpiringMap } from '../utils/expiring-map.js';
+import { getInstagramMessageSender } from './instagram-message-sender.js';
 import { getDatabase } from '../db/adapter.js';
 import type { Sql } from '../types/sql.js';
 import type { QuickReply } from '../types/instagram.js';
@@ -95,39 +94,19 @@ export class InstagramStoriesManager {
   private aiOrchestrator = getConversationAIOrchestrator();
   private redis = getRedisConnectionManager();
 
-  private credentialsCache = new ExpiringMap<string, InstagramAPICredentials>();
+  // Use existing Instagram message sender for credentials management
+  private messageSender = getInstagramMessageSender();
 
-  private getClient(merchantId: string) {
-    return getInstagramClient(merchantId);
-  }
-
-  private async getCredentials(merchantId: string): Promise<InstagramAPICredentials> {
-    const cached = this.credentialsCache.get(merchantId);
-    if (cached && (!cached.tokenExpiresAt || cached.tokenExpiresAt > new Date())) {
-      return cached;
-    }
-
-    const client = this.getClient(merchantId);
-    const creds = await client.loadMerchantCredentials(merchantId);
-    if (!creds) {
-      throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
-    }
-    await client.validateCredentials(creds, merchantId);
-
-    const ttlMs = creds.tokenExpiresAt
-      ? Math.max(creds.tokenExpiresAt.getTime() - Date.now(), 0)
-      : 60 * 60 * 1000;
-    this.credentialsCache.set(merchantId, creds, ttlMs);
-    return creds;
-  }
+  // Remove duplicate client and credentials management - use message sender instead
 
   public clearMerchantClient(merchantId: string) {
-    this.credentialsCache.delete(merchantId);
-    clearInstagramClient(merchantId);
+    // Delegate to message sender for consistent client management
+    this.messageSender.reloadMerchant(merchantId);
   }
 
   public dispose(): void {
-    this.credentialsCache.dispose();
+    // Delegate to message sender for consistent disposal
+    this.messageSender.dispose();
   }
 
   /**
@@ -285,7 +264,7 @@ export class InstagramStoriesManager {
         return false;
       }
 
-      // Generate AI response
+      // Generate AI response using existing AI orchestrator
       const aiResult = await this.aiOrchestrator.generatePlatformResponse(
         prompt,
         context,
@@ -298,16 +277,13 @@ export class InstagramStoriesManager {
         interaction
       );
 
-      // Send response via Instagram API
-      const instagramClient = this.getClient(merchantId);
-      const credentials = await this.getCredentials(merchantId);
-
-      const sendResult = await instagramClient.sendMessage(credentials, merchantId, {
-        recipientId: interaction.userId,
-        messagingType: 'RESPONSE',
-        text: personalizedResponse,
-        quickReplies: this.generateQuickReplies(interaction)
-      });
+      // Send response via Instagram API using existing message sender
+      const sendResult = await this.messageSender.sendTextMessage(
+        merchantId,
+        interaction.userId,
+        personalizedResponse,
+        conversation.id
+      );
 
       if (sendResult.success) {
         // Store the response in conversation
@@ -551,6 +527,7 @@ export class InstagramStoriesManager {
     try {
       const sql: Sql = this.db.getSQL();
 
+      // Use existing database adapter for consistent operations
       await sql`
         INSERT INTO story_interactions (
           id,
@@ -952,21 +929,14 @@ export class InstagramStoriesManager {
     interaction: StoryInteraction
   ): Promise<void> {
     try {
-      const instagramClient = this.getClient(merchantId);
-      const credentials = await this.getCredentials(merchantId);
-
       const assistanceMessage = `شكراً لاهتمامك! 🛍️ يسعدني أساعدك في اختيار المنتج المناسب. راسلني هنا وراح أرسلك كل التفاصيل والأسعار ✨`;
 
-      await instagramClient.sendMessage(credentials, merchantId, {
-        recipientId: interaction.userId,
-        messagingType: 'RESPONSE',
-        text: assistanceMessage,
-        quickReplies: [
-          { title: 'كتالوج المنتجات 📋', payload: 'CATALOG' },
-          { title: 'الأسعار 💰', payload: 'PRICES' },
-          { title: 'التوصيل 🚚', payload: 'DELIVERY' }
-        ]
-      });
+      // Use existing message sender for consistent message sending
+      await this.messageSender.sendTextMessage(
+        merchantId,
+        interaction.userId,
+        assistanceMessage
+      );
 
       this.logger.info('Sales assistance sent for story interaction', {
         interactionType: interaction.type

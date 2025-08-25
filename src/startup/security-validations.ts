@@ -1,4 +1,6 @@
 // Production-grade environment validation with explicit required keys.
+import { validateKeyEntropy } from '../services/encryption.js';
+
 type EnvSpec = {
   key: string;
   mask?: (v: string) => string;
@@ -47,5 +49,51 @@ export function validateProductionEnv(): void {
     if (!process.env[key]) {
       throw new Error(`Missing required environment variable: ${key}`);
     }
+  }
+}
+
+/**
+ * Validate encryption key entropy and security
+ */
+export function validateEncryptionKeys(): void {
+  const encryptionKeys = [
+    { name: 'ENCRYPTION_KEY', value: process.env.ENCRYPTION_KEY },
+    { name: 'ENCRYPTION_KEY_HEX', value: process.env.ENCRYPTION_KEY_HEX },
+    { name: 'JWT_SECRET', value: process.env.JWT_SECRET }
+  ];
+
+  for (const { name, value } of encryptionKeys) {
+    if (value) {
+      const entropyValidation = validateKeyEntropy(value);
+      
+      if (!entropyValidation.isValid) {
+        console.warn(`⚠️ ${name} entropy validation failed:`);
+        console.warn(`   Score: ${entropyValidation.entropyScore}/100`);
+        console.warn(`   Issues: ${entropyValidation.issues.join(', ')}`);
+        console.warn(`   Recommendations: ${entropyValidation.recommendations.join(', ')}`);
+        
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error(`${name} entropy validation failed: ${entropyValidation.issues.join(', ')}`);
+        }
+      } else {
+        console.log(`✅ ${name} entropy validation passed (Score: ${entropyValidation.entropyScore}/100)`);
+      }
+    }
+  }
+}
+
+// Direct execution for CLI validation
+if (import.meta.url === `file://${process.argv[1]}`) {
+  try {
+    console.log('🔍 Validating production environment...');
+    assertEnvStrict();
+    validateProductionEnv();
+    validateEncryptionKeys();
+    console.log('✅ Production environment validation passed');
+    process.exit(0);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('❌ Production environment validation failed:', errorMessage);
+    process.exit(1);
   }
 }

@@ -11,10 +11,10 @@ import { getInstagramAIService, type InstagramContext, type InstagramAIResponse 
 import { getDatabase } from '../db/adapter.js';
 import type { Platform } from '../types/database.js';
 import type { DIContainer } from '../container/index.js';
-import type { Pool } from 'pg';
+
 import { logger } from './logger.js';
 
-interface InteractionRow {
+interface InteractionRow extends Record<string, unknown> {
   platform: string;
   conversation_stage: string;
   message_type: string;
@@ -24,14 +24,14 @@ interface InteractionRow {
   ai_processed: boolean;
 }
 
-interface PlatformHistoryRow {
+interface PlatformHistoryRow extends Record<string, unknown> {
   platform: string;
   interaction_count: string;
   last_interaction: string;
   stages: string[];
 }
 
-interface JourneyStageRow {
+interface JourneyStageRow extends Record<string, unknown> {
   platform: string;
   conversation_stage: string;
   created_at: string;
@@ -82,20 +82,25 @@ export class ConversationAIOrchestrator {
   private aiService!: ReturnType<typeof getAIService>;
   private instagramAI!: ReturnType<typeof getInstagramAIService>;
   private db!: ReturnType<typeof getDatabase>;
-  // removed unused field
 
-  constructor(_container?: DIContainer) {
-    if (_container) {
-      this.initializeFromContainer();
+  constructor(container?: DIContainer) {
+    if (container) {
+      this.initializeFromContainer(container);
     } else {
       this.initializeLegacy();
     }
   }
 
-  private initializeFromContainer(): void {
-    // Services will be injected via container when available
-    // For now, fallback to legacy methods
-    this.initializeLegacy();
+  private initializeFromContainer(container: DIContainer): void {
+    try {
+      // Try to get services from container first
+      this.aiService = container.get<ReturnType<typeof getAIService>>('aiService') || getAIService();
+      this.instagramAI = container.get<ReturnType<typeof getInstagramAIService>>('instagramAIService') || getInstagramAIService();
+      this.db = container.get<ReturnType<typeof getDatabase>>('database') || getDatabase();
+    } catch (error: unknown) {
+      logger.warn('Container initialization failed, falling back to legacy methods', { error });
+      this.initializeLegacy();
+    }
   }
 
   private initializeLegacy(): void {
@@ -109,34 +114,34 @@ export class ConversationAIOrchestrator {
    */
   public async generatePlatformResponse(
     customerMessage: string,
-    _context: ConversationContext | InstagramContext,
+    context: ConversationContext | InstagramContext,
     platform: Platform
   ): Promise<PlatformAIResponse> {
     try {
-      logger.info(`🤖 Generating ${platform} AI response for merchant: ${_context.merchantId}`);
+      logger.info(`🤖 Generating ${platform} AI response for merchant: ${context.merchantId}`);
 
       // احترام Service Controller قبل تشغيل الذكاء
       try {
         const { getServiceController } = await import('./service-controller.js');
         const sc = getServiceController();
-        const enabled = await sc.isServiceEnabled(_context.merchantId, 'ai_processing');
+        const enabled = await sc.isServiceEnabled(context.merchantId, 'ai_processing');
         if (!enabled) {
-          return this.getFallbackPlatformResponse(platform, _context);
+          return this.getFallbackPlatformResponse(platform, context);
         }
-      } catch {
-        // لا توقف المسار إذا تعذّر الوصول للكنترولر
+      } catch (error: unknown) {
+        logger.warn('Service controller check failed, continuing with AI processing', { error });
       }
 
       // Get cross-platform context
       const crossPlatformContext = await this.getCrossPlatformContext(
-        _context.customerId,
-        _context.merchantId
+        context.customerId,
+        context.merchantId
       );
 
       // Determine conversation personality
       const personality = await this.determineConversationPersonality(
         platform,
-        _context,
+        context,
         crossPlatformContext
       );
 
@@ -145,7 +150,7 @@ export class ConversationAIOrchestrator {
 
       if (platform === 'instagram') {
         // Use Instagram-specific AI
-        const instagramContext = _context as InstagramContext;
+        const instagramContext = context as InstagramContext;
         response = await this.instagramAI.generateInstagramResponse(
           customerMessage,
           instagramContext
@@ -155,7 +160,7 @@ export class ConversationAIOrchestrator {
         adaptations = this.applyInstagramAdaptations(response, personality, crossPlatformContext);
       } else {
         // Use standard AI for WhatsApp
-        response = await this.aiService.generateResponse(customerMessage, _context);
+        response = await this.aiService.generateResponse(customerMessage, context);
         
         // Apply WhatsApp-specific adaptations
         adaptations = this.applyWhatsAppAdaptations(response, personality, crossPlatformContext);
@@ -167,11 +172,11 @@ export class ConversationAIOrchestrator {
       // Log platform-specific interaction (لا تسقط النظام لو فشلت الكتابة)
       try {
         await this.logPlatformInteraction(
-          { ..._context, conversationHistory: [] } as ConversationContext, // لا نمرّر تاريخ طويل
+          { ...context, conversationHistory: [] } as ConversationContext, // لا نمرّر تاريخ طويل
           response, platform, adaptations
         );
-      } catch (e) {
-        console.warn('logPlatformInteraction failed (non-fatal)', (e as Error)?.message);
+      } catch (error: unknown) {
+        logger.warn('logPlatformInteraction failed (non-fatal)', { error });
       }
 
       return {
@@ -181,13 +186,16 @@ export class ConversationAIOrchestrator {
         adaptations
       };
 
-    } catch (error: any) {
-      this.aiService?.['logger']?.error?.(`❌ Platform response generation failed for ${platform}`, {
-        err: error?.message || String(error)
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`❌ Platform response generation failed for ${platform}`, {
+        error: errorMessage,
+        merchantId: context.merchantId,
+        customerId: context.customerId
       });
       
       // Return fallback response
-      return this.getFallbackPlatformResponse(platform, _context);
+      return this.getFallbackPlatformResponse(platform, context);
     }
   }
 
@@ -198,7 +206,7 @@ export class ConversationAIOrchestrator {
     originalMessage: string,
     fromPlatform: Platform,
     toPlatform: Platform,
-    context: ConversationContext
+    _context: ConversationContext
   ): Promise<{
     adaptedMessage: string;
     adaptations: PlatformAdaptation[];
@@ -242,8 +250,9 @@ export class ConversationAIOrchestrator {
         contextPreserved: true
       };
 
-    } catch (error: any) {
-      this.aiService['logger']?.error('❌ Cross-platform adaptation failed', error);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error('❌ Cross-platform adaptation failed', { error: errorMessage });
       return {
         adaptedMessage: originalMessage,
         adaptations: [],
@@ -265,11 +274,11 @@ export class ConversationAIOrchestrator {
     recommendations: string[];
   }> {
     try {
-      const sql = this.db.getSQL() as any;
+      const pool = this.db.getPool();
 
       // Get customer interactions across platforms
-      const interactions = await sql<InteractionRow>`
-        SELECT 
+      const { rows: interactions } = await pool.query<InteractionRow>(
+        `SELECT 
           c.platform,
           c.conversation_stage,
           ml.message_type,
@@ -279,11 +288,12 @@ export class ConversationAIOrchestrator {
           ml.ai_processed
         FROM conversations c
         JOIN message_logs ml ON c.id = ml.conversation_id
-        WHERE (c.customer_whatsapp = ${customerId} OR c.customer_instagram = ${customerId})
-        AND c.merchant_id = ${merchantId}::uuid
+        WHERE (c.customer_whatsapp = $1 OR c.customer_instagram = $1)
+        AND c.merchant_id = $2::uuid
         ORDER BY ml.created_at DESC
-        LIMIT 100
-      `;
+        LIMIT 100`,
+        [customerId, merchantId]
+      );
 
       // Analyze patterns
       const customerProfile = await this.analyzeCustomerProfile(interactions);
@@ -302,8 +312,9 @@ export class ConversationAIOrchestrator {
         recommendations
       };
 
-    } catch (error: any) {
-      console.error('❌ Conversation insights generation failed:', error?.message || String(error));
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error('❌ Conversation insights generation failed:', { error: errorMessage });
       return {
         customerProfile: {} as EnhancedCustomerProfile,
         platformPreferences: {} as PlatformPreferences,
@@ -321,19 +332,19 @@ export class ConversationAIOrchestrator {
     merchantId: string
   ): Promise<CrossPlatformContext> {
     try {
-      const sql = this.db.getSQL() as any;
-
-      const platformHistory = await sql<PlatformHistoryRow>`
-        SELECT 
+      const pool = this.db.getPool();
+      const { rows: platformHistory } = await pool.query<PlatformHistoryRow>(
+        `SELECT 
           platform,
           COUNT(*) as interaction_count,
           MAX(updated_at) as last_interaction,
           array_agg(DISTINCT conversation_stage) as stages
         FROM conversations
-        WHERE (customer_whatsapp = ${customerId} OR customer_instagram = ${customerId})
-        AND merchant_id = ${merchantId}::uuid
-        GROUP BY platform
-      `;
+        WHERE (customer_whatsapp = $1 OR customer_instagram = $1)
+        AND merchant_id = $2::uuid
+        GROUP BY platform`,
+        [customerId, merchantId]
+      );
 
       const hasWhatsAppHistory = platformHistory.some(
         (p: PlatformHistoryRow) => p.platform === 'whatsapp'
@@ -354,18 +365,19 @@ export class ConversationAIOrchestrator {
       );
 
       // Get customer journey stages
-      const journeyStages = await sql<JourneyStageRow>`
-        SELECT 
+      const { rows: journeyStages } = await pool.query<JourneyStageRow>(
+        `SELECT 
           platform,
           conversation_stage,
           created_at,
           'unknown' as intent
         FROM conversations
-        WHERE (customer_whatsapp = ${customerId} OR customer_instagram = ${customerId})
-        AND merchant_id = ${merchantId}::uuid
+        WHERE (customer_whatsapp = $1 OR customer_instagram = $1)
+        AND merchant_id = $2::uuid
         ORDER BY created_at ASC
-        LIMIT 20
-      `;
+        LIMIT 20`,
+        [customerId, merchantId]
+      );
 
       const customerJourney: CustomerJourneyStage[] = journeyStages.map(
         (stage: JourneyStageRow) => ({
@@ -384,8 +396,9 @@ export class ConversationAIOrchestrator {
         totalInteractions
       };
 
-    } catch (error: any) {
-      console.error('❌ Error getting cross-platform context:', error?.message || String(error));
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error('❌ Error getting cross-platform context:', { error: errorMessage });
       return {
         hasWhatsAppHistory: false,
         hasInstagramHistory: false,
@@ -401,7 +414,7 @@ export class ConversationAIOrchestrator {
    */
   private async determineConversationPersonality(
     platform: Platform,
-    context: ConversationContext,
+    _context: ConversationContext,
     crossPlatformContext: CrossPlatformContext
   ): Promise<ConversationPersonality> {
     const basePersonality: ConversationPersonality = {
@@ -441,7 +454,7 @@ export class ConversationAIOrchestrator {
   private applyInstagramAdaptations(
     response: AIResponse | InstagramAIResponse,
     personality: ConversationPersonality,
-    crossPlatformContext: CrossPlatformContext
+    _crossPlatformContext: CrossPlatformContext
   ): PlatformAdaptation[] {
     const adaptations: PlatformAdaptation[] = [];
 
@@ -617,47 +630,241 @@ export class ConversationAIOrchestrator {
     const total = interactions.length;
     
     return {
-      whatsappPreference: ((platforms.whatsapp || 0) / total) * 100,
-      instagramPreference: ((platforms.instagram || 0) / total) * 100,
+      whatsappPreference: total > 0 ? ((platforms.whatsapp || 0) / total) * 100 : 0,
+      instagramPreference: total > 0 ? ((platforms.instagram || 0) / total) * 100 : 0,
       switchingFrequency: this.calculateSwitchingFrequency(interactions)
     };
   }
 
   /**
-   * Private: Additional helper methods would be implemented here
+   * Private: Analyze time preferences based on interaction timestamps
    */
-  private analyzeTimePreferences(_interactions: InteractionRow[]): string {
-    // Implementation for time preference analysis
-    return 'evening';
+  private analyzeTimePreferences(interactions: InteractionRow[]): string {
+    if (interactions.length === 0) return 'unknown';
+    
+    const hours = interactions.map(i => new Date(i.created_at).getHours());
+    const hourCounts = hours.reduce((acc, hour) => {
+      acc[hour] = (acc[hour] || 0) + 1;
+      return acc;
+    }, {} as Record<number, number>);
+    
+    const entries = Object.entries(hourCounts);
+    if (entries.length === 0) return 'unknown';
+    
+    // Find the hour with maximum interactions
+    let maxHour = 12;
+    let maxCount = 0;
+    
+    for (const [hourStr, count] of entries) {
+      const hour = Number(hourStr);
+      if (count > maxCount) {
+        maxCount = count;
+        maxHour = hour;
+      }
+    }
+    
+    // Categorize the hour
+    if (maxHour >= 6 && maxHour < 12) return 'morning';
+    if (maxHour >= 12 && maxHour < 17) return 'afternoon';
+    if (maxHour >= 17 && maxHour < 22) return 'evening';
+    return 'night';
   }
 
-  private analyzeResponsePatterns(_interactions: InteractionRow[]): any {
-    // Implementation for response pattern analysis
-    return {};
+  /**
+   * Private: Analyze response patterns
+   */
+  private analyzeResponsePatterns(interactions: InteractionRow[]): Record<string, unknown> {
+    if (interactions.length === 0) return {};
+    
+    const patterns = {
+      averageResponseTime: 0,
+      responseRate: 0,
+      preferredMessageType: 'text',
+      engagementLevel: 'medium'
+    };
+    
+    // Calculate response rate
+    const userMessages = interactions.filter(i => i.direction === 'inbound');
+    const aiResponses = interactions.filter(i => i.direction === 'outbound' && i.ai_processed);
+    patterns.responseRate = userMessages.length > 0 ? (aiResponses.length / userMessages.length) * 100 : 0;
+    
+    // Determine preferred message type
+    const messageTypes = interactions.map(i => i.message_type);
+    const typeCounts = messageTypes.reduce((acc, type) => {
+      acc[type] = (acc[type] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    
+    const typeEntries = Object.entries(typeCounts);
+    if (typeEntries.length === 0) {
+      patterns.preferredMessageType = 'text';
+    } else {
+      // Find the message type with maximum count
+      let maxType = 'text';
+      let maxCount = 0;
+      
+      for (const [type, count] of typeEntries) {
+        if (count > maxCount) {
+          maxCount = count;
+          maxType = type;
+        }
+      }
+      
+      patterns.preferredMessageType = maxType;
+    }
+    
+    // Determine engagement level
+    if (patterns.responseRate > 80) patterns.engagementLevel = 'high';
+    else if (patterns.responseRate > 50) patterns.engagementLevel = 'medium';
+    else patterns.engagementLevel = 'low';
+    
+    return patterns;
   }
 
-  private analyzePurchaseIntent(_interactions: InteractionRow[]): number {
-    // Implementation for purchase intent analysis
-    return 0.7;
+  /**
+   * Private: Analyze purchase intent based on conversation patterns
+   */
+  private analyzePurchaseIntent(interactions: InteractionRow[]): number {
+    if (interactions.length === 0) return 0;
+    
+    let intentScore = 0;
+    
+    // Check for purchase-related keywords
+    const purchaseKeywords = ['سعر', 'ثمن', 'شراء', 'طلب', 'دفع', 'حجز', 'احجز', 'اريد', 'عايز'];
+    const hasPurchaseKeywords = interactions.some(i => 
+      purchaseKeywords.some(keyword => 
+        i.content.toLowerCase().includes(keyword.toLowerCase())
+      )
+    );
+    
+    if (hasPurchaseKeywords) intentScore += 0.4;
+    
+    // Check for product inquiries
+    const productKeywords = ['موجود', 'متوفر', 'فيه', 'عندك', 'عندكم', 'متوفر'];
+    const hasProductInquiries = interactions.some(i => 
+      productKeywords.some(keyword => 
+        i.content.toLowerCase().includes(keyword.toLowerCase())
+      )
+    );
+    
+    if (hasProductInquiries) intentScore += 0.3;
+    
+    // Check for detailed questions
+    const detailedQuestions = interactions.filter(i => i.content.length > 50);
+    if (detailedQuestions.length > 2) intentScore += 0.2;
+    
+    // Check for multiple interactions (engagement)
+    if (interactions.length > 5) intentScore += 0.1;
+    
+    return Math.min(intentScore, 1.0);
   }
 
-  private analyzeConversationTrends(_interactions: InteractionRow[]): ConversationTrend[] {
-    // Implementation for conversation trend analysis
-    return [];
+  /**
+   * Private: Analyze conversation trends
+   */
+  private analyzeConversationTrends(interactions: InteractionRow[]): ConversationTrend[] {
+    if (interactions.length < 3) return [];
+    
+    const trends: ConversationTrend[] = [];
+    
+    // Analyze platform usage trends
+    const platformGroups = interactions.reduce((acc, i) => {
+      if (!acc[i.platform]) {
+        acc[i.platform] = [];
+      }
+      const platformArray = acc[i.platform];
+      if (platformArray) {
+        platformArray.push(i);
+      }
+      return acc;
+    }, {} as Record<string, InteractionRow[]>);
+    
+    Object.entries(platformGroups).forEach(([platform, platformInteractions]) => {
+      if (platformInteractions && platformInteractions.length > 2) {
+        trends.push({
+          trend: `Increasing ${platform} usage`,
+          frequency: platformInteractions.length,
+          platform: platform as Platform
+        });
+      }
+    });
+    
+    // Analyze conversation stage progression
+    const stages = interactions.map(i => i.conversation_stage);
+    const uniqueStages = [...new Set(stages)];
+    if (uniqueStages.length > 2) {
+      trends.push({
+        trend: 'Conversation stage progression',
+        frequency: uniqueStages.length,
+        platform: 'whatsapp' // Default platform
+      });
+    }
+    
+    return trends;
   }
 
-  private calculateSwitchingFrequency(_interactions: InteractionRow[]): number {
-    // Implementation for platform switching frequency calculation
-    return 0.3;
+  /**
+   * Private: Calculate platform switching frequency
+   */
+  private calculateSwitchingFrequency(interactions: InteractionRow[]): number {
+    if (interactions.length < 2) return 0;
+    
+    let switches = 0;
+    for (let i = 1; i < interactions.length; i++) {
+      const currentInteraction = interactions[i];
+      const previousInteraction = interactions[i - 1];
+      
+      if (currentInteraction && previousInteraction) {
+        const currentPlatform = currentInteraction.platform;
+        const previousPlatform = previousInteraction.platform;
+        if (currentPlatform && previousPlatform && currentPlatform !== previousPlatform) {
+          switches++;
+        }
+      }
+    }
+    
+    return switches / (interactions.length - 1);
   }
 
+  /**
+   * Private: Generate conversation recommendations
+   */
   private generateConversationRecommendations(
     profile: EnhancedCustomerProfile,
     preferences: PlatformPreferences,
-    trends: ConversationTrend[]
+    _trends: ConversationTrend[]
   ): string[] {
-    // Implementation for generating recommendations
-    return ['Focus on Instagram engagement', 'Use more visual content'];
+    const recommendations: string[] = [];
+    
+    // Platform-specific recommendations
+    if (preferences.instagramPreference > 70) {
+      recommendations.push('Focus on Instagram engagement and visual content');
+    }
+    
+    if (preferences.whatsappPreference > 70) {
+      recommendations.push('Prioritize WhatsApp for detailed conversations');
+    }
+    
+    // Engagement recommendations
+    if (profile.purchaseIntent > 0.7) {
+      recommendations.push('High purchase intent detected - focus on closing');
+    }
+    
+    if (profile.totalInteractions > 10) {
+      recommendations.push('High engagement customer - maintain relationship');
+    }
+    
+    // Time-based recommendations
+    if (profile.preferredTimeOfDay === 'evening') {
+      recommendations.push('Schedule interactions during evening hours');
+    }
+    
+    // Cross-platform recommendations
+    if (preferences.switchingFrequency > 0.3) {
+      recommendations.push('Customer switches platforms frequently - maintain consistency');
+    }
+    
+    return recommendations.length > 0 ? recommendations : ['Continue current engagement strategy'];
   }
 
   /**
@@ -670,7 +877,7 @@ export class ConversationAIOrchestrator {
     adaptations: PlatformAdaptation[]
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL() as any;
+      const pool = this.db.getPool();
       // قص التفاصيل الطويلة لتفادي قيود الأعمدة/الفهارس
       const safeDetails = {
         platform,
@@ -681,8 +888,8 @@ export class ConversationAIOrchestrator {
         responseTime: response.responseTime,
         orchestrated: true,
       };
-      await sql`
-        INSERT INTO audit_logs (
+      await pool.query(
+        `INSERT INTO audit_logs (
           merchant_id,
           action,
           entity_type,
@@ -690,16 +897,25 @@ export class ConversationAIOrchestrator {
           execution_time_ms,
           success
         ) VALUES (
-          ${context.merchantId}::uuid,
+          $1::uuid,
+          $2,
+          $3,
+          $4::jsonb,
+          $5,
+          $6
+        )`,
+        [
+          context.merchantId,
           'PLATFORM_AI_ORCHESTRATION',
           'AI_INTERACTION',
-          ${JSON.stringify(safeDetails)},
-          ${response.responseTime},
+          JSON.stringify(safeDetails),
+          response.responseTime,
           true
-        )
-      `;
-    } catch (error: any) {
-      console.error('❌ Platform interaction logging failed:', error?.message || String(error));
+        ]
+      );
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error('❌ Platform interaction logging failed:', { error: errorMessage });
     }
   }
 
@@ -715,13 +931,16 @@ export class ConversationAIOrchestrator {
       platform === 'instagram'
         ? 'عذرًا صار خطأ بسيط، راسلنا مرة ثانية 🌟'
         : 'عذرًا، واجهتنا مشكلة مؤقتة. حاول مجددًا 🙏';
+    
+    const stage = 'stage' in context ? context.stage : 'UNKNOWN';
+    
     const fallback =
       platform === 'instagram'
         ? ({
             message: baseMsg,
             messageAr: baseMsg,
             intent: 'SUPPORT',
-            stage: (context as any).stage,
+            stage,
             actions: [{ type: 'ESCALATE', data: { reason: 'AI_ERROR' }, priority: 1 }],
             products: [],
             confidence: 0.1,
@@ -731,9 +950,15 @@ export class ConversationAIOrchestrator {
             engagement: { likelyToShare: false, viralPotential: 0, userGeneratedContent: false }
           } as InstagramAIResponse)
         : ({
-            message: baseMsg, messageAr: baseMsg, intent: 'SUPPORT', stage: (context as any).stage,
+            message: baseMsg, 
+            messageAr: baseMsg, 
+            intent: 'SUPPORT', 
+            stage,
             actions: [{ type: 'ESCALATE', data: { reason: 'AI_ERROR' }, priority: 1 }],
-            products: [], confidence: 0.1, tokens: { prompt: 0, completion: 0, total: 0 }, responseTime: 0
+            products: [], 
+            confidence: 0.1, 
+            tokens: { prompt: 0, completion: 0, total: 0 }, 
+            responseTime: 0
           } as AIResponse);
 
     return {
@@ -750,7 +975,7 @@ interface EnhancedCustomerProfile {
   whatsappInteractions: number;
   instagramInteractions: number;
   preferredTimeOfDay: string;
-  responsePatterns: any;
+  responsePatterns: Record<string, unknown>;
   purchaseIntent: number;
 }
 

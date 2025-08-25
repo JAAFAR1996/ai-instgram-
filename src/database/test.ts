@@ -8,11 +8,11 @@
  */
 
 import { getDatabase } from '../db/adapter.js';
-import { getPool, withTx } from '../db/index.js';
+import { getPool } from '../db/index.js';
 import { getLogger } from '../services/logger.js';
 import { must } from '../utils/safety.js';
 import { getRLSDatabase } from './rls-wrapper.js';
-import { seedDatabase, cleanupTestData } from './seed.js';
+import { cleanupTestData } from './seed.js';
 import { randomUUID } from 'crypto';
 
 const log = getLogger({ component: 'database-test' });
@@ -104,8 +104,9 @@ export class DatabaseTestSuite {
         summary
       };
 
-    } catch (error) {
-      log.error('❌ Test suite failed:', error);
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      log.error('❌ Test suite failed:', err);
       return {
         success: false,
         suites: this.testResults,
@@ -168,7 +169,6 @@ export class DatabaseTestSuite {
 
     // Test 2: Pool stats
     tests.push(await this.runTest('Connection Pool Health', async () => {
-      const stats = this.pool.totalCount;
       return { 
         totalCount: this.pool.totalCount,
         idleCount: this.pool.idleCount,
@@ -307,7 +307,9 @@ export class DatabaseTestSuite {
 
     // Test 1: RLS context setup
     tests.push(await this.runTest('RLS Context Setup', async () => {
-      await this.rlsDb.setMerchantContext(this.testMerchantId!);
+      if (!this.testMerchantId) throw new Error('No test merchant available');
+      
+      await this.rlsDb.setMerchantContext(this.testMerchantId);
       const context = this.rlsDb.getCurrentContext();
       return { 
         merchantId: context.merchantId,
@@ -317,6 +319,8 @@ export class DatabaseTestSuite {
 
     // Test 2: RLS query isolation
     tests.push(await this.runTest('RLS Query Isolation', async () => {
+      if (!this.testMerchantId) throw new Error('No test merchant available');
+      
       // Query with RLS should only return merchant's data
       const merchantProducts = await this.rlsDb.query`
         SELECT COUNT(*)::text as count
@@ -329,11 +333,12 @@ export class DatabaseTestSuite {
       try {
         await this.rlsDb.query`SELECT COUNT(*) FROM products`;
         return { isolated: false, error: 'RLS bypass detected' };
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
         return { 
           isolated: true, 
           merchantProductCount: merchantProducts[0]?.count,
-          rlsError: error instanceof Error ? error.message : String(error)
+          rlsError: err.message
         };
       }
     }));
@@ -365,7 +370,9 @@ export class DatabaseTestSuite {
 
     // Test 1: Transaction commit
     tests.push(await this.runTest('Transaction Commit', async () => {
-      await this.rlsDb.setMerchantContext(this.testMerchantId!);
+      if (!this.testMerchantId) throw new Error('No test merchant available');
+      
+      await this.rlsDb.setMerchantContext(this.testMerchantId);
       
       const result = await this.rlsDb.transaction(async (trx) => {
         const products = await trx`
@@ -402,7 +409,9 @@ export class DatabaseTestSuite {
 
     // Test 2: Transaction rollback
     tests.push(await this.runTest('Transaction Rollback', async () => {
-      await this.rlsDb.setMerchantContext(this.testMerchantId!);
+      if (!this.testMerchantId) throw new Error('No test merchant available');
+      
+      await this.rlsDb.setMerchantContext(this.testMerchantId);
       
       let productId: string | null = null;
       
@@ -421,8 +430,9 @@ export class DatabaseTestSuite {
           // Force an error to trigger rollback
           await trx`INSERT INTO invalid_table (col) VALUES ('test')`;
         });
-      } catch (error) {
+      } catch (error: unknown) {
         // Expected error
+        log.debug('Expected rollback error:', { error: error instanceof Error ? error.message : String(error) });
       }
 
       // Verify product was rolled back
@@ -456,7 +466,7 @@ export class DatabaseTestSuite {
         'SELECT version()', 
         100,
         async () => {
-          const sql = this.db.getSQL();
+      const sql = this.db.getSQL();
           await sql`SELECT version()`;
         }
       );
@@ -470,16 +480,16 @@ export class DatabaseTestSuite {
         20,
         async () => {
           const sql = this.db.getSQL();
-          await sql`
-            SELECT 
-              m.business_name,
+      await sql`
+        SELECT 
+          m.business_name,
               COUNT(DISTINCT p.id) as product_count,
               COUNT(DISTINCT o.id) as order_count
-            FROM merchants m
+        FROM merchants m
             LEFT JOIN products p ON m.id = p.merchant_id
-            LEFT JOIN orders o ON m.id = o.merchant_id
-            WHERE m.subscription_status = 'ACTIVE'
-            GROUP BY m.id, m.business_name
+        LEFT JOIN orders o ON m.id = o.merchant_id
+        WHERE m.subscription_status = 'ACTIVE'
+        GROUP BY m.id, m.business_name
             LIMIT 50
           `;
         }
@@ -538,16 +548,19 @@ export class DatabaseTestSuite {
           )
         `;
         return { constraintEnforced: false };
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
         return { 
           constraintEnforced: true,
-          error: error instanceof Error ? error.message : String(error)
+          error: err.message
         };
       }
     }));
 
     // Test 2: Check constraints
     tests.push(await this.runTest('Check Constraints', async () => {
+      if (!this.testMerchantId) throw new Error('No test merchant available');
+      
       const sql = this.db.getSQL();
       
       try {
@@ -565,16 +578,19 @@ export class DatabaseTestSuite {
           )
         `;
         return { constraintEnforced: false };
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
         return { 
           constraintEnforced: true,
-          error: error instanceof Error ? error.message : String(error)
+          error: err.message
         };
       }
     }));
 
     // Test 3: Unique constraints
     tests.push(await this.runTest('Unique Constraints', async () => {
+      if (!this.testMerchantId) throw new Error('No test merchant available');
+      
       const sql = this.db.getSQL();
       
       const uniqueSku = `UNIQUE-TEST-${randomUUID()}`;
@@ -608,11 +624,12 @@ export class DatabaseTestSuite {
           )
         `;
         return { constraintEnforced: false };
-      } catch (error) {
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
         return { 
           constraintEnforced: true,
           sku: uniqueSku,
-          error: error instanceof Error ? error.message : String(error)
+          error: err.message
         };
       }
     }));
@@ -629,7 +646,9 @@ export class DatabaseTestSuite {
 
     // Test 1: Complete order flow
     tests.push(await this.runTest('Complete Order Flow', async () => {
-      await this.rlsDb.setMerchantContext(this.testMerchantId!);
+      if (!this.testMerchantId) throw new Error('No test merchant available');
+      
+      await this.rlsDb.setMerchantContext(this.testMerchantId);
       
       const result = await this.rlsDb.transaction(async (trx) => {
         // Create customer conversation
@@ -696,11 +715,13 @@ export class DatabaseTestSuite {
 
     // Test 2: Analytics query simulation
     tests.push(await this.runTest('Analytics Query Simulation', async () => {
-      await this.rlsDb.setMerchantContext(this.testMerchantId!);
+      if (!this.testMerchantId) throw new Error('No test merchant available');
+      
+      await this.rlsDb.setMerchantContext(this.testMerchantId);
       
       const analytics = await this.rlsDb.query`
         WITH merchant_stats AS (
-          SELECT 
+        SELECT 
             COUNT(DISTINCT o.id) as total_orders,
             COUNT(DISTINCT c.id) as total_conversations,
             COUNT(DISTINCT p.id) as total_products,
@@ -774,16 +795,16 @@ export class DatabaseTestSuite {
         duration,
         details: typeof result === 'object' ? result as Record<string, unknown> : { result }
       };
-    } catch (error) {
+    } catch (error: unknown) {
       const duration = Date.now() - startTime;
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const err = error instanceof Error ? error : new Error(String(error));
       
-      log.error(`❌ Test failed: ${name} (${duration}ms)`, error);
+      log.error(`❌ Test failed: ${name} (${duration}ms)`, err);
       return {
         name,
         passed: false,
         duration,
-        error: errorMsg
+        error: err.message
       };
     }
   }
@@ -833,8 +854,9 @@ export class DatabaseTestSuite {
       await cleanupTestData();
       
       log.info('✅ Cleanup completed');
-    } catch (error) {
-      log.error('❌ Cleanup failed:', error);
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      log.error('❌ Cleanup failed:', err);
     }
   }
 }
@@ -879,8 +901,9 @@ export async function quickConnectionTest(): Promise<boolean> {
     await sql`SELECT 1 as test`;
     log.info('✅ Database connection successful');
     return true;
-  } catch (error) {
-    log.error('❌ Database connection failed:', error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    log.error('❌ Database connection failed:', err);
     return false;
   }
 }
@@ -891,8 +914,9 @@ export async function quickIntegrityTest(): Promise<boolean> {
     await testSuite.setupTestEnvironment();
     const results = await testSuite.runIntegrityTests();
     return results.success;
-  } catch (error) {
-    log.error('❌ Integrity test failed:', error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    log.error('❌ Integrity test failed:', err);
     return false;
   }
 }
@@ -902,34 +926,35 @@ if (require.main === module) {
   const command = process.argv[2];
   
   (async () => {
-    try {
-      switch (command) {
+  try {
+    switch (command) {
         case 'all':
-        case 'test':
+      case 'test':
           const success = await runDatabaseTests();
-          process.exit(success ? 0 : 1);
-          break;
+        process.exit(success ? 0 : 1);
+        break;
           
         case 'connection':
           const connected = await quickConnectionTest();
           process.exit(connected ? 0 : 1);
-          break;
+        break;
           
         case 'integrity':
           const integrityOk = await quickIntegrityTest();
           process.exit(integrityOk ? 0 : 1);
-          break;
+        break;
           
-        default:
+      default:
           console.log('📖 Available commands:');
           console.log('  all        - Run all database tests');
           console.log('  connection - Quick connection test');
           console.log('  integrity  - Quick data integrity test');
           process.exit(0);
       }
-    } catch (error) {
-      console.error('❌ Command failed:', error);
-      process.exit(1);
-    }
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      console.error('❌ Command failed:', err);
+    process.exit(1);
+  }
   })();
 }

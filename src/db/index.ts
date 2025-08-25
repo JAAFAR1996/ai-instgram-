@@ -8,6 +8,7 @@
 import { Pool, PoolClient, PoolConfig } from 'pg';
 import { getLogger } from '../services/logger.js';
 import { getConfig } from '../config/index.js';
+import type { DatabaseError } from '../types/database.js';
 
 const log = getLogger({ component: 'database' });
 
@@ -36,9 +37,9 @@ interface RetryConfig {
 }
 
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
-  maxRetries: 3,
+  maxRetries: 5,
   baseDelay: 1000, // 1 second
-  maxDelay: 30000, // 30 seconds
+  maxDelay: 10000, // 10 seconds
   backoffMultiplier: 2
 };
 
@@ -52,11 +53,13 @@ function createPoolConfig(): PoolConfig {
   
   return {
     connectionString: config.database.url,
-    ssl: config.database.ssl ? { rejectUnauthorized: false } : false,
-    max: isRender ? 10 : config.database.maxConnections, // Render free tier limit
-    min: isRender ? 2 : Math.min(5, Math.floor(config.database.maxConnections / 4)),
-    idleTimeoutMillis: isRender ? 20000 : 30000, // أقل لـ Render
-    connectionTimeoutMillis: isRender ? 10000 : 5000, // أكثر تسامحاً لـ Render
+    ssl: config.database.ssl ? { 
+      rejectUnauthorized: process.env.NODE_ENV === 'production' ? true : false 
+    } : false,
+    max: isRender ? 8 : 15,
+    min: isRender ? 2 : Math.min(5, Math.floor(15 / 4)),
+    idleTimeoutMillis: 15000,
+    connectionTimeoutMillis: 8000,
     allowExitOnIdle: false,
     statement_timeout: isRender ? 25000 : 30000,
     query_timeout: isRender ? 25000 : 30000,
@@ -90,9 +93,10 @@ export function getPool(): Pool {
 
     pool.on('error', (err, client) => {
       poolHealthStats.failedConnections++;
+      const dbError = err as DatabaseError;
       log.error('Database pool error:', {
         error: err.message,
-        code: (err as any).code,
+        code: dbError.code,
         totalConnections: poolHealthStats.totalConnections,
         failedConnections: poolHealthStats.failedConnections
       });
@@ -138,7 +142,7 @@ export async function withTx<T>(
 ): Promise<T> {
   const {
     timeout = 30000, // 30 seconds default
-    retries = 2,
+    retries = 5,
     isolationLevel = 'READ COMMITTED'
   } = options || {};
 
@@ -378,14 +382,15 @@ async function monitorPoolHealth(): Promise<void> {
  * Handle connection failures with automatic recovery
  */
 function handleConnectionFailure(error: Error): void {
+  const dbError = error as DatabaseError;
   log.error('Connection failure detected', {
     error: error.message,
-    code: (error as any).code,
+    code: dbError.code,
     connectionRetries: poolHealthStats.connectionRetries
   });
   
   // Implement connection failure recovery strategies
-  const errorCode = (error as any).code;
+  const errorCode = dbError.code;
   
   switch (errorCode) {
     case 'ECONNREFUSED':
@@ -492,10 +497,10 @@ function updatePerformanceStats(duration: number): void {
 function isDeadlockError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   
-  const pgError = error as any;
+  const pgError = error as DatabaseError;
   return pgError.code === '40P01' || // deadlock_detected
          pgError.code === '40001' || // serialization_failure  
-         (pgError.message && pgError.message.includes('deadlock'));
+         Boolean(pgError.message && pgError.message.includes('deadlock'));
 }
 
 /**
@@ -504,7 +509,7 @@ function isDeadlockError(error: unknown): boolean {
 function isSerializationError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   
-  const pgError = error as any;
+  const pgError = error as DatabaseError;
   return pgError.code === '40001' || // serialization_failure
          pgError.code === '25P02';   // transaction_integrity_constraint_violation
 }
@@ -522,12 +527,12 @@ function isConnectionError(error: Error): boolean {
     'ENETUNREACH'
   ];
   
-  const pgError = error as any;
-  return connectionCodes.includes(pgError.code) ||
-         connectionCodes.includes(pgError.errno) ||
+  const pgError = error as DatabaseError;
+  return connectionCodes.includes(pgError.code || '') ||
+         connectionCodes.includes((pgError as any).errno || '') ||
          (typeof error === 'object' && error !== null && 'message' in error && 
-          typeof (error as any).message === 'string' && 
-          (error as any).message.includes('connect'));
+          typeof error.message === 'string' && 
+          error.message.includes('connect'));
 }
 
 /**

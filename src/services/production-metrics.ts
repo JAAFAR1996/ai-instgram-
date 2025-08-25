@@ -64,6 +64,7 @@ export class ProductionMetricsCollector {
   private alerts: MetricAlert[] = [];
   private isCollecting = false;
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private redis = getRedisConnectionManager();
 
   // Metric counters (in-memory, could be Redis in production)
   private counters = {
@@ -92,6 +93,9 @@ export class ProductionMetricsCollector {
     this.isCollecting = true;
     logger.info('Starting production metrics collection', { intervalMs });
 
+    // Load counters from Redis
+    await this.loadCountersFromRedis();
+
     // Initial collection
     await this.collectMetrics();
 
@@ -108,13 +112,80 @@ export class ProductionMetricsCollector {
   /**
    * Stop metrics collection
    */
-  stop(): void {
+  async stop(): Promise<void> {
     this.isCollecting = false;
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    
+    // Save counters to Redis before stopping
+    await this.saveCountersToRedis();
+    
+    // Clean up old throttled alerts (older than 1 hour)
+    const oneHourAgo = Date.now() - 3600000;
+    for (const [metric, timestamp] of this.alertThrottle.entries()) {
+      if (timestamp < oneHourAgo) {
+        this.alertThrottle.delete(metric);
+      }
+    }
+    
     logger.info('Metrics collection stopped');
+  }
+
+  /**
+   * Alert throttling to prevent spam
+   */
+  private alertThrottle = new Map<string, number>();
+  private shouldSendAlert(metric: string): boolean {
+    const lastSent = this.alertThrottle.get(metric) || 0;
+    const now = Date.now();
+    if (now - lastSent < 300000) return false; // 5 minutes
+    this.alertThrottle.set(metric, now);
+    return true;
+  }
+
+  /**
+   * Load counters from Redis
+   */
+  private async loadCountersFromRedis(): Promise<void> {
+    try {
+      const client = await this.redis.getConnection(RedisUsageType.CACHING);
+      const redisCounters = await client.hgetall('prod_metrics');
+      
+      // Update local counters with Redis values
+      for (const [key, value] of Object.entries(redisCounters)) {
+        if (key in this.counters) {
+          this.counters[key as keyof typeof this.counters] = parseInt(value) || 0;
+        }
+      }
+      
+      logger.info('Loaded counters from Redis', { counters: this.counters });
+    } catch (error) {
+      logger.warn('Failed to load counters from Redis, using defaults', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * Save counters to Redis
+   */
+  private async saveCountersToRedis(): Promise<void> {
+    try {
+      const client = await this.redis.getConnection(RedisUsageType.CACHING);
+      
+      // Save all counters to Redis
+      for (const [key, value] of Object.entries(this.counters)) {
+        await client.hset('prod_metrics', key, value);
+      }
+      
+      logger.info('Saved counters to Redis', { counters: this.counters });
+    } catch (error) {
+      logger.warn('Failed to save counters to Redis', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
   /**
@@ -399,8 +470,10 @@ export class ProductionMetricsCollector {
       this.alerts.unshift(alert);
       logger.warn('Production alert triggered', { ...alert });
       
-      // Send notification (implement based on your notification system)
-      this.sendNotification(alert);
+      // Send notification with throttling
+      if (this.shouldSendAlert(alert.metric)) {
+        this.sendNotification(alert);
+      }
     }
 
     // Keep only last 100 alerts
@@ -424,11 +497,25 @@ export class ProductionMetricsCollector {
   }
 
   /**
-   * Increment metric counter
+   * Increment metric counter with Redis persistence
    */
-  public incrementCounter(metric: keyof typeof this.counters): void {
+  public async incrementCounter(metric: keyof typeof this.counters): Promise<void> {
     if (this.counters.hasOwnProperty(metric)) {
-      this.counters[metric]++;
+      try {
+        // Increment in Redis for persistence
+        const client = await this.redis.getConnection(RedisUsageType.CACHING);
+        await client.hincrby('prod_metrics', metric, 1);
+        
+        // Also increment local counter for immediate access
+        this.counters[metric]++;
+      } catch (error) {
+        // Fallback to local counter only if Redis fails
+        this.counters[metric]++;
+        logger.warn('Failed to increment counter in Redis, using local fallback', {
+          metric,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     }
   }
 
@@ -447,6 +534,28 @@ export class ProductionMetricsCollector {
   }
 
   /**
+   * Get counters from Redis
+   */
+  public async getRedisCounters(): Promise<Record<string, number>> {
+    try {
+      const client = await this.redis.getConnection(RedisUsageType.CACHING);
+      const redisCounters = await client.hgetall('prod_metrics');
+      
+      const result: Record<string, number> = {};
+      for (const [key, value] of Object.entries(redisCounters)) {
+        result[key] = parseInt(value) || 0;
+      }
+      
+      return result;
+    } catch (error) {
+      logger.warn('Failed to get counters from Redis', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return {};
+    }
+  }
+
+  /**
    * Get metrics for dashboard/monitoring
    */
   public getMetricsForMonitoring() {
@@ -454,7 +563,16 @@ export class ProductionMetricsCollector {
       metrics: this.metrics,
       alerts: this.getAlerts(10),
       counters: this.counters,
-      isCollecting: this.isCollecting
+      isCollecting: this.isCollecting,
+      throttledAlerts: Array.from(this.alertThrottle.entries()).map(([metric, timestamp]) => ({
+        metric,
+        lastSent: new Date(timestamp).toISOString(),
+        canSendAgain: Date.now() - timestamp >= 300000
+      })),
+      redisStatus: {
+        connected: this.redis !== null,
+        countersPersisted: true
+      }
     };
   }
 }

@@ -7,12 +7,17 @@
 
 import { randomUUID } from 'crypto';
 import { getConfig, type LogLevel } from '../config/index.js';
-import { createWriteStream, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { createWriteStream, existsSync, mkdirSync, access, mkdir, statfs } from 'fs';
+import { join, dirname } from 'path';
 import { gzip } from 'zlib';
 import { promisify } from 'util';
 
+const fs = { access, mkdir, statfs };
+
 const gzipAsync = promisify(gzip);
+const accessAsync = promisify(fs.access);
+const mkdirAsync = promisify(fs.mkdir);
+const statfsAsync = promisify(fs.statfs);
 
 // serr function moved to isolation/context.ts to avoid duplicates
 
@@ -92,12 +97,64 @@ export interface MemoryMonitoringConfig {
 }
 
 /**
- * Tightened sensitive fields to reduce false positives
+ * Comprehensive sensitive fields for production-grade data protection
+ * Includes common patterns and variations to catch all sensitive data
  */
 const SENSITIVE_FIELDS = [
-  'password','secret','token','authorization','api_key','client_secret',
-  'webhook_secret','private_key','access_token','refresh_token','jwt',
-  'x-hub-signature','x-hub-signature-256','cookie','set-cookie'
+  // Authentication & Authorization
+  'password', 'passwd', 'pwd', 'secret', 'token', 'authorization', 'auth',
+  'api_key', 'apikey', 'api_key', 'client_secret', 'clientsecret',
+  'webhook_secret', 'webhooksecret', 'private_key', 'privatekey',
+  'access_token', 'accesstoken', 'refresh_token', 'refreshtoken',
+  'jwt', 'bearer', 'session', 'sessionid', 'session_id',
+  
+  // Headers & Cookies
+  'x-hub-signature', 'x-hub-signature-256', 'x-api-key', 'x-auth-token',
+  'cookie', 'set-cookie', 'authorization', 'x-authorization',
+  
+  // Database & Connection
+  'db_password', 'database_password', 'db_secret', 'connection_string',
+  'connectionstring', 'connection_url', 'connectionurl',
+  
+  // Payment & Financial
+  'card_number', 'cardnumber', 'credit_card', 'creditcard',
+  'cvv', 'cvc', 'expiry', 'expiration', 'account_number', 'accountnumber',
+  
+  // Social Media & OAuth
+  'instagram_token', 'facebook_token', 'whatsapp_token', 'telegram_token',
+  'oauth_token', 'oauth_secret', 'oauthsecret',
+  
+  // Encryption & Security
+  'encryption_key', 'encryptionkey', 'decryption_key', 'decryptionkey',
+  'signing_key', 'signingkey', 'hmac_key', 'hmackey',
+  
+  // Environment & Configuration
+  'env_secret', 'env_secret', 'config_secret', 'configsecret',
+  'deployment_key', 'deploymentkey', 'release_key', 'releasekey'
+];
+
+/**
+ * Regex patterns for detecting sensitive data in strings
+ */
+const SENSITIVE_PATTERNS = [
+  // API Keys (various formats)
+  /api[_-]?key[_-]?[a-zA-Z0-9]{20,}/gi,
+  /[a-zA-Z0-9]{32,}/g, // Long alphanumeric strings (likely tokens)
+  
+  // JWT tokens
+  /eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g,
+  
+  // Credit card numbers (basic pattern)
+  /\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g,
+  
+  // Email addresses (for PII protection)
+  /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
+  
+  // Phone numbers (various formats)
+  /\b(\+\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
+  
+  // URLs with tokens
+  /https?:\/\/[^\s]*[?&](token|key|secret|password)=[^\s&]*/gi
 ];
 
 /**
@@ -111,8 +168,32 @@ export class Logger {
   private currentLogFile: string | null = null;
   private writeStream: NodeJS.WritableStream | null = null;
   private memoryCheckTimer: NodeJS.Timeout | null = null;
+  private diskSpaceCheckTimer: NodeJS.Timeout | null = null;
   private totalLogsWritten = 0;
   private startTime = Date.now();
+
+  /**
+   * Ensure log directory exists with proper permissions
+   */
+  private async ensureLogDirectoryExists(): Promise<void> {
+    const config = this.rotationConfig || {};
+    if (!config.logDirectory) return;
+
+    try {
+      // Check if directory exists
+      await accessAsync(dirname(config.logDirectory));
+    } catch {
+      // Create directory with recursive option
+      await mkdirAsync(dirname(config.logDirectory), { recursive: true });
+      
+      // Verify directory was created successfully
+      try {
+        await accessAsync(dirname(config.logDirectory));
+      } catch (error) {
+        throw new Error(`Failed to create log directory: ${error}`);
+      }
+    }
+  }
 
   constructor(
     context: LogContext = {},
@@ -122,17 +203,23 @@ export class Logger {
   ) {
     this.context = context;
     this.minLevel = this.getLogLevel();
-    this.setupLogRotation();
+    this.setupLogRotation().catch(error => {
+      console.error('Failed to setup log rotation:', error);
+    });
     this.setupLogBatching();
     this.setupMemoryMonitoring();
+    this.setupDiskSpaceMonitoring();
   }
 
   /**
    * Setup log rotation
    */
-  private setupLogRotation(): void {
+  private async setupLogRotation(): Promise<void> {
     const config = this.rotationConfig || {};
     if (!config.logDirectory) return;
+
+    // Ensure log directory exists with proper permissions
+    await this.ensureLogDirectoryExists();
 
     // Create log directory if it doesn't exist
     if (!existsSync(config.logDirectory)) {
@@ -167,6 +254,39 @@ export class Logger {
     this.memoryCheckTimer = setInterval(() => {
       this.checkMemoryUsage();
     }, checkInterval);
+  }
+
+  /**
+   * Setup disk space monitoring
+   */
+  private setupDiskSpaceMonitoring(): void {
+    const config = this.rotationConfig || {};
+    if (!config.logDirectory) return;
+
+    // Check disk space every minute
+    this.diskSpaceCheckTimer = setInterval(async () => {
+      try {
+        const logDir = config.logDirectory!;
+        const stats = await statfsAsync(dirname(logDir));
+        const freeSpaceMB = (stats.bavail * stats.bsize) / (1024 * 1024);
+        const totalSpaceMB = (stats.blocks * stats.bsize) / (1024 * 1024);
+        const usedSpacePercent = ((totalSpaceMB - freeSpaceMB) / totalSpaceMB) * 100;
+        
+        // Warn if free space is less than 100MB or disk usage is more than 90%
+        if (freeSpaceMB < 100 || usedSpacePercent > 90) {
+          this.warn('Low disk space for logs', {
+            freeSpaceMB: Math.round(freeSpaceMB),
+            totalSpaceMB: Math.round(totalSpaceMB),
+            usedSpacePercent: Math.round(usedSpacePercent),
+            threshold: { freeSpaceMB: 100, usedSpacePercent: 90 },
+            logDirectory: logDir
+          });
+        }
+      } catch (error) {
+        // Silently fail disk space check
+        console.error('Disk space check failed:', error);
+      }
+    }, 60000); // Check every minute
   }
 
   /**
@@ -494,14 +614,14 @@ export class Logger {
   }
 
   /**
-   * Redact sensitive information from logs
+   * Redact sensitive information from logs with enhanced pattern detection
    */
   private redactSensitiveData(data: unknown): Record<string, unknown> {
     if (!data || typeof data !== 'object') return data as Record<string, unknown>;
 
     const redacted = { ...data } as Record<string, unknown>;
 
-    // Redact sensitive fields
+    // Redact sensitive fields by name
     for (const field of SENSITIVE_FIELDS) {
       if (redacted[field] !== undefined) {
         if (typeof redacted[field] === 'string') {
@@ -512,7 +632,7 @@ export class Logger {
       }
     }
 
-    // Handle nested objects
+    // Handle nested objects and arrays with pattern detection
     for (const [key, value] of Object.entries(redacted)) {
       if (value && typeof value === 'object' && !Array.isArray(value)) {
         redacted[key] = this.redactSensitiveData(value);
@@ -520,12 +640,20 @@ export class Logger {
         redacted[key] = value.map(item =>
           typeof item === 'object' ? this.redactSensitiveData(item) : item
         );
+      } else if (typeof value === 'string') {
+        // Apply pattern-based redaction to string values
+        redacted[key] = this.redactStringPatterns(value);
       }
     }
 
     // Special handling for headers
     if (redacted.headers && typeof redacted.headers === 'object') {
       redacted.headers = this.redactHeaders(redacted.headers as Record<string, unknown>);
+    }
+
+    // Special handling for URLs and connection strings
+    if (redacted.url && typeof redacted.url === 'string') {
+      redacted.url = this.redactUrl(redacted.url);
     }
 
     return redacted;
@@ -562,6 +690,70 @@ export class Logger {
   }
 
   /**
+   * Redact sensitive patterns in strings using regex
+   */
+  private redactStringPatterns(str: string): string {
+    if (!str || typeof str !== 'string') return str;
+    
+    let redacted = str;
+    
+    // Apply each pattern for redaction
+    for (const pattern of SENSITIVE_PATTERNS) {
+      redacted = redacted.replace(pattern, (match) => {
+        // For JWT tokens, show only first and last parts
+        if (match.includes('.')) {
+          const parts = match.split('.');
+          if (parts.length >= 3) {
+            const firstPart = parts[0] || '';
+            const lastPart = parts[parts.length - 1] || '';
+            return `${firstPart.slice(0, 10)}...${lastPart.slice(-10)}`;
+          }
+        }
+        
+        // For other patterns, use standard masking
+        return this.maskString(match);
+      });
+    }
+    
+    return redacted;
+  }
+
+  /**
+   * Redact sensitive information from URLs
+   */
+  private redactUrl(url: string): string {
+    if (!url || typeof url !== 'string') return url;
+    
+    try {
+      const urlObj = new URL(url);
+      
+      // Redact sensitive query parameters
+      const sensitiveParams = ['token', 'key', 'secret', 'password', 'api_key', 'auth'];
+      for (const param of sensitiveParams) {
+        if (urlObj.searchParams.has(param)) {
+          urlObj.searchParams.set(param, '[REDACTED]');
+        }
+      }
+      
+      // Redact sensitive path segments
+      const pathParts = urlObj.pathname.split('/');
+      const redactedPath = pathParts.map(part => {
+        if (part && part.length > 20 && /^[a-zA-Z0-9_-]+$/.test(part)) {
+          // Likely a token or ID
+          return this.maskString(part);
+        }
+        return part || '';
+      });
+      urlObj.pathname = redactedPath.join('/');
+      
+      return urlObj.toString();
+    } catch {
+      // If URL parsing fails, apply pattern redaction
+      return this.redactStringPatterns(url);
+    }
+  }
+
+  /**
    * Get logger statistics
    */
   getStats(): {
@@ -569,12 +761,16 @@ export class Logger {
     queueSize: number;
     uptime: number;
     memoryUsage: NodeJS.MemoryUsage;
+    logFile?: string;
+    logDirectory?: string;
   } {
     return {
       totalLogsWritten: this.totalLogsWritten,
       queueSize: this.logQueue.length,
       uptime: Date.now() - this.startTime,
-      memoryUsage: process.memoryUsage()
+      memoryUsage: process.memoryUsage(),
+      ...(this.currentLogFile && { logFile: this.currentLogFile }),
+      ...(this.rotationConfig?.logDirectory && { logDirectory: this.rotationConfig.logDirectory })
     };
   }
 
@@ -591,6 +787,11 @@ export class Logger {
     if (this.memoryCheckTimer) {
       clearInterval(this.memoryCheckTimer);
       this.memoryCheckTimer = null;
+    }
+
+    if (this.diskSpaceCheckTimer) {
+      clearInterval(this.diskSpaceCheckTimer);
+      this.diskSpaceCheckTimer = null;
     }
 
     // Flush remaining logs

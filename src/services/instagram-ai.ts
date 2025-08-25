@@ -5,18 +5,46 @@
  * ===============================================
  */
 
-import { type ConversationContext, type AIResponse, type MessageHistory } from './ai.js';
+import { type ConversationContext, type AIResponse } from './ai.js';
 import { getDatabase } from '../db/adapter.js';
 import { createLogger } from './logger.js';
 import OpenAI from 'openai';
 import { getEnv } from '../config/env.js';
 
-// Simple merchant configuration interface
+// تحسين Type Safety - إضافة interfaces جديدة
 interface MerchantAIConfig {
   aiModel: string;
   maxTokens: number;
   temperature: number;
   language: string;
+}
+
+interface MerchantAIConfigData {
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+  language?: string;
+}
+
+interface StoryContext {
+  mediaId: string;
+  mediaType: string;
+  caption?: string;
+}
+
+interface PostContext {
+  mediaId: string;
+  caption?: string;
+}
+
+interface Product {
+  id: string;
+  sku: string;
+  name_ar: string;
+  price_usd: number;
+  category: string;
+  description_ar?: string;
+  image_urls?: string[];
 }
 
 export interface InstagramAIResponse extends AIResponse {
@@ -47,7 +75,7 @@ export interface InstagramContext extends ConversationContext {
     mediaType?: 'video' | 'carousel' | 'photo';
     caption?: string;
     hashtags?: string[];
-    [k: string]: any;
+    [k: string]: unknown;
   };
   visualPreferences?: {
     colorScheme: string[];
@@ -94,7 +122,7 @@ export class InstagramAIService {
       `;
       
       if (result.length > 0 && result[0]?.ai_config) {
-        const config = (result[0]!.ai_config) as any;
+        const config = (result[0]!.ai_config) as MerchantAIConfigData;
         return {
           aiModel: config?.model || 'gpt-4o-mini',
           maxTokens: config?.maxTokens || 600,
@@ -115,7 +143,8 @@ export class InstagramAIService {
         language: 'ar'
       };
     } catch (error) {
-      this.logger.error('❌ Failed to get merchant AI config:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error('❌ Failed to get merchant AI config:', { error: errorMessage });
       return {
         aiModel: 'gpt-4o-mini',
         maxTokens: 600,
@@ -269,10 +298,11 @@ export class InstagramAIService {
       await this.logInstagramAIInteraction(context, customerMessage, aiResponse);
 
       return aiResponse;
-    } catch (error: any) {
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error('❌ Instagram AI response generation failed:', {
-        err: error?.message || String(error),
-        stack: error?.stack,
+        error: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined,
       });
       
       return this.getContextualFallback(context, 'AI_API_ERROR');
@@ -284,7 +314,7 @@ export class InstagramAIService {
    */
   public async generateStoryReply(
     storyReaction: string,
-    storyContext: { mediaId: string; mediaType: string; caption?: string },
+    storyContext: StoryContext,
     context: InstagramContext
   ): Promise<InstagramAIResponse> {
     try {
@@ -313,8 +343,9 @@ export class InstagramAIService {
       };
 
       return aiResponse;
-    } catch (error: any) {
-      this.logger.error('❌ Story reply generation failed:', error?.message || String(error));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error('❌ Story reply generation failed:', { error: errorMessage });
       return this.getInstagramFallbackResponse(context);
     }
   }
@@ -324,7 +355,7 @@ export class InstagramAIService {
    */
   public async generateCommentResponse(
     commentText: string,
-    postContext: { mediaId: string; caption?: string },
+    postContext: PostContext,
     context: InstagramContext
   ): Promise<InstagramAIResponse> {
     try {
@@ -353,8 +384,9 @@ export class InstagramAIService {
       };
 
       return aiResponse;
-    } catch (error: any) {
-      this.logger.error('❌ Comment response generation failed:', error?.message || String(error));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error('❌ Comment response generation failed:', { error: errorMessage });
       return this.getInstagramFallbackResponse(context);
     }
   }
@@ -401,8 +433,9 @@ export class InstagramAIService {
         };
       }
       return showcase;
-    } catch (error: any) {
-      this.logger.error('❌ Product showcase generation failed:', error?.message || String(error));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error('❌ Product showcase generation failed:', { error: errorMessage });
       return {
         mediaRecommendations: [],
         caption: '',
@@ -454,8 +487,9 @@ export class InstagramAIService {
         };
       }
       return analysis;
-    } catch (error: any) {
-      this.logger.error('❌ Content performance analysis failed:', error?.message || String(error));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error('❌ Content performance analysis failed:', { error: errorMessage });
       return {
         viralScore: 0,
         engagementPrediction: 0,
@@ -562,8 +596,8 @@ export class InstagramAIService {
    */
   private buildStoryReplyPrompt(
     storyReaction: string,
-    storyContext: any,
-    context: InstagramContext
+    storyContext: StoryContext,
+    _context: InstagramContext
   ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     return [
       {
@@ -593,8 +627,8 @@ export class InstagramAIService {
    */
   private buildCommentReplyPrompt(
     commentText: string,
-    postContext: any,
-    context: InstagramContext
+    postContext: PostContext,
+    _context: InstagramContext
   ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     return [
       {
@@ -623,8 +657,8 @@ export class InstagramAIService {
    * Private: Build product showcase prompt
    */
   private buildProductShowcasePrompt(
-    products: any[],
-    context: InstagramContext
+    products: Product[],
+    _context: InstagramContext
   ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     const productsText = products.map(p => 
       `${p.name_ar} - $${p.price_usd} - ${p.category}`
@@ -699,7 +733,7 @@ ${productsText}
    */
   private async generateRelevantHashtags(
     message: string,
-    context: InstagramContext
+    _context: InstagramContext
   ): Promise<string[]> {
     try {
       // Base hashtags for Iraqi market
@@ -714,7 +748,7 @@ ${productsText}
         home: ['#منزل', '#ديكور', '#تأثيث']
       };
 
-      const category = context.merchantSettings?.businessCategory || 'general';
+      const category = _context.merchantSettings?.businessCategory || 'general';
       const relevantHashtags = categoryHashtags[category] || [];
 
       // Trending hashtags (this could be enhanced with real-time trend data)
@@ -732,7 +766,7 @@ ${productsText}
   /**
    * Private: Get products for showcase - optimized with batching
    */
-  private async getProductsForShowcase(productIds: string[], merchantId: string): Promise<any[]> {
+  private async getProductsForShowcase(productIds: string[], merchantId: string): Promise<Product[]> {
     try {
       const sql = this.db.getSQL();
       
@@ -745,7 +779,7 @@ ${productsText}
         productBatches.push(batch);
       }
       
-      let allProducts: any[] = [];
+      let allProducts: Product[] = [];
       
       // Process batches concurrently for better performance
       const batchPromises = productBatches.map(batch => 
@@ -760,11 +794,12 @@ ${productsText}
       );
       
       const batchResults = await Promise.all(batchPromises);
-      batchResults.forEach(batch => allProducts.push(...batch));
+      batchResults.forEach(batch => allProducts.push(...(batch as unknown as Product[])));
       
       return allProducts;
     } catch (error) {
-      this.logger.error('❌ Error fetching showcase products:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error('❌ Error fetching showcase products:', { error: errorMessage });
       return [];
     }
   }
@@ -772,12 +807,13 @@ ${productsText}
   /**
    * ✅ 3. Performance Optimization: Batch process multiple operations
    */
-  private async processCommentBatch(operations: Array<() => Promise<any>>): Promise<any[]> {
+  private async processCommentBatch(operations: Array<() => Promise<unknown>>): Promise<unknown[]> {
     try {
       // Execute operations in parallel for better performance
       return await Promise.all(operations);
     } catch (error) {
-      this.logger.error('❌ Batch processing failed:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error('❌ Batch processing failed:', { error: errorMessage });
       return [];
     }
   }
@@ -846,7 +882,8 @@ ${productsText}
       await this.processCommentBatch(operations);
       
     } catch (error) {
-      this.logger.error('❌ Instagram AI interaction logging failed:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error('❌ Instagram AI interaction logging failed:', { error: errorMessage });
     }
   }
 

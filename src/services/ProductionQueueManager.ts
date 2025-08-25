@@ -114,6 +114,20 @@ type Logger = {
 // ===== أنواع ومساعدات صغيرة آمنة =====
 type U<T> = T | undefined;
 
+// تحسين Type Safety - إضافة interfaces للـ Job
+interface JobWithAttempts {
+  id: string;
+  name: string;
+  data: unknown;
+  attemptsMade?: number;
+  opts?: {
+    attempts?: number;
+    delay?: number;
+  };
+  processedOn?: number;
+  timestamp?: number;
+}
+
 export class ProductionQueueManager {
   private queue: Queue | null = null;
   private _queueEvents: QueueEvents | null = null;
@@ -352,13 +366,15 @@ export class ProductionQueueManager {
       return await this.circuitBreaker.execute(async () => {
         try {
           const queue = this.queue;
+          const jobWithAttempts = job as unknown as JobWithAttempts;
+          
           this.logger.info(`🔄 ${webhookWorkerId} - بدء معالجة ويب هوك`, {
             webhookWorkerId,
             eventId,
             merchantId,
             platform,
             jobId: job.id,
-            attempt: (job as any).attemptsMade + 1 || 1,
+            attempt: (jobWithAttempts.attemptsMade ?? 0) + 1,
             queueStatus: {
               waiting: queue ? await queue.getWaiting().then(jobs => jobs.length) : 0,
               active: queue ? await queue.getActive().then(jobs => jobs.length) : 0
@@ -393,6 +409,9 @@ export class ProductionQueueManager {
           
         } catch (error) {
           const duration = Date.now() - startTime;
+          const jobWithAttempts = job as JobWithAttempts;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          
           this.logger.error(`❌ ${webhookWorkerId} - فشل في معالجة الويب هوك`, { 
             webhookWorkerId,
             eventId, 
@@ -400,12 +419,14 @@ export class ProductionQueueManager {
             platform,
             jobId: job.id,
             duration: `${duration}ms`,
-            err: serr(error),
-            attempt: (job as any).attemptsMade + 1 || 1,
-            maxAttempts: (job as any).opts?.attempts || 3
+            error: errorMessage,
+            attempt: (jobWithAttempts.attemptsMade ?? 0) + 1,
+            maxAttempts: jobWithAttempts.opts?.attempts ?? 3
           });
           
-          throw error;
+          // تحويل الخطأ إلى Error object إذا لم يكن كذلك
+          const processedError = error instanceof Error ? error : new Error(errorMessage);
+          throw processedError;
         }
       });
     }
@@ -434,13 +455,15 @@ export class ProductionQueueManager {
       
       return await this.circuitBreaker.execute(async () => {
         try {
+          const jobWithAttempts = job as JobWithAttempts;
+          
           this.logger.info(`🤖 ${aiWorkerId} - بدء معالجة استجابة ذكاء اصطناعي`, {
             aiWorkerId,
             conversationId,
             merchantId,
             jobId: job.id,
             messageLength: (message as string).length || 0,
-            attempt: (job as any).attemptsMade + 1 || 1
+            attempt: (jobWithAttempts.attemptsMade ?? 0) + 1
           });
 
           const result = await this.processAIResponseJob({
@@ -468,18 +491,23 @@ export class ProductionQueueManager {
           
         } catch (error) {
           const duration = Date.now() - startTime;
+          const jobWithAttempts = job as JobWithAttempts;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          
           this.logger.error(`❌ ${aiWorkerId} - فشل في معالجة استجابة الذكاء الاصطناعي`, { 
             aiWorkerId,
             conversationId, 
             merchantId,
             duration: `${duration}ms`,
-            error: error instanceof Error ? error.message : String(error),
-            attempt: (job as any).attemptsMade + 1 || 1,
-            maxAttempts: (job as any).opts?.attempts || 3,
+            error: errorMessage,
+            attempt: (jobWithAttempts.attemptsMade ?? 0) + 1,
+            maxAttempts: jobWithAttempts.opts?.attempts ?? 3,
             jobId: job.id
           });
           
-          throw error;
+          // تحويل الخطأ إلى Error object إذا لم يكن كذلك
+          const processedError = error instanceof Error ? error : new Error(errorMessage);
+          throw processedError;
         }
       });
     }
@@ -504,11 +532,13 @@ export class ProductionQueueManager {
           await this.performCleanup(type, olderThanDays);
           return { cleaned: true, type, olderThanDays } as const;
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
           this.logger.error('فشل في تنظيف الطابور', { 
             type, 
-            error: error instanceof Error ? error.message : String(error)
+            error: errorMessage
           });
-          throw error as Error;
+          const processedError = error instanceof Error ? error : new Error(errorMessage);
+          throw processedError;
         }
       },
       { connection, concurrency: 1 }
@@ -702,10 +732,11 @@ export class ProductionQueueManager {
               }
               
               // 🔍 فحص إذا كان Job delayed بدلاً من waiting
-              if ((job as any).opts?.delay && (job as any).opts.delay > 0) {
+              const jobWithAttempts = job as JobWithAttempts;
+              if (jobWithAttempts.opts?.delay && jobWithAttempts.opts.delay > 0) {
                 this.logger.warn('⏰ [MANUAL-PROCESSING] Job delayed - تخطي', { 
                   jobId: job.id, 
-                  delay: (job as any).opts?.delay 
+                  delay: jobWithAttempts.opts?.delay 
                 });
                 continue;
               }

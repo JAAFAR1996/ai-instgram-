@@ -59,7 +59,7 @@ export function pushDLQ(item: Partial<DeadLetterItem> & { reason: string; payloa
     id: generateDLQId(),
     ts: Date.now(),
     retryCount: 0,
-    maxRetries: 3,
+    maxRetries: 5,
     severity: 'medium',
     category: 'other',
     ...item

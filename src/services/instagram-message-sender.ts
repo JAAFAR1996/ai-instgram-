@@ -1,6 +1,6 @@
 /**
  * ===============================================
- * Instagram Message Sender - STEP 4 Implementation
+ * Instagram Message Sender - Unified Service
  * Handles sending messages, media, and responses via Instagram Graph API
  * ===============================================
  */
@@ -8,50 +8,33 @@
 import {
   getInstagramClient,
   clearInstagramClient,
-  type InstagramAPICredentials
+  type InstagramAPICredentials,
+  type InstagramAttachment
 } from './instagram-api.js';
 import { ExpiringMap } from '../utils/expiring-map.js';
 import { getDatabase } from '../db/adapter.js';
 import { getMessageWindowService } from './message-window.js';
 import { getLogger } from './logger.js';
-import type { QuickReply, SendMessageRequest, SendResult } from '../types/instagram.js';
+import type { 
+  QuickReply, 
+  SendMessageRequest, 
+  SendResult,
+  InstagramTemplatePayload,
+  InstagramTemplateElement,
+  InstagramTemplateButton,
+  MessageTemplate,
+  MessageMetadata,
+  BulkSendMetadata
+} from '../types/instagram.js';
+import { createErrorResponse } from '../utils/instagram-errors.js';
 
 interface SendMessageWithAttachment extends Omit<SendMessageRequest, 'messagingType' | 'text'> {
-  attachment: { type: string; payload: any };
+  attachment: InstagramAttachment;
   text?: string;
   messagingType?: SendMessageRequest['messagingType'];
 }
 
-export interface MessageTemplate {
-  type: 'generic' | 'button' | 'receipt' | 'list';
-  elements: TemplateElement[];
-}
-
-export interface TemplateElement {
-  title: string;
-  subtitle?: string;
-  image_url?: string;
-  default_action?: {
-    type: 'web_url' | 'postback';
-    url?: string;
-    payload?: string;
-  };
-  buttons?: TemplateButton[];
-}
-
-export interface TemplateButton {
-  type: 'web_url' | 'postback' | 'phone_number';
-  title: string;
-  url?: string;
-  payload?: string;
-  phone_number?: string;
-}
-
 const logger = getLogger({ component: 'InstagramMessageSender' });
-
-
-
-
 
 export class InstagramMessageSender {
   private db = getDatabase();
@@ -126,12 +109,11 @@ export class InstagramMessageSender {
       if (conversationId) {
         const canSendMessage = await this.checkMessageWindow(merchantId, recipientId);
         if (!canSendMessage) {
-          return {
-            success: false,
-            error: 'Message window expired - cannot send message',
-            deliveryStatus: 'failed',
-            timestamp: new Date()
-          };
+          return createErrorResponse(new Error('Message window expired - cannot send message'), {
+            merchantId,
+            recipientId,
+            conversationId
+          });
         }
       }
 
@@ -184,12 +166,12 @@ export class InstagramMessageSender {
         }
       }
       
-      const result: SendResult = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        deliveryStatus: 'failed',
-        timestamp: new Date()
-      };
+      const result = createErrorResponse(error, {
+        merchantId,
+        recipientId,
+        conversationId,
+        messageType: 'text'
+      });
 
       await this.logMessageSent(merchantId, recipientId, message, result, conversationId);
       return result;
@@ -215,12 +197,12 @@ export class InstagramMessageSender {
       if (conversationId) {
         const canSendMessage = await this.checkMessageWindow(merchantId, recipientId);
         if (!canSendMessage) {
-          return {
-            success: false,
-            error: 'Message window expired - cannot send media',
-            deliveryStatus: 'failed',
-            timestamp: new Date()
-          };
+          return createErrorResponse(new Error('Message window expired - cannot send media'), {
+            merchantId,
+            recipientId,
+            conversationId,
+            mediaType
+          });
         }
       }
 
@@ -236,12 +218,13 @@ export class InstagramMessageSender {
         try {
           finalAttachmentId = await client.uploadMedia(finalMediaUrl, mediaType);
         } catch (error) {
-          return {
-            success: false,
-            error: `Media upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            deliveryStatus: 'failed',
-            timestamp: new Date()
-          };
+          return createErrorResponse(error, {
+            merchantId,
+            recipientId,
+            mediaType,
+            mediaUrl: finalMediaUrl,
+            context: 'media_upload'
+          });
         }
       }
 
@@ -272,9 +255,9 @@ export class InstagramMessageSender {
         result,
         conversationId,
         {
-          mediaUrl: finalAttachmentId ? undefined : finalMediaUrl,
+          ...(finalAttachmentId ? {} : { mediaUrl: finalMediaUrl }),
           mediaType,
-          attachmentId: finalAttachmentId,
+          ...(finalAttachmentId ? { attachmentId: finalAttachmentId } : {}),
           reusedAttachment: Boolean(attachmentId)
         }
       );
@@ -305,12 +288,14 @@ export class InstagramMessageSender {
         }
       }
       
-      const result: SendResult = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        deliveryStatus: 'failed',
-        timestamp: new Date()
-      };
+      const result = createErrorResponse(error, {
+        merchantId,
+        recipientId,
+        conversationId,
+        mediaType,
+        mediaUrl,
+        context: 'media_send'
+      });
 
       await this.logMessageSent(merchantId, recipientId, `[MEDIA_ERROR] ${mediaType}`, result, conversationId);
       return result;
@@ -333,12 +318,12 @@ export class InstagramMessageSender {
       if (conversationId) {
         const canSendMessage = await this.checkMessageWindow(merchantId, recipientId);
         if (!canSendMessage) {
-          return {
-            success: false,
-            error: 'Message window expired - cannot send template',
-            deliveryStatus: 'failed',
-            timestamp: new Date()
-          };
+          return createErrorResponse(new Error('Message window expired - cannot send template'), {
+            merchantId,
+            recipientId,
+            conversationId,
+            templateType: template.type
+          });
         }
       }
 
@@ -401,12 +386,13 @@ export class InstagramMessageSender {
         }
       }
       
-      const result: SendResult = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        deliveryStatus: 'failed',
-        timestamp: new Date()
-      };
+      const result = createErrorResponse(error, {
+        merchantId,
+        recipientId,
+        conversationId,
+        templateType: template.type,
+        context: 'template_send'
+      });
 
       await this.logMessageSent(merchantId, recipientId, '[TEMPLATE_ERROR]', result, conversationId);
       return result;
@@ -459,12 +445,12 @@ export class InstagramMessageSender {
         }
       }
       
-      const result: SendResult = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        deliveryStatus: 'failed',
-        timestamp: new Date()
-      };
+      const result = createErrorResponse(error, {
+        merchantId,
+        commentId,
+        replyText,
+        context: 'comment_reply'
+      });
 
       await this.logCommentReply(merchantId, commentId, replyText, result);
       return result;
@@ -488,12 +474,12 @@ export class InstagramMessageSender {
       if (conversationId) {
         const canSendMessage = await this.checkMessageWindow(merchantId, recipientId);
         if (!canSendMessage) {
-          return {
-            success: false,
-            error: 'Message window expired - cannot send quick replies',
-            deliveryStatus: 'failed',
-            timestamp: new Date()
-          };
+          return createErrorResponse(new Error('Message window expired - cannot send quick replies'), {
+            merchantId,
+            recipientId,
+            conversationId,
+            quickRepliesCount: quickReplies.length
+          });
         }
       }
 
@@ -553,12 +539,13 @@ export class InstagramMessageSender {
         }
       }
       
-      const result: SendResult = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        deliveryStatus: 'failed',
-        timestamp: new Date()
-      };
+      const result = createErrorResponse(error, {
+        merchantId,
+        recipientId,
+        conversationId,
+        quickRepliesCount: quickReplies.length,
+        context: 'quick_replies_send'
+      });
 
       await this.logMessageSent(merchantId, recipientId, message, result, conversationId);
       return result;
@@ -691,12 +678,10 @@ export class InstagramMessageSender {
             failed++;
             const errorMsg = `${recipientId}: ${error instanceof Error ? error.message : 'Unknown error'}`;
             errors.push(errorMsg);
-            results.push({
-              success: false,
-              error: errorMsg,
-              deliveryStatus: 'failed',
-              timestamp: new Date()
-            });
+            results.push(createErrorResponse(error, {
+              recipientId,
+              context: 'bulk_send'
+            }));
           }
         }
 
@@ -714,7 +699,11 @@ export class InstagramMessageSender {
         failed,
         message,
         sharedAttachmentId
-          ? { attachmentId: sharedAttachmentId, mediaUrl: options?.mediaUrl, mediaType: options?.mediaType }
+          ? { 
+              attachmentId: sharedAttachmentId, 
+              ...(options?.mediaUrl ? { mediaUrl: options.mediaUrl } : {}),
+              ...(options?.mediaType ? { mediaType: options.mediaType } : {})
+            }
           : undefined
       );
 
@@ -735,28 +724,38 @@ export class InstagramMessageSender {
     }
   }
 
-  
-
   /**
    * Private: Convert template to Instagram format
    */
-  private convertToInstagramTemplate(template: MessageTemplate): any {
+  private convertToInstagramTemplate(template: MessageTemplate): InstagramTemplatePayload {
     // Convert our template format to Instagram's expected format
     return {
       template_type: template.type,
-      elements: template.elements.map(element => ({
-        title: element.title,
-        subtitle: element.subtitle,
-        image_url: element.image_url,
-        default_action: element.default_action,
-        buttons: element.buttons?.map(button => ({
-          type: button.type,
-          title: button.title,
-          url: button.url,
-          payload: button.payload,
-          phone_number: button.phone_number
-        }))
-      }))
+      elements: template.elements.map(element => {
+        const instagramElement: InstagramTemplateElement = {
+          title: element.title
+        };
+        
+        if (element.subtitle) instagramElement.subtitle = element.subtitle;
+        if (element.image_url) instagramElement.image_url = element.image_url;
+        if (element.default_action) instagramElement.default_action = element.default_action;
+        if (element.buttons) {
+          instagramElement.buttons = element.buttons.map(button => {
+            const instagramButton: InstagramTemplateButton = {
+              type: button.type,
+              title: button.title
+            };
+            
+            if (button.url) instagramButton.url = button.url;
+            if (button.payload) instagramButton.payload = button.payload;
+            if (button.phone_number) instagramButton.phone_number = button.phone_number;
+            
+            return instagramButton;
+          });
+        }
+        
+        return instagramElement;
+      })
     };
   }
 
@@ -789,7 +788,7 @@ export class InstagramMessageSender {
     message: string,
     result: SendResult,
     conversationId?: string,
-    metadata?: any
+    metadata?: MessageMetadata
   ): Promise<void> {
     try {
       const sql = this.db.getSQL();
@@ -901,7 +900,7 @@ export class InstagramMessageSender {
     sent: number,
     failed: number,
     message: string,
-    metadata?: any
+    metadata?: BulkSendMetadata
   ): Promise<void> {
     try {
       const sql = this.db.getSQL();

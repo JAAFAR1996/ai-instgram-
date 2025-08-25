@@ -1,4 +1,11 @@
-// src/types/db.ts
+/**
+ * ===============================================
+ * Database Row Types
+ * TypeScript interfaces for database row structures
+ * Compatible with all SQL type definitions
+ * ===============================================
+ */
+
 export interface DatabaseRow {
   [key: string]: unknown;
 }
@@ -67,28 +74,7 @@ export interface MerchantRow extends DatabaseRow {
   deleted_at?: Date;
 }
 
-export interface ConversationRow extends DatabaseRow {
-  id: string;
-  merchant_id: string;
-  platform_id: string;
-  platform_type: 'instagram' | 'facebook' | 'whatsapp';
-  status: 'active' | 'paused' | 'archived';
-  metadata: Record<string, unknown>;
-  created_at: Date;
-  updated_at: Date;
-}
 
-export interface MessageRow extends DatabaseRow {
-  id: string;
-  conversation_id: string;
-  merchant_id: string;
-  platform_message_id: string;
-  direction: 'inbound' | 'outbound';
-  content: string;
-  metadata: Record<string, unknown>;
-  created_at: Date;
-  processed_at?: Date;
-}
 
 export interface CredentialRow extends DatabaseRow {
   id: string;

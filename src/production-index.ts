@@ -23,7 +23,7 @@ import { initTelemetry, telemetry } from './services/telemetry.js';
 import { randomUUID } from 'crypto';
 // اجعل prom-client اختيارياً
 let promClient: typeof import('prom-client') | null = null;
-try { promClient = await import('prom-client'); } catch {}
+try { promClient = await import('prom-client'); } catch { /* prom-client not available */ }
 
 // 5) Startup modules
 import { getPool, runDatabaseMigrations } from './startup/database.js';
@@ -150,7 +150,7 @@ async function bootstrap() {
       const contentType = c.req.header('content-type');
       if (contentType?.includes('application/json')) {
         const body = await c.req.arrayBuffer();
-        (c as any).rawBody = Buffer.from(body);
+        (c as { rawBody?: Buffer }).rawBody = Buffer.from(body);
       }
       await next();
     });
@@ -275,42 +275,115 @@ async function bootstrap() {
 }
 
 // Graceful shutdown handling
-async function gracefulShutdown(signal: string) {
-  log.info(`${signal} received, shutting down gracefully...`);
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string, exitCode: number = 0) {
+  if (isShuttingDown) {
+    log.warn('Shutdown already in progress, ignoring duplicate signal');
+    return;
+  }
+  
+  isShuttingDown = true;
+  const startTime = Date.now();
+  
+  log.info(`🛑 ${signal} received, initiating graceful shutdown...`);
   
   try {
+    // Set a timeout for shutdown operations
+    const shutdownTimeout = setTimeout(() => {
+      log.error('❌ Shutdown timeout reached, forcing exit');
+      process.exit(1);
+    }, 30000); // 30 seconds timeout
+    
+    // Stop accepting new requests
+    log.info('📝 Stopping new request acceptance...');
+    
     // Stop health monitoring
-    const { stopHealth } = await import('./services/health-check.js');
-    stopHealth();
+    try {
+      const { stopHealth } = await import('./services/health-check.js');
+      stopHealth();
+      log.info('✅ Health monitoring stopped');
+    } catch (error) {
+      log.warn('⚠️ Failed to stop health monitoring:', error);
+    }
     
     // Close database connections
-    const { closeDatabase } = await import('./startup/database.js');
-    await closeDatabase();
+    try {
+      const { closeDatabase } = await import('./startup/database.js');
+      await closeDatabase();
+      log.info('✅ Database connections closed');
+    } catch (error) {
+      log.warn('⚠️ Failed to close database connections:', error);
+    }
     
     // Close Redis connections
-    const { closeRedisConnections } = await import('./startup/redis.js');
-    await closeRedisConnections();
+    try {
+      const { closeRedisConnections } = await import('./startup/redis.js');
+      await closeRedisConnections();
+      log.info('✅ Redis connections closed');
+    } catch (error) {
+      log.warn('⚠️ Failed to close Redis connections:', error);
+    }
     
-    log.info('✅ Graceful shutdown completed');
-    process.exit(0);
+    // Stop telemetry
+    try {
+      telemetry.trackEvent('service_shutdown', {
+        signal,
+        duration: Date.now() - startTime,
+        timestamp: new Date().toISOString()
+      });
+      log.info('✅ Telemetry recorded');
+    } catch (error) {
+      log.warn('⚠️ Failed to record telemetry:', error);
+    }
+    
+    clearTimeout(shutdownTimeout);
+    
+    const shutdownDuration = Date.now() - startTime;
+    log.info(`✅ Graceful shutdown completed in ${shutdownDuration}ms`);
+    
+    process.exit(exitCode);
   } catch (error: any) {
     log.error('❌ Error during shutdown:', error);
     process.exit(1);
   }
 }
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  log.error('❌ Uncaught Exception:', error);
-  gracefulShutdown('uncaughtException');
+// Enhanced signal handlers
+process.on('SIGTERM', async () => {
+  log.info('📡 SIGTERM received from container orchestrator');
+  await gracefulShutdown('SIGTERM', 0);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('SIGINT', async () => {
+  log.info('⌨️ SIGINT received (Ctrl+C)');
+  await gracefulShutdown('SIGINT', 0);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', async (error) => {
+  log.error('❌ Uncaught Exception:', error);
+  await gracefulShutdown('uncaughtException', 1);
+});
+
+process.on('unhandledRejection', async (reason, promise) => {
   log.error('❌ Unhandled Rejection:', { reason, promise });
-  gracefulShutdown('unhandledRejection');
+  await gracefulShutdown('unhandledRejection', 1);
+});
+
+// Additional signal handlers for different environments
+process.on('SIGUSR1', async () => {
+  log.info('📊 SIGUSR1 received (debug signal)');
+  // Don't shutdown, just log current state
+  const { getHealthSnapshot } = await import('./services/health-check.js');
+  const health = getHealthSnapshot();
+  log.info('Current health status:', health);
+});
+
+process.on('SIGUSR2', async () => {
+  log.info('🔄 SIGUSR2 received (reload signal)');
+  // Could implement hot reload here if needed
+  log.info('Hot reload not implemented, ignoring SIGUSR2');
 });
 
 // Start the application

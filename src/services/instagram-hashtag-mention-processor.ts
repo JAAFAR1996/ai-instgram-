@@ -102,8 +102,8 @@ export class InstagramHashtagMentionProcessor {
       const extractedMentions = this.extractMentions(data.content);
 
       // Combine with provided data
-      const allHashtags = [...new Set([...data.hashtags, ...extractedHashtags])];
-      const allMentions = [...new Set([...data.mentions, ...extractedMentions])];
+      const allHashtags = Array.from(new Set([...data.hashtags, ...extractedHashtags]));
+      const allMentions = Array.from(new Set([...data.mentions, ...extractedMentions]));
 
       // Limit processing to prevent excessive concurrency
       const MAX_ITEMS = 5;
@@ -206,31 +206,45 @@ export class InstagramHashtagMentionProcessor {
         LIMIT 20
       `);
 
-      const trendAnalyses: HashtagTrendAnalysis[] = [];
+      // Process trends in parallel using Promise.allSettled
+      const trendProcessingPromises = trends.map(async (trend) => {
+        try {
+          const trendData = (trend as unknown) as { hashtag: string; total_usage: string; avg_sentiment: string; positive_count: string; neutral_count: string; negative_count: string; usage_hours: number[] };
+          
+          // Calculate growth and get associated words in parallel
+          const [recentGrowth, associatedWords] = await Promise.all([
+            this.calculateHashtagGrowth(trendData.hashtag, merchantId, timeframe),
+            this.getAssociatedWords(trendData.hashtag, merchantId)
+          ]);
 
-      for (const trend of trends) {
-        const trendData = (trend as unknown) as { hashtag: string; total_usage: string; avg_sentiment: string; positive_count: string; neutral_count: string; negative_count: string; usage_hours: number[] };
-        // Calculate growth (simplified - would need historical data)
-        const recentGrowth = await this.calculateHashtagGrowth(trendData.hashtag, merchantId, timeframe);
+          return {
+            hashtag: trendData.hashtag,
+            totalUsage: Number(trendData.total_usage),
+            recentGrowth,
+            topAssociatedWords: associatedWords.slice(0, 5),
+            sentimentTrend: {
+              positive: Number(trendData.positive_count),
+              neutral: Number(trendData.neutral_count),
+              negative: Number(trendData.negative_count)
+            },
+            peakUsageTimes: (trendData.usage_hours || []).map((hour: number) => `${Number(hour)}:00`),
+            competitorUsage: 0, // Would need competitor tracking
+            recommendedStrategy: Number(trendData.total_usage) > 10 
+              ? 'استراتيجية تركيز عالية - استخدم هذا الهاشتاغ في المحتوى الترويجي'
+              : 'استراتيجية مراقبة - تابع نمو هذا الهاشتاغ'
+          };
+        } catch (error) {
+          logger.error(`Failed to process trend for hashtag: ${trend.hashtag}`, error);
+          return null;
+        }
+      });
 
-        // Get associated words
-        const associatedWords = await this.getAssociatedWords(trendData.hashtag, merchantId);
-
-        trendAnalyses.push({
-          hashtag: trendData.hashtag,
-          totalUsage: Number(trendData.total_usage),
-          recentGrowth,
-          topAssociatedWords: associatedWords.slice(0, 5),
-          sentimentTrend: {
-            positive: Number(trendData.positive_count),
-            neutral: Number(trendData.neutral_count),
-            negative: Number(trendData.negative_count)
-          },
-          peakUsageTimes: (trendData.usage_hours || []).map((hour: number) => `${Number(hour)}:00`),
-          competitorUsage: 0, // Would need competitor tracking
-          recommendedStrategy: this.generateHashtagStrategy(trend)
-        });
-      }
+      const trendResults = await Promise.allSettled(trendProcessingPromises);
+      const trendAnalyses: HashtagTrendAnalysis[] = trendResults
+        .filter((result): result is PromiseFulfilledResult<HashtagTrendAnalysis> => 
+          result.status === 'fulfilled' && result.value !== null
+        )
+        .map(result => result.value);
 
       return trendAnalyses;
     } catch (error) {
@@ -364,9 +378,9 @@ export class InstagramHashtagMentionProcessor {
         })),
         mentionAnalytics: {
           totalMentions: mentionStats.reduce((sum, stat) => sum + Number(((stat as unknown) as { mention_type: string; count: string })?.count ?? 0), 0),
-          influencerMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'influencer') as any)?.count ?? 0),
-          customerMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'customer') as any)?.count ?? 0),
-          competitorMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'competitor') as any)?.count ?? 0)
+          influencerMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'influencer') as { count: string } | undefined)?.count ?? 0),
+          customerMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'customer') as { count: string } | undefined)?.count ?? 0),
+          competitorMentions: Number((mentionStats.find(s => ((s as unknown) as { mention_type: string })?.mention_type === 'competitor') as { count: string } | undefined)?.count ?? 0)
         },
         trendingHashtags,
         recommendedHashtags
@@ -590,7 +604,7 @@ export class InstagramHashtagMentionProcessor {
   }
 
   /**
-   * Private: Store hashtag/mention data
+   * Private: Store hashtag/mention data with batch processing
    */
   private async storeHashtagMentionData(
     data: ContentHashtagMentionData,
@@ -599,79 +613,125 @@ export class InstagramHashtagMentionProcessor {
   ): Promise<void> {
     try {
       const sql: Sql = this.db.getSQL();
+      const BATCH_SIZE = 10; // Process in batches of 10
 
-      // Store hashtag data concurrently
-      const hashtagInsertPromises = hashtagAnalyses.map(analysis => sql`
-        INSERT INTO hashtag_mentions (
-          message_id,
-          merchant_id,
-          hashtag,
-          mentioned_user,
-          content,
-          source,
-          sentiment,
-          category,
-          marketing_value,
-          engagement_score,
-          user_id,
-          created_at
-        ) VALUES (
-          ${data.messageId},
-          ${data.merchantId}::uuid,
-          ${analysis.hashtag},
-          NULL,
-          ${data.content},
-          ${data.source},
-          ${analysis.sentiment},
-          ${analysis.category},
-          ${analysis.marketingValue},
-          ${this.calculateEngagementScore(analysis)},
-          ${data.userId},
-          ${data.timestamp}
-        )
-        ON CONFLICT (message_id, hashtag) DO UPDATE SET
-          sentiment = EXCLUDED.sentiment,
-          updated_at = NOW()
-      `);
-      await Promise.all(hashtagInsertPromises);
+      // Process hashtag data in batches
+      const hashtagBatches = this.chunkArray(hashtagAnalyses, BATCH_SIZE);
+      const hashtagBatchPromises = hashtagBatches.map(async (batch) => {
+        try {
+          const batchPromises = batch.map(analysis => sql`
+            INSERT INTO hashtag_mentions (
+              message_id,
+              merchant_id,
+              hashtag,
+              mentioned_user,
+              content,
+              source,
+              sentiment,
+              category,
+              marketing_value,
+              engagement_score,
+              user_id,
+              created_at
+            ) VALUES (
+              ${data.messageId},
+              ${data.merchantId}::uuid,
+              ${analysis.hashtag},
+              NULL,
+              ${data.content},
+              ${data.source},
+              ${analysis.sentiment},
+              ${analysis.category},
+              ${analysis.marketingValue},
+              ${this.calculateEngagementScore(analysis)},
+              ${data.userId},
+              ${data.timestamp}
+            )
+            ON CONFLICT (message_id, hashtag) DO UPDATE SET
+              sentiment = EXCLUDED.sentiment,
+              updated_at = NOW()
+          `);
+          return Promise.allSettled(batchPromises);
+        } catch (error) {
+          logger.error('Failed to process hashtag batch:', error);
+          return Promise.resolve([]);
+        }
+      });
 
-      // Store mention data concurrently
-      const mentionInsertPromises = mentionAnalyses.map(analysis => sql`
-        INSERT INTO hashtag_mentions (
-          message_id,
-          merchant_id,
-          hashtag,
-          mentioned_user,
-          content,
-          source,
-          sentiment,
-          mention_type,
-          engagement_potential,
-          engagement_score,
-          user_id,
-          created_at
-        ) VALUES (
-          ${data.messageId},
-          ${data.merchantId}::uuid,
-          NULL,
-          ${analysis.mentionedUser},
-          ${data.content},
-          ${data.source},
-          ${analysis.sentiment},
-          ${analysis.mentionType},
-          ${analysis.engagementPotential},
-          ${this.calculateMentionEngagementScore(analysis)},
-          ${data.userId},
-          ${data.timestamp}
-        )
-        ON CONFLICT (message_id, mentioned_user) DO UPDATE SET
-          sentiment = EXCLUDED.sentiment,
-          updated_at = NOW()
-      `);
-      await Promise.all(mentionInsertPromises);
+      // Process mention data in batches
+      const mentionBatches = this.chunkArray(mentionAnalyses, BATCH_SIZE);
+      const mentionBatchPromises = mentionBatches.map(async (batch) => {
+        try {
+          const batchPromises = batch.map(analysis => sql`
+            INSERT INTO hashtag_mentions (
+              message_id,
+              merchant_id,
+              hashtag,
+              mentioned_user,
+              content,
+              source,
+              sentiment,
+              mention_type,
+              engagement_potential,
+              engagement_score,
+              user_id,
+              created_at
+            ) VALUES (
+              ${data.messageId},
+              ${data.merchantId}::uuid,
+              NULL,
+              ${analysis.mentionedUser},
+              ${data.content},
+              ${data.source},
+              ${analysis.sentiment},
+              ${analysis.mentionType},
+              ${analysis.engagementPotential},
+              ${this.calculateMentionEngagementScore(analysis)},
+              ${data.userId},
+              ${data.timestamp}
+            )
+            ON CONFLICT (message_id, mentioned_user) DO UPDATE SET
+              sentiment = EXCLUDED.sentiment,
+              updated_at = NOW()
+          `);
+          return Promise.allSettled(batchPromises);
+        } catch (error) {
+          logger.error('Failed to process mention batch:', error);
+          return Promise.resolve([]);
+        }
+      });
+
+      // Execute all batches in parallel
+      const [hashtagResults, mentionResults] = await Promise.allSettled([
+        Promise.allSettled(hashtagBatchPromises),
+        Promise.allSettled(mentionBatchPromises)
+      ]);
+
+      // Log results
+      if (hashtagResults.status === 'fulfilled') {
+        const successfulHashtagBatches = hashtagResults.value.filter(result => result.status === 'fulfilled').length;
+        logger.info(`✅ Processed ${successfulHashtagBatches}/${hashtagBatches.length} hashtag batches successfully`);
+      }
+
+      if (mentionResults.status === 'fulfilled') {
+        const successfulMentionBatches = mentionResults.value.filter(result => result.status === 'fulfilled').length;
+        logger.info(`✅ Processed ${successfulMentionBatches}/${mentionBatches.length} mention batches successfully`);
+      }
+
     } catch (error) {
-      console.error('❌ Store hashtag/mention data failed:', error);
+      logger.error('❌ Store hashtag/mention data failed:', error);
     }
+  }
+
+  /**
+   * Private: Helper method to chunk array into batches
+   */
+  private chunkArray<T>(array: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < array.length; i += size) {
+      chunks.push(array.slice(i, i + size));
+    }
+    return chunks;
   }
 
   /**

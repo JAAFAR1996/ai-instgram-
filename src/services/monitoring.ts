@@ -13,6 +13,7 @@ import type { Pool } from 'pg';
 import { getLogger } from './logger.js';
 import { telemetry } from './telemetry.js';
 import { must } from '../utils/safety.js';
+import { getRedisMonitor } from './redis-monitoring.js';
 
 const logger = getLogger({ component: 'MonitoringService' });
 
@@ -107,8 +108,9 @@ interface CalculatedQualityMetrics {
 
 export class MonitoringService {
   private db!: ReturnType<typeof getDatabase>;
-  // private pool!: Pool; // Reserved for future use
   private logger!: ReturnType<typeof getLogger>;
+  private healthCheckInterval?: NodeJS.Timeout | undefined;
+  private redisMonitor = getRedisMonitor();
 
   constructor(container?: DIContainer) {
     if (container) {
@@ -129,6 +131,20 @@ export class MonitoringService {
   private initializeLegacy(): void {
     this.db = getDatabase();
     this.logger = getLogger({ component: 'MonitoringService' });
+  }
+
+  /**
+   * Set Redis connection for monitoring
+   */
+  public setRedisConnection(redisConnection: any): void {
+    this.redisMonitor.setRedisConnection(redisConnection);
+  }
+
+  /**
+   * Get database connection with proper connection pooling
+   */
+  private async getDbConnection() {
+    return await this.db.connect();
   }
 
   /**
@@ -170,7 +186,7 @@ export class MonitoringService {
         alerts
       };
     } catch (error) {
-      logger.error('WhatsApp quality check failed', error, {
+      this.logger.error('WhatsApp quality check failed', error, {
         merchantId,
         platform: 'whatsapp',
         event: 'checkWhatsAppQuality'
@@ -346,8 +362,7 @@ export class MonitoringService {
     }
   }
 
-  /* @ts-nocheck */
-/**
+  /**
    * Comprehensive system health check
    */
   public async getSystemHealth(): Promise<{
@@ -418,7 +433,12 @@ export class MonitoringService {
     responseTime: number;
     error?: string;
   }>> {
-    const services = [];
+    const services: Array<{
+      name: string;
+      status: 'up' | 'down' | 'degraded';
+      responseTime: number;
+      error?: string;
+    }> = [];
     
     // Database health check
     try {
@@ -429,7 +449,7 @@ export class MonitoringService {
       
       services.push({
         name: 'database',
-        status: responseTime < 100 ? 'up' : 'degraded' as const,
+        status: responseTime < 100 ? 'up' : 'degraded',
         responseTime
       });
       
@@ -437,31 +457,46 @@ export class MonitoringService {
     } catch (error: unknown) {
       services.push({
         name: 'database',
-        status: 'down' as const,
+        status: 'down',
         responseTime: 0,
         error: (error as { message?: string })?.message ?? 'unknown'
       });
       telemetry.recordDatabaseQuery('health_check', false, 0);
     }
 
-    // Redis health check (if available)
+    // Redis health check using RedisMonitor
     try {
-      // This would be implemented when Redis client is available
+      const redisHealth = await this.redisMonitor.performHealthCheck();
+      
       services.push({
         name: 'redis',
-        status: 'up' as const,
-        responseTime: 5 // Mock for now
+        status: redisHealth.healthy ? 'up' : 'degraded',
+        responseTime: redisHealth.redis.responseTime
       });
+      
+      // Log Redis alerts if any
+      if (!redisHealth.healthy) {
+        this.logger.warn('Redis health check detected issues', {
+          alerts: redisHealth.alerts,
+          responseTime: redisHealth.redis.responseTime,
+          memoryUsage: redisHealth.redis.memoryUsage
+        });
+      }
     } catch (error: unknown) {
       services.push({
         name: 'redis',
-        status: 'down' as const,
+        status: 'down',
         responseTime: 0,
         error: (error as { message?: string })?.message ?? 'unknown'
       });
+      
+      this.logger.error('Redis health check failed', error, {
+        component: 'MonitoringService',
+        method: 'checkServiceHealth'
+      });
     }
 
-    return services as Array<{ name: string; status: "degraded" | "up" | "down"; responseTime: number; error?: string }>;
+    return services;
   }
 
   /**
@@ -816,6 +851,27 @@ export class MonitoringService {
       });
     }
   }
+
+  /**
+   * Cleanup resources and close connections
+   */
+  async dispose(): Promise<void> {
+    try {
+      // Close database connections
+      await this.db.close();
+      
+      // Clear health check interval if exists
+      if (this.healthCheckInterval) {
+        clearInterval(this.healthCheckInterval);
+        this.healthCheckInterval = undefined;
+      }
+      
+      this.logger.info('Monitoring service resources cleaned up successfully');
+    } catch (error) {
+      this.logger.error('Error during monitoring service cleanup', error);
+      throw error;
+    }
+  }
 }
 
 /**
@@ -840,6 +896,7 @@ export function createPerformanceMiddleware(monitoringService: MonitoringService
 
       // Log async to avoid blocking response
       monitoringService.logPerformanceMetrics(metrics).catch(err => {
+        // Use console.error as fallback since logger is private
         console.error('Performance logging failed:', err);
       });
 

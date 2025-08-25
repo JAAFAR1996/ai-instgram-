@@ -9,7 +9,7 @@ import { Context, Next } from 'hono';
 import { getDatabase } from '../db/adapter.js';
 import { getLogger } from '../services/logger.js';
 import { serr } from '../isolation/context.js';
-import jwt from 'jsonwebtoken';
+import * as jwt from 'jsonwebtoken';
 
 const log = getLogger({ component: 'rls-merchant-isolation' });
 

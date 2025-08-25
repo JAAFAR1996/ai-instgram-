@@ -10,9 +10,9 @@ import type { ConversationStage, Platform } from '../types/database.js';
 import type { DIContainer } from '../container/index.js';
 import type { Pool } from 'pg';
 import type { AppConfig } from '../config/index.js';
+import { getLogger } from './logger.js';
 
-// removed unused JsonObject
-
+// Type definitions for better type safety
 export interface AIResponse {
   message: string;
   messageAr: string;
@@ -31,7 +31,7 @@ export interface AIResponse {
 
 export interface AIAction {
   type: 'ADD_TO_CART' | 'SHOW_PRODUCT' | 'CREATE_ORDER' | 'COLLECT_INFO' | 'ESCALATE' | 'SCHEDULE_TEMPLATE';
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   priority: number;
 }
 
@@ -82,17 +82,98 @@ export interface MerchantSettings {
   autoResponses: Record<string, unknown>;
 }
 
+export interface Product {
+  id: string;
+  sku: string;
+  name_ar: string;
+  price_usd: number;
+  category: string;
+  stock_quantity: number;
+}
+
+export interface ProductSummary {
+  category: string;
+  count: number;
+  avg_price: number;
+}
+
+export interface IntentAnalysisResult {
+  intent: string;
+  confidence: number;
+  entities: Record<string, unknown>;
+  stage: ConversationStage;
+}
+
+export interface AIRecommendationResponse {
+  recommendations: ProductRecommendation[];
+}
+
 export class AIService {
   protected openai: OpenAI;
-  // removed unused field
   protected pool: Pool;
   private config: AppConfig;
-  private logger: { error: (...args: unknown[]) => void; warn: (...args: unknown[]) => void };
+  private logger = getLogger({ component: 'ai-service' });
   private db: { query: (sql: string, params?: unknown[]) => Promise<unknown[]> };
+  
+  // Performance optimization: Product caching
+  private productCache = new Map<string, { products: Product[]; timestamp: number }>();
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-  constructor(_container: DIContainer) {}
+  constructor(container: DIContainer) {
+    // Initialize OpenAI client with proper validation
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    if (!openaiApiKey) {
+      throw new Error('OPENAI_API_KEY environment variable is required');
+    }
+    
+    this.openai = new OpenAI({
+      apiKey: openaiApiKey,
+      timeout: 30000, // 30 seconds timeout
+    });
 
+    // Initialize database pool with validation
+    this.pool = container.get<Pool>('pool');
+    if (!this.pool) {
+      throw new Error('Database pool not found in container');
+    }
 
+    // Initialize configuration with validation
+    this.config = container.get<AppConfig>('config');
+    if (!this.config) {
+      throw new Error('AppConfig not found in container');
+    }
+
+    // Validate AI configuration
+    if (!this.config.ai?.model) {
+      throw new Error('AI model configuration is required');
+    }
+
+    if (!this.config.ai?.temperature) {
+      throw new Error('AI temperature configuration is required');
+    }
+
+    if (!this.config.ai?.maxTokens) {
+      throw new Error('AI maxTokens configuration is required');
+    }
+
+    // Initialize database interface with proper error handling
+    this.db = {
+      query: async (sql: string, params?: unknown[]) => {
+        const client = await this.pool.connect();
+        try {
+          const result = await client.query(sql, params);
+          return result.rows;
+        } catch (error) {
+          this.logger.error('Database query failed:', { sql, params, error });
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+    };
+
+    this.logger.info('AI Service initialized successfully');
+  }
 
   /** Basic runtime validation for AIResponse payload */
   private validateAIResponse(payload: unknown): payload is AIResponse {
@@ -114,12 +195,26 @@ export class AIService {
   }
 
   /** Exponential backoff retry helper */
-  private async withRetry<T>(fn: () => Promise<T>, label: string, max=3): Promise<T> {
+  private async withRetry<T>(fn: () => Promise<T>, label: string, max = 3, timeout = 30000): Promise<T> {
     let attempt = 0;
     let lastErr: unknown;
     while (attempt < max) {
       try {
-        return await fn();
+        // ✅ إضافة timeout للعملية نفسها
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        
+        const result = await Promise.race([
+          fn(),
+          new Promise<never>((_, reject) => {
+            controller.signal.addEventListener('abort', () => {
+              reject(new Error(`${label} timeout after ${timeout}ms`));
+            });
+          })
+        ]);
+        
+        clearTimeout(timeoutId);
+        return result;
       } catch (e: unknown) {
         lastErr = e;
         const msg = String((e as { message?: string })?.message || e);
@@ -140,8 +235,8 @@ export class AIService {
       const { getServiceController } = await import('./service-controller.js');
       const sc = getServiceController();
       return await sc.isServiceEnabled(merchantId, 'ai_processing');
-    } catch {
-      // لو تعذّر الوصول للكنترولر، لا توقف العمل
+    } catch (error: unknown) {
+      this.logger.warn('Failed to check AI service status, defaulting to enabled:', { merchantId, error });
       return true;
     }
   }
@@ -156,9 +251,9 @@ export class AIService {
     const startTime = Date.now();
 
     try {
-      // حارس تفعيل الخدمة
+      // Service enablement check
       if (!(await this.isAIEnabled(context.merchantId))) {
-        this.logger.warn('AI disabled by ServiceController; returning fallback');
+        this.logger.warn('AI disabled by ServiceController; returning fallback', { merchantId: context.merchantId });
         return this.getFallbackResponse(context);
       }
 
@@ -167,7 +262,9 @@ export class AIService {
 
       // Call OpenAI API with timeout + retry
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.openai['timeout'] ?? 30000);
+      const timeout = this.config.ai.timeout || 30000;
+      const timer = setTimeout(() => controller.abort(), timeout);
+      
       const completion = await this.withRetry(
         () => this.openai.chat.completions.create({
           model: this.config.ai.model,
@@ -183,18 +280,28 @@ export class AIService {
       ).finally(() => clearTimeout(timer));
 
       const responseTime = Date.now() - startTime;
-      const response = (completion as any).choices?.[0]?.message?.content;
+      const response = completion.choices?.[0]?.message?.content;
 
       if (!response) {
         throw new Error('No response from OpenAI');
       }
 
       // Parse & validate AI response
-      let aiResponse: any;
-      try { aiResponse = JSON.parse(response); } catch (err) {
-        this.logger.error("Invalid AI JSON response", { err });
+      let aiResponse: AIResponse;
+      try { 
+        aiResponse = JSON.parse(response) as AIResponse; 
+      } catch (error: unknown) {
+        // ✅ تحسين تسجيل الخطأ
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.error("Invalid AI JSON response", { 
+          error: errorMessage,
+          response: response.substring(0, 200), // ✅ قص الرد لتجنب logs كبيرة
+          merchantId: context.merchantId,
+          customerId: context.customerId
+        });
         return this.getFallbackResponse(context);
       }
+      
       if (!this.validateAIResponse(aiResponse)) {
         this.logger.error("AI JSON schema validation failed", { got: aiResponse });
         return this.getFallbackResponse(context);
@@ -213,9 +320,12 @@ export class AIService {
 
       return aiResponse;
     } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error('AI response generation failed:', {
-        err: (error as { message?: string })?.message || String(error),
-        stack: (error as { stack?: string })?.stack,
+        error: err.message,
+        stack: err.stack,
+        merchantId: context.merchantId,
+        customerId: context.customerId
       });
       
       // Return fallback response
@@ -229,27 +339,32 @@ export class AIService {
   public async analyzeIntent(
     customerMessage: string,
     context: ConversationContext
-  ): Promise<{
-    intent: string;
-    confidence: number;
-    entities: Record<string, unknown>;
-    stage: ConversationStage;
-  }> {
+  ): Promise<IntentAnalysisResult> {
     try {
       const prompt = this.buildIntentAnalysisPrompt(customerMessage, context);
       
       const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: this.config.ai.intentModel || 'gpt-4o-mini',
         messages: prompt,
-        temperature: 0.3,
-        max_tokens: 200,
+        temperature: this.config.ai.intentTemperature || 0.3,
+        max_tokens: this.config.ai.intentMaxTokens || 200,
         response_format: { type: 'json_object' }
       });
 
       const response = completion.choices?.[0]?.message?.content;
-      return JSON.parse(response || '{}');
+      if (!response) {
+        throw new Error('No response from OpenAI for intent analysis');
+      }
+      
+      const result = JSON.parse(response) as IntentAnalysisResult;
+      return result;
     } catch (error: unknown) {
-      this.logger.error('❌ Intent analysis failed', error);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error('Intent analysis failed', { 
+        error: err.message, 
+        customerMessage: this.maskPII(customerMessage),
+        merchantId: context.merchantId 
+      });
       return {
         intent: 'UNKNOWN',
         confidence: 0,
@@ -268,7 +383,7 @@ export class AIService {
     maxProducts: number = 5
   ): Promise<ProductRecommendation[]> {
     try {
-      // Get merchant's products
+      // Get merchant's products with caching
       const products = await this.getMerchantProducts(context.merchantId);
       
       const prompt = this.buildProductRecommendationPrompt(
@@ -278,19 +393,27 @@ export class AIService {
       );
 
       const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: this.config.ai.recommendationModel || 'gpt-4o-mini',
         messages: prompt,
-        temperature: 0.5,
-        max_tokens: 300,
+        temperature: this.config.ai.recommendationTemperature || 0.5,
+        max_tokens: this.config.ai.recommendationMaxTokens || 300,
         response_format: { type: 'json_object' }
       });
 
-      const response = (completion as any).choices?.[0]?.message?.content;
-      const recommendations = JSON.parse(response || '{"recommendations": []}');
+      const response = completion.choices?.[0]?.message?.content;
+      if (!response) {
+        throw new Error('No response from OpenAI for product recommendations');
+      }
       
+      const recommendations = JSON.parse(response) as AIRecommendationResponse;
       return recommendations.recommendations.slice(0, maxProducts);
-    } catch (error: any) {
-      this.logger.error('❌ Product recommendation failed', error);
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error('Product recommendation failed', { 
+        error: err.message, 
+        customerQuery: this.maskPII(customerQuery),
+        merchantId: context.merchantId 
+      });
       return [];
     }
   }
@@ -306,15 +429,20 @@ export class AIService {
       const prompt = this.buildSummaryPrompt(conversationHistory, context);
       
       const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: this.config.ai.summaryModel || 'gpt-4o-mini',
         messages: prompt,
-        temperature: 0.3,
-        max_tokens: 200
+        temperature: this.config.ai.summaryTemperature || 0.3,
+        max_tokens: this.config.ai.summaryMaxTokens || 200
       });
 
       return completion.choices[0]?.message?.content || 'لا يوجد ملخص متاح';
-    } catch (error: any) {
-      this.logger.error('❌ Conversation summary failed', error);
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.logger.error('Conversation summary failed', { 
+        error: err.message, 
+        merchantId: context.merchantId,
+        historyLength: conversationHistory.length 
+      });
       return 'خطأ في إنتاج الملخص';
     }
   }
@@ -362,7 +490,7 @@ export class AIService {
       { role: 'system', content: systemPrompt }
     ];
 
-    // Add conversation history
+    // Add conversation history (last 10 messages)
     context.conversationHistory.slice(-10).forEach(msg => {
       messages.push({
         role: msg.role,
@@ -414,7 +542,7 @@ export class AIService {
   private buildProductRecommendationPrompt(
     customerQuery: string,
     context: ConversationContext,
-    products: Array<{ id: string; sku: string; name_ar: string; price_usd: number; category: string }>
+    products: Product[]
   ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     const productsText = products.map(p => 
       `ID: ${p.id}, SKU: ${p.sku}, اسم: ${p.name_ar}, سعر: $${p.price_usd}, فئة: ${p.category}`
@@ -462,7 +590,7 @@ ${productsText}
   }
 
   /**
-   * Private: Get merchant products summary
+   * Private: Get merchant products summary with caching
    */
   private async getProductsSummary(merchantId: string): Promise<string> {
     try {
@@ -470,33 +598,49 @@ ${productsText}
         SELECT category, COUNT(*)::int as count, AVG(price_usd)::float as avg_price
         FROM products 
         WHERE merchant_id = $1::uuid 
-        AND status = 'ACTIVE'
+        AND status = $2
         GROUP BY category
         LIMIT 5
-      `, [merchantId]);
+      `, [merchantId, 'ACTIVE']);
 
-      return (products as Array<{category:string;count:string;avg_price:number}>).map((p) =>
+      return (products as ProductSummary[]).map((p) =>
         `${p.category}: ${p.count} منتج (متوسط السعر: ${Math.round(p.avg_price)})`
       ).join(', ');
     } catch (error: unknown) {
+      this.logger.error('Failed to get products summary', { merchantId, error });
       return 'منتجات متنوعة';
     }
   }
 
   /**
-   * Private: Get merchant products
+   * Private: Get merchant products with caching
    */
-  private async getMerchantProducts(merchantId: string): Promise<any[]> {
+  private async getMerchantProducts(merchantId: string): Promise<Product[]> {
     try {
+      // Check cache first
+      const cached = this.productCache.get(merchantId);
+      const now = Date.now();
+      
+      if (cached && (now - cached.timestamp) < this.CACHE_TTL) {
+        return cached.products;
+      }
+
+      // Fetch from database
       const rows = await this.db.query(`
         SELECT id, sku, name_ar, price_usd, category, stock_quantity
         FROM products
-        WHERE merchant_id = $1::uuid AND status = 'ACTIVE'
+        WHERE merchant_id = $1::uuid AND status = $2
         ORDER BY created_at DESC
         LIMIT 20
-      `, [merchantId]);
-      return rows as Array<{id:string;name:string;price:number;category:string}>;
-    } catch (error) {
+      `, [merchantId, 'ACTIVE']);
+      
+      const products = rows as Product[];
+      
+      // Update cache
+      this.productCache.set(merchantId, { products, timestamp: now });
+      
+      return products;
+    } catch (error: unknown) {
       this.logger.error('Failed to fetch merchant products', { merchantId, error });
       return [];
     }
@@ -521,14 +665,16 @@ ${productsText}
           success
         ) VALUES (
           $1::uuid,
-          'AI_RESPONSE_GENERATED',
-          'AI_INTERACTION',
-          $2::jsonb,
-          $3::int,
-          $4::boolean
+          $2,
+          $3,
+          $4::jsonb,
+          $5::int,
+          $6::boolean
         )
       `, [
         context.merchantId,
+        'AI_RESPONSE_GENERATED',
+        'AI_INTERACTION',
         JSON.stringify({
           input: input.substring(0, 200),
           intent: response.intent,
@@ -540,35 +686,64 @@ ${productsText}
         true
       ]);
     } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error('AI interaction logging failed:', {
-        err: (error as { message?: string })?.message || String(error),
-        stack: (error as { stack?: string })?.stack,
+        error: err.message,
+        stack: err.stack,
+        merchantId: context.merchantId
       });
     }
   }
 
   /**
-   * Private: Get fallback response
+   * Private: Generate fallback response when AI fails
    */
-  private getFallbackResponse(context: ConversationContext): AIResponse {
-    const fallbackMessages = [
-      'عذراً، واجهت مشكلة تقنية. يرجى إعادة إرسال رسالتك 🙏',
-      'أعتذر، لم أتمكن من فهم طلبك بوضوح. هل يمكنك إعادة الصياغة؟',
-      'نواجه مشكلة تقنية مؤقتة. سأتواصل معك قريباً 📱'
-    ];
-
-    const message = fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)];
-
+  private getFallbackResponse(): AIResponse {
     return {
-      message: message ?? '',
-      messageAr: message ?? '',
-      intent: 'SUPPORT',
-      stage: context.stage,
+      message: 'عذراً، حدث خطأ في معالجة رسالتك. يرجى المحاولة مرة أخرى.',
+      messageAr: 'عذراً، حدث خطأ في معالجة رسالتك. يرجى المحاولة مرة أخرى.',
+      intent: 'unknown',
+      stage: 'GREETING',
       actions: [{ type: 'ESCALATE', data: { reason: 'AI_ERROR' }, priority: 1 }],
       products: [],
       confidence: 0.1,
       tokens: { prompt: 0, completion: 0, total: 0 },
       responseTime: 0
+    };
+  }
+
+  /**
+   * Private: Generate error response
+   */
+  private getErrorResponse(): AIResponse {
+    return {
+      message: 'عذراً، حدث خطأ في النظام. يرجى المحاولة لاحقاً.',
+      messageAr: 'عذراً، حدث خطأ في النظام. يرجى المحاولة لاحقاً.',
+      intent: 'error',
+      stage: 'GREETING',
+      actions: [{ type: 'ESCALATE', data: { reason: 'SYSTEM_ERROR' }, priority: 1 }],
+      products: [],
+      confidence: 0.0,
+      tokens: { prompt: 0, completion: 0, total: 0 },
+      responseTime: 0
+    };
+  }
+
+  /**
+   * Clear product cache (useful for testing or manual cache invalidation)
+   */
+  public clearProductCache(): void {
+    this.productCache.clear();
+    this.logger.info('Product cache cleared');
+  }
+
+  /**
+   * Get cache statistics
+   */
+  public getCacheStats(): { size: number; entries: string[] } {
+    return {
+      size: this.productCache.size,
+      entries: Array.from(this.productCache.keys())
     };
   }
 }

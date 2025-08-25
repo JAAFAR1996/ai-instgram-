@@ -14,10 +14,10 @@ class TimerManager {
   }
 
   clearAll(): void {
-    for (const timer of this.timers) {
+    Array.from(this.timers).forEach(timer => {
       clearTimeout(timer);
       clearInterval(timer);
-    }
+    });
     this.timers.clear();
   }
 }

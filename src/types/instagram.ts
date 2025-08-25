@@ -129,29 +129,7 @@ export interface InstagramContext {
   };
 }
 
-export interface MediaContent {
-  format: string;
-  originalFileName?: string;
-  metadata?: {
-    duration?: number;
-    fileSize?: number;
-    dimensions?: {
-      width: number;
-      height: number;
-    };
-    format?: string;
-    originalFileName?: string;
-    aiAnalysis?: {
-      description?: string;
-      objects?: string[];
-      colors?: string[];
-      text?: string;
-      sentiment?: 'positive' | 'neutral' | 'negative';
-      isProductImage?: boolean;
-      suggestedTags?: string[];
-    };
-  };
-}
+// MediaContent interface moved to social.ts for consistency
 
 export interface WebhookEvent {
   field: string;
@@ -287,3 +265,125 @@ export const ZInstagramOAuthCredentials = z.object({
   tokenExpiresAt: z.preprocess((v) => (typeof v === 'string' ? new Date(v) : v), z.date()).optional()
 });
 export type TInstagramOAuthCredentials = z.infer<typeof ZInstagramOAuthCredentials>;
+
+// Error categorization system
+export enum InstagramErrorCode {
+  // Authentication & Authorization Errors
+  INVALID_CREDENTIALS = 'INSTAGRAM_INVALID_CREDENTIALS',
+  EXPIRED_TOKEN = 'INSTAGRAM_EXPIRED_TOKEN',
+  UNAUTHORIZED_ACCESS = 'INSTAGRAM_UNAUTHORIZED_ACCESS',
+  INSUFFICIENT_PERMISSIONS = 'INSTAGRAM_INSUFFICIENT_PERMISSIONS',
+  
+  // Rate Limiting & Quota Errors
+  RATE_LIMIT_EXCEEDED = 'INSTAGRAM_RATE_LIMIT_EXCEEDED',
+  QUOTA_EXCEEDED = 'INSTAGRAM_QUOTA_EXCEEDED',
+  MESSAGE_WINDOW_EXPIRED = 'INSTAGRAM_MESSAGE_WINDOW_EXPIRED',
+  
+  // Media & Content Errors
+  MEDIA_UPLOAD_FAILED = 'INSTAGRAM_MEDIA_UPLOAD_FAILED',
+  INVALID_MEDIA_FORMAT = 'INSTAGRAM_INVALID_MEDIA_FORMAT',
+  MEDIA_SIZE_EXCEEDED = 'INSTAGRAM_MEDIA_SIZE_EXCEEDED',
+  INVALID_MESSAGE_CONTENT = 'INSTAGRAM_INVALID_MESSAGE_CONTENT',
+  
+  // Recipient & User Errors
+  INVALID_RECIPIENT = 'INSTAGRAM_INVALID_RECIPIENT',
+  RECIPIENT_NOT_FOUND = 'INSTAGRAM_RECIPIENT_NOT_FOUND',
+  RECIPIENT_BLOCKED = 'INSTAGRAM_RECIPIENT_BLOCKED',
+  RECIPIENT_OPTED_OUT = 'INSTAGRAM_RECIPIENT_OPTED_OUT',
+  
+  // Network & Infrastructure Errors
+  NETWORK_TIMEOUT = 'INSTAGRAM_NETWORK_TIMEOUT',
+  NETWORK_CONNECTION_FAILED = 'INSTAGRAM_NETWORK_CONNECTION_FAILED',
+  API_SERVICE_UNAVAILABLE = 'INSTAGRAM_API_SERVICE_UNAVAILABLE',
+  
+  // Database & Storage Errors
+  DATABASE_CONNECTION_FAILED = 'INSTAGRAM_DATABASE_CONNECTION_FAILED',
+  CREDENTIALS_NOT_FOUND = 'INSTAGRAM_CREDENTIALS_NOT_FOUND',
+  LOGGING_FAILED = 'INSTAGRAM_LOGGING_FAILED',
+  
+  // Business Logic Errors
+  MERCHANT_NOT_FOUND = 'INSTAGRAM_MERCHANT_NOT_FOUND',
+  INVALID_CONVERSATION_ID = 'INSTAGRAM_INVALID_CONVERSATION_ID',
+  TEMPLATE_CONVERSION_FAILED = 'INSTAGRAM_TEMPLATE_CONVERSION_FAILED',
+  
+  // Generic Errors
+  UNKNOWN_ERROR = 'INSTAGRAM_UNKNOWN_ERROR',
+  VALIDATION_ERROR = 'INSTAGRAM_VALIDATION_ERROR',
+  INTERNAL_SERVER_ERROR = 'INSTAGRAM_INTERNAL_SERVER_ERROR'
+}
+
+export interface InstagramError {
+  code: InstagramErrorCode;
+  message: string;
+  details?: Record<string, unknown>;
+  retryable: boolean;
+  category: 'AUTH' | 'RATE_LIMIT' | 'MEDIA' | 'RECIPIENT' | 'NETWORK' | 'DATABASE' | 'BUSINESS' | 'GENERIC';
+}
+
+// Instagram API specific types
+export interface InstagramTemplatePayload {
+  template_type: 'generic' | 'button' | 'receipt' | 'list';
+  elements: InstagramTemplateElement[];
+}
+
+export interface InstagramTemplateElement {
+  title: string;
+  subtitle?: string;
+  image_url?: string;
+  default_action?: {
+    type: 'web_url' | 'postback';
+    url?: string;
+    payload?: string;
+  };
+  buttons?: InstagramTemplateButton[];
+}
+
+export interface InstagramTemplateButton {
+  type: 'web_url' | 'postback' | 'phone_number';
+  title: string;
+  url?: string;
+  payload?: string;
+  phone_number?: string;
+}
+
+// Message template types
+export interface MessageTemplate {
+  type: 'generic' | 'button' | 'receipt' | 'list';
+  elements: TemplateElement[];
+}
+
+export interface TemplateElement {
+  title: string;
+  subtitle?: string;
+  image_url?: string;
+  default_action?: {
+    type: 'web_url' | 'postback';
+    url?: string;
+    payload?: string;
+  };
+  buttons?: TemplateButton[];
+}
+
+export interface TemplateButton {
+  type: 'web_url' | 'postback' | 'phone_number';
+  title: string;
+  url?: string;
+  payload?: string;
+  phone_number?: string;
+}
+
+// Message metadata types
+export interface MessageMetadata {
+  mediaType?: 'image' | 'video' | 'audio';
+  mediaUrl?: string;
+  attachmentId?: string;
+  reusedAttachment?: boolean;
+  template?: MessageTemplate;
+  quickReplies?: QuickReply[];
+}
+
+export interface BulkSendMetadata {
+  attachmentId?: string;
+  mediaUrl?: string;
+  mediaType?: 'image' | 'video' | 'audio';
+}

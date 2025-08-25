@@ -66,7 +66,8 @@ export class UpstashQuotaMonitor {
 
     try {
       const info = await redis.info();
-      const usedMatch = info.match(/total_commands_processed:(d+)/);
+      // ✅ إصلاح regex pattern
+      const usedMatch = info.match(/total_commands_processed:(\d+)/);
       const used = usedMatch ? Number(usedMatch[1]) : 0;
       const limit = Number(process.env.UPSTASH_REDIS_REQUEST_LIMIT || 100000);
       return { used, limit, percentage: used / limit };

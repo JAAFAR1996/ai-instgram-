@@ -7,6 +7,7 @@ export interface CircuitBreakerOptions {
   expectedErrorThreshold: number;  // نسبة الخطأ المتوقعة (%)
   halfOpenMaxCalls: number;        // عدد المحاولات في حالة نصف مفتوح
   timeout: number;                 // مهلة زمنية للعمليات
+  serviceName?: string;            // اسم الخدمة للتشخيص
 }
 
 export interface CircuitBreakerResult<T> {
@@ -44,6 +45,7 @@ export class CircuitBreaker {
   private totalExecutions = 0;
   private totalExecutionTime = 0;
   private halfOpenCallCount = 0;
+  private serviceName: string;
   
   private readonly options: CircuitBreakerOptions;
 
@@ -52,6 +54,8 @@ export class CircuitBreaker {
     recoveryTimeout: number = 60000,
     options: Partial<CircuitBreakerOptions> = {}
   ) {
+    this.serviceName = options.serviceName || 'unknown-service';
+    
     this.options = {
       failureThreshold,
       recoveryTimeout,
@@ -59,6 +63,7 @@ export class CircuitBreaker {
       expectedErrorThreshold: options.expectedErrorThreshold || 50,  // 50%
       halfOpenMaxCalls: options.halfOpenMaxCalls || 3,
       timeout: options.timeout || 10000,  // 10 ثواني
+      serviceName: this.serviceName,
       ...options
     };
   }
@@ -139,7 +144,7 @@ export class CircuitBreaker {
   private async executeWithTimeout<T>(operation: () => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        reject(new Error(`العملية تجاوزت المهلة الزمنية المحددة: ${this.options.timeout}ms`));
+        reject(new Error(`${this.serviceName}: العملية تجاوزت المهلة الزمنية المحددة: ${this.options.timeout}ms`));
       }, this.options.timeout);
 
       operation()
@@ -328,39 +333,54 @@ export class CircuitBreaker {
 
   // الحصول على معلومات التشخيص
   getDiagnostics(): {
+    serviceName: string;
     healthy: boolean;
     issues: string[];
     recommendations: string[];
+    stats: CircuitBreakerStats;
   } {
     const stats = this.getStats();
     const issues: string[] = [];
     const recommendations: string[] = [];
     
     if (stats.state === 'OPEN') {
-      issues.push('الدائرة مفتوحة - الخدمة غير متاحة');
-      recommendations.push('فحص الخدمة الأساسية وإصلاح المشاكل');
+      issues.push(`${this.serviceName}: الدائرة مفتوحة - الخدمة غير متاحة`);
+      recommendations.push(`فحص ${this.serviceName} وإصلاح المشاكل الأساسية`);
     }
     
     if (stats.errorRate > this.options.expectedErrorThreshold) {
-      issues.push(`معدل الخطأ عالي: ${stats.errorRate}%`);
-      recommendations.push('مراجعة سجلات الأخطاء وتحسين استقرار الخدمة');
+      issues.push(`${this.serviceName}: معدل الخطأ عالي: ${stats.errorRate}%`);
+      recommendations.push(`مراجعة سجلات ${this.serviceName} وتحسين استقرار الخدمة`);
     }
     
     if (stats.averageExecutionTime > this.options.timeout * 0.8) {
-      issues.push(`متوسط وقت التنفيذ مرتفع: ${stats.averageExecutionTime}ms`);
-      recommendations.push('تحسين أداء العمليات أو زيادة المهلة الزمنية');
+      issues.push(`${this.serviceName}: متوسط وقت التنفيذ مرتفع: ${stats.averageExecutionTime}ms`);
+      recommendations.push(`تحسين أداء ${this.serviceName} أو زيادة المهلة الزمنية`);
     }
     
     if (stats.uptimePercentage < 95) {
-      issues.push(`نسبة التشغيل منخفضة: ${stats.uptimePercentage}%`);
-      recommendations.push('تحسين موثوقية الخدمة');
+      issues.push(`${this.serviceName}: نسبة التشغيل منخفضة: ${stats.uptimePercentage}%`);
+      recommendations.push(`تحسين موثوقية ${this.serviceName}`);
     }
 
     return {
+      serviceName: this.serviceName,
       healthy: issues.length === 0,
       issues,
-      recommendations
+      recommendations,
+      stats
     };
+  }
+
+  // الحصول على اسم الخدمة
+  getServiceName(): string {
+    return this.serviceName;
+  }
+
+  // تحديث اسم الخدمة
+  setServiceName(name: string): void {
+    this.serviceName = name;
+    this.options.serviceName = name;
   }
 }
 

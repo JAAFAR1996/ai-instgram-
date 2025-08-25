@@ -10,11 +10,10 @@
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { telemetry } from './telemetry.js';
 import { createHash } from 'crypto';
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import type {
-  QuickReply,
-  InstagramMessagePayload,
+
   InstagramAPIResponse,
   InstagramAPICredentials,
   SendMessageRequest
@@ -54,7 +53,8 @@ export interface InstagramMessage {
 export interface InstagramAttachment {
   type: 'image' | 'video' | 'audio' | 'file';
   payload: {
-    url: string;
+    url?: string;
+    attachment_id?: string;
     is_reusable?: boolean;
   };
 }
@@ -311,7 +311,7 @@ export class InstagramAPIClient {
 
     const fileBuffer = await fs.readFile(mediaPath);
     const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), path.basename(mediaPath));
+    form.append('file', new Blob([fileBuffer as any]), path.basename(mediaPath));
     form.append('media_type', mediaType);
 
     const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(
@@ -380,7 +380,7 @@ export class InstagramAPIClient {
 
       return {
         success: true,
-        ...(result && typeof result === 'object' && 'id' in result ? { id: String((result as any).id) } : {})
+        ...(result && typeof result === 'object' && 'id' in result ? { id: String((result as { id: string }).id) } : {})
       };
     } catch (error) {
       this.logger.error('❌ Instagram comment reply failed:', error);
@@ -595,14 +595,14 @@ export class InstagramAPIClient {
       }
 
       // Decrypt the token
-      const decryptedToken = this.encryptionService.decryptInstagramToken(
+      const decryptedTokenData = this.encryptionService.decryptInstagramToken(
         cred.instagram_token_encrypted
       );
 
       return {
-        accessToken: decryptedToken,
+        accessToken: decryptedTokenData.token,
         businessAccountId: cred.business_account_id ?? '',
-        pageAccessToken: decryptedToken,
+        pageAccessToken: decryptedTokenData.token,
         pageId: cred.instagram_page_id ?? '',
         webhookVerifyToken: cred.webhook_verify_token ?? '',
         appSecret: cred.app_secret ?? ''

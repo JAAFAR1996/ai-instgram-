@@ -16,6 +16,19 @@ export interface AIConfig {
   model: string;
   maxTokens: number;
   temperature: number;
+  timeout?: number;
+  // Intent analysis configuration
+  intentModel?: string;
+  intentTemperature?: number;
+  intentMaxTokens?: number;
+  // Product recommendation configuration
+  recommendationModel?: string;
+  recommendationTemperature?: number;
+  recommendationMaxTokens?: number;
+  // Summary configuration
+  summaryModel?: string;
+  summaryTemperature?: number;
+  summaryMaxTokens?: number;
 }
 
 export interface InstagramConfig {
