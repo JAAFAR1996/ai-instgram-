@@ -54,12 +54,12 @@ function createPoolConfig(): PoolConfig {
   return {
     connectionString: config.database.url,
     ssl: config.database.ssl ? { 
-      rejectUnauthorized: process.env.NODE_ENV === 'production' ? true : false 
+      rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false'
     } : false,
-    max: isRender ? 8 : 15,
-    min: isRender ? 2 : Math.min(5, Math.floor(15 / 4)),
+    max: Number(process.env.DB_MAX_CONNECTIONS || process.env.DATABASE_POOL_MAX || (isRender ? 8 : 15)),
+    min: Number(process.env.DATABASE_POOL_MIN || (isRender ? 2 : Math.min(5, Math.floor(15 / 4)))),
     idleTimeoutMillis: 15000,
-    connectionTimeoutMillis: 8000,
+    connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT || 8000),
     allowExitOnIdle: false,
     statement_timeout: isRender ? 25000 : 30000,
     query_timeout: isRender ? 25000 : 30000,
