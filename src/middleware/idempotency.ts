@@ -111,10 +111,14 @@ export function createIdempotencyMiddleware(
       }
       
       const idempotencyKey = await generateIdempotencyKey(c, finalConfig);
-      const redis = await getRedisConnectionManager().getConnection(RedisUsageType.IDEMPOTENCY);
       
-      // Check if request was already processed
-      const existingResult = await redis.get(idempotencyKey);
+      // Safe Redis operation with fallback
+      const redisResult = await getRedisConnectionManager().safeRedisOperation(
+        RedisUsageType.IDEMPOTENCY,
+        async (redis) => await redis.get(idempotencyKey)
+      );
+      
+      const existingResult = redisResult.ok ? redisResult.result : null;
       
       if (existingResult) {
         let parsed;
@@ -135,8 +139,11 @@ export function createIdempotencyMiddleware(
         // Return cached response - with safety checks
         if (!parsed || typeof parsed !== 'object' || !('body' in parsed) || !('status' in parsed)) {
           logger.error('Corrupted cache entry - missing required fields', { parsed });
-          // Remove corrupted cache entry
-          await redis.del(idempotencyKey);
+          // Remove corrupted cache entry safely
+          await getRedisConnectionManager().safeRedisOperation(
+            RedisUsageType.IDEMPOTENCY,
+            async (redis) => await redis.del(idempotencyKey)
+          );
           // Continue processing instead of returning corrupted data
         } else {
           return c.json(parsed.body, parsed.status, parsed.headers || {});
@@ -154,10 +161,13 @@ export function createIdempotencyMiddleware(
       const responseData = c.get(K_RESP) as IdempotencyResponse<unknown>;
       
       if (shouldCache && responseData) {
-        await redis.setex(
-          idempotencyKey,
-          finalConfig.ttlSeconds,
-          JSON.stringify(responseData)
+        await getRedisConnectionManager().safeRedisOperation(
+          RedisUsageType.IDEMPOTENCY,
+          async (redis) => await redis.setex(
+            idempotencyKey,
+            finalConfig.ttlSeconds,
+            JSON.stringify(responseData)
+          )
         );
         logger.info(`💾 Cached idempotency result: ${idempotencyKey}`);
       }
