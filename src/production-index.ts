@@ -304,7 +304,7 @@ async function gracefulShutdown(signal: string, exitCode: number = 0) {
       stopHealth();
       log.info('✅ Health monitoring stopped');
     } catch (error) {
-      log.warn('⚠️ Failed to stop health monitoring:', error);
+      log.warn('⚠️ Failed to stop health monitoring:', { error });
     }
     
     // Close database connections
@@ -313,7 +313,7 @@ async function gracefulShutdown(signal: string, exitCode: number = 0) {
       await closeDatabase();
       log.info('✅ Database connections closed');
     } catch (error) {
-      log.warn('⚠️ Failed to close database connections:', error);
+      log.warn('⚠️ Failed to close database connections:', { error });
     }
     
     // Close Redis connections
@@ -322,7 +322,7 @@ async function gracefulShutdown(signal: string, exitCode: number = 0) {
       await closeRedisConnections();
       log.info('✅ Redis connections closed');
     } catch (error) {
-      log.warn('⚠️ Failed to close Redis connections:', error);
+      log.warn('⚠️ Failed to close Redis connections:', { error });
     }
     
     // Stop telemetry
@@ -334,7 +334,7 @@ async function gracefulShutdown(signal: string, exitCode: number = 0) {
       });
       log.info('✅ Telemetry recorded');
     } catch (error) {
-      log.warn('⚠️ Failed to record telemetry:', error);
+      log.warn('⚠️ Failed to record telemetry:', { error });
     }
     
     clearTimeout(shutdownTimeout);

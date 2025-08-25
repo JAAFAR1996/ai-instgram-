@@ -146,13 +146,12 @@ export function registerUtilityMessageRoutes(app: Hono): void {
 
       // Create template using real service
       const utilityService = new UtilityMessagesService();
-      const template = await utilityService.createTemplate(
-        merchantId,
-        templateData.name,
-        templateData.type as UtilityMessageType,
-        templateData.content,
-        templateData.variables
-      );
+      const template = await utilityService.createTemplate(merchantId, {
+        name: templateData.name,
+        type: templateData.type as UtilityMessageType,
+        content: templateData.content,
+        variables: templateData.variables
+      });
 
       return c.json({
         success: true,

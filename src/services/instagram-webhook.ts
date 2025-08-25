@@ -18,6 +18,7 @@ import { getInstagramMediaManager } from './instagram-media-manager.js';
 import { verifyHMACRaw } from './encryption.js';
 import { createLogger } from './logger.js';
 import type { ConversationRow, MessageHistoryRow as DBMessageHistoryRow } from '../types/database-rows.js';
+import type { ConversationStage } from '../types/database.js';
 import type { DIContainer } from '../container/index.js';
 import type { Pool } from 'pg';
 import type { Sql } from '../types/sql.js';
@@ -800,7 +801,7 @@ export class InstagramWebhookHandler {
         merchantId,
         customerId,
         platform: 'instagram',
-        stage: conversation?.conversation_stage as Record<string, unknown>,
+        stage: (conversation?.conversation_stage as ConversationStage) || 'GREETING',
         cart: (session.cart as SessionData['cart']) || [],
         preferences: (session.preferences as SessionData['preferences']) ?? {},
         conversationHistory: messageHistory.reverse().map((msg: DBMessageHistoryRow) => ({

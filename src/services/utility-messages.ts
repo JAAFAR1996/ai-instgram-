@@ -414,7 +414,7 @@ export class UtilityMessagesService {
       
       // Create template in database using prepared statement
       const result = await sql`
-        INSERT INTO utility_templates (
+        INSERT INTO utility_message_templates (
           merchant_id, name, type, content, variables, approved, created_at, updated_at
         ) VALUES (
           ${merchantId}, ${template.name}, ${template.type}, ${template.content}, 
@@ -446,6 +446,121 @@ export class UtilityMessagesService {
       return newTemplate;
     } catch (error) {
       this.logger.error('Failed to create template in database', error, { merchantId });
+      throw error;
+    }
+  }
+
+  /**
+   * Get message history for merchant from utility_message_logs table
+   */
+  async getMessageHistory(
+    merchantId: string, 
+    limit: number = 50, 
+    offset: number = 0
+  ): Promise<any[]> {
+    try {
+      const db = getDatabase();
+      const sql = db.getSQL();
+      
+      this.logger.info('Getting message history', { merchantId, limit, offset });
+      
+      const result = await sql`
+        SELECT 
+          id,
+          merchant_id,
+          recipient_id,
+          template_id,
+          message_id,
+          message_type,
+          sent_at,
+          created_at
+        FROM utility_message_logs 
+        WHERE merchant_id = ${merchantId}::uuid
+        ORDER BY sent_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+      
+      this.logger.info('Message history retrieved', { 
+        merchantId, 
+        count: result.length,
+        event: 'getMessageHistory'
+      });
+      
+      return result || [];
+    } catch (error) {
+      this.logger.error('Failed to get message history', error, { merchantId });
+      return [];
+    }
+  }
+
+  /**
+   * Create default templates for new merchant
+   * Includes all essential business communication templates
+   */
+  async createDefaultTemplates(merchantId: string): Promise<void> {
+    try {
+      this.logger.info('Creating default templates', { merchantId });
+      
+      const defaultTemplates = [
+        {
+          name: 'Order Confirmation',
+          type: 'ORDER_UPDATE' as UtilityMessageType,
+          content: 'تأكيد الطلب: طلبك رقم {{order_number}} تم تأكيده بنجاح. شكراً لثقتك بنا!',
+          variables: ['order_number']
+        },
+        {
+          name: 'Delivery Update', 
+          type: 'DELIVERY_NOTIFICATION' as UtilityMessageType,
+          content: 'تحديث التوصيل: طلبك رقم {{order_number}} في طريقه إليك. سيصل خلال {{estimated_time}}.',
+          variables: ['order_number', 'estimated_time']
+        },
+        {
+          name: 'Payment Confirmation',
+          type: 'PAYMENT_UPDATE' as UtilityMessageType,
+          content: 'تأكيد الدفع: تم استلام مبلغ {{amount}} بنجاح لطلب رقم {{order_number}}.',
+          variables: ['amount', 'order_number']
+        },
+        {
+          name: 'Account Security Alert',
+          type: 'ACCOUNT_NOTIFICATION' as UtilityMessageType,
+          content: 'تنبيه أمني: تم تسجيل دخول جديد إلى حسابك من {{location}} في {{time}}.',
+          variables: ['location', 'time']
+        },
+        {
+          name: 'Appointment Reminder',
+          type: 'APPOINTMENT_REMINDER' as UtilityMessageType,
+          content: 'تذكير بالموعد: موعدك المحدد في {{date}} الساعة {{time}} مع {{service_provider}}.',
+          variables: ['date', 'time', 'service_provider']
+        }
+      ];
+
+      let createdCount = 0;
+      for (const template of defaultTemplates) {
+        try {
+          await this.createTemplate(merchantId, template);
+          createdCount++;
+          this.logger.info('Default template created', { 
+            merchantId, 
+            templateName: template.name,
+            templateType: template.type
+          });
+        } catch (error) {
+          this.logger.error('Failed to create default template', error, { 
+            merchantId, 
+            templateName: template.name 
+          });
+          // Continue with other templates even if one fails
+        }
+      }
+
+      this.logger.info('Default templates creation completed', { 
+        merchantId, 
+        createdCount,
+        totalTemplates: defaultTemplates.length,
+        event: 'createDefaultTemplates'
+      });
+    } catch (error) {
+      this.logger.error('Failed to create default templates', error, { merchantId });
       throw error;
     }
   }

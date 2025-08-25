@@ -1,7 +1,6 @@
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { performHealthCheck } from './RedisSimpleHealthCheck.js';
-import type { DatabaseError } from '../types/database.js';
 
 // Health check result types
 export interface HealthCheckResult {

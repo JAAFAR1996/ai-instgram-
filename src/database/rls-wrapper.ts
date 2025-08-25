@@ -8,7 +8,6 @@
 import { randomUUID } from 'crypto';
 import { getDatabase } from '../db/adapter.js';
 import { getLogger } from '../services/logger.js';
-import { withTx } from '../db/index.js';
 import type { Sql } from '../types/sql.js';
 import type { SqlFunction } from '../db/sql-template.js';
 import { q } from '../db/safe-query.js';

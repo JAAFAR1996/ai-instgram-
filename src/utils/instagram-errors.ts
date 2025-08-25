@@ -5,7 +5,8 @@
  * ===============================================
  */
 
-import type { InstagramError, InstagramErrorCode, SendResult } from '../types/instagram.js';
+import type { InstagramError, SendResult } from '../types/instagram.js';
+import { InstagramErrorCode } from '../types/instagram.js';
 
 /**
  * Error categorization function

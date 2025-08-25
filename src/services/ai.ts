@@ -254,7 +254,7 @@ export class AIService {
       // Service enablement check
       if (!(await this.isAIEnabled(context.merchantId))) {
         this.logger.warn('AI disabled by ServiceController; returning fallback', { merchantId: context.merchantId });
-        return this.getFallbackResponse(context);
+        return this.getFallbackResponse();
       }
 
       // Build conversation prompt
@@ -299,12 +299,12 @@ export class AIService {
           merchantId: context.merchantId,
           customerId: context.customerId
         });
-        return this.getFallbackResponse(context);
+        return this.getFallbackResponse();
       }
       
       if (!this.validateAIResponse(aiResponse)) {
         this.logger.error("AI JSON schema validation failed", { got: aiResponse });
-        return this.getFallbackResponse(context);
+        return this.getFallbackResponse();
       }
       
       // Add metadata
@@ -329,7 +329,7 @@ export class AIService {
       });
       
       // Return fallback response
-      return this.getFallbackResponse(context);
+      return this.getFallbackResponse();
     }
   }
 

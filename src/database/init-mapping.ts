@@ -1,5 +1,4 @@
 import { Pool } from 'pg';
-import { requireMerchantId } from '../utils/merchant.js';
 import { getConfig } from '../config/index.js';
 import { getLogger } from '../services/logger.js';
 

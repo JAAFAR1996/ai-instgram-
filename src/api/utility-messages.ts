@@ -140,32 +140,23 @@ app.post('/api/utility-messages/:merchantId/templates',
       
       const utilityService = getUtilityMessagesService();
       
-      const result = await utilityService.createUtilityTemplate(merchantId, templateData);
+      const result = await utilityService.createTemplate(merchantId, templateData);
       
-      if (result.success) {
-        console.log(`✅ Utility template created for merchant ${merchantId}`);
-        
-        return c.json({
-          success: true,
-          template_id: result.template_id,
-          name: templateData.name,
-          type: templateData.type,
-          approved: true, // Auto-approved for page-owned templates (2025)
-          created_at: new Date().toISOString(),
-          compliance_note: {
-            ar: 'تم الموافقة على القالب تلقائياً - يمكن استخدامه فوراً',
-            en: 'Template auto-approved - ready for immediate use'
-          }
-        });
-      } else {
-        console.error(`❌ Failed to create utility template for merchant ${merchantId}:`, result.error);
-        
-        return c.json({
-          success: false,
-          error: result.error,
-          template_name: templateData.name
-        }, 400);
-      }
+      console.log(`✅ Utility template created for merchant ${merchantId}`);
+      
+      return c.json({
+        success: true,
+        template_id: result.id,
+        name: result.name,
+        type: result.type,
+        approved: result.approved,
+        created_at: result.created_at.toISOString(),
+        updated_at: result.updated_at.toISOString(),
+        compliance_note: {
+          ar: 'تم الموافقة على القالب تلقائياً - يمكن استخدامه فوراً',
+          en: 'Template auto-approved - ready for immediate use'
+        }
+      });
       
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
@@ -269,8 +260,11 @@ app.post('/api/utility-messages/:merchantId/setup-defaults',
       const { merchantId } = c.req.valid('param');
       
       const utilityService = getUtilityMessagesService();
+      
+      // Create default templates for the merchant
       await utilityService.createDefaultTemplates(merchantId);
       
+      // Get all templates including the newly created ones
       const templates = await utilityService.getTemplates(merchantId);
       
       return c.json({

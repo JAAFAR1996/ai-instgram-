@@ -5,7 +5,6 @@
  * ===============================================
  */
 
-import { Pool } from 'pg';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { getLogger } from '../services/logger.js';
@@ -156,8 +155,6 @@ export async function getMigrationStatus(): Promise<{
       'SELECT name, applied_at FROM _migrations ORDER BY applied_at'
     );
 
-    const executedSet = new Set(executedMigrations.map((m: any) => m.name));
-    
     const migrations = allFiles.map(file => {
       const executed = executedMigrations.find((m: any) => m.name === file);
       return {
