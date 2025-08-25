@@ -56,7 +56,7 @@ async function getRateLimiter(type: string) {
     });
   } else {
     // Memory fallback
-    const { RateLimiterMemory } = require('rate-limiter-flexible');
+    const { RateLimiterMemory } = await import('rate-limiter-flexible');
     rateLimiters[type] = new RateLimiterMemory({
       points: DEFAULT_RATE_LIMIT,
       duration: DEFAULT_WINDOW_MS / 1000,
