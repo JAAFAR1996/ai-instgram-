@@ -49,20 +49,19 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
  */
 function createPoolConfig(): PoolConfig {
   const config = getConfig();
-  const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
   
   return {
     connectionString: config.database.url,
     ssl: config.database.ssl ? { 
       rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false'
     } : false,
-    max: Number(process.env.DB_MAX_CONNECTIONS || process.env.DATABASE_POOL_MAX || (isRender ? 8 : 15)),
-    min: Number(process.env.DATABASE_POOL_MIN || (isRender ? 2 : Math.min(5, Math.floor(15 / 4)))),
+    max: Number(process.env.DB_MAX_CONNECTIONS || process.env.DATABASE_POOL_MAX || 15),
+    min: Number(process.env.DATABASE_POOL_MIN || Math.min(5, Math.floor(15 / 4))),
     idleTimeoutMillis: 15000,
     connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT || 8000),
     allowExitOnIdle: false,
-    statement_timeout: isRender ? 25000 : 30000,
-    query_timeout: isRender ? 25000 : 30000,
+    statement_timeout: 30000,
+    query_timeout: 30000,
   };
 }
 

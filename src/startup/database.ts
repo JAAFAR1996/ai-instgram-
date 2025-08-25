@@ -26,8 +26,6 @@ export function initializePool(): Pool {
     throw new Error('DATABASE_URL environment variable is required');
   }
 
-  const isRender = process.env.IS_RENDER === 'true';
-
   pool = new Pool({
     connectionString: databaseUrl,
     ssl: databaseUrl.includes('sslmode=require') ? {
