@@ -66,7 +66,7 @@ export class CacheService {
       this.stats.errors++;
       log.warn('Cache get failed, falling back to null', {
         key: fullKey,
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
       return null;
     }
@@ -104,7 +104,7 @@ export class CacheService {
       this.stats.errors++;
       log.warn('Cache set failed', {
         key: fullKey,
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
       return false;
     }
@@ -135,7 +135,7 @@ export class CacheService {
       this.stats.errors++;
       log.warn('Cache delete failed', {
         key: fullKey,
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
       return false;
     }
@@ -161,7 +161,7 @@ export class CacheService {
       this.stats.errors++;
       log.warn('Cache exists check failed', {
         key: fullKey,
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
       return false;
     }
@@ -195,7 +195,7 @@ export class CacheService {
       this.stats.errors++;
       log.warn('Cache mget failed', {
         keys: fullKeys,
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
       return keys.map(() => null);
     }
@@ -234,7 +234,7 @@ export class CacheService {
       this.stats.errors++;
       log.warn('Cache mset failed', {
         count: entries.length,
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
       return false;
     }

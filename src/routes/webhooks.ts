@@ -216,7 +216,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         const jobId = randomUUID();
         await spool.spoolJob({
           jobId,
-          jobType: 'instagram-webhook',
+          jobType: 'WEBHOOK_PROCESSING',
           jobData: jobPayload,
           priority: 'NORMAL',
           merchantId
