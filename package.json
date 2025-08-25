@@ -51,6 +51,10 @@
     "docker:prod": "docker-compose -f docker-compose.prod.yml up -d",
     "docker:stop": "docker-compose down",
     "security:audit": "bun audit",
+    "security:fix": "npm audit fix --force",
+    "deps:update": "npm update",
+    "deps:outdated": "npm outdated",
+    "deps:clean": "npm ls inflight && npm update && npm audit fix --force",
     "logs": "docker-compose logs -f api",
     "check-env": "node check-env.cjs",
     "check-env:prod": "NODE_ENV=production node check-env.cjs"
@@ -109,11 +113,16 @@
     "@vitest/coverage-v8": "^3.2.4",
     "bun-types": "^1.0.0",
     "cross-env": "^7.0.3",
-    "esbuild": "^0.19.0",
+    "esbuild": "^0.25.9",
     "eslint": "^9.34.0",
     "tsx": "^4.20.4",
     "typescript": "~5.9.2",
     "typescript-eslint": "^8.40.0",
     "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "inflight": "^1.0.6",
+    "glob": "^10.0.0",
+    "node-domexception": "^1.0.0"
   }
 }
