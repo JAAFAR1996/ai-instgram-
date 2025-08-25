@@ -18,52 +18,53 @@ import { getConfig } from '../config/index.js';
 const clean = (v?: string | null) =>
   (v ?? '').replace(/[\r\n]/g, '').trim();
 
-// Redis connection for distributed rate limiting
 const config = getConfig();
-const redisClient = await getRedisConnectionManager()
-  .getConnection(RedisUsageType.CACHING);
+let redisClient: any = null;
+
+async function getRedisClient() {
+  if (process.env.REDIS_ENABLED === 'false') return null;
+  
+  if (!redisClient) {
+    try {
+      redisClient = await getRedisConnectionManager()
+        .getConnection(RedisUsageType.CACHING);
+    } catch (error) {
+      console.warn('Redis not available, using memory fallback');
+      return null;
+    }
+  }
+  return redisClient;
+}
 
 // Rate limiter configurations
 const DEFAULT_RATE_LIMIT = parseInt(process.env.RATE_LIMIT_MAX || '100');
 const DEFAULT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000');
 
-const rateLimiters = {
-  // General API endpoints
-  general: new RateLimiterRedis({
-    storeClient: redisClient,
-    keyPrefix: 'api_general',
-    points: DEFAULT_RATE_LIMIT, // requests
-    duration: DEFAULT_WINDOW_MS / 1000, // per window seconds
-    blockDuration: 60, // block for 60 seconds
-  }),
+const rateLimiters: any = {};
 
-  // Per merchant rate limiting
-  merchant: new RateLimiterRedis({
-    storeClient: redisClient,
-    keyPrefix: 'api_merchant',
-    points: parseInt(process.env.MERCHANT_RATE_LIMIT || '500'), // requests per merchant
-    duration: parseInt(process.env.MERCHANT_RATE_WINDOW || '60'), // per 60 seconds
-    blockDuration: 120, // block for 2 minutes
-  }),
-
-  // Webhook endpoints (higher limits)
-  webhook: new RateLimiterRedis({
-    storeClient: redisClient,
-    keyPrefix: 'webhook',
-    points: parseInt(process.env.WEBHOOK_RATE_LIMIT || '1000'), // requests
-    duration: parseInt(process.env.WEBHOOK_RATE_WINDOW || '60'), // per 60 seconds
-    blockDuration: 30, // block for 30 seconds
-  }),
-
-  // Message sending (strict limits)
-  messaging: new RateLimiterRedis({
-    storeClient: redisClient,
-    keyPrefix: 'messaging',
-    points: parseInt(process.env.MESSAGING_RATE_LIMIT || '20'), // messages per customer
-    duration: parseInt(process.env.MESSAGING_RATE_WINDOW || '60'), // per 60 seconds
-    blockDuration: 300, // block for 5 minutes
-  }),
-};
+async function getRateLimiter(type: string) {
+  if (rateLimiters[type]) return rateLimiters[type];
+  
+  const redis = await getRedisClient();
+  if (redis) {
+    rateLimiters[type] = new RateLimiterRedis({
+      storeClient: redis,
+      keyPrefix: `api_${type}`,
+      points: DEFAULT_RATE_LIMIT,
+      duration: DEFAULT_WINDOW_MS / 1000,
+      blockDuration: 60,
+    });
+  } else {
+    // Memory fallback
+    const { RateLimiterMemory } = require('rate-limiter-flexible');
+    rateLimiters[type] = new RateLimiterMemory({
+      points: DEFAULT_RATE_LIMIT,
+      duration: DEFAULT_WINDOW_MS / 1000,
+    });
+  }
+  
+  return rateLimiters[type];
+}
 
 export interface SecurityContext {
   traceId: string;
