@@ -171,6 +171,12 @@ export class Logger {
   private diskSpaceCheckTimer: NodeJS.Timeout | null = null;
   private totalLogsWritten = 0;
   private startTime = Date.now();
+  
+  // Duplicate message protection
+  private duplicateCache: Map<string, { count: number; firstSeen: number; lastSeen: number }> = new Map();
+  private duplicateThreshold = 5; // Max duplicates before throttling
+  private duplicateWindow = 60000; // 1 minute window
+  private duplicateCleanupTimer: NodeJS.Timeout | null = null;
 
   /**
    * Ensure log directory exists with proper permissions
@@ -209,6 +215,7 @@ export class Logger {
     this.setupLogBatching();
     this.setupMemoryMonitoring();
     this.setupDiskSpaceMonitoring();
+    this.setupDuplicateProtection();
   }
 
   /**
@@ -254,6 +261,106 @@ export class Logger {
     this.memoryCheckTimer = setInterval(() => {
       this.checkMemoryUsage();
     }, checkInterval);
+  }
+
+  /**
+   * Setup duplicate message protection cleanup
+   */
+  private setupDuplicateProtection(): void {
+    // Clean up old entries every 5 minutes
+    this.duplicateCleanupTimer = setInterval(() => {
+      this.cleanupDuplicateCache();
+    }, 300000); // 5 minutes
+  }
+
+  /**
+   * Clean up old entries from duplicate cache
+   */
+  private cleanupDuplicateCache(): void {
+    const now = Date.now();
+    const cutoff = now - this.duplicateWindow;
+    
+    for (const [key, entry] of this.duplicateCache.entries()) {
+      if (entry.lastSeen < cutoff) {
+        this.duplicateCache.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Generate unique key for log message to detect duplicates
+   */
+  private generateMessageKey(level: LogLevel, message: string, context?: LogContext): string {
+    const contextStr = context ? JSON.stringify(context) : '';
+    return `${level}:${message}:${contextStr}`;
+  }
+
+  /**
+   * Check if message is duplicate and should be throttled
+   */
+  private shouldThrottleDuplicate(level: LogLevel, message: string, context?: LogContext): boolean {
+    const key = this.generateMessageKey(level, message, context);
+    const now = Date.now();
+    
+    const entry = this.duplicateCache.get(key);
+    if (!entry) {
+      // First occurrence
+      this.duplicateCache.set(key, { count: 1, firstSeen: now, lastSeen: now });
+      return false;
+    }
+    
+    // Update entry
+    entry.count++;
+    entry.lastSeen = now;
+    
+    // Check if within time window
+    if (now - entry.firstSeen > this.duplicateWindow) {
+      // Reset if outside window
+      this.duplicateCache.set(key, { count: 1, firstSeen: now, lastSeen: now });
+      return false;
+    }
+    
+    // Throttle if too many duplicates
+    if (entry.count > this.duplicateThreshold) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Log throttled duplicate message
+   */
+  private logThrottledDuplicate(level: LogLevel, message: string, context?: LogContext): void {
+    const key = this.generateMessageKey(level, message, context);
+    const entry = this.duplicateCache.get(key);
+    
+    if (entry) {
+      const throttledMessage = `[THROTTLED] ${message} (repeated ${entry.count} times in ${Math.round((Date.now() - entry.firstSeen) / 1000)}s)`;
+      const throttledEntry: LogEntry = {
+        level,
+        timestamp: new Date().toISOString(),
+        message: throttledMessage,
+        context: {
+          ...context,
+          _throttled: true,
+          _duplicateCount: entry.count,
+          _timeWindow: Math.round((Date.now() - entry.firstSeen) / 1000)
+        },
+        metadata: {
+          pid: process.pid,
+          memoryUsage: process.memoryUsage(),
+          uptime: process.uptime(),
+          environment: getConfig().environment,
+          ...(process.env.npm_package_version && { version: process.env.npm_package_version })
+        }
+      };
+      
+      this.writeToConsole(throttledEntry);
+      
+      // Reset counter after logging throttled message
+      entry.count = 0;
+    }
   }
 
   /**
@@ -514,6 +621,12 @@ export class Logger {
    */
   private async log(level: LogLevel, message: string, context?: LogContext & { err?: unknown; error?: unknown }): Promise<void> {
     if (!this.shouldLog(level)) return;
+
+    // Check for duplicate message throttling
+    if (this.shouldThrottleDuplicate(level, message, context)) {
+      this.logThrottledDuplicate(level, message, context);
+      return;
+    }
 
     const ctx = this.redactSensitiveData({ ...this.context, ...(context ?? {}) }) as LogContext & { err?: unknown; error?: unknown };
     const { err, error, ...safeCtx } = ctx as Record<string, unknown>;
@@ -793,6 +906,14 @@ export class Logger {
       clearInterval(this.diskSpaceCheckTimer);
       this.diskSpaceCheckTimer = null;
     }
+
+    if (this.duplicateCleanupTimer) {
+      clearInterval(this.duplicateCleanupTimer);
+      this.duplicateCleanupTimer = null;
+    }
+
+    // Clear duplicate cache
+    this.duplicateCache.clear();
 
     // Flush remaining logs
     await this.flushBatch();
