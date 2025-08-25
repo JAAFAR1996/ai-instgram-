@@ -26,12 +26,17 @@ export function initializePool(): Pool {
     throw new Error('DATABASE_URL environment variable is required');
   }
 
+  const isRender = process.env.IS_RENDER === 'true';
+
   pool = new Pool({
     connectionString: databaseUrl,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    max: 20,
+    ssl: databaseUrl.includes('sslmode=require') ? {
+      rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false'
+    } : false,
+    max: Number(process.env.DB_MAX_CONNECTIONS || process.env.DATABASE_POOL_MAX || 20),
+    min: Number(process.env.DATABASE_POOL_MIN || 2),
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
+    connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT || 10000),
   });
 
   pool.on('error', (err) => {
