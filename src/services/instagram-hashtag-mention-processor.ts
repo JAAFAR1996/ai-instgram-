@@ -234,7 +234,7 @@ export class InstagramHashtagMentionProcessor {
               : 'استراتيجية مراقبة - تابع نمو هذا الهاشتاغ'
           };
         } catch (error) {
-          logger.error(`Failed to process trend for hashtag: ${trend.hashtag}`, error);
+          logger.error(`Failed to process trend for hashtag: ${trend.hashtag}`, { error });
           return null;
         }
       });
@@ -653,7 +653,7 @@ export class InstagramHashtagMentionProcessor {
           `);
           return Promise.allSettled(batchPromises);
         } catch (error) {
-          logger.error('Failed to process hashtag batch:', error);
+          logger.error('Failed to process hashtag batch:', { error });
           return Promise.resolve([]);
         }
       });
@@ -696,7 +696,7 @@ export class InstagramHashtagMentionProcessor {
           `);
           return Promise.allSettled(batchPromises);
         } catch (error) {
-          logger.error('Failed to process mention batch:', error);
+          logger.error('Failed to process mention batch:', { error });
           return Promise.resolve([]);
         }
       });
@@ -719,7 +719,7 @@ export class InstagramHashtagMentionProcessor {
       }
 
     } catch (error) {
-      logger.error('❌ Store hashtag/mention data failed:', error);
+      logger.error('❌ Store hashtag/mention data failed:', { error });
     }
   }
 

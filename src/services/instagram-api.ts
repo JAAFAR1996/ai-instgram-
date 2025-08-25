@@ -102,7 +102,6 @@ function isInstagramProfile(data: unknown): data is InstagramProfile {
 }
 
 export class InstagramAPIClient {
-  private readonly baseUrl = GRAPH_API_BASE_URL;
   private encryptionService!: EncryptionService;
   // removed unused fields
   private rateLimiter!: MetaRateLimiter;
@@ -112,8 +111,8 @@ export class InstagramAPIClient {
   private credentials: InstagramAPICredentials | null = null;
   // removed unused fields
 
-  constructor(_container: DIContainer) {
-    this.logger = _container.get('logger');
+  constructor(container: DIContainer) {
+    this.logger = container.get('logger');
     
     this.initializeDependencies();
   }
@@ -253,8 +252,6 @@ export class InstagramAPIClient {
         true
       );
 
-      const rateLimitRemaining =
-        this.parseRateLimitHeaders(response) ?? 200;
       const result = (await response.json()) as { message_id?: string };
 
       const out: InstagramAPIResponse = {
@@ -474,7 +471,7 @@ export class InstagramAPIClient {
         verify_token: credentials.webhookVerifyToken
       };
 
-      const _result = await this.graphRequest<{ success?: boolean }>(
+      await this.graphRequest<{ success?: boolean }>(
         'POST',
         `/${credentials.pageId}/subscribed_apps`,
         (credentials.accessToken || credentials.pageAccessToken)!,

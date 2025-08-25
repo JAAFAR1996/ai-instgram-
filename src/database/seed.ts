@@ -6,7 +6,6 @@
  */
 
 import { getDatabase } from '../db/adapter.js';
-import { getPool, withTx } from '../db/index.js';
 import { getConfig } from '../config/index.js';
 import { getLogger } from '../services/logger.js';
 
@@ -14,7 +13,6 @@ const log = getLogger({ component: 'database-seeder' });
 
 export class DatabaseSeeder {
   private db = getDatabase();
-  private pool = getPool();
 
   /**
    * Check if seeding is allowed in current environment

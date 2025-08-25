@@ -75,7 +75,7 @@ export function getPool(): Pool {
     pool = new Pool(config);
 
     // Enhanced pool event handlers
-    pool.on('connect', (client) => {
+    pool.on('connect', () => {
       poolHealthStats.totalConnections++;
       poolHealthStats.successfulConnections++;
       log.debug('New client connected to PostgreSQL', {
@@ -84,14 +84,14 @@ export function getPool(): Pool {
       });
     });
 
-    pool.on('acquire', (client) => {
+    pool.on('acquire', () => {
       log.debug('Client acquired from pool', {
         idleCount: pool?.idleCount,
         totalCount: pool?.totalCount
       });
     });
 
-    pool.on('error', (err, client) => {
+    pool.on('error', (err) => {
       poolHealthStats.failedConnections++;
       const dbError = err as DatabaseError;
       log.error('Database pool error:', {
@@ -105,7 +105,7 @@ export function getPool(): Pool {
       handleConnectionFailure(err);
     });
 
-    pool.on('remove', (client) => {
+    pool.on('remove', () => {
       log.debug('Client removed from pool', {
         reason: 'idle_timeout_or_error',
         remainingConnections: pool?.totalCount
@@ -322,7 +322,6 @@ function startPoolHealthMonitoring(): void {
 async function monitorPoolHealth(): Promise<void> {
   try {
     const stats = getPoolStats();
-    const config = getConfig();
     
     if (!stats || !pool) return;
     

@@ -26,7 +26,6 @@ export interface RLSContext {
 export class RLSDatabase {
   private db = getDatabase();
   private currentContext: RLSContext = {};
-  private readonly TRANSACTION_TIMEOUT = 30000; // 30 seconds
 
   /**
    * Validate UUID format

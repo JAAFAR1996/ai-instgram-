@@ -170,7 +170,7 @@ export class CrossPlatformConversationManager {
           conversationCount: platformConversations.length,
           messageCount: totalMessages,
           averageResponseTime: Math.round(Number.isFinite(avgResponseTime) ? (avgResponseTime || 0) : 0),
-          preferredTime: await this.calculatePreferredTime(merchantId, platform as Platform, platformConversations[0]?.id ?? ''),
+          preferredTime: await this.calculatePreferredTime(),
           lastSeen: new Date(platformConversations[0]?.last_message_at || platformConversations[0]?.updated_at || new Date().toISOString()),
           stage: platformConversations[0]?.conversation_stage || 'GREETING',
           context: CrossPlatformConversationManager.jsonParseSafe(platformConversations[0]?.session_data, {} as Record<string, unknown>)
@@ -685,7 +685,7 @@ export class CrossPlatformConversationManager {
   /**
    * Private: Additional helper methods would be implemented here
    */
-  private async calculatePreferredTime(merchantId: string, platform: Platform, conversationId: string): Promise<string> {
+  private async calculatePreferredTime(): Promise<string> {
     // Implementation for calculating preferred interaction time
     return 'evening';
   }

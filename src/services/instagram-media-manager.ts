@@ -10,9 +10,6 @@ import { ExpiringMap } from '../utils/expiring-map.js';
 import { getDatabase } from '../db/adapter.js';
 import { createLogger } from './logger.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
-import type { InstagramContext } from './instagram-ai.js';
-import type { ConversationStage } from '../types/database.js';
-
 import type { MediaContent } from '../types/social.js';
 
 export interface MediaMessage {

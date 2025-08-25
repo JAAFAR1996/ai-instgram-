@@ -67,7 +67,6 @@ export class DatabaseAdapter implements IDatabase {
   private sql: SqlFunction;
   private queryMetrics: QueryMetrics[] = [];
   private readonly MAX_METRICS_HISTORY = 1000;
-  private readonly DEFAULT_QUERY_TIMEOUT = 30000; // 30 seconds
   private readonly DEFAULT_TRANSACTION_TIMEOUT = 60000; // 60 seconds
 
   constructor() {
