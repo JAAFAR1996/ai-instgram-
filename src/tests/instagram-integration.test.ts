@@ -8,7 +8,7 @@
 
 // TEMPORARILY DISABLED DUE TO TYPE CONFLICTS
 /* 
-import { describe, test, expect, beforeAll, afterAll, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll, beforeEach, mock } from 'vitest';
 import { RateLimiterMemory } from 'rate-limiter-flexible';
 import { getInstagramAIService } from '../services/instagram-ai.js';
 import { getInstagramClient } from '../services/instagram-api.js';
@@ -17,7 +17,7 @@ import { getConversationAIOrchestrator } from '../services/conversation-ai-orche
 import { getDatabase } from '../db/adapter.js';
 
 // Mock OpenAI to avoid API calls and timeouts
-mock.module('openai', () => {
+vi.mock('openai', () => {
   return {
     default: class OpenAI {
       chat = {
@@ -44,7 +44,7 @@ mock.module('openai', () => {
 });
 
 // Mock security middleware to use in-memory rate limiter and no-op headers
-mock.module('../middleware/security.js', () => {
+vi.mock('../middleware/security.js', () => {
   const limiter = new RateLimiterMemory({ points: 3, duration: 60 });
   return {
     securityHeaders: async (_c: any, next: any) => {
@@ -63,7 +63,7 @@ mock.module('../middleware/security.js', () => {
 });
 
 // Stub meta rate limiter to always allow
-mock.module('../services/meta-rate-limiter.js', () => ({
+vi.mock('../services/meta-rate-limiter.js', () => ({
   getMetaRateLimiter: () => ({
     checkRedisRateLimit: async () => ({ allowed: true, remaining: 1, resetTime: Date.now() + 1000 })
   })

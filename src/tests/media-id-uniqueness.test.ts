@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from 'vitest';
 import { InstagramWebhookHandler } from '../services/instagram-webhook.js';
 
 describe('Media ID generation', () => {

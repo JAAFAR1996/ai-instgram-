@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { migrate, rollback, getMigrationStatus, createMigrationTable } from './migrate.js';
 import { getDatabase } from '../db/adapter.js';
 import { getPool } from '../db/index.js';

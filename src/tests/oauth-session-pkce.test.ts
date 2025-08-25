@@ -1,8 +1,8 @@
-import { describe, test, expect, mock, afterEach } from 'bun:test';
+import { describe, test, expect, mock, afterEach } from 'vitest';
 import crypto from 'crypto';
 
 // Mock environment configuration
-mock.module('../config/environment.js', () => ({
+vi.mock('../config/environment.js', () => ({
   getConfig: () => ({
     instagram: {
       appId: '1234567890',
@@ -78,11 +78,11 @@ const sql = async (strings: TemplateStringsArray, ...values: any[]) => {
   return [];
 };
 
-mock.module('../database/connection.js', () => ({
+vi.mock('../database/connection.js', () => ({
   getDatabase: () => ({ getSQL: () => sql })
 }));
 
-mock.module('../services/RedisConnectionManager.js', () => ({
+vi.mock('../services/RedisConnectionManager.js', () => ({
   getRedisConnectionManager: () => ({
     getConnection: async () => ({
       setex: async () => {},

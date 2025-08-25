@@ -1,11 +1,11 @@
-import { describe, test, expect, beforeEach, afterAll, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterAll, mock } from 'vitest';
 
 const sendImageMessage = mock(async (_recipient: string, _url: string, _caption: string) => ({
   success: true,
   messageId: 'msg123'
 }));
 
-mock.module('../services/instagram-api.js', () => ({
+vi.mock('../services/instagram-api.js', () => ({
   getInstagramClient: () => ({
     initialize: mock(async () => {}),
     sendImageMessage,
@@ -15,11 +15,11 @@ mock.module('../services/instagram-api.js', () => ({
   clearInstagramClient: () => {}
 }));
 
-mock.module('../database/connection.js', () => ({
+vi.mock('../database/connection.js', () => ({
   getDatabase: () => ({ getSQL: () => ({}) })
 }));
 
-mock.module('../services/conversation-ai-orchestrator.js', () => ({
+vi.mock('../services/conversation-ai-orchestrator.js', () => ({
   getConversationAIOrchestrator: () => ({})
 }));
 

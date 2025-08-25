@@ -4,7 +4,7 @@ services:
     runtime: node
     repo: https://github.com/YOUR_USERNAME/YOUR_REPO
     branch: main
-    buildCommand: echo "No build needed"
+    buildCommand: npm ci && npm run build
     startCommand: node production.cjs
     envVars:
       - key: NODE_ENV
@@ -37,5 +37,18 @@ services:
         value: https://ai-instgram.onrender.com/auth/instagram/callback
       - key: CORS_ORIGINS
         value: https://ai-instgram.onrender.com,https://graph.facebook.com
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
     healthCheckPath: /health
     autoDeploy: true
+    plan: starter
+    region: oregon
+    numInstances: 1
+    disk:
+      name: ai-sales-data
+      mountPath: /app/data
+      sizeGB: 1

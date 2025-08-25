@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect } from 'vitest';
 import EncryptionService, { verifyHMAC, readRawBody } from './encryption.js';
 
 describe('verifyHMAC', () => {

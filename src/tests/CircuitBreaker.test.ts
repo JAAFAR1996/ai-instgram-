@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, mock } from 'vitest';
 import { CircuitBreaker } from './CircuitBreaker.js';
 
 // Mock logger to avoid console noise during tests
@@ -15,7 +15,7 @@ const mockLogger = {
   error: mock(() => {})
 };
 
-mock.module('./logger.js', () => ({
+vi.mock('./logger.js', () => ({
   createLogger: () => mockLogger,
   getLogger: () => mockLogger
 }));

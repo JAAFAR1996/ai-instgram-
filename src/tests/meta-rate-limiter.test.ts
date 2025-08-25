@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { MetaRateLimiter } from '../services/meta-rate-limiter.ts';
 
 class FakeMulti {

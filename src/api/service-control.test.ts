@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeAll, afterAll, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { RateLimiterMemory } from 'rate-limiter-flexible';
 import { getServiceControlAPI } from './service-controller.js';
 import { getDatabase } from '../db/adapter.js';
@@ -43,7 +43,7 @@ async function initializeDatabase() {
 }
 
 // Mock security middleware لاختبارات مستقلة
-mock.module('../middleware/security.js', () => {
+vi.mock('../middleware/security.js', () => {
   const limiter = new RateLimiterMemory({ points: 10, duration: 60 });
   return {
     securityHeaders: async (_c: any, next: any) => {
@@ -62,7 +62,7 @@ mock.module('../middleware/security.js', () => {
 });
 
 // Mock Redis for independent testing
-mock.module('../services/RedisConnectionManager.js', () => ({
+vi.mock('../services/RedisConnectionManager.js', () => ({
   getRedisConnectionManager: () => ({
     getConnection: async () => ({
       get: async () => null,

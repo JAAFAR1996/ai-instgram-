@@ -3,7 +3,7 @@
  * Critical security tests for tenant isolation
  */
 
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { Pool, PoolClient } from 'pg';
 import { getConfig } from '../config/environment.js';
 

@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'vitest';
 import {
   runStartupValidation,
   validateMerchantConfig,
@@ -84,7 +84,7 @@ const mockSQL = mock((strings: TemplateStringsArray, ...values: any[]) => {
 });
 
 // Mock modules
-mock.module('../config/environment.js', () => ({
+vi.mock('../config/environment.js', () => ({
   getConfig: mock(() => mockConfig),
   EnvironmentValidationError: class extends Error {
     constructor(errors: string[]) {
@@ -93,11 +93,11 @@ mock.module('../config/environment.js', () => ({
   }
 }));
 
-mock.module('../database/connection.js', () => ({
+vi.mock('../database/connection.js', () => ({
   getDatabase: mock(() => mockDatabase)
 }));
 
-mock.module('../config/graph-api.js', () => ({
+vi.mock('../config/graph-api.js', () => ({
   GRAPH_API_BASE_URL: 'https://graph.facebook.com/v23.0'
 }));
 
@@ -255,7 +255,7 @@ describe('Startup Validation - التحقق من صحة البدء', () => {
       };
 
       const mockGetConfig = mock(() => invalidConfig);
-      mock.module('../config/environment.js', () => ({
+      vi.mock('../config/environment.js', () => ({
         getConfig: mockGetConfig,
         EnvironmentValidationError: class extends Error {}
       }));
@@ -276,7 +276,7 @@ describe('Startup Validation - التحقق من صحة البدء', () => {
       };
 
       const mockGetConfig = mock(() => invalidConfig);
-      mock.module('../config/environment.js', () => ({
+      vi.mock('../config/environment.js', () => ({
         getConfig: mockGetConfig,
         EnvironmentValidationError: class extends Error {}
       }));
@@ -298,7 +298,7 @@ describe('Startup Validation - التحقق من صحة البدء', () => {
       };
 
       const mockGetConfig = mock(() => invalidConfig);
-      mock.module('../config/environment.js', () => ({
+      vi.mock('../config/environment.js', () => ({
         getConfig: mockGetConfig,
         EnvironmentValidationError: class extends Error {}
       }));
@@ -509,7 +509,7 @@ describe('Startup Validation - التحقق من صحة البدء', () => {
       };
 
       const mockGetConfig = mock(() => prodConfig);
-      mock.module('../config/environment.js', () => ({
+      vi.mock('../config/environment.js', () => ({
         getConfig: mockGetConfig,
         EnvironmentValidationError: class extends Error {}
       }));
@@ -537,7 +537,7 @@ describe('Startup Validation - التحقق من صحة البدء', () => {
       };
 
       const mockGetConfig = mock(() => weakConfig);
-      mock.module('../config/environment.js', () => ({
+      vi.mock('../config/environment.js', () => ({
         getConfig: mockGetConfig,
         EnvironmentValidationError: class extends Error {}
       }));
@@ -559,7 +559,7 @@ describe('Startup Validation - التحقق من صحة البدء', () => {
       };
 
       const mockGetConfig = mock(() => highRateLimitConfig);
-      mock.module('../config/environment.js', () => ({
+      vi.mock('../config/environment.js', () => ({
         getConfig: mockGetConfig,
         EnvironmentValidationError: class extends Error {}
       }));

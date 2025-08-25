@@ -8,14 +8,14 @@ process.env.INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || '0123456789abcdef
 process.env.BASE_URL = process.env.BASE_URL || 'http://localhost';
 process.env.MERCHANT_ID = process.env.MERCHANT_ID || 'merchant1';
 
-import { describe, test, expect, mock } from 'bun:test';
+import { describe, test, expect, mock } from 'vitest';
 import { getEncryptionService } from '../services/encryption.js';
 
 const encryption = getEncryptionService();
 
 describe('Instagram encrypted token retrieval', () => {
   test('initializes API client with decrypted token', async () => {
-    mock.module('../services/RedisConnectionManager.js', () => ({
+    vi.mock('../services/RedisConnectionManager.js', () => ({
       getRedisConnectionManager: () => ({
         getConnection: async () => ({
           get: async () => null,
@@ -24,10 +24,10 @@ describe('Instagram encrypted token retrieval', () => {
         })
       })
     }));
-    mock.module('../services/meta-rate-limiter.js', () => ({
+    vi.mock('../services/meta-rate-limiter.js', () => ({
       getMetaRateLimiter: () => ({ checkRedisRateLimit: async () => ({ allowed: true }) })
     }));
-    mock.module('../database/connection.js', () => ({
+    vi.mock('../database/connection.js', () => ({
       getDatabase: () => ({ getSQL: () => mock(async () => []) })
     }));
     (globalThis as any).requireMerchantId = () => 'merchant1';
@@ -55,7 +55,7 @@ describe('Instagram encrypted token retrieval', () => {
   });
 
   test('sendTextMessage uses decrypted token', async () => {
-    mock.module('../services/RedisConnectionManager.js', () => ({
+    vi.mock('../services/RedisConnectionManager.js', () => ({
       getRedisConnectionManager: () => ({
         getConnection: async () => ({ get: async () => null, setex: async () => null })
       })

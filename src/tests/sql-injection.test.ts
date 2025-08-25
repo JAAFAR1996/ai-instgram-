@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeAll } from 'bun:test';
+import { describe, test, expect, beforeAll } from 'vitest';
 import { CrossPlatformConversationManager } from '../services/cross-platform-conversation-manager.js';
 import { getDatabase } from '../db/adapter.js';
 

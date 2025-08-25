@@ -1,7 +1,7 @@
-import { describe, test, expect, mock } from 'bun:test';
+import { describe, test, expect, mock } from 'vitest';
 
 // Mock Redis connection manager to avoid actual Redis dependency
-mock.module('../services/RedisConnectionManager.js', () => ({
+vi.mock('../services/RedisConnectionManager.js', () => ({
   getRedisConnectionManager: () => ({
     getConnection: async () => ({
       get: async () => null,

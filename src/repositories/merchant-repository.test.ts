@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { MerchantRepository, type Merchant, type CreateMerchantRequest, type UpdateMerchantRequest } from './merchant-repository.js';
 import { getDatabase } from '../db/adapter.js';
 

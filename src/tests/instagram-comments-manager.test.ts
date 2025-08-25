@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'vitest';
 import { InstagramCommentsManager, getInstagramCommentsManager } from './instagram-comments-manager.js';
 import type { CommentInteraction, CommentResponse, CommentAnalytics, CommentModerationRule } from './instagram-comments-manager.js';
 
@@ -81,32 +81,32 @@ const mockLogger = {
 };
 
 // Mock modules
-mock.module('./instagram-api.js', () => ({
+vi.mock('./instagram-api.js', () => ({
   getInstagramClient: mock(() => mockInstagramClient),
   clearInstagramClient: mock()
 }));
 
-mock.module('../database/connection.js', () => ({
+vi.mock('../database/connection.js', () => ({
   getDatabase: mock(() => mockDatabase)
 }));
 
-mock.module('./conversation-ai-orchestrator.js', () => ({
+vi.mock('./conversation-ai-orchestrator.js', () => ({
   getConversationAIOrchestrator: mock(() => mockAIOrchestrator)
 }));
 
-mock.module('./RedisConnectionManager.js', () => ({
+vi.mock('./RedisConnectionManager.js', () => ({
   getRedisConnectionManager: mock(() => mockRedisManager)
 }));
 
-mock.module('./logger.js', () => ({
+vi.mock('./logger.js', () => ({
   createLogger: mock(() => mockLogger)
 }));
 
-mock.module('../middleware/idempotency.js', () => ({
+vi.mock('../middleware/idempotency.js', () => ({
   hashMerchantAndBody: mock((merchantId: string, body: any) => `hash-${merchantId}-${JSON.stringify(body).length}`)
 }));
 
-mock.module('../utils/expiring-map.js', () => ({
+vi.mock('../utils/expiring-map.js', () => ({
   ExpiringMap: mock().mockImplementation(() => ({
     get: mock(() => null),
     set: mock(),

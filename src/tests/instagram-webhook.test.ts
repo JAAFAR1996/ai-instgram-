@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'vitest';
 
 // Tests for processMessagingEvent
 
@@ -9,20 +9,20 @@ describe('InstagramWebhookHandler.processMessagingEvent', () => {
   beforeEach(async () => {
     logger = { info: mock(() => {}), error: mock(() => {}), warn: mock(() => {}) };
 
-    mock.module('../services/logger.js', () => ({
+    vi.mock('../services/logger.js', () => ({
       createLogger: () => logger,
       getLogger: () => logger
     }));
     (globalThis as any).createLogger = () => logger;
-    mock.module('../services/instagram-api.js', () => ({ getInstagramClient: () => ({}) }));
-    mock.module('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
-    mock.module('../repositories/index.js', () => ({ getRepositories: () => ({}) }));
-    mock.module('../services/message-window.js', () => ({ getMessageWindowService: () => ({ updateCustomerMessageTime: mock(async () => {}) }) }));
-    mock.module('../services/conversation-ai-orchestrator.js', () => ({ getConversationAIOrchestrator: () => ({}) }));
-    mock.module('../services/instagram-stories-manager.js', () => ({ getInstagramStoriesManager: () => ({}) }));
-    mock.module('../services/instagram-comments-manager.js', () => ({ getInstagramCommentsManager: () => ({}) }));
-    mock.module('../services/instagram-media-manager.js', () => ({ getInstagramMediaManager: () => ({}) }));
-    mock.module('../services/service-controller.js', () => ({ getServiceController: () => ({}) }));
+    vi.mock('../services/instagram-api.js', () => ({ getInstagramClient: () => ({}) }));
+    vi.mock('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
+    vi.mock('../repositories/index.js', () => ({ getRepositories: () => ({}) }));
+    vi.mock('../services/message-window.js', () => ({ getMessageWindowService: () => ({ updateCustomerMessageTime: mock(async () => {}) }) }));
+    vi.mock('../services/conversation-ai-orchestrator.js', () => ({ getConversationAIOrchestrator: () => ({}) }));
+    vi.mock('../services/instagram-stories-manager.js', () => ({ getInstagramStoriesManager: () => ({}) }));
+    vi.mock('../services/instagram-comments-manager.js', () => ({ getInstagramCommentsManager: () => ({}) }));
+    vi.mock('../services/instagram-media-manager.js', () => ({ getInstagramMediaManager: () => ({}) }));
+    vi.mock('../services/service-controller.js', () => ({ getServiceController: () => ({}) }));
 
     const mod = await import('../services/instagram-webhook.ts');
     handler = new mod.InstagramWebhookHandler();
@@ -83,20 +83,20 @@ describe('InstagramWebhookHandler.inviteCommentToDM', () => {
       replyToComment: mock(async () => ({ success: true }))
     };
 
-    mock.module('../services/logger.js', () => ({
+    vi.mock('../services/logger.js', () => ({
       createLogger: () => logger,
       getLogger: () => logger
     }));
     (globalThis as any).createLogger = () => logger;
-    mock.module('../services/instagram-api.js', () => ({ getInstagramClient: () => client }));
-    mock.module('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
-    mock.module('../repositories/index.js', () => ({ getRepositories: () => ({}) }));
-    mock.module('../services/message-window.js', () => ({ getMessageWindowService: () => ({}) }));
-    mock.module('../services/conversation-ai-orchestrator.js', () => ({ getConversationAIOrchestrator: () => ({}) }));
-    mock.module('../services/instagram-stories-manager.js', () => ({ getInstagramStoriesManager: () => ({}) }));
-    mock.module('../services/instagram-comments-manager.js', () => ({ getInstagramCommentsManager: () => ({}) }));
-    mock.module('../services/instagram-media-manager.js', () => ({ getInstagramMediaManager: () => ({}) }));
-    mock.module('../services/service-controller.js', () => ({ getServiceController: () => ({}) }));
+    vi.mock('../services/instagram-api.js', () => ({ getInstagramClient: () => client }));
+    vi.mock('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
+    vi.mock('../repositories/index.js', () => ({ getRepositories: () => ({}) }));
+    vi.mock('../services/message-window.js', () => ({ getMessageWindowService: () => ({}) }));
+    vi.mock('../services/conversation-ai-orchestrator.js', () => ({ getConversationAIOrchestrator: () => ({}) }));
+    vi.mock('../services/instagram-stories-manager.js', () => ({ getInstagramStoriesManager: () => ({}) }));
+    vi.mock('../services/instagram-comments-manager.js', () => ({ getInstagramCommentsManager: () => ({}) }));
+    vi.mock('../services/instagram-media-manager.js', () => ({ getInstagramMediaManager: () => ({}) }));
+    vi.mock('../services/service-controller.js', () => ({ getServiceController: () => ({}) }));
 
     const mod = await import('../services/instagram-webhook.ts');
     handler = new mod.InstagramWebhookHandler();

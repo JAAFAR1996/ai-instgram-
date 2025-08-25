@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeEach, afterEach, jest } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, jest } from 'vitest';
 import { Hono, Context } from 'hono';
 import { testClient } from 'hono/testing';
 import crypto from 'crypto';

@@ -1,4 +1,4 @@
-import { describe, test, expect, mock } from 'bun:test';
+import { describe, test, expect, mock } from 'vitest';
 import { retryFetch } from '../services/instagram-messaging.ts';
 
 // Helper to create mock Response

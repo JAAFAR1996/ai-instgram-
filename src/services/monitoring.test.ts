@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeAll, afterAll, beforeEach, mock } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll, beforeEach, mock } from 'vitest';
 import { MonitoringService, MetricsCollector, AlertManager, type PerformanceMetric, type AlertRule } from './monitoring.js';
 import { getDatabase } from '../db/adapter.js';
 
@@ -23,7 +23,7 @@ const mockRedisConnection = {
   del: mock(async () => 1)
 };
 
-mock.module('../services/RedisConnectionManager.js', () => ({
+vi.mock('../services/RedisConnectionManager.js', () => ({
   getRedisConnectionManager: () => ({
     getConnection: async () => mockRedisConnection
   })
@@ -36,7 +36,7 @@ const mockNotificationService = {
   sendEmail: mock(async () => ({ success: true }))
 };
 
-mock.module('../services/notification-service.js', () => ({
+vi.mock('../services/notification-service.js', () => ({
   getNotificationService: () => mockNotificationService
 }));
 
@@ -48,7 +48,7 @@ const mockLogger = {
   debug: mock(() => {})
 };
 
-mock.module('./logger.js', () => ({
+vi.mock('./logger.js', () => ({
   createLogger: () => mockLogger,
   getLogger: () => mockLogger
 }));

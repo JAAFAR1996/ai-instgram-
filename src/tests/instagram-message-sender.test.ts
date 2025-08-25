@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -8,9 +8,9 @@ describe('InstagramAPIClient.uploadMedia', () => {
   let client: any;
 
   beforeEach(async () => {
-    mock.module('../services/telemetry.js', () => ({ telemetry: { recordMetaRequest: () => {} } }));
-    mock.module('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
-    mock.module('../services/meta-rate-limiter.js', () => ({ getMetaRateLimiter: () => ({ checkRedisRateLimit: async () => ({ allowed: true }) }) }));
+    vi.mock('../services/telemetry.js', () => ({ telemetry: { recordMetaRequest: () => {} } }));
+    vi.mock('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
+    vi.mock('../services/meta-rate-limiter.js', () => ({ getMetaRateLimiter: () => ({ checkRedisRateLimit: async () => ({ allowed: true }) }) }));
     const mod = await import('../services/instagram-api.js');
     client = new mod.InstagramAPIClient();
     await fs.mkdir(tmpDir, { recursive: true });
@@ -78,9 +78,9 @@ describe('InstagramMessageSender client caching', () => {
       validateCredentials: mock(async () => {})
     };
 
-    mock.module('../services/instagram-api.js', () => ({ getInstagramClient: () => client }));
-    mock.module('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
-    mock.module('../services/message-window.js', () => ({
+    vi.mock('../services/instagram-api.js', () => ({ getInstagramClient: () => client }));
+    vi.mock('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
+    vi.mock('../services/message-window.js', () => ({
       getMessageWindowService: () => ({
         recordMerchantResponse: mock(async () => {}),
         getWindowStatus: mock(async () => ({ canSendMessage: true }))
@@ -130,7 +130,7 @@ describe('InstagramMessageSender error logging', () => {
       })
     };
 
-    mock.module('../services/logger.js', () => ({
+    vi.mock('../services/logger.js', () => ({
       getLogger: () => ({
         error: errorMock,
         info: () => {},
@@ -140,9 +140,9 @@ describe('InstagramMessageSender error logging', () => {
       })
     }));
 
-    mock.module('../services/instagram-api.js', () => ({ getInstagramClient: () => client }));
-    mock.module('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
-    mock.module('../services/message-window.js', () => ({
+    vi.mock('../services/instagram-api.js', () => ({ getInstagramClient: () => client }));
+    vi.mock('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
+    vi.mock('../services/message-window.js', () => ({
       getMessageWindowService: () => ({
         getWindowStatus: mock(async (_merchantId: string, recipient: any) => {
           if (recipient.instagram === 'user2') {
