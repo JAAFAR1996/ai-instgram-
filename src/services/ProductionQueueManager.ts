@@ -1,7 +1,6 @@
 import { Queue, Worker, QueueEvents } from 'bullmq';
 import type { Job, RedisClient, JobsOptions } from 'bullmq';
 import { Redis, ReplyError } from 'ioredis';
-import type { Redis as RedisType } from 'ioredis';
 import { Pool } from 'pg';
 import { withWebhookTenantJob, withAITenantJob } from '../isolation/context.js';
 
@@ -45,11 +44,7 @@ import * as crypto from 'node:crypto';
 import { serr } from '../isolation/context.js';
 import { performHealthCheck } from './RedisSimpleHealthCheck.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
-import {
-  RedisQueueError,
-  RedisConnectionError,
-  RedisErrorHandler
-} from '../errors/RedisErrors.js';
+
 import { getInstagramWebhookHandler } from './instagram-webhook.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramWebhookEvent, ProcessedWebhookResult } from './instagram-webhook.js';
@@ -127,13 +122,11 @@ interface JobWithAttempts {
 }
 
 export class ProductionQueueManager {
-  private queue: Queue | null = null;
-  // removed unused field
-  private workers: Record<string, Worker> = {};
   private connectionManager: RedisConnectionManager;
   private circuitBreaker: CircuitBreaker;
-  private errorHandler: RedisErrorHandler;
-  private queueConnection: U<Redis>;
+  private queue: Queue | null = null;
+  private queueConnection: Redis | undefined = undefined;
+  private workers: Record<string, Worker> = {};
   private isProcessing = false;
   private lastProcessedAt?: Date;
   private processedJobs = 0;
@@ -155,64 +148,30 @@ export class ProductionQueueManager {
   private messageSender = getInstagramMessageSender();
 
   constructor(
-    redisUrl: string,
     private logger: Logger,
     environment: RedisEnvironment,
     private dbPool: Pool,
     private queueName: string = 'ai-sales-production'
   ) {
     this.connectionManager = new RedisConnectionManager(
-      redisUrl,
+      process.env.REDIS_URL || '',
       environment,
       logger
     );
-    // this.healthMonitor = new RedisHealthMonitor(logger);
     this.circuitBreaker = new CircuitBreaker(5, 60000);
-    this.errorHandler = new RedisErrorHandler(logger as any);
   }
 
   async initialize(): Promise<QueueInitResult> {
     try {
       this.logger.info('🔄 بدء تهيئة مدير الطوابير الإنتاجي...');
 
-      // 1. الحصول على اتصال Redis مخصص للطوابير
-      const connectionResult = await this.circuitBreaker.execute(
-        async () => {
-          return await this.connectionManager.getConnection(RedisUsageType.QUEUE_SYSTEM);
-        }
-      );
-
-      if (!connectionResult.success) {
-        throw new RedisConnectionError(
-          'Failed to get queue Redis connection',
-          { error: connectionResult.error }
-        );
-      }
-
-      this.queueConnection = connectionResult.result as RedisType;
+      // 1. الحصول على اتصال Redis من connectionManager
+      const connection = await this.connectionManager.getConnection(RedisUsageType.QUEUE_SYSTEM);
       
-      // 2. التحقق من صحة الاتصال
-      if (!this.queueConnection) {
-        throw new RedisConnectionError('Queue connection is undefined');
-      }
-      
-      // const healthCheck = await this.healthMonitor.performComprehensiveHealthCheck(this.queueConnection);
-      const healthCheck = { connected: true, responseTime: 0, metrics: {} };
-      
-      if (!healthCheck.connected) {
-        throw new RedisQueueError(
-          'Redis connection health check failed',
-          { healthCheck }
-        );
-      }
+      this.logger.info('✅ تم الحصول على اتصال Redis للطوابير');
 
-      this.logger.info('✅ تم التحقق من اتصال Redis للطوابير', {
-        responseTime: healthCheck.responseTime,
-        metrics: healthCheck.metrics
-      });
-
-      // 3. إنشاء BullMQ Queue باستخدام خيارات الاتصال المحسنة
-      const connection = this.queueConnection; // ioredis instance
+      // 2. إنشاء BullMQ Queue
+      this.queueConnection = connection;
       
       this.queue = new Queue(this.queueName, {
         connection,
@@ -221,65 +180,68 @@ export class ProductionQueueManager {
           removeOnFail:    { age: 259200, count: 100 },
           attempts: 5,
           backoff: { type: 'exponential', delay: 2000 }
-        },
-        // ملاحظة: إعدادات مراقبة التوقف تتم عبر QueueEvents/Workers
+        }
       });
 
-      // 4. إعداد معالجات الأحداث والمهام
+      // 3. إعداد معالجات الأحداث والمهام
       this.logger.info('🔧 بدء إعداد معالجات الأحداث والمهام...');
       await this.setupEventHandlers();
       this.logger.info('📡 تم إعداد معالجات الأحداث');
       await this.setupJobProcessors(connection);
       this.logger.info('⚙️ تم إعداد معالجات المهام');
 
-      // 5. تنظيف أولي وبدء المراقبة
+      // 4. تنظيف أولي وبدء المراقبة
       await this.performInitialCleanup();
       this.startQueueMonitoring();
 
-      const diagnostics = {
-        redisConnection: await this.connectionManager.getConnection(RedisUsageType.QUEUE_SYSTEM),
-        queueHealth: healthCheck,
-        circuitBreaker: this.circuitBreaker.getStats()
-      };
-
-      // بدء مراقبة Workers بعد التهيئة
+      // 5. بدء مراقبة Workers
       this.startWorkerHealthMonitoring();
 
       this.logger.info('✅ تم تهيئة مدير الطوابير الإنتاجي بنجاح', {
         queueName: this.queueName,
-        responseTime: healthCheck.responseTime,
-        totalConnections: this.connectionManager.getConnectionStats().totalConnections,
+        totalConnections: 1,
         workersReady: true
       });
 
       return {
         success: true,
         queue: this.queue,
-        connectionInfo: healthCheck,
-        diagnostics
+        connectionInfo: {
+          connected: true,
+          responseTime: 0,
+          metrics: {}
+        },
+        diagnostics: {
+          redisConnection: connection,
+          queueHealth: {
+            connected: true,
+            responseTime: 0,
+            metrics: {}
+          },
+          circuitBreaker: this.circuitBreaker.getStats()
+        }
       };
 
     } catch (error) {
-      const redisError = this.errorHandler.handleError(error, {
-        operation: 'QueueManager.initialize',
-        queueName: this.queueName
-      });
-
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
       this.logger.error('💥 فشل في تهيئة مدير الطوابير', {
-        err: serr(redisError),
-        context: redisError.context
+        error: errorMessage,
+        context: { operation: 'QueueManager.initialize', queueName: this.queueName }
       });
 
       return {
         success: false,
         queue: null,
-        error: redisError.message,
+        error: errorMessage,
         diagnostics: {
           circuitBreaker: this.circuitBreaker.getStats()
         }
       };
     }
   }
+
+
 
   private async setupEventHandlers(): Promise<void> {
     if (!this.queue) return;

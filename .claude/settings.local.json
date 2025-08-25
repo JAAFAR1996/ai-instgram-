@@ -7,7 +7,8 @@
       "Bash(npx tsc:*)",
       "Bash(uuidgen)",
       "Bash(env:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

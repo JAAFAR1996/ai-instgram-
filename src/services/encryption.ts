@@ -6,8 +6,19 @@
  */
 
 import * as crypto from 'node:crypto';
-import { getEnv } from '../config/env.js';
 import { getLogger } from './logger.js';
+
+// ✅ Safe environment access without config dependency
+function getEnvVar(name: string, defaultValue?: string): string {
+  const value = process.env[name];
+  if (!value) {
+    if (defaultValue !== undefined) {
+      return defaultValue;
+    }
+    throw new Error(`Required environment variable ${name} is not set`);
+  }
+  return value;
+}
 
 export type HmacVerifyResult =
   | { ok: true }
@@ -249,7 +260,7 @@ export class EncryptionService {
   private readonly logger = getLogger({ component: 'encryption-service' });
 
   constructor(masterKey?: string, rotationConfig?: Partial<KeyRotationConfig>) {
-    const key = masterKey || getEnv('ENCRYPTION_KEY');
+    const key = masterKey || getEnvVar('ENCRYPTION_KEY');
     if (!key) {
       throw new Error('ENCRYPTION_KEY environment variable required');
     }

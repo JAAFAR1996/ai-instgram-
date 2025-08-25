@@ -49,20 +49,49 @@ export async function initializeRedisIntegration(_pool: Pool): Promise<RedisInte
   try {
     log.info('🔄 Initializing Redis integration...');
     
+    // التحقق من صحة Redis URL
+    if (!redisUrl.startsWith('redis://') && !redisUrl.startsWith('rediss://')) {
+      throw new Error(`Invalid Redis URL format: ${redisUrl}`);
+    }
+
+    // التحقق من الاتصال بـ Redis قبل التهيئة
+    const { Redis } = await import('ioredis');
+    const testConnection = new Redis(redisUrl, {
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+      connectTimeout: 5000,
+      commandTimeout: 3000,
+      enableReadyCheck: true
+    });
+
+    // اختبار الاتصال
+    await testConnection.ping();
+    await testConnection.disconnect();
+    
+    log.info('✅ Redis connection test successful');
+    
     // Try to initialize queue manager
     const { getPool } = await import('../db/index.js');
     const environment = process.env.NODE_ENV === 'production' ? RedisEnvironment.PRODUCTION : RedisEnvironment.DEVELOPMENT;
     const dbPool = getPool();
     
-    // Create logger adapter for ProductionQueueManager
+    // Create simple logger adapter for ProductionQueueManager
     const queueLogger = {
-      info: (...args: unknown[]) => log.info(String(args[0]), args.length > 1 ? { extra: args.slice(1) } : undefined),
-      warn: (...args: unknown[]) => log.warn(String(args[0]), args.length > 1 ? { extra: args.slice(1) } : undefined),
-      error: (...args: unknown[]) => log.error(String(args[0]), args.length > 1 ? args[1] as Error : undefined, args.length > 2 ? { extra: args.slice(2) } : undefined),
-      debug: (...args: unknown[]) => log.debug?.(String(args[0]), args.length > 1 ? { extra: args.slice(1) } : undefined)
+      info: (message: string, context?: Record<string, unknown>) => {
+        log.info(message, context);
+      },
+      warn: (message: string, context?: Record<string, unknown>) => {
+        log.warn(message, context);
+      },
+      error: (message: string, error?: Error, context?: Record<string, unknown>) => {
+        log.error(message, error, context);
+      },
+      debug: (message: string, context?: Record<string, unknown>) => {
+        log.debug?.(message, context);
+      }
     };
     
-    queueManager = new ProductionQueueManager(redisUrl, queueLogger, environment, dbPool);
+    queueManager = new ProductionQueueManager(queueLogger, environment, dbPool);
     const queueResult = await queueManager.initialize();
     
     if (queueResult.success) {
@@ -82,14 +111,15 @@ export async function initializeRedisIntegration(_pool: Pool): Promise<RedisInte
       };
     }
 
-    return initializationResult!; // Safe because we always assign before returning
-  } catch (error: any) {
+    return initializationResult!;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     log.error('❌ Redis integration initialization failed', error);
     
     const errorResult: RedisIntegrationResult = {
       success: false,
       mode: 'disabled',
-      error: error.message,
+      error: errorMessage,
       reason: 'initialization_error'
     };
     

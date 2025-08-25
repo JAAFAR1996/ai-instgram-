@@ -48,7 +48,6 @@ export class CacheService {
     
     try {
       const result = await this.connectionManager.safeRedisOperation(
-        'get',
         RedisUsageType.CACHE,
         async (redis: Redis) => {
           const value = await redis.get(fullKey);
@@ -56,7 +55,7 @@ export class CacheService {
         }
       );
 
-      if (result.ok && result.result !== null) {
+      if (result.ok && result.result !== undefined && result.result !== null) {
         this.stats.hits++;
         return result.result;
       } else {
@@ -82,7 +81,6 @@ export class CacheService {
     
     try {
       const result = await this.connectionManager.safeRedisOperation(
-        'set',
         RedisUsageType.CACHE,
         async (redis: Redis) => {
           const serialized = JSON.stringify(value);
@@ -91,9 +89,9 @@ export class CacheService {
         }
       );
 
-      if (result.ok) {
+      if (result.ok && result.result !== undefined) {
         this.stats.sets++;
-        return true;
+        return result.result;
       } else {
         log.debug('Cache set skipped', {
           key: fullKey,
@@ -120,7 +118,6 @@ export class CacheService {
     
     try {
       const result = await this.connectionManager.safeRedisOperation(
-        'delete',
         RedisUsageType.CACHE,
         async (redis: Redis) => {
           const deleted = await redis.del(fullKey);
@@ -128,9 +125,9 @@ export class CacheService {
         }
       );
 
-      if (result.ok) {
+      if (result.ok && result.result !== undefined) {
         this.stats.deletes++;
-        return result.result || false;
+        return result.result;
       } else {
         return false;
       }
@@ -152,7 +149,6 @@ export class CacheService {
     
     try {
       const result = await this.connectionManager.safeRedisOperation(
-        'exists',
         RedisUsageType.CACHE,
         async (redis: Redis) => {
           const exists = await redis.exists(fullKey);
@@ -160,7 +156,7 @@ export class CacheService {
         }
       );
 
-      return result.ok ? (result.result || false) : false;
+      return result.ok && result.result !== undefined ? result.result : false;
     } catch (error: any) {
       this.stats.errors++;
       log.warn('Cache exists check failed', {
@@ -179,7 +175,6 @@ export class CacheService {
     
     try {
       const result = await this.connectionManager.safeRedisOperation(
-        'mget',
         RedisUsageType.CACHE,
         async (redis: Redis) => {
           const values = await redis.mget(...fullKeys);
@@ -214,7 +209,6 @@ export class CacheService {
     
     try {
       const result = await this.connectionManager.safeRedisOperation(
-        'mset',
         RedisUsageType.CACHE,
         async (redis: Redis) => {
           const pipeline = redis.pipeline();

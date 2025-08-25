@@ -52,7 +52,6 @@ async function redisHealthProbe(): Promise<HealthCheckResult> {
   try {
     const manager = getRedisConnectionManager();
     const result = await manager.safeRedisOperation(
-      'health_check',
       RedisUsageType.HEALTH_CHECK,
       async (redis) => {
         const healthResult = await performHealthCheck(redis);

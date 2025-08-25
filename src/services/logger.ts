@@ -6,11 +6,13 @@
  */
 
 import { randomUUID } from 'crypto';
-import { getConfig, type LogLevel } from '../config/index.js';
 import { createWriteStream, existsSync, mkdirSync, access, mkdir, statfs } from 'fs';
 import { join, dirname } from 'path';
 import { gzip } from 'zlib';
 import { promisify } from 'util';
+
+// ✅ BREAKING CIRCULAR DEPENDENCY - No config import
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
 const fs = { access, mkdir, statfs };
 
@@ -30,7 +32,20 @@ export const LOG_LEVELS = {
 
 export function standardizeLogLevel(): LogLevel {
   const level = process.env.LOG_LEVEL?.toLowerCase();
-  return level && ['error', 'warn', 'info', 'debug'].includes(level) ? level as LogLevel : 'info';
+  return level && ['trace', 'debug', 'info', 'warn', 'error', 'fatal'].includes(level) ? level as LogLevel : 'info';
+}
+
+// ✅ Safe environment access without circular dependency
+function getEnvironment(): string {
+  return process.env.NODE_ENV || 'development';
+}
+
+// ✅ Safe config access without circular dependency
+function getLogLevelFromEnv(): LogLevel {
+  const level = process.env.LOG_LEVEL?.toLowerCase();
+  return level && ['trace', 'debug', 'info', 'warn', 'error', 'fatal'].includes(level) 
+    ? level as LogLevel 
+    : 'info';
 }
 
 export interface LogContext {
@@ -208,7 +223,7 @@ export class Logger {
     private memoryConfig?: Partial<MemoryMonitoringConfig>
   ) {
     this.context = context;
-    this.minLevel = this.getLogLevel();
+    this.minLevel = getLogLevelFromEnv(); // ✅ Use safe function
     this.setupLogRotation().catch(error => {
       console.error('Failed to setup log rotation:', error);
     });
@@ -351,7 +366,7 @@ export class Logger {
           pid: process.pid,
           memoryUsage: process.memoryUsage(),
           uptime: process.uptime(),
-          environment: getConfig().environment,
+          environment: getEnvironment(),
           ...(process.env.npm_package_version && { version: process.env.npm_package_version })
         }
       };
@@ -449,10 +464,10 @@ export class Logger {
    * Write log entry to console
    */
   private writeToConsole(entry: LogEntry): void {
-    const config = getConfig();
+    const env = getEnvironment(); // ✅ Use safe function
     const out = (entry.level === 'error' || entry.level === 'fatal') ? process.stderr : process.stdout;
     
-    if (config.environment === 'production') {
+    if (env === 'production') {
       out.write(JSON.stringify(entry) + '\n');
     } else {
       const { context, error } = entry;
@@ -641,7 +656,7 @@ export class Logger {
          pid: process.pid,
          memoryUsage: process.memoryUsage(),
          uptime: process.uptime(),
-         environment: getConfig().environment,
+         environment: getEnvironment(), // ✅ Use safe function
          ...(process.env.npm_package_version && { version: process.env.npm_package_version })
        },
       ...(finalError ? {
@@ -656,10 +671,10 @@ export class Logger {
     // Apply environment-specific filtering
     if (this.shouldFilterLog(entry)) return;
 
-    const config = getConfig();
+    const env = getEnvironment();
     
     // Remove timestamp from production output since Render adds its own
-    if (config.environment === 'production') {
+    if (env === 'production') {
       const entryObj: Record<string, unknown> = { ...entry };
       delete entryObj.timestamp;
     }
@@ -687,8 +702,7 @@ export class Logger {
    * Check if log should be filtered based on environment
    */
   private shouldFilterLog(entry: LogEntry): boolean {
-    const config = getConfig();
-    const env = config.environment;
+    const env = getEnvironment(); // ✅ Use safe function
 
     // Filter debug logs in production
     if (env === 'production' && entry.level === 'debug') {
@@ -719,12 +733,7 @@ export class Logger {
     return levels[level] >= levels[this.minLevel];
   }
 
-  /**
-   * Get log level from environment
-   */
-  private getLogLevel(): LogLevel {
-    return standardizeLogLevel();
-  }
+  // ✅ Removed unused getLogLevel method - using getLogLevelFromEnv directly
 
   /**
    * Redact sensitive information from logs with enhanced pattern detection

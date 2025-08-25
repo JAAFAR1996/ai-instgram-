@@ -5,9 +5,53 @@
  * ===============================================
  */
 
-import { getLogger } from '../services/logger.js';
+// ✅ PREVENT CIRCULAR DEPENDENCY - Use console for Redis error logging
+// Cannot import logger here as it may cause circular dependencies with Redis operations
 
-const log = getLogger({ component: 'redis-errors' });
+// ✅ RENDER-OPTIMIZED Redis Error Logger 
+// Prevents circular dependencies and works with Render's logging system
+export const redisErrorConsole = {
+  error: (message: string, context?: any) => {
+    const env = process.env.NODE_ENV || 'development';
+    const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
+    
+    if (env === 'production' || isRender) {
+      // Render-friendly JSON format (no timestamp - Render adds its own)
+      console.error(JSON.stringify({
+        level: 'error',
+        message: `❌ High severity Redis error`,
+        context: { component: 'redis-errors', ...context },
+        metadata: {
+          pid: process.pid,
+          memoryUsage: process.memoryUsage(),
+          uptime: process.uptime(),
+          environment: env
+        }
+      }));
+    } else {
+      console.error(`ERROR Redis: ${message}`, context ? JSON.stringify(context) : '');
+    }
+  },
+  
+  warn: (message: string, context?: any) => {
+    const env = process.env.NODE_ENV || 'development';
+    const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
+    
+    if (env === 'production' || isRender) {
+      console.warn(JSON.stringify({
+        level: 'warn',
+        message: `⚠️ Redis warning`,
+        context: { component: 'redis-errors', ...context },
+        metadata: {
+          pid: process.pid,
+          environment: env
+        }
+      }));
+    } else {
+      console.warn(`WARN Redis: ${message}`, context ? JSON.stringify(context) : '');
+    }
+  }
+};
 
 /**
  * Error Categories
@@ -279,7 +323,32 @@ function getString(v: unknown, fallback = ''): string {
 export class RedisErrorFactory {
   static createFromIORedisError(error: unknown, context?: Record<string, unknown>): RedisBaseError {
     const err = (error as IoRedisErrorLike) || {};
-    const message = getString(err.message, 'Unknown Redis error');
+    
+    // ✅ RENDER-OPTIMIZED - Fix "[object Object]" issue with better error parsing
+    let message = 'Unknown Redis error';
+    
+    try {
+      if (err.message) {
+        if (typeof err.message === 'string') {
+          message = err.message;
+        } else if (err.message && typeof err.message === 'object') {
+          // Better object serialization for Render logs
+          message = JSON.stringify(err.message, null, 0);
+        } else {
+          message = String(err.message);
+        }
+      } else if (error instanceof Error) {
+        message = error.message;
+      } else if (typeof error === 'string') {
+        message = error;
+      } else if (error && typeof error === 'object') {
+        // Handle complex error objects better
+        const errorObj = error as any;
+        message = errorObj.message || errorObj.code || errorObj.name || JSON.stringify(error, null, 0);
+      }
+    } catch (parseError) {
+      message = 'Redis error (parse failed)';
+    }
     
     if (getString(err.code) === 'ECONNREFUSED' || getString(err.code) === 'ENOTFOUND') {
       return new RedisConnectionError(
@@ -289,7 +358,7 @@ export class RedisErrorFactory {
       );
     }
 
-    if (getString(err.code) === 'NOAUTH' || getString(err.message).includes('AUTH')) {
+    if (getString(err.code) === 'NOAUTH' || message.includes('AUTH')) {
       return new RedisAuthenticationError(
         `Authentication failed: ${message}`,
         context,
@@ -297,7 +366,7 @@ export class RedisErrorFactory {
       );
     }
 
-    if (getString(err.code) === 'TIMEOUT' || getString(err.message).toLowerCase().includes('timeout')) {
+    if (getString(err.code) === 'TIMEOUT' || message.toLowerCase().includes('timeout')) {
       return new RedisTimeoutError(
         `Operation timeout: ${message}`,
         context,
@@ -313,7 +382,7 @@ export class RedisErrorFactory {
       );
     }
 
-    const errMsg = getString(err.message).toLowerCase();
+    const errMsg = message.toLowerCase();
     if (errMsg.includes('oom') || errMsg.includes('memory')) {
       return new RedisMemoryError(
         `Memory error: ${message}`,
@@ -431,7 +500,6 @@ export class RedisErrorHandler {
   private lastErrorTime: Date | null = null;
 
   constructor(
-    private logger = log,
     rateLimitConfig?: Partial<RateLimitConfig>
   ) {
     this.rateLimitConfig = {
@@ -458,20 +526,25 @@ export class RedisErrorHandler {
       ...additionalContext
     };
 
-    switch (error.severity) {
-      case ErrorSeverity.CRITICAL:
-        this.logger.error('🚨 Critical Redis error', logContext);
-        break;
-      case ErrorSeverity.HIGH:
-        this.logger.error('❌ High severity Redis error', logContext);
-        break;
-      case ErrorSeverity.MEDIUM:
-        this.logger.warn('⚠️ Medium severity Redis error', logContext);
-        break;
-      case ErrorSeverity.LOW:
-        this.logger.info('ℹ️ Low severity Redis error', logContext);
-        break;
-    }
+    // استخدام logger بدلاً من console لتجنب الحلقة اللانهائية
+    const logMessage = this.getLogMessage(error.severity);
+    
+    // استخدام structured logging
+    const logEntry = {
+      level: 'error',
+      timestamp: new Date().toISOString(),
+      message: logMessage,
+      context: logContext,
+      metadata: {
+        pid: process.pid,
+        memoryUsage: process.memoryUsage(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development'
+      }
+    };
+
+    // استخدام console.error مباشرة لتجنب الحلقة اللانهائية
+    console.error(JSON.stringify(logEntry));
 
     // Add to history
     this.errorHistory.push(error);
@@ -482,6 +555,24 @@ export class RedisErrorHandler {
     // Update error counts
     this.errorCounts[error.code] = (this.errorCounts[error.code] || 0) + 1;
     this.lastErrorTime = new Date();
+  }
+
+  /**
+   * Get appropriate log message based on severity
+   */
+  private getLogMessage(severity: ErrorSeverity): string {
+    switch (severity) {
+      case ErrorSeverity.CRITICAL:
+        return '🚨 Critical Redis error';
+      case ErrorSeverity.HIGH:
+        return '❌ High severity Redis error';
+      case ErrorSeverity.MEDIUM:
+        return '⚠️ Medium severity Redis error';
+      case ErrorSeverity.LOW:
+        return 'ℹ️ Low severity Redis error';
+      default:
+        return '❌ Redis error';
+    }
   }
 
   /**
@@ -628,13 +719,25 @@ export class RedisErrorHandler {
     } else if (error instanceof Error) {
       redisError = RedisErrorFactory.createFromIORedisError(error, context);
     } else {
+      // إصلاح مشكلة "[object Object]"
+      let errorMessage = 'Unknown error occurred';
+      if (error && typeof error === 'object') {
+        try {
+          errorMessage = JSON.stringify(error);
+        } catch {
+          errorMessage = String(error);
+        }
+      } else {
+        errorMessage = String(error);
+      }
+      
       redisError = new RedisConnectionError(
-        'Unknown error occurred',
-        { ...context, originalError: String(error) }
+        errorMessage,
+        { ...context, originalError: errorMessage }
       );
     }
 
-    // Log the error
+    // Log the error (سيتم استخدام console.error مباشرة لتجنب الحلقة)
     this.logError(redisError, context);
 
     // Categorize the error
@@ -653,43 +756,84 @@ export class RedisErrorHandler {
     error: RedisBaseError,
     categorization: ReturnType<typeof this.categorizeError>
   ): void {
+    // استخدام console.log مباشرة لتجنب الحلقة اللانهائية
+    const baseLogData = {
+      level: 'info',
+      timestamp: new Date().toISOString(),
+      context: {
+        code: error.code,
+        category: error.category,
+        severity: error.severity,
+        recoveryStrategy: categorization.recoveryStrategy
+      },
+      metadata: {
+        pid: process.pid,
+        environment: process.env.NODE_ENV || 'development'
+      }
+    };
+
     switch (categorization.recoveryStrategy) {
       case RecoveryStrategy.RETRY:
         if (categorization.isRetryable) {
-          this.logger.info('🔄 Applying retry strategy', {
-            code: error.code,
-            retryCount: error.retryCount
-          });
+          const logData = {
+            ...baseLogData,
+            level: 'info',
+            context: {
+              ...baseLogData.context,
+              message: '🔄 Applying retry strategy',
+              retryCount: error.retryCount
+            }
+          };
+          console.log(JSON.stringify(logData));
         }
         break;
 
       case RecoveryStrategy.CIRCUIT_BREAKER:
-        this.logger.warn('⚡ Circuit breaker activated', {
-          code: error.code,
-          category: error.category
-        });
+        const circuitLogData = {
+          ...baseLogData,
+          level: 'warn',
+          context: {
+            ...baseLogData.context,
+            message: '⚡ Circuit breaker activated'
+          }
+        };
+        console.warn(JSON.stringify(circuitLogData));
         break;
 
       case RecoveryStrategy.FALLBACK:
-        this.logger.info('🔄 Applying fallback strategy', {
-          code: error.code,
-          category: error.category
-        });
+        const fallbackLogData = {
+          ...baseLogData,
+          level: 'info',
+          context: {
+            ...baseLogData.context,
+            message: '🔄 Applying fallback strategy'
+          }
+        };
+        console.log(JSON.stringify(fallbackLogData));
         break;
 
       case RecoveryStrategy.ALERT:
-        this.logger.error('🚨 Alert: Critical error detected', {
-          code: error.code,
-          category: error.category,
-          severity: error.severity
-        });
+        const alertLogData = {
+          ...baseLogData,
+          level: 'error',
+          context: {
+            ...baseLogData.context,
+            message: '🚨 Alert: Critical error detected'
+          }
+        };
+        console.error(JSON.stringify(alertLogData));
         break;
 
       case RecoveryStrategy.IGNORE:
-        this.logger.debug('ℹ️ Ignoring error', {
-          code: error.code,
-          category: error.category
-        });
+        const ignoreLogData = {
+          ...baseLogData,
+          level: 'debug',
+          context: {
+            ...baseLogData.context,
+            message: 'ℹ️ Ignoring error'
+          }
+        };
+        console.debug(JSON.stringify(ignoreLogData));
         break;
     }
   }

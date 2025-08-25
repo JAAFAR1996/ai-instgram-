@@ -608,7 +608,6 @@ async function validateRedisConnection(): Promise<ValidationResult> {
     
     // Test Redis connection with timeout
     const result = await redisManager.safeRedisOperation(
-      'ping',
       RedisUsageType.CACHING,
       async (redis) => {
         const pong = await redis.ping();

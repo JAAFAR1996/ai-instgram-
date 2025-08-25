@@ -8,14 +8,35 @@
 import type { AppConfig, DatabaseConfig, EnvMode, LogLevel } from './types.js';
 import { EnvironmentValidationError } from './types.js';
 import { REQUIRED_ENV_VARS, validateRuntimeConfig } from './validators.js';
-import { logger } from '../services/logger.js';
+
+// ✅ BREAKING CIRCULAR DEPENDENCY - Use console instead of logger
+// Cannot import logger here as it creates circular dependency with logger importing getConfig
 
 /**
  * Validate and load environment configuration
  * @throws {EnvironmentValidationError} If validation fails
  */
+// ✅ RENDER-OPTIMIZED Safe console logging for config validation
+const configConsole = {
+  info: (message: string) => {
+    const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
+    const env = process.env.NODE_ENV || 'development';
+    
+    if (env === 'production' || isRender) {
+      console.log(JSON.stringify({
+        level: 'info',
+        message,
+        context: { component: 'config-validation' },
+        metadata: { environment: env, pid: process.pid }
+      }));
+    } else {
+      console.log(`INFO Config: ${message}`);
+    }
+  }
+};
+
 export function loadAndValidateEnvironment(): AppConfig {
-  logger.info('🔍 Validating environment configuration...');
+  configConsole.info('🔍 Validating environment configuration...');
   
   const errors: string[] = [];
   const env = process.env;
@@ -30,7 +51,7 @@ export function loadAndValidateEnvironment(): AppConfig {
       } else if (config.default) {
         // Set default value
         env[varName] = config.default;
-        logger.info(`⚙️ Using default value for ${varName}: ${config.default}`);
+        configConsole.info(`⚙️ Using default value for ${varName}: ${config.default}`);
       }
       continue;
     }
@@ -209,8 +230,8 @@ export function loadAndValidateEnvironment(): AppConfig {
     }
   };
 
-  logger.info('✅ Environment validation passed');
-  logger.info(`🌍 Running in ${config.environment} mode`);
+  configConsole.info('✅ Environment validation passed');
+  configConsole.info(`🌍 Running in ${config.environment} mode`);
   
   return config;
 }
