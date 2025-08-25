@@ -632,6 +632,58 @@ export class Logger {
   }
 
   /**
+   * Safe error serialization that prevents [object Object]
+   */
+  private safeSerializeError(error: unknown): { name: string; message: string; stack?: string } {
+    // استخدام النمط المُثبت من RedisErrorFactory
+    if (error instanceof Error) {
+      return {
+        name: error.name,
+        message: error.message,
+        ...(error.stack ? { stack: error.stack } : {})
+      };
+    }
+
+    if (typeof error === 'string') {
+      return {
+        name: 'Error',
+        message: error
+      };
+    }
+
+    if (error && typeof error === 'object') {
+      const errorObj = error as any;
+      let message = 'Unknown error';
+      
+      // محاولة استخراج message بطرق مختلفة
+      if (typeof errorObj.message === 'string') {
+        message = errorObj.message;
+      } else if (typeof errorObj.code === 'string') {
+        message = `Error code: ${errorObj.code}`;
+      } else if (typeof errorObj.name === 'string') {
+        message = `Error name: ${errorObj.name}`;
+      } else {
+        // استخدام JSON.stringify كآخر حل مع protection من circular references
+        try {
+          message = JSON.stringify(errorObj, null, 0);
+        } catch {
+          message = 'Error (serialization failed)';
+        }
+      }
+
+      return {
+        name: typeof errorObj.name === 'string' ? errorObj.name : 'Error',
+        message
+      };
+    }
+
+    return {
+      name: 'Error',
+      message: 'Unknown error occurred'
+    };
+  }
+
+  /**
    * Core logging method with top-level context and error
    */
   private async log(level: LogLevel, message: string, context?: LogContext & { err?: unknown; error?: unknown }): Promise<void> {
@@ -660,11 +712,7 @@ export class Logger {
          ...(process.env.npm_package_version && { version: process.env.npm_package_version })
        },
       ...(finalError ? {
-        error: (finalError instanceof Error)
-          ? { name: finalError.name, message: String(finalError.message), ...(finalError.stack ? { stack: finalError.stack } : {}) }
-          : (typeof finalError === 'object' && finalError !== null) 
-            ? { name: String((finalError as any)?.name ?? 'Error'), message: String((finalError as any)?.message ?? finalError) }
-            : { name: String((finalError as any)?.name ?? 'Error'), message: String((finalError as any)?.message ?? finalError) }
+        error: this.safeSerializeError(finalError)
       } : {})
     };
 

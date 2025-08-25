@@ -12,6 +12,7 @@ import { getRedisConnectionManager } from '../services/RedisConnectionManager.js
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { getLogger } from '../services/logger.js';
 import { MerchantIdMissingError } from '../utils/merchant.js';
+import { createSafeErrorHandler } from '../utils/safe-error-handler.js';
 
 export interface IdempotencyConfig {
   ttlSeconds: number;
@@ -32,6 +33,9 @@ const K_IDEMPOTENCY_TTL = 'idempotencyTtl';
 const K_CACHE_FLAG = 'cacheIdempotency';
 const K_RESP = 'idempotencyResponse';
 const logger = getLogger({ component: 'IdempotencyMiddleware' });
+
+// Create error handler instance
+const errorHandler = createSafeErrorHandler('IdempotencyMiddleware');
 
 const DEFAULT_CONFIG: IdempotencyConfig = {
   ttlSeconds: 3600, // 1 hour
@@ -117,7 +121,13 @@ export function createIdempotencyMiddleware(
         try {
           parsed = JSON.parse(existingResult);
         } catch (err) {
-          logger.error('Invalid cache entry', err);
+          const safeError = errorHandler.handleError(err, {
+            operation: 'parse_cache_entry',
+            requestPath: c.req.path,
+            requestMethod: c.req.method,
+            merchantId: c.req.header('x-merchant-id')
+          });
+          logger.error('Invalid cache entry', safeError);
           return c.text('Invalid cache entry', 500);
         }
         logger.info(`🔒 Idempotency hit: ${idempotencyKey}`);
@@ -159,7 +169,14 @@ export function createIdempotencyMiddleware(
           code: 'MERCHANT_ID_MISSING'
         }, 400);
       }
-      logger.error('❌ Idempotency middleware error', error);
+      
+      const safeError = errorHandler.handleError(error, {
+        requestPath: c.req.path,
+        requestMethod: c.req.method,
+        merchantId: c.req.header('x-merchant-id')
+      });
+      
+      logger.error('❌ Idempotency middleware error', safeError);
       // Continue with normal processing on idempotency errors
       await next();
     }
