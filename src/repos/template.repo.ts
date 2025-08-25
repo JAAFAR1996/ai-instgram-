@@ -150,8 +150,8 @@ export async function listTemplates(
 ): Promise<Template[]> {
   const { type, approved, limit = 50, offset = 0 } = options;
   
-  let whereConditions = ['merchant_id = $1::uuid'];
-  let params: any[] = [merchantId];
+  const whereConditions = ['merchant_id = $1::uuid'];
+  const params: any[] = [merchantId];
   let paramIndex = 2;
   
   if (type) {

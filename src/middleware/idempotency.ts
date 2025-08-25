@@ -6,7 +6,7 @@
  * ===============================================
  */
 
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 import { Context, Next } from 'hono';
 import { getRedisConnectionManager } from '../services/RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';

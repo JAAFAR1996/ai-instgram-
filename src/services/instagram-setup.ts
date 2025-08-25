@@ -7,7 +7,6 @@
 
 import type { BusinessAccountInfo } from '../types/instagram.js';
 import { getInstagramClient, getInstagramAPICredentialsManager, type InstagramAPICredentials } from './instagram-api.js';
-import { getEncryptionService } from './encryption.js';
 import { getDatabase } from '../db/adapter.js';
 import { createLogger } from './logger.js';
 
@@ -53,7 +52,6 @@ function isBusinessAccountInfo(data: unknown): data is BusinessAccountInfo {
 }
 
 export class InstagramSetupService {
-  private _encryptionService = getEncryptionService();
   private db = getDatabase();
   private logger = createLogger({ component: 'InstagramSetupService' });
 

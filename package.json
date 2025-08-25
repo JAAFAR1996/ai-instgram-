@@ -18,9 +18,9 @@
     "start:production": "node dist/production-index.js",
     "validate:production": "node dist/startup/security-validations.js",
     "start:dev": "NODE_ENV=development bun run src/index.ts",
-    "test": "bun test --env-file=.env.test",
-    "test:coverage": "bun test --coverage",
-    "test:watch": "bun test --watch",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest --watch",
     "test:instagram": "node run-instagram-tests.js integration",
     "test:instagram:unit": "node run-instagram-tests.js unit",
     "test:instagram:e2e": "node run-instagram-tests.js e2e",
@@ -95,6 +95,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@eslint/js": "^9.34.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/crypto-js": "^4.2.1",
@@ -102,15 +103,17 @@
     "@types/jsonwebtoken": "^9.0.5",
     "@types/node": "^20.19.11",
     "@types/pg": "^8.15.5",
-    "@types/prom-client": "^15.0.6",
     "@types/uuid": "^9.0.7",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.40.0",
+    "@typescript-eslint/parser": "^8.40.0",
+    "@vitest/coverage-v8": "^3.2.4",
     "bun-types": "^1.0.0",
     "cross-env": "^7.0.3",
     "esbuild": "^0.19.0",
-    "eslint": "^8.56.0",
+    "eslint": "^9.34.0",
     "tsx": "^4.20.4",
-    "typescript": "^5.9.2"
+    "typescript": "~5.9.2",
+    "typescript-eslint": "^8.40.0",
+    "vitest": "^3.2.4"
   }
 }

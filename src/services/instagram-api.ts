@@ -19,8 +19,7 @@ import type {
   SendMessageRequest
 } from '../types/instagram.js';
 import type { DIContainer } from '../container/index.js';
-import type { Pool } from 'pg';
-import type { AppConfig } from '../config/index.js';
+
 import type EncryptionService from './encryption.js';
 import type { MetaRateLimiter } from './meta-rate-limiter.js';
 import type Logger from './logger.js';
@@ -558,7 +557,6 @@ export class InstagramAPIClient {
   public async loadMerchantCredentials(merchantId: string): Promise<InstagramAPICredentials | null> {
     try {
       // Use pool directly for SQL operations
-      const { query } = await import('../db/index.js');
       const { getDatabase } = await import('../db/adapter.js');
       const sql = getDatabase().getSQL();
       
@@ -674,21 +672,7 @@ export class InstagramAPIClient {
     };
   }
 
-  /**
-   * Private: Parse rate limit from response headers
-   */
-  private parseRateLimitHeaders(response: Response): number {
-    const remaining = response.headers.get('X-App-Usage');
-    if (remaining) {
-      try {
-        const usage = JSON.parse(remaining);
-        return Math.max(0, 100 - (usage.call_count || 0));
-      } catch {
-        return 100; // Default
-      }
-    }
-    return 100;
-  }
+
 }
 
 /**
@@ -696,14 +680,10 @@ export class InstagramAPIClient {
  */
 export class InstagramAPICredentialsManager {
   private encryptionService!: EncryptionService;
-  private pool: Pool;
   private logger: Logger;
-  private config: AppConfig;
 
-  constructor(private container: DIContainer) {
-    this.pool = container.get<Pool>('pool');
-    this.config = container.get<AppConfig>('config');
-    this.logger = container.get('logger');
+  constructor(_container: DIContainer) {
+    this.logger = _container.get('logger');
     
     this.initializeDependencies();
   }
@@ -740,7 +720,6 @@ export class InstagramAPICredentialsManager {
       );
 
       // Use pool directly for SQL operations
-      const { query } = await import('../db/index.js');
       const { getDatabase } = await import('../db/adapter.js');
       const sql = getDatabase().getSQL();
       
@@ -801,7 +780,6 @@ export class InstagramAPICredentialsManager {
   public async removeCredentials(merchantId: string): Promise<void> {
     try {
       // Use pool directly for SQL operations
-      const { query } = await import('../db/index.js');
       const { getDatabase } = await import('../db/adapter.js');
       const sql = getDatabase().getSQL();
       
@@ -833,7 +811,6 @@ export class InstagramAPICredentialsManager {
   public async hasValidCredentials(merchantId: string): Promise<boolean> {
     try {
       // Use pool directly for SQL operations
-      const { query } = await import('../db/index.js');
       const { getDatabase } = await import('../db/adapter.js');
       const sql = getDatabase().getSQL();
       
@@ -861,18 +838,23 @@ export class InstagramAPICredentialsManager {
   }> {
     try {
       // Use pool directly for SQL operations
-      const { query } = await import('../db/index.js');
       const { getDatabase } = await import('../db/adapter.js');
       const db = getDatabase();
       
-      const result = await query(db.getPool(), `
+      const sql = db.getSQL();
+      const result = await sql<{
+        instagram_token_encrypted: string | null;
+        instagram_page_id: string | null;
+        last_access_at: string | null;
+        [key: string]: unknown;
+      }>`
         SELECT
           instagram_token_encrypted,
           instagram_page_id,
           last_access_at
         FROM merchant_credentials
-        WHERE merchant_id = $1::uuid
-      `, [merchantId]) as Array<{
+        WHERE merchant_id = ${merchantId}::uuid
+      ` as Array<{
         instagram_token_encrypted: string | null;
         instagram_page_id: string | null;
         last_access_at: string | null;

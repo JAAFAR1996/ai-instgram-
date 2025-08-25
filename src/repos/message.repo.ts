@@ -151,8 +151,8 @@ export async function listUtilityMessages(
 ): Promise<Array<MessageLog & { templateName?: string }>> {
   const { recipientId, templateId, messageType, status, startDate, endDate, limit = 50, offset = 0 } = options;
   
-  let whereConditions = ['l.merchant_id = $1::uuid'];
-  let params: any[] = [merchantId];
+  const whereConditions = ['l.merchant_id = $1::uuid'];
+  const params: any[] = [merchantId];
   let paramIndex = 2;
   
   if (recipientId) {
@@ -271,8 +271,8 @@ export async function getMessageStats(
       dateFormat = 'YYYY-MM-DD';
   }
   
-  let whereConditions = ['merchant_id = $1::uuid'];
-  let params: any[] = [merchantId];
+  const whereConditions = ['merchant_id = $1::uuid'];
+  const params: any[] = [merchantId];
   let paramIndex = 2;
   
   if (startDate) {

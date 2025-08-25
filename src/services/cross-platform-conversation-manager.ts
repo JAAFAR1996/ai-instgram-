@@ -7,7 +7,6 @@
  */
 
 import { getDatabase } from '../db/adapter.js';
-import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 // ✅ تم إزالة DBRow لأنه غير مستخدم في هذا الملف
 import type { 
   ConversationSession,
@@ -84,7 +83,6 @@ export interface ConversationMergeResult {
 
 export class CrossPlatformConversationManager {
   private db = getDatabase();
-  private _aiOrchestrator = getConversationAIOrchestrator();
 
   private static jsonParseSafe<T = unknown>(v: unknown, fallback: T): T {
     try {
@@ -261,7 +259,6 @@ export class CrossPlatformConversationManager {
       // Calculate continuity score
       const continuityScore = this.calculateContinuityScore(
         sourceConversation.session_data,
-        targetConversation.session_data,
         contextTransferResult
       );
 
@@ -368,12 +365,12 @@ export class CrossPlatformConversationManager {
       }
 
       // Select primary conversation based on strategy
-      const primaryConversation = this.selectPrimaryConversation(conversations as any[], mergeStrategy);
-      const secondaryConversations = conversations.filter(c => c.id !== primaryConversation.id);
+      const primaryConversation = this.selectPrimaryConversation(conversations as unknown as ConversationRow[], mergeStrategy);
+      const secondaryConversations = conversations.filter(c => c.id !== primaryConversation.id) as unknown as ConversationRow[];
 
       // Merge contexts
       const mergedContext = await this.mergeConversationContexts(
-        [primaryConversation, ...secondaryConversations] as any[]
+        [primaryConversation, ...secondaryConversations]
       );
 
       // Update primary conversation with merged context
@@ -549,10 +546,8 @@ export class CrossPlatformConversationManager {
    * Recommend optimal platform for customer engagement
    */
   public async recommendOptimalPlatform(
-    merchantId: string,
     customerProfile: UnifiedCustomerProfile,
-    messageType: 'text' | 'media' | 'template' | 'urgent',
-    timeOfDay?: 'morning' | 'afternoon' | 'evening'
+    messageType: 'text' | 'media' | 'template' | 'urgent'
   ): Promise<{
     recommendedPlatform: Platform;
     confidence: number;
@@ -565,14 +560,12 @@ export class CrossPlatformConversationManager {
 
       // Consider message type appropriateness
       const messageTypeScores = {
-        WHATSAPP: this.getWhatsAppMessageScore(messageType, customerProfile),
-        INSTAGRAM: this.getInstagramMessageScore(messageType, customerProfile)
+        WHATSAPP: this.getWhatsAppMessageScore(messageType),
+        INSTAGRAM: this.getInstagramMessageScore(messageType)
       };
 
       // Consider time-based preferences
-      const timeBasedScores = timeOfDay ? 
-        await this.getTimeBasedPlatformPreferences(merchantId, customerProfile.customerId, timeOfDay) :
-        { WHATSAPP: 0.5, INSTAGRAM: 0.5 };
+      const timeBasedScores = await this.getTimeBasedPlatformPreferences();
 
       // Calculate final scores
       const finalScores = {
@@ -796,8 +789,7 @@ export class CrossPlatformConversationManager {
       };
 
       const sql: Sql = this.db.getSQL();
-      await sql`
-        UPDATE conversations 
+      await sql`        UPDATE conversations 
         SET session_data = ${JSON.stringify(mergedContext)}
         WHERE id = ${targetConversation.id}::uuid
       `;
@@ -817,14 +809,12 @@ export class CrossPlatformConversationManager {
 
   private calculateContinuityScore(
     sourceData: string,
-    targetData: string,
     transferResult: { success: boolean; transferredFields: string[] }
   ): number {
     if (!transferResult.success) return 0;
 
     try {
       const sourceContext = CrossPlatformConversationManager.jsonParseSafe<Record<string, unknown>>(sourceData, {});
-      const targetContext = CrossPlatformConversationManager.jsonParseSafe<Record<string, unknown>>(targetData, {});
 
       const sourceFields = Object.keys(sourceContext);
       const preservedFields = transferResult.transferredFields;
@@ -967,7 +957,7 @@ export class CrossPlatformConversationManager {
     return { whatsappScore, instagramScore };
   }
 
-  private getWhatsAppMessageScore(messageType: string, profile: UnifiedCustomerProfile): number {
+  private getWhatsAppMessageScore(messageType: string): number {
     // WhatsApp is better for detailed, formal communications
     const scores = {
       text: 0.8,
@@ -978,7 +968,7 @@ export class CrossPlatformConversationManager {
     return scores[messageType as keyof typeof scores] || 0.5;
   }
 
-  private getInstagramMessageScore(messageType: string, profile: UnifiedCustomerProfile): number {
+  private getInstagramMessageScore(messageType: string): number {
     // Instagram is better for visual, casual communications
     const scores = {
       text: 0.6,
@@ -989,11 +979,7 @@ export class CrossPlatformConversationManager {
     return scores[messageType as keyof typeof scores] || 0.5;
   }
 
-  private async getTimeBasedPlatformPreferences(
-    merchantId: string,
-    customerId: string,
-    timeOfDay: string
-  ): Promise<{ WHATSAPP: number; INSTAGRAM: number }> {
+  private async getTimeBasedPlatformPreferences(): Promise<{ WHATSAPP: number; INSTAGRAM: number }> {
     // Implementation for time-based platform preferences
     return { WHATSAPP: 0.5, INSTAGRAM: 0.5 };
   }

@@ -144,8 +144,7 @@ export class InstagramMessageSender {
       if (conversationId && response.success) {
         await this.messageWindowService.recordMerchantResponse(
           merchantId,
-          { instagram: recipientId, platform: 'instagram' },
-          conversationId
+          { instagram: recipientId, platform: 'instagram' }
         );
       }
 
@@ -211,8 +210,8 @@ export class InstagramMessageSender {
       const credentials = await this.getCredentials(merchantId);
 
       // Upload media first if it's a local file and no attachment is provided
-      let finalMediaUrl = mediaUrl;
-      let finalCaption = caption;
+      const finalMediaUrl = mediaUrl;
+      const finalCaption = caption;
       let finalAttachmentId = attachmentId;
       if (!finalAttachmentId && !finalMediaUrl.startsWith('http')) {
         try {
@@ -266,8 +265,7 @@ export class InstagramMessageSender {
       if (conversationId && response.success) {
         await this.messageWindowService.recordMerchantResponse(
           merchantId,
-          { instagram: recipientId, platform: 'instagram' },
-          conversationId
+          { instagram: recipientId, platform: 'instagram' }
         );
       }
 
@@ -364,8 +362,7 @@ export class InstagramMessageSender {
       if (conversationId && response.success) {
         await this.messageWindowService.recordMerchantResponse(
           merchantId,
-          { instagram: recipientId, platform: 'instagram' },
-          conversationId
+          { instagram: recipientId, platform: 'instagram' }
         );
       }
 
@@ -517,8 +514,7 @@ export class InstagramMessageSender {
       if (conversationId && response.success) {
         await this.messageWindowService.recordMerchantResponse(
           merchantId,
-          { instagram: recipientId, platform: 'instagram' },
-          conversationId
+          { instagram: recipientId, platform: 'instagram' }
         );
       }
 

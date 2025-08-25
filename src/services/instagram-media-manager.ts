@@ -6,10 +6,7 @@
  */
 
 import { getInstagramMessageSender } from './instagram-message-sender.js';
-import { ExpiringMap } from '../utils/expiring-map.js';
-import { getDatabase } from '../db/adapter.js';
 import { createLogger } from './logger.js';
-import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { MediaContent } from '../types/social.js';
 
 export interface MediaMessage {
@@ -61,9 +58,7 @@ export interface MediaTemplate {
 }
 
 export class InstagramMediaManager {
-  private db = getDatabase();
   private logger = createLogger({ component: 'InstagramMediaManager' });
-  private aiOrchestrator = getConversationAIOrchestrator();
   private messageSender = getInstagramMessageSender();
 
   /**
@@ -140,7 +135,7 @@ export class InstagramMediaManager {
 
       if (templateId) {
         // Use media template
-        const template = await this.getMediaTemplate(templateId, merchantId);
+        const template = await this.getMediaTemplate(templateId);
         if (!template) {
           throw new Error('Media template not found');
         }
@@ -215,7 +210,7 @@ export class InstagramMediaManager {
   /**
    * Get media template (simplified implementation)
    */
-  private async getMediaTemplate(templateId: string, merchantId: string): Promise<MediaTemplate | null> {
+  private async getMediaTemplate(templateId: string): Promise<MediaTemplate | null> {
     // Simplified implementation - in real scenario, fetch from database
     const templates: Record<string, MediaTemplate> = {
       'greeting-template': {

@@ -188,11 +188,6 @@ export function createMerchantIsolationMiddleware(
 ) {
   const finalConfig = { ...DEFAULT_CONFIG, ...config };
   
-  // Simplified header getter
-  const getHeader = (c: Context, name: string): string | undefined => {
-    return c.req.header(name) || undefined;
-  };
-
   // Simplified query getter
   const getQuery = (c: Context, name: string): string | undefined => {
     try {

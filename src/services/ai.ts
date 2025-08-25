@@ -388,7 +388,6 @@ export class AIService {
       
       const prompt = this.buildProductRecommendationPrompt(
         customerQuery,
-        context,
         products
       );
 
@@ -426,7 +425,7 @@ export class AIService {
     context: ConversationContext
   ): Promise<string> {
     try {
-      const prompt = this.buildSummaryPrompt(conversationHistory, context);
+      const prompt = this.buildSummaryPrompt(conversationHistory);
       
       const completion = await this.openai.chat.completions.create({
         model: this.config.ai.summaryModel || 'gpt-4o-mini',
@@ -541,7 +540,6 @@ export class AIService {
    */
   private buildProductRecommendationPrompt(
     customerQuery: string,
-    context: ConversationContext,
     products: Product[]
   ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     const productsText = products.map(p => 
@@ -570,8 +568,7 @@ ${productsText}
    * Private: Build summary prompt
    */
   private buildSummaryPrompt(
-    conversationHistory: MessageHistory[],
-    context: ConversationContext
+    conversationHistory: MessageHistory[]
   ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     const historyText = conversationHistory.map(msg => 
       `${msg.role}: ${msg.content}`
@@ -712,22 +709,7 @@ ${productsText}
     };
   }
 
-  /**
-   * Private: Generate error response
-   */
-  private getErrorResponse(): AIResponse {
-    return {
-      message: 'عذراً، حدث خطأ في النظام. يرجى المحاولة لاحقاً.',
-      messageAr: 'عذراً، حدث خطأ في النظام. يرجى المحاولة لاحقاً.',
-      intent: 'error',
-      stage: 'GREETING',
-      actions: [{ type: 'ESCALATE', data: { reason: 'SYSTEM_ERROR' }, priority: 1 }],
-      products: [],
-      confidence: 0.0,
-      tokens: { prompt: 0, completion: 0, total: 0 },
-      responseTime: 0
-    };
-  }
+
 
   /**
    * Clear product cache (useful for testing or manual cache invalidation)
@@ -758,7 +740,7 @@ export function getAIService(): AIService {
   // إبقِ الواجهة متزامِنة لتوافق الكود الحالي
   // وحافظ على require كحل توافقي في بيئات CJS/ESM الممزوجة
   // (يمكن لاحقاً ترقية المشروع لاستيراد ديناميكي بالكامل)
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+   
   const { container } = require('../container/index.js');
   if (!container.has('aiService')) {
     container.registerSingleton('aiService', () => new AIService(container));

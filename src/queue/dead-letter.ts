@@ -36,7 +36,7 @@ const MAX_DLQ_SIZE = parseInt(process.env.DLQ_MAX_SIZE || '10000');
 const DLQ_RETRY_DELAY_MS = parseInt(process.env.DLQ_RETRY_DELAY_MS || '300000'); // 5 minutes
 const logger = getLogger({ component: 'DLQ' });
 
-let dlqStats = {
+const dlqStats = {
   totalProcessed: 0,
   totalRetried: 0,
   totalFailed: 0,

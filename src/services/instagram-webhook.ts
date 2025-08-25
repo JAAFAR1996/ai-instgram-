@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 import { getInstagramClient } from './instagram-api.js';
 import { getMessageWindowService } from './message-window.js';
 import { getDatabase } from '../db/adapter.js';
@@ -19,8 +19,6 @@ import { verifyHMACRaw } from './encryption.js';
 import { createLogger } from './logger.js';
 import type { ConversationRow, MessageHistoryRow as DBMessageHistoryRow } from '../types/database-rows.js';
 import type { ConversationStage } from '../types/database.js';
-import type { DIContainer } from '../container/index.js';
-import type { Pool } from 'pg';
 import type { Sql } from '../types/sql.js';
 // import type { InstagramMessage, InstagramComment, InstagramStoryMention } from './instagram-api.js';
 import type { InstagramContext } from './instagram-ai.js';
@@ -122,11 +120,7 @@ export interface ProcessedWebhookResult {
   errors: string[];
 }
 
-interface _MessageHistoryRow {
-  role: string;
-  content: string;
-  timestamp: Date;
-}
+
 
 interface Logger {
   info: (message: string, context?: Record<string, unknown>) => void;
@@ -143,23 +137,12 @@ export class InstagramWebhookHandler {
   private storiesManager!: ReturnType<typeof getInstagramStoriesManager>;
   private commentsManager!: ReturnType<typeof getInstagramCommentsManager>;
   private mediaManager!: ReturnType<typeof getInstagramMediaManager>;
-  private _pool!: Pool;
 
-  constructor(private _container?: DIContainer) {
-    if (_container) {
-      this._pool = _container.get<Pool>('pool');
-      this.logger = _container.get<ReturnType<typeof createLogger>>('logger');
-      this.initializeFromContainer();
-    } else {
-      this.initializeLegacy();
-    }
-  }
-
-  private initializeFromContainer(): void {
-    // Services will be injected via container when available
-    // For now, fallback to legacy methods
+  constructor() {
     this.initializeLegacy();
   }
+
+
 
   private initializeLegacy(): void {
     this.logger = createLogger({ component: 'InstagramWebhook' });
@@ -363,7 +346,7 @@ export class InstagramWebhookHandler {
     merchantId: string,
     result: ProcessedWebhookResult
   ): Promise<number> {
-    let customerId: string | undefined = event.sender?.id;
+    const customerId: string | undefined = event.sender?.id;
     try {
       if (!customerId) {
         throw new Error('Missing sender ID in messaging event');
@@ -1261,18 +1244,7 @@ export class InstagramWebhookHandler {
     return typeMapping[instagramType.toLowerCase()] || 'document';
   }
 
-  /**
-   * Private: Extract file format from URL
-   */
-  private extractFileFormat(url: string): string {
-    try {
-      const urlParts = url.split('.');
-      const last = (urlParts[urlParts.length - 1] ?? '').split('?')[0] ?? '';
-      return last.toLowerCase();
-    } catch {
-      return 'unknown';
-    }
-  }
+
 
   /**
    * Private: Legacy media attachment processing (fallback)

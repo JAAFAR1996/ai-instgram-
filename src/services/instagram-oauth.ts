@@ -81,11 +81,9 @@ export class InstagramOAuthService {
     const rateKey = `ig-oauth:${resolvedMerchantId}:${method}:${path}`;
 
     let check: { allowed: boolean; remaining: number; resetTime: number };
-    let _rateLimitCheckSkipped = false;
     try {
       check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
     } catch (error) {
-      _rateLimitCheckSkipped = true;
       this.logger.warn(
         `⚠️ Redis rate limit check failed for ${rateKey}:`,
         { err: error }

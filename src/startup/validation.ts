@@ -884,7 +884,7 @@ async function validateSecurityConfiguration(): Promise<ValidationResult> {
     };
 
     const missingHeaders = [];
-    for (const [header, expectedValue] of Object.entries(securityHeaders)) {
+    for (const [header] of Object.entries(securityHeaders)) {
       // In production, would check actual HTTP headers
       // For validation, assume they're configured if not explicitly disabled
       const headerDisabled = process.env[`DISABLE_${header.replace(/-/g, '_').toUpperCase()}`] === 'true';

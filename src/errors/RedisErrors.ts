@@ -565,7 +565,6 @@ export class RedisErrorHandler {
   getErrorMetrics(): ErrorMetrics {
     const now = new Date();
     const oneMinuteAgo = new Date(now.getTime() - 60000);
-    const oneHourAgo = new Date(now.getTime() - 3600000);
 
     const recentErrors = this.errorHistory.filter(
       error => error.timestamp >= oneMinuteAgo

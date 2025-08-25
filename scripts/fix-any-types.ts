@@ -64,8 +64,7 @@ const HIGH_PRIORITY_FILES = [
   'src/services/ai.ts',
   'src/services/instagram-api.ts', 
   'src/services/ProductionQueueManager.ts',
-  'src/services/cross-platform-conversation-manager.ts',
-  'src/services/instagram-testing-orchestrator.ts'
+  'src/services/cross-platform-conversation-manager.ts'
 ];
 
 class SafeAnyRemover {

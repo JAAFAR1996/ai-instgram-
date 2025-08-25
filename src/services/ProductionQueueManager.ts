@@ -1,5 +1,5 @@
 import { Queue, Worker, QueueEvents } from 'bullmq';
-import type { Job, RedisClient } from 'bullmq';
+import type { Job, RedisClient, JobsOptions } from 'bullmq';
 import { Redis, ReplyError } from 'ioredis';
 import type { Redis as RedisType } from 'ioredis';
 import { Pool } from 'pg';
@@ -41,7 +41,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 import { RedisUsageType, RedisEnvironment } from '../config/RedisConfigurationFactory.js';
 import RedisConnectionManager from './RedisConnectionManager.js';
-import crypto from 'node:crypto';
+import * as crypto from 'node:crypto';
 import { serr } from '../isolation/context.js';
 import { performHealthCheck } from './RedisSimpleHealthCheck.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
@@ -120,17 +120,14 @@ interface JobWithAttempts {
   name: string;
   data: unknown;
   attemptsMade?: number;
-  opts?: {
-    attempts?: number;
-    delay?: number;
-  };
+  opts?: JobsOptions;
   processedOn?: number;
   timestamp?: number;
+  remove(): Promise<void>;
 }
 
 export class ProductionQueueManager {
   private queue: Queue | null = null;
-  private _queueEvents: QueueEvents | null = null;
   // removed unused field
   private workers: Record<string, Worker> = {};
   private connectionManager: RedisConnectionManager;
@@ -290,7 +287,6 @@ export class ProductionQueueManager {
     // استخدم QueueEvents بدلاً من الاستماع مباشرة على queue
     const client: RedisClient = await this.queue.client;
     const events = new QueueEvents(this.queueName, { connection: client });
-    this._queueEvents = events;
     void events.waitUntilReady();
 
     events.on('error', (error) => {
@@ -366,7 +362,6 @@ export class ProductionQueueManager {
       return await this.circuitBreaker.execute(async () => {
         try {
           const queue = this.queue;
-          const jobWithAttempts = job as unknown as JobWithAttempts;
           
           this.logger.info(`🔄 ${webhookWorkerId} - بدء معالجة ويب هوك`, {
             webhookWorkerId,
@@ -374,7 +369,7 @@ export class ProductionQueueManager {
             merchantId,
             platform,
             jobId: job.id,
-            attempt: (jobWithAttempts.attemptsMade ?? 0) + 1,
+            attempt: 1, // BullMQ handles attempts internally
             queueStatus: {
               waiting: queue ? await queue.getWaiting().then(jobs => jobs.length) : 0,
               active: queue ? await queue.getActive().then(jobs => jobs.length) : 0
@@ -409,7 +404,6 @@ export class ProductionQueueManager {
           
         } catch (error) {
           const duration = Date.now() - startTime;
-          const jobWithAttempts = job as JobWithAttempts;
           const errorMessage = error instanceof Error ? error.message : String(error);
           
           this.logger.error(`❌ ${webhookWorkerId} - فشل في معالجة الويب هوك`, { 
@@ -420,8 +414,8 @@ export class ProductionQueueManager {
             jobId: job.id,
             duration: `${duration}ms`,
             error: errorMessage,
-            attempt: (jobWithAttempts.attemptsMade ?? 0) + 1,
-            maxAttempts: jobWithAttempts.opts?.attempts ?? 3
+            attempt: 1, // BullMQ handles attempts internally
+            maxAttempts: 3
           });
           
           // تحويل الخطأ إلى Error object إذا لم يكن كذلك
@@ -455,15 +449,13 @@ export class ProductionQueueManager {
       
       return await this.circuitBreaker.execute(async () => {
         try {
-          const jobWithAttempts = job as JobWithAttempts;
-          
           this.logger.info(`🤖 ${aiWorkerId} - بدء معالجة استجابة ذكاء اصطناعي`, {
             aiWorkerId,
             conversationId,
             merchantId,
             jobId: job.id,
             messageLength: (message as string).length || 0,
-            attempt: (jobWithAttempts.attemptsMade ?? 0) + 1
+            attempt: 1 // BullMQ handles attempts internally
           });
 
           const result = await this.processAIResponseJob({
@@ -491,7 +483,6 @@ export class ProductionQueueManager {
           
         } catch (error) {
           const duration = Date.now() - startTime;
-          const jobWithAttempts = job as JobWithAttempts;
           const errorMessage = error instanceof Error ? error.message : String(error);
           
           this.logger.error(`❌ ${aiWorkerId} - فشل في معالجة استجابة الذكاء الاصطناعي`, { 
@@ -500,8 +491,8 @@ export class ProductionQueueManager {
             merchantId,
             duration: `${duration}ms`,
             error: errorMessage,
-            attempt: (jobWithAttempts.attemptsMade ?? 0) + 1,
-            maxAttempts: jobWithAttempts.opts?.attempts ?? 3,
+            attempt: 1, // BullMQ handles attempts internally
+            maxAttempts: 3,
             jobId: job.id
           });
           
@@ -732,7 +723,7 @@ export class ProductionQueueManager {
               }
               
               // 🔍 فحص إذا كان Job delayed بدلاً من waiting
-              const jobWithAttempts = job as JobWithAttempts;
+              const jobWithAttempts = job as unknown as JobWithAttempts;
               if (jobWithAttempts.opts?.delay && jobWithAttempts.opts.delay > 0) {
                 this.logger.warn('⏰ [MANUAL-PROCESSING] Job delayed - تخطي', { 
                   jobId: job.id, 
@@ -843,7 +834,7 @@ export class ProductionQueueManager {
             this.startManualPolling();
           }, backoffMs);
         } else {
-          this.logger.error('❌ [MANUAL-POLLING] خطأ في Manual Polling', {
+          this.logger.error('❌ [MANUAL-POLLING] خطأ في التحقق اليدوي', {
             error: error instanceof Error ? error.message : String(error),
             stack:
               error instanceof Error
@@ -1312,40 +1303,7 @@ export class ProductionQueueManager {
       }
 
       // 🚀 معالجة AI حقيقية باستخدام AI Orchestrator
-      const platform = ((jobData.platform as string | undefined)?.toLowerCase() || 'instagram') as 'instagram' | 'whatsapp';
       
-      // إنشاء context حسب platform
-      let context: Record<string, unknown>;
-      
-      if (platform === 'instagram') {
-        context = {
-          conversationId: jobData.conversationId,
-          merchantId: jobData.merchantId,
-          customerId: jobData.customerId,
-          messageHistory: (jobData.messageHistory || []) as unknown as import('../types/common.js').MessageLike[],
-          customerProfile: jobData.customerProfile || {},
-          businessContext: jobData.businessContext || {},
-          // Instagram-specific properties
-          interactionType: jobData.interactionType || 'dm',
-          stage: 'engagement',
-          cart: [],
-          preferences: {},
-          conversationHistory: jobData.messageHistory || [],
-          mediaContext: jobData.mediaContext || {},
-          visualPreferences: jobData.visualPreferences || {}
-        };
-      } else {
-        // WhatsApp context (simpler)
-        context = {
-          conversationId: jobData.conversationId,
-          merchantId: jobData.merchantId,
-          customerId: jobData.customerId,
-          messageHistory: (jobData.messageHistory || []) as unknown as import('../types/common.js').MessageLike[],
-          customerProfile: jobData.customerProfile || {},
-          businessContext: jobData.businessContext || {}
-        };
-      }
-
       // 📝 جلب بيانات المحادثة من قاعدة البيانات
       const conversation = await this.repositories.conversation.findById(String(jobData.conversationId));
       if (!conversation) {

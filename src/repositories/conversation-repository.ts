@@ -317,8 +317,8 @@ export class ConversationRepository {
    * Find conversations with filters
    */
   async findMany(filters: ConversationFilters = {}): Promise<Conversation[]> {
-    let whereConditions: string[] = [];
-    let params: any[] = [];
+    const whereConditions: string[] = [];
+    const params: any[] = [];
     let paramIndex = 1;
 
     if (filters.merchantId) {
@@ -385,8 +385,8 @@ export class ConversationRepository {
    * Get conversation statistics
    */
   async getStats(merchantId?: string, dateFrom?: Date, dateTo?: Date): Promise<ConversationStats> {
-    let whereConditions: string[] = [];
-    let params: any[] = [];
+    const whereConditions: string[] = [];
+    const params: any[] = [];
     let paramIndex = 1;
 
     if (merchantId) {
@@ -472,8 +472,8 @@ export class ConversationRepository {
    * Count conversations with filters
    */
   async count(filters: ConversationFilters = {}): Promise<number> {
-    let whereConditions: string[] = [];
-    let params: any[] = [];
+    const whereConditions: string[] = [];
+    const params: any[] = [];
     let paramIndex = 1;
 
     if (filters.merchantId) {

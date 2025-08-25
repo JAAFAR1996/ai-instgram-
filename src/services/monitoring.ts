@@ -9,7 +9,7 @@ import { getDatabase } from '../db/adapter.js';
 import type { Sql } from '../types/sql.js';
 import type { Platform, QualityStatus } from '../types/database.js';
 import type { DIContainer } from '../container/index.js';
-import type { Pool } from 'pg';
+
 import { getLogger } from './logger.js';
 import { telemetry } from './telemetry.js';
 import { must } from '../utils/safety.js';
@@ -140,12 +140,7 @@ export class MonitoringService {
     this.redisMonitor.setRedisConnection(redisConnection);
   }
 
-  /**
-   * Get database connection with proper connection pooling
-   */
-  private async getDbConnection() {
-    return await this.db.connect();
-  }
+
 
   /**
    * Check WhatsApp Business API quality rating

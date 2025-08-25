@@ -8,7 +8,6 @@
 import { getInstagramMessageSender } from './instagram-message-sender.js';
 import { getDatabase } from '../db/adapter.js';
 import type { Sql } from '../types/sql.js';
-import type { QuickReply } from '../types/instagram.js';
 import type { ConversationStage } from '../types/database.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import type { InstagramContext } from './instagram-ai.js';
@@ -759,25 +758,7 @@ export class InstagramStoriesManager {
     return personalizedResponse;
   }
 
-  /**
-   * Private: Generate quick replies for story interactions
-   */
-  private generateQuickReplies(interaction: StoryInteraction): QuickReply[] {
-    const baseReplies = [
-      { content_type: 'text' as const, title: 'منتجاتنا 🛍️', payload: 'SHOW_PRODUCTS' },
-      { content_type: 'text' as const, title: 'أسعار 💰', payload: 'SHOW_PRICES' }
-    ];
 
-    if (interaction.type === 'story_reply' && interaction.content) {
-      baseReplies.unshift({
-        content_type: 'text' as const,
-        title: 'المزيد 💬',
-        payload: 'TELL_MORE'
-      });
-    }
-
-    return baseReplies;
-  }
 
   /**
    * Private: Store story response
@@ -843,7 +824,7 @@ export class InstagramStoriesManager {
     interaction: StoryInteraction
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql = this.db.getSQL();
       const redis = await this.redis.getConnection(RedisUsageType.CACHING);
 
       // Ensure unique users per day using Redis set
@@ -890,7 +871,7 @@ export class InstagramStoriesManager {
     interactionType: string
   ): Promise<void> {
     try {
-      const sql = this.db.getSQL() as any;
+      const sql = this.db.getSQL();
 
       await sql`
         INSERT INTO sales_opportunities (

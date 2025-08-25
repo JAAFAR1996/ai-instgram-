@@ -8,7 +8,6 @@
 
 import { getDatabase } from '../db/adapter.js';
 import { logger } from './logger.js';
-import type { DBRow } from '../types/instagram.js';
 
 export interface MessageWindowStatus {
   canSendMessage: boolean;
@@ -221,8 +220,7 @@ export class MessageWindowService {
    */
   public async recordMerchantResponse(
     merchantId: string,
-    customer: CustomerIdentifier,
-    messageId?: string
+    customer: CustomerIdentifier
   ): Promise<void> {
     try {
       const sql = this.db.getSQL();

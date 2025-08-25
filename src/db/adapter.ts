@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { getPool, withTx } from './index.js';
+import { getPool } from './index.js';
 import { type Sql, type SqlFunction } from './sql-template.js';
 export type { DBRow } from '../types/instagram.js';
 import { buildSqlCompat } from '../infrastructure/db/sql-compat.js';
@@ -14,6 +14,21 @@ import { getLogger } from '../services/logger.js';
 import type { Pool, PoolClient } from 'pg';
 
 const log = getLogger({ component: 'database-adapter' });
+
+/**
+ * Extended PoolClient interface with processID
+ */
+interface ExtendedPoolClient extends PoolClient {
+  processID?: number;
+}
+
+/**
+ * Database error interface
+ */
+interface DatabaseErrorType extends Error {
+  code?: string;
+  message: string;
+}
 
 /**
  * Query Performance Metrics
@@ -98,7 +113,7 @@ export class DatabaseAdapter implements IDatabase {
         
         // Log slow queries
         if (duration > 1000) {
-          log.warn('⚠️ Slow query detected', {
+          log.warn('🐌 Slow query detected', {
             duration,
             sql: sql.substring(0, 200) + (sql.length > 200 ? '...' : ''),
             rowCount: result.length
@@ -108,9 +123,9 @@ export class DatabaseAdapter implements IDatabase {
         return result;
       } catch (error) {
         const duration = Date.now() - startTime;
-        log.error('❌ Query execution failed', {
-          sql: sql.substring(0, 200) + (sql.length > 200 ? '...' : ''),
+        log.error('❌ SQL execution failed', {
           duration,
+          sql: sql.substring(0, 200) + (sql.length > 200 ? '...' : ''),
           error: error instanceof Error ? error.message : String(error)
         });
         throw error;
@@ -141,36 +156,42 @@ export class DatabaseAdapter implements IDatabase {
    */
   private setupPoolEventHandlers(): void {
     this.pool.on('connect', (client: PoolClient) => {
+      const extendedClient = client as ExtendedPoolClient;
       log.debug('🔌 New database connection established', {
-        clientId: (client as any).processID || 'unknown'
+        clientId: extendedClient.processID || 'unknown'
       });
     });
 
     this.pool.on('acquire', (client: PoolClient) => {
+      const extendedClient = client as ExtendedPoolClient;
       log.debug('📥 Database connection acquired', {
-        clientId: (client as any).processID || 'unknown',
+        clientId: extendedClient.processID || 'unknown',
         poolStats: this.getPoolStats()
       });
     });
 
-    this.pool.on('release', (error: Error, client: PoolClient) => {
+    this.pool.on('release', (error: Error | null, client: PoolClient) => {
+      const extendedClient = client as ExtendedPoolClient;
       log.debug('📤 Database connection released', {
-        clientId: (client as any).processID || 'unknown',
-        poolStats: this.getPoolStats()
+        clientId: extendedClient.processID || 'unknown',
+        poolStats: this.getPoolStats(),
+        ...(error && { error: error.message })
       });
     });
 
     this.pool.on('error', (error: Error, client: PoolClient) => {
+      const extendedClient = client as ExtendedPoolClient;
       log.error('❌ Database pool error', {
         error: error.message,
-        clientId: (client as any)?.processID || 'unknown',
+        clientId: extendedClient.processID || 'unknown',
         poolStats: this.getPoolStats()
       });
     });
 
     this.pool.on('remove', (client: PoolClient) => {
+      const extendedClient = client as ExtendedPoolClient;
       log.debug('🗑️ Database connection removed', {
-        clientId: (client as any).processID || 'unknown',
+        clientId: extendedClient.processID || 'unknown',
         poolStats: this.getPoolStats()
       });
     });
@@ -224,18 +245,19 @@ export class DatabaseAdapter implements IDatabase {
       });
       
       return result.rows as T[];
-    } catch (error: any) {
+    } catch (error: unknown) {
       const duration = Date.now() - startTime;
+      const dbError = error as DatabaseErrorType;
       log.error('❌ Query execution failed', {
         sql: sql.substring(0, 200) + (sql.length > 200 ? '...' : ''),
         duration,
-        error: error.message,
-        code: error.code
+        error: dbError.message,
+        code: dbError.code
       });
       
       throw new DatabaseError(
-        error.message,
-        error.code,
+        dbError.message,
+        dbError.code,
         sql,
         params
       );
@@ -278,7 +300,7 @@ export class DatabaseAdapter implements IDatabase {
       log.debug('🔄 Transaction started', {
         isolationLevel,
         readOnly,
-        clientId: (client as any).processID || 'unknown'
+        clientId: (client as ExtendedPoolClient).processID || 'unknown'
       });
 
       // Set transaction options
@@ -288,7 +310,7 @@ export class DatabaseAdapter implements IDatabase {
       }
 
       // Create SQL function bound to this client
-      const clientSql = buildSqlCompat(client as any);
+      const clientSql = buildSqlCompat(this.pool);
       
       // Execute transaction with timeout
       const transactionPromise = fn(clientSql);
@@ -303,37 +325,38 @@ export class DatabaseAdapter implements IDatabase {
       const duration = Date.now() - startTime;
       log.debug('✅ Transaction committed successfully', {
         duration,
-        clientId: (client as any).processID || 'unknown'
+        clientId: (client as ExtendedPoolClient).processID || 'unknown'
       });
       
       return result;
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (client) {
         try {
           await client.query('ROLLBACK');
           log.debug('🔄 Transaction rolled back', {
-            clientId: (client as any).processID || 'unknown',
-            error: error.message
+            clientId: (client as ExtendedPoolClient).processID || 'unknown',
+            error: error instanceof Error ? error.message : String(error)
           });
         } catch (rollbackError) {
           log.error('❌ Failed to rollback transaction', {
-            clientId: (client as any).processID || 'unknown',
+            clientId: (client as ExtendedPoolClient).processID || 'unknown',
             rollbackError: rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
           });
         }
       }
       
       const duration = Date.now() - startTime;
+      const dbError = error as DatabaseErrorType;
       log.error('❌ Transaction failed', {
         duration,
-        error: error.message,
+        error: dbError.message,
         isolationLevel,
         readOnly
       });
       
       throw new DatabaseError(
-        `Transaction failed: ${error.message}`,
-        error.code,
+        `Transaction failed: ${dbError.message}`,
+        dbError.code,
         undefined,
         undefined
       );
@@ -341,7 +364,7 @@ export class DatabaseAdapter implements IDatabase {
       if (client) {
         client.release();
         log.debug('📤 Transaction connection released', {
-          clientId: (client as any).processID || 'unknown'
+          clientId: (client as ExtendedPoolClient).processID || 'unknown'
         });
       }
     }
@@ -375,11 +398,12 @@ export class DatabaseAdapter implements IDatabase {
       });
       
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
       const poolStats = this.getPoolStats();
+      const dbError = error as DatabaseErrorType;
       
       log.error('❌ Database health check failed', {
-        error: error instanceof Error ? error.message : String(error),
+        error: dbError.message,
         poolStats
       });
       
@@ -398,14 +422,15 @@ export class DatabaseAdapter implements IDatabase {
       await this.pool.end();
       
       log.info('✅ Database connections closed successfully');
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const dbError = error as DatabaseErrorType;
       log.error('❌ Failed to close database connections', {
-        error: error.message
+        error: dbError.message
       });
       
       throw new DatabaseError(
-        `Failed to close database: ${error.message}`,
-        error.code
+        `Failed to close database: ${dbError.message}`,
+        dbError.code
       );
     }
   }

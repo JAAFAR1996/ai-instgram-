@@ -348,7 +348,7 @@ export class Logger {
     if (config.environment === 'production') {
       out.write(JSON.stringify(entry) + '\n');
     } else {
-      const { context, error, metadata, ...rest } = entry;
+      const { context, error } = entry;
       out.write(`${entry.timestamp} ${entry.level.toUpperCase().padEnd(5)} ${entry.message}` +
                 (context && Object.keys(context).length ? ` ${JSON.stringify(context)}` : '') +
                 (error ? ` ${JSON.stringify(error)}` : '') + '\n');

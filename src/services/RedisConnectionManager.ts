@@ -2,8 +2,7 @@ import { Redis } from 'ioredis';
 import {
   RedisUsageType,
   RedisEnvironment as Environment,
-  ProductionRedisConfigurationFactory,
-  RedisConfiguration
+  ProductionRedisConfigurationFactory
 } from '../config/RedisConfigurationFactory.js';
 import { 
   isConnectionHealthy as healthCheck, 
@@ -12,10 +11,7 @@ import {
 } from './RedisSimpleHealthCheck.js';
 import {
   RedisConnectionError,
-  RedisValidationError,
   RedisErrorHandler,
-  isConnectionError,
-  isTimeoutError,
   RedisRateLimitError
 } from '../errors/RedisErrors.js';
 

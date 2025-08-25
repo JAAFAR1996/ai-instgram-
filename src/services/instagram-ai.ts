@@ -278,7 +278,7 @@ export class InstagramAIService {
         this.logger.error('Invalid Instagram AI JSON response', { sample: response.slice(0, 200) });
         return this.getContextualFallback(context, 'AI_API_ERROR');
       }
-      let aiResponse = parsed.data;
+      const aiResponse = parsed.data;
       
       // Add metadata
       aiResponse.tokens = {
@@ -290,7 +290,6 @@ export class InstagramAIService {
 
       // Enhance with Instagram-specific features
       aiResponse.hashtagSuggestions = await this.generateRelevantHashtags(
-        customerMessage,
         context
       );
 
@@ -330,7 +329,7 @@ export class InstagramAIService {
 
       const response = completion.choices?.[0]?.message?.content;
       const parsed = this.parseJsonSafe<InstagramAIResponse>(response ?? undefined);
-      let aiResponse = parsed.ok && this.validateInstagramResponse(parsed.data)
+      const aiResponse = parsed.ok && this.validateInstagramResponse(parsed.data)
         ? parsed.data
         : this.getInstagramFallbackResponse(context);
 
@@ -371,7 +370,7 @@ export class InstagramAIService {
 
       const response = completion.choices?.[0]?.message?.content;
       const parsed = this.parseJsonSafe<InstagramAIResponse>(response ?? undefined);
-      let aiResponse = parsed.ok && this.validateInstagramResponse(parsed.data)
+      const aiResponse = parsed.ok && this.validateInstagramResponse(parsed.data)
         ? parsed.data
         : this.getInstagramFallbackResponse(context);
 
@@ -450,8 +449,7 @@ export class InstagramAIService {
    */
   public async analyzeContentPerformance(
     content: string,
-    contentType: 'story' | 'post' | 'reel',
-    context: InstagramContext
+    contentType: 'story' | 'post' | 'reel'
   ): Promise<{
     viralScore: number;
     engagementPrediction: number;
@@ -459,7 +457,7 @@ export class InstagramAIService {
     optimizationSuggestions: string[];
   }> {
     try {
-      const prompt = this.buildContentAnalysisPrompt(content, contentType, context);
+      const prompt = this.buildContentAnalysisPrompt(content, contentType);
 
       const completion = await this.openai.chat.completions.create({
         model: 'gpt-4o-mini',
@@ -697,8 +695,7 @@ ${productsText}
    */
   private buildContentAnalysisPrompt(
     content: string,
-    contentType: string,
-    context: InstagramContext
+    contentType: string
   ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     return [
       {
@@ -732,7 +729,6 @@ ${productsText}
    * Private: Generate relevant hashtags
    */
   private async generateRelevantHashtags(
-    message: string,
     _context: InstagramContext
   ): Promise<string[]> {
     try {
@@ -779,7 +775,7 @@ ${productsText}
         productBatches.push(batch);
       }
       
-      let allProducts: Product[] = [];
+      const allProducts: Product[] = [];
       
       // Process batches concurrently for better performance
       const batchPromises = productBatches.map(batch => 

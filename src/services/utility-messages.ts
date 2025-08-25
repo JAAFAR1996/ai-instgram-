@@ -5,12 +5,10 @@
  * ===============================================
  */
 
-import { getPool } from '../db/index.js';
 import { getDatabase } from '../db/adapter.js';
 import { getInstagramMessageSender } from './instagram-message-sender.js';
 import { getLogger } from './logger.js';
 import type { DIContainer } from '../container/index.js';
-import type { Pool } from 'pg';
 
 export type UtilityMessageType = 
   | 'ORDER_UPDATE' 
@@ -45,13 +43,12 @@ export interface UtilityMessageResult {
 }
 
 export class UtilityMessagesService {
-  private pool!: Pool;
+
   private logger!: any;
   private messageSender = getInstagramMessageSender();
 
   constructor(container?: DIContainer) {
     if (container) {
-      this.pool = container.get<Pool>('pool');
       this.logger = container.get('logger');
     } else {
       // Legacy fallback
@@ -60,7 +57,6 @@ export class UtilityMessagesService {
   }
 
   private initializeLegacy(): void {
-    this.pool = getPool();
     this.logger = getLogger({ component: 'UtilityMessagesService' });
   }
 

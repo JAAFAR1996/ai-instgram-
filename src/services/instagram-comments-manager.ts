@@ -286,7 +286,8 @@ export class InstagramCommentsManager {
         }
       };
 
-      const aiResult = await this.aiOrchestrator.generatePlatformResponse(
+      // AI response generation (currently using fallback analysis)
+      await this.aiOrchestrator.generatePlatformResponse(
         analysisPrompt,
         context,
         'instagram'
@@ -923,7 +924,7 @@ export class InstagramCommentsManager {
    */
   private async updateCommentAnalytics(
     merchantId: string,
-    comment: CommentInteraction,
+    _comment: CommentInteraction,
     response: CommentResponse
   ): Promise<void> {
     try {
