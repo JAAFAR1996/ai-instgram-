@@ -92,8 +92,8 @@ export class RedisConnectionManager {
    */
   async getConnection(usageType: RedisUsageType): Promise<Redis> {
     // Check if Redis is disabled via environment variable
-    if (process.env.DISABLE_REDIS === 'true') {
-      throw new Error('Redis is disabled by DISABLE_REDIS environment variable');
+    if (process.env.DISABLE_REDIS === 'true' || process.env.DISABLE_REDIStrue === 'true') {
+      throw new Error('Redis is disabled by environment variable');
     }
     
     // Check if we have a healthy connection
@@ -220,6 +220,11 @@ export class RedisConnectionManager {
           if (err.message.includes('ECONNRESET')) {
             return false;
           }
+          // Don't reconnect on max retries errors
+          if (err.message.includes('MaxRetriesPerRequestError') || 
+              err.message.includes('max retries per request limit')) {
+            return false;
+          }
           return 1;
         }
       });
@@ -269,6 +274,17 @@ export class RedisConnectionManager {
         throw new Error('Redis rate limit exceeded');
       }
 
+      // Handle max retries errors
+      if (errorMessage.includes('MaxRetriesPerRequestError') || 
+          errorMessage.includes('max retries per request limit')) {
+        this.logger?.warn('Redis max retries exceeded - will retry later', {
+          usageType,
+          error: errorMessage
+        });
+        
+        throw new Error('Redis max retries exceeded');
+      }
+
       // Handle connection reset errors
       if (errorMessage.includes('ECONNRESET')) {
         this.logger?.warn('Redis connection reset - will retry later', {
@@ -314,6 +330,7 @@ export class RedisConnectionManager {
       
       // Handle specific error types gracefully
       if (error.message.includes('MaxRetriesPerRequestError') || 
+          error.message.includes('max retries per request limit') ||
           error.message.includes('ECONNRESET') ||
           error.message.includes('Connection timeout')) {
         this.logger?.warn('Redis connection error (will retry)', {
@@ -353,7 +370,7 @@ export class RedisConnectionManager {
   ): Promise<{ ok: boolean; result?: T; reason?: string; skipped?: boolean }> {
     
     // Check if Redis is disabled via environment variable
-    if (process.env.DISABLE_REDIS === 'true') {
+    if (process.env.DISABLE_REDIS === 'true' || process.env.DISABLE_REDIStrue === 'true') {
       return {
         ok: false,
         skipped: true,
@@ -398,7 +415,8 @@ export class RedisConnectionManager {
           errorMessage.includes('Connection is closed') ||
           errorMessage.includes('Failed to create') ||
           errorMessage.includes('Redis is currently rate limited') ||
-          errorMessage.includes('MaxRetriesPerRequestError')) {
+          errorMessage.includes('MaxRetriesPerRequestError') ||
+          errorMessage.includes('max retries per request limit')) {
         
         this.logger?.warn('Redis not available, skipping operation', {
           usageType,

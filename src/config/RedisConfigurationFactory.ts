@@ -215,10 +215,13 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
   }
 
   private createCachingConfiguration(baseConfig: BaseRedisConfig): CachingRedisConfig {
+    const isUpstash = baseConfig.host?.includes('upstash.io') || 
+                     baseConfig.host?.includes('redis.upstash.com');
+    
     const config: CachingRedisConfig = {
       connectTimeout: 8000,
       lazyConnect: true,
-      maxRetriesPerRequest: 3,
+      maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || (isUpstash ? 3 : 5)),
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}cache:`,
       enableOfflineQueue: true
@@ -233,10 +236,13 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
   }
 
   private createRateLimiterConfiguration(baseConfig: BaseRedisConfig): CachingRedisConfig {
+    const isUpstash = baseConfig.host?.includes('upstash.io') || 
+                     baseConfig.host?.includes('redis.upstash.com');
+    
     const config: CachingRedisConfig = {
       connectTimeout: 8000,
       lazyConnect: true,
-      maxRetriesPerRequest: 3,
+      maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || (isUpstash ? 3 : 5)),
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}ratelimit:`,
       enableOfflineQueue: true
