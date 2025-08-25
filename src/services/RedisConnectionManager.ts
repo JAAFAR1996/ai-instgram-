@@ -202,13 +202,17 @@ export class RedisConnectionManager {
       const connection = new Redis({
         ...config,
         lazyConnect: true,
-        maxRetriesPerRequest: 3,
+        maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || 5), // زيادة من 3 إلى 5
         connectTimeout: this.poolConfig.connectionTimeout,
         enableReadyCheck: true,
         enableOfflineQueue: false,
         reconnectOnError: (err) => {
           // Don't reconnect on rate limit errors
           if (err.message.includes('max requests limit exceeded')) {
+            return false;
+          }
+          // Don't reconnect on connection reset errors
+          if (err.message.includes('ECONNRESET')) {
             return false;
           }
           return 1;
@@ -258,6 +262,16 @@ export class RedisConnectionManager {
         });
         
         throw new Error('Redis rate limit exceeded');
+      }
+
+      // Handle connection reset errors
+      if (errorMessage.includes('ECONNRESET')) {
+        this.logger?.warn('Redis connection reset - will retry later', {
+          usageType,
+          error: errorMessage
+        });
+        
+        throw new Error('Redis connection reset');
       }
 
       // Handle connection errors

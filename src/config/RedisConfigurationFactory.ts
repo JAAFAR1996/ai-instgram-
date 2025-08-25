@@ -254,10 +254,11 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
     const config: CachingRedisConfig = {
       connectTimeout: 8000,
       lazyConnect: true,
-      maxRetriesPerRequest: 3,
+      maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || 5), // زيادة من 3 إلى 5
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}idempotency:`,
-      enableOfflineQueue: true
+      enableOfflineQueue: true,
+      enableReadyCheck: true // إضافة ready check
     };
     
     if (baseConfig.host) config.host = baseConfig.host;
