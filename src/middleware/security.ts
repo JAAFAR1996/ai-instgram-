@@ -104,9 +104,9 @@ export function getClientIP(forwarded?: string): string | undefined {
 /**
  * Basic rate limiting middleware
  */
-export function rateLimitMiddleware(limiterType: keyof typeof rateLimiters = 'general') {
+export function rateLimitMiddleware(limiterType: string = 'general') {
   return async (c: Context, next: Next): Promise<Response | void> => {
-    const limiter = rateLimiters[limiterType];
+    const limiter = await getRateLimiter(limiterType);
     const key = getClientIP(c.req.header('x-forwarded-for')) || 'unknown';
     
     try {
@@ -143,7 +143,7 @@ export function merchantRateLimitMiddleware() {
       }, 400);
     }
 
-    const limiter = rateLimiters.merchant;
+    const limiter = await getRateLimiter('merchant');
     const key = `merchant_${merchantId}`;
     
     try {
