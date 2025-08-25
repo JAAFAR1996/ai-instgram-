@@ -87,6 +87,22 @@ export interface MessageHistoryRow extends DatabaseRow {
   metadata: Record<string, unknown> | null;
 }
 
+export interface ManualFollowupRow extends DatabaseRow {
+  id: string;
+  merchant_id: string;
+  customer_id: string;
+  conversation_id: string | null;
+  original_message: string;
+  reason: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  status: 'PENDING' | 'ASSIGNED' | 'COMPLETED' | 'CANCELLED';
+  assigned_to: string | null;
+  created_at: string;
+  scheduled_for: string;
+  completed_at: string | null;
+  notes: string | null;
+}
+
 // ===============================================
 // STATISTICS & ANALYTICS
 // ===============================================
@@ -152,6 +168,10 @@ export function isCredentialRow(row: DatabaseRow): row is CredentialRow {
 
 export function isStatsRow(row: DatabaseRow): row is StatsRow {
   return 'total' in row && 'count' in row;
+}
+
+export function isManualFollowupRow(row: DatabaseRow): row is ManualFollowupRow {
+  return 'id' in row && 'merchant_id' in row && 'customer_id' in row && 'reason' in row;
 }
 
 // ===============================================

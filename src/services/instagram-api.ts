@@ -225,7 +225,7 @@ export class InstagramAPIClient {
         throw err;
       }
 
-      return returnResponse ? res : (res.json() as Promise<T>);
+      return returnResponse ? res : await res.json() as T;
     } finally {
       clearTimeout(timeout);
     }
@@ -616,9 +616,34 @@ export class InstagramAPIClient {
     merchantId: string
   ): Promise<void> {
     try {
-      await this.getBusinessAccountInfo(credentials, merchantId);
+      // اختبار الcredentials الحالية
+      const response = await this.graphRequest<{ id: string; name: string }>(
+        'GET',
+        `/${credentials.businessAccountId}`,
+        (credentials.accessToken || credentials.pageAccessToken)!,
+        {},
+        merchantId,
+        false
+      );
+      
+      this.logger.info('✅ Instagram credentials validated successfully', { 
+        merchantId, 
+        businessAccountId: credentials.businessAccountId,
+        accountName: response.name 
+      });
+      
     } catch (error: unknown) {
-      throw new Error(`Invalid Instagram credentials: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      this.logger.error('❌ Instagram credentials validation failed:', {
+        error: error instanceof Error ? error.message : String(error),
+        merchantId,
+        businessAccountId: credentials.businessAccountId
+      });
+      
+      // محاولة تجديد التوكن
+      const refreshed = await this.attemptTokenRefresh(merchantId, credentials);
+      if (!refreshed) {
+        throw new Error(`Instagram credentials expired and cannot refresh. Merchant: ${merchantId}`);
+      }
     }
   }
 
@@ -670,6 +695,62 @@ export class InstagramAPIClient {
       ...basePayload,
       message
     };
+  }
+
+  private async attemptTokenRefresh(
+    merchantId: string, 
+    credentials: InstagramAPICredentials
+  ): Promise<boolean> {
+    try {
+      // محاولة تجديد التوكن باستخدام fb_exchange_token
+      if (credentials.accessToken || credentials.pageAccessToken) {
+        const currentToken = credentials.accessToken || credentials.pageAccessToken!;
+        
+        // استخدام fb_exchange_token لتجديد التوكن
+        const refreshResponse = await this.graphRequest<{ access_token: string; expires_in: number }>(
+          'GET',
+          '/oauth/access_token',
+          '',
+          {
+            grant_type: 'fb_exchange_token',
+            client_id: process.env.FACEBOOK_APP_ID || '',
+            client_secret: credentials.appSecret || '',
+            fb_exchange_token: currentToken
+          },
+          merchantId,
+          false
+        );
+        
+        // حفظ التوكن الجديد في قاعدة البيانات
+        await this.saveRefreshedToken(merchantId, refreshResponse.access_token);
+        return true;
+      }
+      return false;
+    } catch (refreshError) {
+      this.logger.error('Token refresh failed', refreshError);
+      return false;
+    }
+  }
+
+  private async saveRefreshedToken(merchantId: string, newToken: string): Promise<void> {
+    try {
+      const { getDatabase } = await import('../db/adapter.js');
+      const db = getDatabase();
+      const sql = db.getSQL();
+      
+      await sql`
+        UPDATE merchant_credentials 
+        SET 
+          instagram_token_encrypted = ${newToken},
+          updated_at = NOW()
+        WHERE merchant_id = ${merchantId}::uuid
+      `;
+      
+      this.logger.info('✅ Token refreshed and saved successfully', { merchantId });
+    } catch (error) {
+      this.logger.error('❌ Failed to save refreshed token', error, { merchantId });
+      throw error;
+    }
   }
 
 
@@ -880,6 +961,8 @@ export class InstagramAPICredentialsManager {
       return { hasCredentials: false };
     }
   }
+
+
 }
 
 // Factory functions for DI container

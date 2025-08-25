@@ -88,7 +88,7 @@ async function bootstrap() {
         throw new Error('DATABASE_URL required in production');
       }
       if (!process.env.REDIS_URL) {
-        log.warn('REDIS_URL not set - Redis disabled');
+        log.warn('REDIS_URL not set - Redis features disabled, continuing without Redis');
       }
     }
 

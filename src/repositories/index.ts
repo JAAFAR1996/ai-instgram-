@@ -9,6 +9,7 @@ import { getConversationRepository, type ConversationRepository } from './conver
 import { getMessageRepository, type MessageRepository } from './message-repository.js';
 import { getMerchantRepository, type MerchantRepository } from './merchant-repository.js';
 import { getCredentialsRepository, type CredentialsRepository } from './credentials-repository.js';
+import { getManualFollowupRepository, type ManualFollowupRepository } from './manual-followup-repository.js';
 import { createUnitOfWork, type UnitOfWork } from '../repos/unit-of-work.js';
 import { 
   createTemplate, 
@@ -26,6 +27,7 @@ export interface RepositoryManager {
   message: MessageRepository;
   merchant: MerchantRepository;
   credentials: CredentialsRepository;
+  manualFollowup: ManualFollowupRepository;
   unitOfWork: UnitOfWork;
   template: {
     create: typeof createTemplate;
@@ -44,6 +46,7 @@ export class RepositoryService {
   public readonly message: MessageRepository;
   public readonly merchant: MerchantRepository;
   public readonly credentials: CredentialsRepository;
+  public readonly manualFollowup: ManualFollowupRepository;
   public readonly unitOfWork: UnitOfWork;
 
   private constructor() {
@@ -51,6 +54,7 @@ export class RepositoryService {
     this.message = getMessageRepository();
     this.merchant = getMerchantRepository();
     this.credentials = getCredentialsRepository();
+    this.manualFollowup = getManualFollowupRepository();
     this.unitOfWork = createUnitOfWork(getDatabase().getPool());
   }
 
@@ -73,6 +77,7 @@ export class RepositoryService {
       message: this.message,
       merchant: this.merchant,
       credentials: this.credentials,
+      manualFollowup: this.manualFollowup,
       unitOfWork: this.unitOfWork,
       template: {
         create: createTemplate,

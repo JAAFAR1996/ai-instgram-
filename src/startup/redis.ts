@@ -35,13 +35,15 @@ export async function initializeRedisIntegration(_pool: Pool): Promise<RedisInte
   }
 
   const redisUrl = process.env.REDIS_URL;
-  if (!redisUrl) {
-    log.warn('REDIS_URL not configured, skipping Redis integration');
+  const disableRedis = process.env.DISABLE_REDIS === 'true';
+  
+  if (!redisUrl || disableRedis) {
+    log.warn(disableRedis ? 'Redis disabled by DISABLE_REDIS flag' : 'REDIS_URL not configured, skipping Redis integration');
     initializationResult = {
       success: false,
       mode: 'disabled',
-      reason: 'no_redis_url',
-      error: 'REDIS_URL environment variable not set'
+      reason: disableRedis ? 'disabled_by_flag' : 'no_redis_url',
+      error: disableRedis ? 'Redis disabled by DISABLE_REDIS environment variable' : 'REDIS_URL environment variable not set'
     };
     return initializationResult;
   }
@@ -114,7 +116,7 @@ export async function initializeRedisIntegration(_pool: Pool): Promise<RedisInte
     return initializationResult!;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    log.error('❌ Redis integration initialization failed', error);
+    log.warn('⚠️ Redis integration initialization failed, continuing without Redis', { error: errorMessage });
     
     const errorResult: RedisIntegrationResult = {
       success: false,

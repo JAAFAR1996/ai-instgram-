@@ -253,8 +253,16 @@ export class AIService {
     try {
       // Service enablement check
       if (!(await this.isAIEnabled(context.merchantId))) {
-        this.logger.warn('AI disabled by ServiceController; returning fallback', { merchantId: context.merchantId });
-        return this.getFallbackResponse();
+        this.logger.warn('AI disabled by ServiceController; sending user notification', { 
+          merchantId: context.merchantId 
+        });
+        
+        const fallbackResponse = this.getFallbackResponse();
+        
+        // تأكد من إيصال الرسالة للمستخدم
+        await this.notifyUserAIDisabled(context);
+        
+        return fallbackResponse;
       }
 
       // Build conversation prompt
@@ -707,6 +715,34 @@ ${productsText}
       tokens: { prompt: 0, completion: 0, total: 0 },
       responseTime: 0
     };
+  }
+
+  private async notifyUserAIDisabled(
+    context: ConversationContext
+  ): Promise<void> {
+    try {
+      // أرسل إشعار للمستخدم مباشرة
+      const { getInstagramClient } = await import('./instagram-api.js');
+      const client = getInstagramClient(context.merchantId);
+      const credentials = await client.loadMerchantCredentials(context.merchantId);
+      
+      if (credentials && context.customerId) {
+        const notificationMessage = "خدمة الرد الآلي معطلة مؤقتاً. سيرد عليك أحد الموظفين قريباً 🙏";
+        
+        await client.sendMessage(credentials, context.merchantId, {
+          recipientId: context.customerId,
+          messagingType: 'RESPONSE',
+          text: notificationMessage
+        });
+        
+        this.logger.info('✅ AI disabled notification sent to user', { 
+          merchantId: context.merchantId,
+          customerId: context.customerId 
+        });
+      }
+    } catch (notificationError) {
+      this.logger.error('❌ Failed to notify user about AI disable', notificationError);
+    }
   }
 
 

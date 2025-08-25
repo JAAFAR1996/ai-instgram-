@@ -435,14 +435,26 @@ export class InstagramWebhookHandler {
 
       // Generate AI response for the message
       if (messageContent.trim()) {
-        await this.generateAIResponse(
-          conversation.id,
-          merchantId,
-          customerId,
-          messageContent,
-          messageType === 'STORY_REPLY' ? 'story_reply' : 'dm',
-          event.message?.mid
-        );
+        try {
+          await this.generateAIResponse(
+            conversation.id,
+            merchantId,
+            customerId,
+            messageContent,
+            messageType === 'STORY_REPLY' ? 'story_reply' : 'dm',
+            event.message?.mid
+          );
+        } catch (aiError) {
+          this.logger.error('❌ AI Response Failed - sending fallback', { 
+            error: aiError instanceof Error ? aiError.message : String(aiError),
+            conversationId: conversation.id,
+            merchantId,
+            customerId
+          });
+          
+          // إرسال رسالة fallback فورية
+          await this.sendImmediateFallback(conversation.id, merchantId, customerId, 'dm');
+        }
       }
 
       this.logger.info('Instagram message processed', {
@@ -813,68 +825,25 @@ export class InstagramWebhookHandler {
 
       const aiResponse = aiResult.response;
 
-      // Store AI response as outgoing message
-      const platformMessageId = 'ai_generated_' + Date.now();
-      await sql`
-        INSERT INTO message_logs (
-          conversation_id,
-          direction,
-          platform,
-          message_type,
-          content,
-          platform_message_id,
-          ai_processed,
-          delivery_status,
-          ai_confidence,
-          ai_intent,
-          processing_time_ms
-        ) VALUES (
-          ${conversationId}::uuid,
-          'OUTGOING',
-          'instagram',
-          'TEXT',
-          ${aiResponse.message},
-          ${platformMessageId},
-          true,
-          'PENDING',
-          ${aiResponse.confidence},
-          ${aiResponse.intent},
-          ${aiResponse.responseTime}
-        )
-      `;
-
-      // Send the message via Instagram API
-      try {
-        const instagramClient = getInstagramClient(merchantId);
-        const credentials = await instagramClient.loadMerchantCredentials(merchantId);
-        if (!credentials) {
-          throw new Error('Instagram credentials not found');
-        }
-        await instagramClient.validateCredentials(credentials, merchantId);
-
-        const sendResult = await instagramClient.sendMessage(credentials, merchantId, {
-          recipientId: customerId,
-          text: aiResponse.message
-        });
-
-        if (sendResult.success) {
-          await sql`
-            UPDATE message_logs
-            SET delivery_status = 'SENT', platform_message_id = ${sendResult.messageId ?? null}
-            WHERE conversation_id = ${conversationId}::uuid AND platform_message_id = ${platformMessageId}
-          `;
-        } else {
-          this.logger.error('Failed to send Instagram message', sendResult.error, {
+                // Store AI response as outgoing message with proper status tracking
+          const messageRecord = await this.storeOutgoingAIMessage(
             conversationId,
-            merchantId,
-            customerId
-          });
-        }
-      } catch (sendError) {
-        this.logger.error('Error sending Instagram message', sendError, {
+            aiResponse
+          );
+
+      // Send the message via Instagram API with transaction safety
+      const deliveryResult = await this.sendAndUpdateMessage(
+        messageRecord.id,
+        merchantId,
+        customerId,
+        aiResponse.message
+      );
+
+      if (!deliveryResult.success) {
+        this.logger.error('❌ AI message delivery failed', {
           conversationId,
-          merchantId,
-          customerId
+          messageId: messageRecord.id,
+          error: deliveryResult.error
         });
       }
 
@@ -1287,6 +1256,169 @@ export class InstagramWebhookHandler {
       this.logger.info('Legacy media processing completed');
     } catch (error) {
       this.logger.error('Legacy media processing failed', error, { conversationId });
+    }
+  }
+
+  private async sendImmediateFallback(
+    conversationId: string,
+    merchantId: string,
+    customerId: string,
+    interactionType: string
+  ): Promise<void> {
+    const fallbackMessage = interactionType === 'dm' 
+      ? 'عذراً للانتظار! راح أرد عليك خلال دقائق ⏰'
+      : 'شكراً لتفاعلك! راح نرد عليك قريباً 🙏';
+      
+    try {
+      const instagramClient = getInstagramClient(merchantId);
+      const credentials = await instagramClient.loadMerchantCredentials(merchantId);
+      
+      if (credentials) {
+        await instagramClient.sendMessage(credentials, merchantId, {
+          recipientId: customerId,
+          messagingType: 'RESPONSE',
+          text: fallbackMessage
+        });
+        
+        this.logger.info('✅ Fallback message sent successfully', { conversationId, customerId });
+      }
+    } catch (fallbackError) {
+      this.logger.error('❌ Even fallback failed', fallbackError);
+    }
+  }
+
+  private async storeOutgoingAIMessage(
+    conversationId: string,
+    aiResponse: any
+  ): Promise<{ id: string; platformMessageId: string }> {
+    const sql = this.db.getSQL();
+    const platformMessageId = `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const [messageRecord] = await sql`
+      INSERT INTO message_logs (
+        conversation_id,
+        direction,
+        platform,
+        message_type,
+        content,
+        platform_message_id,
+        ai_processed,
+        delivery_status,
+        ai_confidence,
+        ai_intent,
+        processing_time_ms,
+        created_at
+      ) VALUES (
+        ${conversationId}::uuid,
+        'OUTGOING',
+        'instagram',
+        'TEXT',
+        ${aiResponse.message},
+        ${platformMessageId},
+        true,
+        'PREPARING',
+        ${aiResponse.confidence || 0.8},
+        ${aiResponse.intent || 'RESPONSE'},
+        ${aiResponse.responseTime || 0},
+        NOW()
+      )
+      RETURNING id, platform_message_id
+    `;
+    
+    if (!messageRecord) {
+      throw new Error('Failed to insert message record');
+    }
+    
+    return { 
+      id: String(messageRecord.id), 
+      platformMessageId: String(messageRecord.platform_message_id) 
+    };
+  }
+
+  private async sendAndUpdateMessage(
+    messageId: string,
+    merchantId: string,
+    customerId: string,
+    messageContent: string
+  ): Promise<{ success: boolean; error?: string; messageId?: string }> {
+    const sql = this.db.getSQL();
+    
+    try {
+      // تحديث الحالة إلى "SENDING"
+      await sql`
+        UPDATE message_logs 
+        SET delivery_status = 'SENDING', updated_at = NOW()
+        WHERE id = ${messageId}
+      `;
+      
+      // إرسال الرسالة
+      const instagramClient = getInstagramClient(merchantId);
+      const credentials = await instagramClient.loadMerchantCredentials(merchantId);
+      
+      if (!credentials) {
+        await sql`
+          UPDATE message_logs 
+          SET delivery_status = 'FAILED', 
+              error_message = 'Credentials not found',
+              updated_at = NOW()
+          WHERE id = ${messageId}
+        `;
+        return { success: false, error: 'Instagram credentials not found' };
+      }
+      
+      const sendResult = await instagramClient.sendMessage(credentials, merchantId, {
+        recipientId: customerId,
+        text: messageContent,
+        messagingType: 'RESPONSE'
+      });
+      
+      if (sendResult.success) {
+        // تحديث الحالة إلى "SENT"
+        await sql`
+          UPDATE message_logs 
+          SET 
+            delivery_status = 'SENT',
+            platform_message_id = ${sendResult.messageId || 'unknown'},
+            updated_at = NOW()
+          WHERE id = ${messageId}
+        `;
+        
+        return { 
+          success: true, 
+          ...(sendResult.messageId ? { messageId: sendResult.messageId } : {})
+        };
+      } else {
+        // تحديث الحالة إلى "FAILED"
+        await sql`
+          UPDATE message_logs 
+          SET 
+            delivery_status = 'FAILED',
+            error_message = ${sendResult.error || 'Unknown send error'},
+            updated_at = NOW()
+          WHERE id = ${messageId}
+        `;
+        
+        return { 
+          success: false, 
+          ...(sendResult.error ? { error: sendResult.error } : {})
+        };
+      }
+      
+    } catch (error) {
+      // تحديث الحالة إلى "FAILED" في حالة الخطأ
+      await sql`
+        UPDATE message_logs 
+        SET 
+          delivery_status = 'FAILED',
+          error_message = ${error instanceof Error ? error.message : String(error)},
+          updated_at = NOW()
+        WHERE id = ${messageId}
+      `;
+      
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error) 
+      };
     }
   }
 }

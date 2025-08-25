@@ -109,11 +109,29 @@ export class InstagramMessageSender {
       if (conversationId) {
         const canSendMessage = await this.checkMessageWindow(merchantId, recipientId);
         if (!canSendMessage) {
-          return createErrorResponse(new Error('Message window expired - cannot send message'), {
+          // محاولة إرسال template message بدلاً من الرسالة العادية
+                    const templateResult = await this.sendTemplateOrBroadcast(
             merchantId,
-            recipientId,
-            conversationId
-          });
+            recipientId, 
+            message
+          );
+          
+          if (templateResult.success) {
+            logger.info('✅ Message sent via template (window expired)', { 
+              merchantId, 
+              recipientId, 
+              templateMessageId: templateResult.messageId 
+            });
+            return templateResult;
+          }
+          
+                // إذا فشل Template أيضاً، سجل الرسالة للمتابعة اليدوية
+      await this.scheduleManualFollowup(merchantId, recipientId, message);
+          
+          return createErrorResponse(
+            new Error('Message window expired - scheduled for manual followup'), 
+            { merchantId, recipientId, conversationId }
+          );
         }
       }
 
@@ -956,6 +974,71 @@ export class InstagramMessageSender {
         error: error instanceof Error ? error.message : 'Unknown upload error'
       };
     }
+  }
+
+  private async sendTemplateOrBroadcast(
+    merchantId: string,
+    recipientId: string,
+    message: string
+  ): Promise<SendResult> {
+    try {
+      const client = this.getClient(merchantId);
+      const credentials = await this.getCredentials(merchantId);
+      
+      // جرب إرسال template message
+      const templatePayload = {
+        recipientId,
+        messagingType: 'MESSAGE_TAG' as const,
+        text: `تحديث من متجرنا: ${message}`
+      };
+      
+      const result = await client.sendMessage(credentials, merchantId, templatePayload);
+      
+      return {
+        success: result.success,
+        ...(result.id ? { messageId: result.id } : {}),
+        deliveryStatus: result.success ? 'sent' : 'failed',
+        timestamp: new Date(),
+        ...(result.success ? {} : { error: result.error })
+      };
+      
+    } catch (error) {
+      logger.error('Template message failed', error);
+      return createErrorResponse(error, { merchantId, recipientId });
+    }
+  }
+
+  private async scheduleManualFollowup(
+    merchantId: string,
+    recipientId: string,
+    message: string
+  ): Promise<void> {
+    const sql = this.db.getSQL();
+    
+    await sql`
+      INSERT INTO manual_followup_queue (
+        merchant_id,
+        customer_id,
+        original_message,
+        reason,
+        priority,
+        created_at,
+        scheduled_for
+      ) VALUES (
+        ${merchantId}::uuid,
+        ${recipientId},
+        ${message},
+        'MESSAGE_WINDOW_EXPIRED',
+        'HIGH',
+        NOW(),
+        NOW() + INTERVAL '1 hour'
+      )
+    `;
+    
+    logger.info('📝 Message scheduled for manual followup', { 
+      merchantId, 
+      recipientId
+    });
   }
 }
 
