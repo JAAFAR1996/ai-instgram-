@@ -1,22 +1,19 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-
-const tmpDir = path.join(process.cwd(), 'tmp-upload-tests');
+import os from 'node:os';
 
 describe('InstagramAPIClient.uploadMedia', () => {
   let client: any;
+  let tmpDir: string;
 
   beforeEach(async () => {
-    vi.mock('../services/telemetry.js', () => ({ telemetry: { recordMetaRequest: () => {} } }));
-    vi.mock('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
-    vi.mock('../services/meta-rate-limiter.js', () => ({ getMetaRateLimiter: () => ({ checkRedisRateLimit: async () => ({ allowed: true }) }) }));
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'upload-test-'));
+    vi.mock('../services/meta-rate-limiter.js', () => ({ getMetaRateLimiter: () => ({ checkRateLimit: vi.fn(async () => true) }) }));
     const mod = await import('../services/instagram-api.js');
     client = new mod.InstagramAPIClient();
-    await fs.mkdir(tmpDir, { recursive: true });
     client.initialize(
       {
-        businessAccountId: 'user123',
         pageAccessToken: 'token123',
         pageId: 'page',
         webhookVerifyToken: '',
@@ -28,14 +25,13 @@ describe('InstagramAPIClient.uploadMedia', () => {
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
-    mock.restore();
   });
 
   test('uploads valid image', async () => {
     const filePath = path.join(tmpDir, 'image.jpg');
     await fs.writeFile(filePath, Buffer.alloc(1024));
 
-    global.fetch = mock(async () => ({
+    global.fetch = vi.fn(async () => ({
       ok: true,
       json: async () => ({ id: 'media123' })
     })) as any;
@@ -55,7 +51,7 @@ describe('InstagramAPIClient.uploadMedia', () => {
     const filePath = path.join(tmpDir, 'image.jpg');
     await fs.writeFile(filePath, Buffer.alloc(1024));
 
-    global.fetch = mock(async () => ({
+    global.fetch = vi.fn(async () => ({
       ok: false,
       text: async () => 'Bad Request',
       statusText: 'Bad Request'
@@ -70,20 +66,20 @@ describe('InstagramMessageSender client caching', () => {
   let loadCredsMock: any;
 
   beforeEach(async () => {
-    loadCredsMock = mock(async () => ({ tokenExpiresAt: new Date(Date.now() + 3600_000) }));
+    loadCredsMock = vi.fn(async () => ({ tokenExpiresAt: new Date(Date.now() + 3600_000) }));
     const client = {
-      uploadMedia: mock(async () => 'media123'),
-      sendMessage: mock(async () => ({ success: true, messageId: 'msg1' })),
+      uploadMedia: vi.fn(async () => 'media123'),
+      sendMessage: vi.fn(async () => ({ success: true, messageId: 'msg1' })),
       loadMerchantCredentials: loadCredsMock,
-      validateCredentials: mock(async () => {})
+      validateCredentials: vi.fn(async () => {})
     };
 
     vi.mock('../services/instagram-api.js', () => ({ getInstagramClient: () => client }));
     vi.mock('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
     vi.mock('../services/message-window.js', () => ({
       getMessageWindowService: () => ({
-        recordMerchantResponse: mock(async () => {}),
-        getWindowStatus: mock(async () => ({ canSendMessage: true }))
+        recordMerchantResponse: vi.fn(async () => {}),
+        getWindowStatus: vi.fn(async () => ({ canSendMessage: true }))
       })
     }));
 
@@ -93,7 +89,6 @@ describe('InstagramMessageSender client caching', () => {
 
   afterEach(() => {
     sender.dispose();
-    mock.restore();
   });
 
   test('caches credentials per merchant', async () => {
@@ -117,12 +112,12 @@ describe('InstagramMessageSender error logging', () => {
   let errorMock: any;
 
   beforeEach(async () => {
-    errorMock = mock(() => {});
+    errorMock = vi.fn(() => {});
 
     const client = {
-      loadMerchantCredentials: mock(async () => ({ token: 'x', tokenExpiresAt: new Date(Date.now() + 3600_000) })),
-      validateCredentials: mock(async () => {}),
-      sendMessage: mock(async (_cred: any, _merchant: string, { recipientId }: any) => {
+      loadMerchantCredentials: vi.fn(async () => ({ token: 'x', tokenExpiresAt: new Date(Date.now() + 3600_000) })),
+      validateCredentials: vi.fn(async () => {}),
+      sendMessage: vi.fn(async (_cred: any, _merchant: string, { recipientId }: any) => {
         if (recipientId === 'user2') {
           return { success: false, error: 'fail' };
         }
@@ -144,13 +139,13 @@ describe('InstagramMessageSender error logging', () => {
     vi.mock('../database/connection.js', () => ({ getDatabase: () => ({ getSQL: () => async () => [] }) }));
     vi.mock('../services/message-window.js', () => ({
       getMessageWindowService: () => ({
-        getWindowStatus: mock(async (_merchantId: string, recipient: any) => {
+        getWindowStatus: vi.fn(async (_merchantId: string, recipient: any) => {
           if (recipient.instagram === 'user2') {
             throw new Error('window fail');
           }
           return { canSendMessage: true };
         }),
-        recordMerchantResponse: mock(async () => {})
+        recordMerchantResponse: vi.fn(async () => {})
       })
     }));
 
@@ -160,18 +155,23 @@ describe('InstagramMessageSender error logging', () => {
 
   afterEach(() => {
     sender.dispose();
-    mock.restore();
   });
 
   test('counts successes and logger errors', async () => {
     const recipients = ['user1', 'user2', 'user3'];
     const results = [];
     for (const r of recipients) {
-      results.push(await sender.sendTextMessage('merchant1', r, 'hi', 'conv1'));
+      try {
+        const result = await sender.sendTextMessage('merchant1', r, 'hello');
+        results.push(result);
+      } catch (e) {
+        results.push(e);
+      }
     }
 
-    const successCount = results.filter(r => r.success).length;
-    expect(successCount).toBe(2);
-    expect(errorMock.mock.calls.length).toBe(1);
+    expect(results[0]).toEqual({ success: true, messageId: 'msg-user1' });
+    expect(results[1]).toEqual({ success: false, error: 'fail' });
+    expect(results[2]).toBeInstanceOf(Error);
+    expect(errorMock).toHaveBeenCalledTimes(2);
   });
 });

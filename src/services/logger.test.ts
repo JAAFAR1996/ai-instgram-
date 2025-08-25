@@ -35,12 +35,12 @@ describe('📝 Logger Service Tests', () => {
     originalStderr = process.stderr.write;
     originalEnv = { ...process.env };
 
-    process.stdout.write = jest.fn((data: string) => {
+    process.stdout.write = vi.fn((data: string) => {
       capturedOutput.push(data);
       return true;
     });
 
-    process.stderr.write = jest.fn((data: string) => {
+    process.stderr.write = vi.fn((data: string) => {
       capturedErrors.push(data);
       return true;
     });

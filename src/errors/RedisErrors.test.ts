@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { describe, test, expect, beforeEach, mock } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import {
   RedisBaseError,
   RedisConnectionError,
@@ -34,10 +34,10 @@ describe('Redis Errors - أخطاء Redis', () => {
 
   beforeEach(() => {
     mockLogger = {
-      error: mock(),
-      warn: mock(),
-      info: mock(),
-      debug: mock()
+      error: vi.fn(),
+      warn: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn()
     };
   });
 

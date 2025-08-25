@@ -11,7 +11,7 @@ import { getLogger } from '../services/logger.js';
 import { getHealthSnapshot } from '../services/health-check.js';
 
 import { telemetry } from '../services/telemetry.js';
-import { registerTestRoutes } from '../internal/test/dev-routes.js';
+// import { registerTestRoutes } from '../internal/test/dev-routes.js';
 import { getRedisIntegrationStatus, getQueueManager } from '../startup/redis.js';
 import * as crypto from 'node:crypto';
 
@@ -297,11 +297,11 @@ export function registerAdminRoutes(app: Hono, deps: AdminDependencies): void {
     }
   });
 
-  // Register development test routes
-  if (process.env.NODE_ENV !== 'production') {
-    registerTestRoutes(app);
-    log.info('Development test routes registered');
-  }
+  // Register development test routes (disabled for production)
+  // if (process.env.NODE_ENV !== 'production') {
+  //   registerTestRoutes(app);
+  //   log.info('Development test routes registered');
+  // }
 
   log.info('Admin routes registered successfully');
 }
