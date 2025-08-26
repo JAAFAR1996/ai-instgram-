@@ -352,7 +352,11 @@ SELECT
     'صورة ترحيب للعملاء الجدد'
 FROM merchants 
 WHERE subscription_status = 'ACTIVE'
-ON CONFLICT DO NOTHING;
+  AND NOT EXISTS (
+    SELECT 1 FROM media_templates mt 
+    WHERE mt.merchant_id = merchants.id 
+    AND mt.name = 'ترحيب بالعملاء'
+  );
 
 INSERT INTO media_templates (merchant_id, name, category, media_type, template_url, description)
 SELECT 
@@ -364,7 +368,11 @@ SELECT
     'صورة عرض المنتجات'
 FROM merchants 
 WHERE subscription_status = 'ACTIVE'
-ON CONFLICT DO NOTHING;
+  AND NOT EXISTS (
+    SELECT 1 FROM media_templates mt 
+    WHERE mt.merchant_id = merchants.id 
+    AND mt.name = 'عرض المنتجات'
+  );
 
 INSERT INTO media_templates (merchant_id, name, category, media_type, template_url, description)
 SELECT 
