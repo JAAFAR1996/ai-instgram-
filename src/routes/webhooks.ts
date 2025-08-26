@@ -202,7 +202,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       try {
         const jobPayload: InstagramWebhookJob = {
           merchantId,
-          webhookEvent: webhookEvent as any, // Type mismatch between schemas
+          payload: webhookEvent as any, // Type mismatch between schemas
           signature: signature,
           timestamp: new Date(),
           headers: {

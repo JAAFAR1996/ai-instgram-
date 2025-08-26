@@ -10,7 +10,7 @@ export { getDatabaseJobSpool } from './db-spool.js';
 // Export types
 export interface InstagramWebhookJob {
   merchantId: string;
-  webhookEvent: {
+  payload: {
     object: string;
     entry: Array<{
       id: string;
