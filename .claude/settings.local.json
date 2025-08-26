@@ -9,7 +9,8 @@
       "Bash(env:*)",
       "Bash(cd:*)",
       "Bash(find:*)",
-      "mcp__render__list_logs"
+      "mcp__render__list_logs",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []
