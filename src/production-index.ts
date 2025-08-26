@@ -26,7 +26,7 @@ let promClient: typeof import('prom-client') | null = null;
 try { promClient = await import('prom-client'); } catch { /* prom-client not available */ }
 
 // 5) Startup modules
-import { getPool, runDatabaseMigrations } from './startup/database.js';
+import { getPool } from './startup/database.js';
 import { initializeRedisIntegration } from './startup/redis.js';
 import { scheduleMaintenance } from './startup/maintenance.js';
 
