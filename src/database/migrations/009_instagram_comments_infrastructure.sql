@@ -365,7 +365,7 @@ SELECT
     '{"type": "keyword", "value": "spam|follow4follow|dm for price|check my bio", "operator": "contains"}',
     '{"type": "hide", "priority": 100}'
 FROM merchants 
-WHERE id IN (SELECT merchant_id FROM merchant_credentials WHERE instagram_token_encrypted IS NOT NULL)
+WHERE subscription_status = 'ACTIVE'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO comment_moderation_rules (merchant_id, name, description, trigger_config, action_config)
@@ -376,14 +376,7 @@ SELECT
     '{"type": "keyword", "value": "سعر|price|كم|how much|متوفر|available|أريد|want", "operator": "contains"}',
     '{"type": "invite_dm", "template": "مرحباً! راح أرسلك رسالة خاصة بكل التفاصيل 💙", "priority": 80}'
 FROM merchants 
-WHERE id IN (SELECT merchant_id FROM merchant_credentials WHERE instagram_token_encrypted IS NOT NULL)
+WHERE subscription_status = 'ACTIVE'
 ON CONFLICT DO NOTHING;
 
--- Migration completion log
-INSERT INTO audit_logs (action, entity_type, details, success)
-VALUES (
-    'MIGRATION_EXECUTED',
-    'DATABASE_SCHEMA',
-    '{"migration": "008_instagram_comments_infrastructure", "description": "Added Instagram Comments advanced management features"}',
-    TRUE
-);
+-- Note: Migration tracking is handled automatically by the migration runner
