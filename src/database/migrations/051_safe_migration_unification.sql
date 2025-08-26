@@ -4,11 +4,11 @@
 -- Migration: 051_safe_migration_unification.sql
 -- ===============================================
 
--- 1. Create backup tables before any changes
-CREATE TEMP TABLE migrations_backup AS 
+-- 1. Create permanent backup tables before any changes
+CREATE TABLE IF NOT EXISTS migrations_backup_20250826 AS 
 SELECT * FROM migrations WHERE EXISTS (SELECT 1 FROM migrations LIMIT 1);
 
-CREATE TEMP TABLE _migrations_backup AS 
+CREATE TABLE IF NOT EXISTS _migrations_backup_20250826 AS 
 SELECT * FROM _migrations WHERE EXISTS (SELECT 1 FROM _migrations LIMIT 1);
 
 -- 2. Ensure schema_migrations table exists with proper structure
@@ -39,7 +39,7 @@ BEGIN
             'legacy_migration' as migration_type
         FROM migrations
         ON CONFLICT (version) DO UPDATE SET
-            applied_at = LEAST(EXCLUDED.applied_at, schema_migrations.applied_at);
+            migration_type = EXCLUDED.migration_type;
     END IF;
 END $$;
 
@@ -55,7 +55,7 @@ BEGIN
             'legacy_underscore' as migration_type
         FROM _migrations
         ON CONFLICT (version) DO UPDATE SET
-            applied_at = LEAST(EXCLUDED.applied_at, schema_migrations.applied_at);
+            migration_type = EXCLUDED.migration_type;
     END IF;
 END $$;
 
@@ -69,8 +69,7 @@ WHERE version IN (
 -- 6. Insert essential migrations that should exist
 INSERT INTO schema_migrations (version, applied_at, success, migration_type) VALUES
     ('001_initial_schema.sql', CURRENT_TIMESTAMP, true, 'core'),
-    ('032_unify_migration_tracking.sql', CURRENT_TIMESTAMP, true, 'tracking'),
-    ('051_safe_migration_unification.sql', CURRENT_TIMESTAMP, true, 'cleanup')
+    ('032_unify_migration_tracking.sql', CURRENT_TIMESTAMP, true, 'tracking')
 ON CONFLICT (version) DO NOTHING;
 
 -- 7. Create validation view to check migration consistency
@@ -136,31 +135,40 @@ BEGIN
 END;
 $$;
 
--- 9. Log the successful unification
-INSERT INTO migration_audit_logs (
-    migration_version,
-    description,
-    execution_status,
-    affected_tables,
-    performance_impact,
-    started_at,
-    completed_at,
-    metadata
-) VALUES (
-    '051_safe_migration_unification.sql',
-    'Safely unified migration tracking system without data loss',
-    'SUCCESS',
-    ARRAY['schema_migrations', 'migration tracking consolidation'],
-    'LOW - Migration system now unified safely',
-    CURRENT_TIMESTAMP,
-    CURRENT_TIMESTAMP,
-    jsonb_build_object(
-        'backup_tables_created', true,
-        'data_migration_completed', true,
-        'test_files_removed', true,
-        'old_tables_preserved', true
-    )
-);
+-- 9. Log the successful unification (with error handling)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'migration_audit_logs') THEN
+        INSERT INTO migration_audit_logs (
+            migration_version,
+            description,
+            execution_status,
+            affected_tables,
+            performance_impact,
+            started_at,
+            completed_at,
+            metadata
+        ) VALUES (
+            '051_safe_migration_unification.sql',
+            'Safely unified migration tracking system without data loss',
+            'SUCCESS',
+            ARRAY['schema_migrations', 'migration tracking consolidation'],
+            'LOW - Migration system now unified safely',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP,
+            jsonb_build_object(
+                'backup_tables_created', true,
+                'data_migration_completed', true,
+                'test_files_removed', true,
+                'old_tables_preserved', true
+            )
+        );
+    END IF;
+EXCEPTION
+    WHEN OTHERS THEN
+        -- Continue if audit logging fails
+        NULL;
+END $$;
 
 -- 10. Instructions for manual cleanup (commented for safety)
 /*
