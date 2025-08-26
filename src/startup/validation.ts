@@ -10,7 +10,6 @@ import { getConfig } from '../config/index.js';
 import { getDatabase } from '../db/adapter.js';
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { getLogger } from '../services/logger.js';
-import { getPool } from '../db/index.js';
 
 export interface ValidationResult {
   success: boolean;

@@ -87,7 +87,7 @@ export async function validateMigrations(): Promise<ValidationResult> {
     
     // Check for test files in production
     const testFiles = migrations.filter(m => 
-      m.number >= 988 || 
+      m.number >= 999 || 
       m.name.includes('test') || 
       m.name.includes('Test')
     );

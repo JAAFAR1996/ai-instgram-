@@ -366,6 +366,7 @@ const RETRY_STRATEGIES: Record<string, RetryStrategy> = {
   linearBackoff: {
     name: 'linear-backoff',
     shouldRetry: (error: Error, attempt: number) => {
+      log.debug('Linear backoff retry check', { error: error.message, attempt });
       return attempt < DEFAULT_RETRY_CONFIG.maxRetries;
     },
     getDelay: (attempt: number, config: RetryConfig) => {

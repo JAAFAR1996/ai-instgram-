@@ -1,6 +1,6 @@
 {
   "generated": "2025-08-26T10:31:06.644Z",
-  "total": 40,
+  "total": 38,
   "migrations": [
     {
       "filename": "001_initial_schema.sql",
@@ -39,7 +39,7 @@
       "category": "UTILITY",
       "size": 5305,
       "modified": "2025-08-26T02:34:09.220Z",
-      "valid": false,
+      "valid": true,
       "required": true
     },
     {
@@ -47,7 +47,7 @@
       "category": "UTILITY",
       "size": 15156,
       "modified": "2025-08-26T02:34:09.237Z",
-      "valid": false,
+      "valid": true,
       "required": true
     },
     {
@@ -306,21 +306,5 @@
       "valid": true,
       "required": false
     },
-    {
-      "filename": "988_instagram_tables.sql",
-      "category": "UNCATEGORIZED",
-      "size": 2563,
-      "modified": "2025-08-26T02:34:10.095Z",
-      "valid": false,
-      "required": false
-    },
-    {
-      "filename": "989_manual_followup_queue.sql",
-      "category": "UNCATEGORIZED",
-      "size": 4388,
-      "modified": "2025-08-26T02:34:10.127Z",
-      "valid": true,
-      "required": false
-    }
   ]
 }

@@ -400,6 +400,15 @@ const MIGRATIONS = [
     dependencies: ['047_rollback_procedures.sql', '049_migration_monitoring.sql'],
     category: 'RISK_MANAGEMENT',
     description: '💾 Complete disaster recovery and business continuity'
+  },
+  
+  // 🔧 FINAL CLEANUP
+  { 
+    name: '051_safe_migration_unification.sql', 
+    required: true, 
+    dependencies: ['032_unify_migration_tracking.sql'],
+    category: 'CRITICAL_FIXES',
+    description: '🔧 Safe migration tracking unification and test file cleanup'
   }
 ];
 
