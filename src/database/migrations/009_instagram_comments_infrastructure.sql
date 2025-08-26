@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS comment_interactions (
     user_id VARCHAR(255) NOT NULL,
     username VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
-    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    commented_at TIMESTAMP WITH TIME ZONE NOT NULL,
     is_reply BOOLEAN DEFAULT FALSE,
     sentiment_score DECIMAL(5,2),
     is_sales_inquiry BOOLEAN DEFAULT FALSE,
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS comment_interactions (
 CREATE INDEX IF NOT EXISTS idx_comment_interactions_merchant ON comment_interactions(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_comment_interactions_post ON comment_interactions(post_id);
 CREATE INDEX IF NOT EXISTS idx_comment_interactions_user ON comment_interactions(user_id);
-CREATE INDEX IF NOT EXISTS idx_comment_interactions_timestamp ON comment_interactions(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_comment_interactions_timestamp ON comment_interactions(commented_at DESC);
 CREATE INDEX IF NOT EXISTS idx_comment_interactions_sentiment ON comment_interactions(sentiment_score);
 CREATE INDEX IF NOT EXISTS idx_comment_interactions_sales ON comment_interactions(is_sales_inquiry) WHERE is_sales_inquiry = TRUE;
 CREATE INDEX IF NOT EXISTS idx_comment_interactions_complaints ON comment_interactions(is_complaint) WHERE is_complaint = TRUE;
@@ -182,7 +182,7 @@ BEGIN
         CASE WHEN NEW.is_complaint THEN 1 ELSE 0 END,
         CASE WHEN NEW.sentiment_score > 60 THEN 1 ELSE 0 END,
         CASE WHEN NEW.sentiment_score < 40 THEN 1 ELSE 0 END,
-        NEW.timestamp,
+        NEW.commented_at,
         NOW()
     )
     ON CONFLICT (merchant_id, user_id)
@@ -196,7 +196,7 @@ BEGIN
             CASE WHEN NEW.sentiment_score > 60 THEN 1 ELSE 0 END,
         negative_comments = user_comment_history.negative_comments + 
             CASE WHEN NEW.sentiment_score < 40 THEN 1 ELSE 0 END,
-        last_comment_date = NEW.timestamp,
+        last_comment_date = NEW.commented_at,
         username = NEW.username,
         updated_at = NOW();
     
@@ -282,8 +282,8 @@ $$ LANGUAGE plpgsql;
 -- Note: Complex analytics function removed to avoid syntax errors
 
 -- Add performance indexes
-CREATE INDEX IF NOT EXISTS idx_comment_interactions_merchant_date ON comment_interactions(merchant_id, DATE(created_at));
-CREATE INDEX IF NOT EXISTS idx_comment_responses_merchant_date ON comment_responses(merchant_id, DATE(created_at));
+CREATE INDEX IF NOT EXISTS idx_comment_interactions_merchant_date ON comment_interactions(merchant_id, (created_at::date));
+CREATE INDEX IF NOT EXISTS idx_comment_responses_merchant_date ON comment_responses(merchant_id, (created_at::date));
 
 -- Add comments for documentation
 COMMENT ON TABLE comment_interactions IS 'Tracks all Instagram comment interactions with sentiment analysis and categorization';
