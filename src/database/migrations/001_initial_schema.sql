@@ -380,8 +380,8 @@ CREATE OR REPLACE FUNCTION update_merchant_search_vector()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.search_vector := 
-        setweight(to_tsvector('arabic', COALESCE(NEW.business_name, '')), 'A') ||
-        setweight(to_tsvector('arabic', COALESCE(NEW.business_category, '')), 'B') ||
+        setweight(to_tsvector('simple', COALESCE(NEW.business_name, '')), 'A') ||
+        setweight(to_tsvector('simple', COALESCE(NEW.business_category, '')), 'B') ||
         setweight(to_tsvector('simple', COALESCE(NEW.whatsapp_number, '')), 'C');
     RETURN NEW;
 END;
@@ -397,12 +397,12 @@ CREATE OR REPLACE FUNCTION update_product_search_vector()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.search_vector := 
-        setweight(to_tsvector('arabic', COALESCE(NEW.name_ar, '')), 'A') ||
-        setweight(to_tsvector('english', COALESCE(NEW.name_en, '')), 'A') ||
-        setweight(to_tsvector('arabic', COALESCE(NEW.description_ar, '')), 'B') ||
-        setweight(to_tsvector('arabic', COALESCE(NEW.category, '')), 'C') ||
+        setweight(to_tsvector('simple', COALESCE(NEW.name_ar, '')), 'A') ||
+        setweight(to_tsvector('simple', COALESCE(NEW.name_en, '')), 'A') ||
+        setweight(to_tsvector('simple', COALESCE(NEW.description_ar, '')), 'B') ||
+        setweight(to_tsvector('simple', COALESCE(NEW.category, '')), 'C') ||
         setweight(to_tsvector('simple', COALESCE(NEW.sku, '')), 'D') ||
-        setweight(to_tsvector('arabic', array_to_string(NEW.tags, ' ')), 'D');
+        setweight(to_tsvector('simple', array_to_string(NEW.tags, ' ')), 'D');
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -416,7 +416,7 @@ CREATE TRIGGER trigger_update_product_search_vector
 CREATE OR REPLACE FUNCTION update_message_content_search()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.content_search := to_tsvector('arabic', COALESCE(NEW.content, '') || ' ' || COALESCE(NEW.media_caption, ''));
+    NEW.content_search := to_tsvector('simple', COALESCE(NEW.content, '') || ' ' || COALESCE(NEW.media_caption, ''));
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
