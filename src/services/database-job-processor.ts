@@ -76,29 +76,35 @@ async function processWebhookFromDatabase(job: any) {
       priority: job.priority
     });
 
-    // استخدام InstagramWebhookHandler مباشرة
-    const webhookHandler = await getInstagramWebhookHandler();
+    // إضافة فحص قاعدة البيانات قبل الاستخدام
+    let webhookHandler: any;
+    try {
+      webhookHandler = await getInstagramWebhookHandler();
+    } catch (error) {
+      logger.error('❌ Failed to get Instagram webhook handler:', error);
+      throw new Error('Webhook handler initialization failed');
+    }
     
-    // التحقق من أن job data يحتوي على payload صحيح
+    // التحقق من صحة job data
     if (!job.jobData) {
       throw new Error('Invalid webhook job data: jobData is null or undefined');
     }
     
     if (!job.jobData.payload) {
-      logger.error('Webhook job missing payload - debugging info', {
+      logger.error('Webhook job missing payload', {
         jobId: job.jobId,
-        jobDataKeys: job.jobData ? Object.keys(job.jobData) : 'null',
-        jobDataType: typeof job.jobData,
-        merchantId: job.merchantId,
-        jobData: job.jobData
+        jobDataKeys: Object.keys(job.jobData || {})
       });
-      throw new Error('Invalid webhook job data: missing payload');
+      throw new Error('Webhook job missing payload');
     }
 
-    // معالجة webhook باستخدام InstagramWebhookHandler
-    const result = await webhookHandler.processWebhook(job.jobData.payload, job.merchantId);
-    
-    logger.info('✅ Webhook job processed successfully', {
+    // معالجة الويبهوك بشكل آمن
+    const result = await webhookHandler.processWebhook(
+      job.jobData.payload,
+      job.merchantId
+    );
+
+    logger.info('✅ Webhook processed successfully', {
       jobId: job.jobId,
       merchantId: job.merchantId,
       success: result.success,
@@ -111,13 +117,11 @@ async function processWebhookFromDatabase(job: any) {
     await spool.removeJob(job.jobId, job.merchantId);
     
   } catch (error) {
-    logger.error('💥 Error processing webhook job from database', {
+    logger.error('❌ Webhook processing failed:', {
       jobId: job.jobId,
       merchantId: job.merchantId,
       error: error instanceof Error ? error.message : String(error)
     });
-    
-    // إعادة throw للخطأ ليتم التعامل معه
     throw error;
   }
 }

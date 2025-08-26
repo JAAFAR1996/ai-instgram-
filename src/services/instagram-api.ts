@@ -591,15 +591,28 @@ export class InstagramAPIClient {
         return null;
       }
 
-      // Decrypt the token
-      const decryptedTokenData = this.encryptionService.decryptInstagramToken(
-        cred.instagram_token_encrypted
-      );
+      // Handle both encrypted and plain tokens
+      let accessToken: string;
+      try {
+        if (cred.instagram_token_encrypted.startsWith('EAAP')) {
+          // Plain Facebook/Instagram token
+          accessToken = cred.instagram_token_encrypted;
+        } else {
+          // Encrypted token - decrypt it
+          const decryptedTokenData = this.encryptionService.decryptInstagramToken(
+            cred.instagram_token_encrypted
+          );
+          accessToken = decryptedTokenData.token;
+        }
+      } catch (decryptError) {
+        // Fallback to plain token if decryption fails
+        accessToken = cred.instagram_token_encrypted;
+      }
 
       return {
-        accessToken: decryptedTokenData.token,
+        accessToken,
         businessAccountId: cred.business_account_id ?? '',
-        pageAccessToken: decryptedTokenData.token,
+        pageAccessToken: accessToken,
         pageId: cred.instagram_page_id ?? '',
         webhookVerifyToken: cred.webhook_verify_token ?? '',
         appSecret: cred.app_secret ?? ''

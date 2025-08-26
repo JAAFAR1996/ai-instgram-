@@ -1316,7 +1316,7 @@ export class ProductionQueueManager {
         platform: 'instagram', // تثبيت على instagram حالياً
         messageType: 'TEXT',
         content: aiResponse.response.message,
-        platformMessageId: `ai_generated_${Date.now()}`,
+        platformMessageId: `${'ai_generated_' + Date.now()}`,
         aiProcessed: true,
         deliveryStatus: 'PENDING',
         aiConfidence: aiResponse.response.confidence,
