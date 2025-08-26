@@ -31,23 +31,11 @@ export async function isConnectionHealthy(
 }
 
 /**
- * Basic Redis validation (ping + simple read/write test)
+ * Basic Redis validation (ping only - simplified for stability)
  */
 export async function validateConnection(connection: Redis): Promise<void> {
-  // 1. Ping test
+  // Simple ping test only - no read/write to avoid rate limiting
   await connection.ping();
-  
-  // 2. Quick write/read test  
-  const testKey = `health:${Date.now()}`;
-  const testValue = 'ok';
-  
-  await connection.set(testKey, testValue, 'EX', 5);
-  const result = await connection.get(testKey);
-  await connection.del(testKey);
-  
-  if (result !== testValue) {
-    throw new Error('Redis read/write validation failed');
-  }
 }
 
 /**

@@ -60,10 +60,11 @@ export async function initializeRedisIntegration(_pool: Pool): Promise<RedisInte
     const { Redis } = await import('ioredis');
     const testConnection = new Redis(redisUrl, {
       lazyConnect: true,
-      maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || 3),
-      connectTimeout: 5000,
-      commandTimeout: 3000,
-      enableReadyCheck: true
+      maxRetriesPerRequest: 1, // تقليل إلى 1 لتجنب MaxRetriesPerRequestError
+      connectTimeout: 10000, // زيادة timeout
+      commandTimeout: 5000, // زيادة command timeout
+      enableReadyCheck: true,
+      enableOfflineQueue: true // تفعيل offline queue
     });
 
     // اختبار الاتصال

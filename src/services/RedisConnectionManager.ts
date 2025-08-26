@@ -207,24 +207,17 @@ export class RedisConnectionManager {
       const connection = new Redis({
         ...config,
         lazyConnect: true,
-        maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || 5), // زيادة من 3 إلى 5
+        maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || 5),
         connectTimeout: this.poolConfig.connectionTimeout,
+        commandTimeout: 10000, // إضافة timeout للcommands
         enableReadyCheck: true,
-        enableOfflineQueue: false,
+        enableOfflineQueue: true, // تفعيل offline queue للسماح بإعادة المحاولة
         reconnectOnError: (err) => {
           // Don't reconnect on rate limit errors
           if (err.message.includes('max requests limit exceeded')) {
             return false;
           }
-          // Don't reconnect on connection reset errors
-          if (err.message.includes('ECONNRESET')) {
-            return false;
-          }
-          // Don't reconnect on max retries errors
-          if (err.message.includes('MaxRetriesPerRequestError') || 
-              err.message.includes('max retries per request limit')) {
-            return false;
-          }
+          // Allow reconnection for other errors
           return 1;
         }
       });

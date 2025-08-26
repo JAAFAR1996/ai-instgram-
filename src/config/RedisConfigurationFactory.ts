@@ -221,7 +221,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
     const config: CachingRedisConfig = {
       connectTimeout: 8000,
       lazyConnect: true,
-      maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || (isUpstash ? 3 : 5)),
+      maxRetriesPerRequest: 1, // تقليل إلى 1 لتجنب MaxRetriesPerRequestError
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}cache:`,
       enableOfflineQueue: true
@@ -242,7 +242,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
     const config: CachingRedisConfig = {
       connectTimeout: 8000,
       lazyConnect: true,
-      maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || (isUpstash ? 3 : 5)),
+      maxRetriesPerRequest: 1, // تقليل إلى 1 لتجنب MaxRetriesPerRequestError
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}ratelimit:`,
       enableOfflineQueue: true
@@ -260,7 +260,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
     const config: CachingRedisConfig = {
       connectTimeout: 8000,
       lazyConnect: true,
-      maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || 5), // زيادة من 3 إلى 5
+      maxRetriesPerRequest: 1, // تقليل إلى 1 لتجنب MaxRetriesPerRequestError
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}idempotency:`,
       enableOfflineQueue: true,
@@ -279,7 +279,7 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
     const config: SessionRedisConfig = {
       connectTimeout: 10000,
       lazyConnect: true,
-      maxRetriesPerRequest: 5, // مهم للsessions
+      maxRetriesPerRequest: 1, // تقليل إلى 1 لتجنب MaxRetriesPerRequestError
       family: 4,
       keyPrefix: `${baseConfig.keyPrefix}session:`,
       keepAlive: 30000, // 30 ثانية للsessions
