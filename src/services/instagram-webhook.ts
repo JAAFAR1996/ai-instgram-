@@ -847,8 +847,12 @@ export class InstagramWebhookHandler {
         });
       }
 
-      // Update conversation stage if changed
-      if (conversation && aiResponse.stage !== conversation.conversation_stage) {
+      // Update conversation stage if changed and valid
+      const validStages = ['GREETING', 'PRODUCT_INQUIRY', 'ORDER_PROCESSING', 'PAYMENT', 'SUPPORT', 
+                          'COMPLETED', 'ABANDONED', 'ESCALATED', 'FOLLOW_UP', 'CLOSING',
+                          'AI_RESPONSE', 'WAITING_RESPONSE', 'PROCESSING', 'PENDING', 'ACTIVE'];
+      
+      if (conversation && aiResponse.stage !== conversation.conversation_stage && validStages.includes(aiResponse.stage)) {
         await sql`
           UPDATE conversations
           SET conversation_stage = ${aiResponse.stage}
@@ -905,7 +909,7 @@ export class InstagramWebhookHandler {
             'instagram',
             'TEXT',
             ${fallbackMessage},
-            'ai_fallback_' + ${Date.now()},
+            ${'ai_fallback_' + Date.now()},
             false,
             'PENDING',
             0.1

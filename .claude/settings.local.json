@@ -11,7 +11,8 @@
       "Bash(find:*)",
       "mcp__render__list_logs",
       "Bash(grep:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "mcp__render__query_render_postgres"
     ],
     "deny": [],
     "ask": []

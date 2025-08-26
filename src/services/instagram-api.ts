@@ -577,6 +577,8 @@ export class InstagramAPIClient {
           app_secret
         FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
+          AND is_active = true
+          AND instagram_token_encrypted IS NOT NULL
       `;
 
       if (credentials.length === 0) {

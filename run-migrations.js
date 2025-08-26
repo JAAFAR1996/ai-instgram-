@@ -47,7 +47,8 @@ const MIGRATIONS = [
   { name: 'Migration Validation Final', file: './src/database/migrations/035_migration_validation_final.sql', required: true },
   { name: 'Complete RLS Policies', file: './src/database/migrations/036_complete_rls_policies.sql', required: true },
   { name: 'Unify RLS Systems', file: './src/database/migrations/037_unify_rls_systems.sql', required: true },
-  { name: 'Add WhatsApp Unique Index', file: './src/database/migrations/038_add_whatsapp_unique_index.sql', required: false }
+  { name: 'Add WhatsApp Unique Index', file: './src/database/migrations/038_add_whatsapp_unique_index.sql', required: false },
+  { name: 'Enable UUID Extension', file: './src/database/migrations/039_enable_uuid_extension.sql', required: true }
 ];
 
 // Validation functions
