@@ -290,7 +290,11 @@ SELECT
     '{"type": "text", "content": "أهلاً وسهلاً! شكراً لمتابعتك ستورينا 🥰 إذا عندك أي استفسار عن منتجاتنا، لا تتردد تراسلني!", "quick_replies": [{"title": "المنتجات 🛍️", "payload": "PRODUCTS"}, {"title": "الأسعار 💰", "payload": "PRICES"}]}'
 FROM merchants 
 WHERE subscription_status = 'ACTIVE'
-ON CONFLICT DO NOTHING;
+  AND NOT EXISTS (
+    SELECT 1 FROM story_templates st 
+    WHERE st.merchant_id = merchants.id 
+    AND st.name = 'ترحيب بالعملاء الجدد'
+  );
 
 INSERT INTO story_templates (merchant_id, name, category, template_data, response_template)
 SELECT 

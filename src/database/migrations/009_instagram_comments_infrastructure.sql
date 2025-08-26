@@ -265,14 +265,7 @@ BEGIN
                     (positive_comments * 80 + (total_comments - positive_comments - negative_comments) * 50 + negative_comments * 20)::DECIMAL / total_comments
                 ELSE 50 
             END,
-            engagement_score = calculate_comment_engagement_score(
-                user_record.total_comments,
-                user_record.sales_inquiries,
-                user_record.complaints,
-                user_record.positive_comments,
-                user_record.negative_comments,
-                user_record.last_comment_date
-            ),
+            engagement_score = calculate_comment_engagement_score(user_record.total_comments, user_record.sales_inquiries, user_record.complaints, user_record.positive_comments, user_record.negative_comments, user_record.last_comment_date),
             is_potential_customer = user_record.sales_inquiries >= 2 OR user_record.positive_comments >= 3,
             is_vip_customer = user_record.total_comments >= 10 AND user_record.complaints = 0 AND user_record.positive_comments >= 5,
             is_problematic = user_record.complaints >= 3 OR user_record.negative_comments >= 5,

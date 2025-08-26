@@ -384,6 +384,10 @@ SELECT
     'صورة شكر للعملاء'
 FROM merchants 
 WHERE subscription_status = 'ACTIVE'
-ON CONFLICT DO NOTHING;
+  AND NOT EXISTS (
+    SELECT 1 FROM media_templates mt 
+    WHERE mt.merchant_id = merchants.id 
+    AND mt.name = 'شكر العملاء'
+  );
 
 -- Note: Migration tracking is handled automatically by the migration runner
