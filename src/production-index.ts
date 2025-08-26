@@ -92,10 +92,10 @@ async function bootstrap() {
       }
     }
 
-    // Initialize database and run migrations
+    // Initialize database (migrations disabled for production safety)
     const pool = getPool();
-    await runDatabaseMigrations();
-    log.info('✅ Database initialized and migrations completed');
+    // await runDatabaseMigrations(); // DISABLED: Run migrations manually before deployment
+    log.info('✅ Database initialized (migrations skipped for production safety)');
 
     // Initialize Redis integration (non-blocking)
     const redisStatus = await initializeRedisIntegration(pool);
