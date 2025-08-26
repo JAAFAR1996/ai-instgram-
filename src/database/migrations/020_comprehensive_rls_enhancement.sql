@@ -256,5 +256,3 @@ BEGIN
 END $$;
 
 -- Record this migration
-INSERT INTO migrations (name, filename) VALUES ('Comprehensive RLS Enhancement', '020_comprehensive_rls_enhancement.sql')
-ON CONFLICT (filename) DO NOTHING;

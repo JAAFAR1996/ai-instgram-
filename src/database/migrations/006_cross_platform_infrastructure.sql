@@ -362,9 +362,4 @@ CREATE TRIGGER trigger_unified_profiles_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_unified_profile_timestamp();
 
--- Insert migration record
-INSERT INTO migrations (name, filename) 
-VALUES ('Cross-Platform Conversation Management Infrastructure', '006_cross_platform_infrastructure.sql')
-WHERE NOT EXISTS (
-    SELECT 1 FROM migrations WHERE filename = '006_cross_platform_infrastructure.sql'
-);
+-- Note: Migration tracking is handled automatically by the migration runner

@@ -15,7 +15,3 @@ CREATE TABLE IF NOT EXISTS analytics_events (
 CREATE INDEX IF NOT EXISTS idx_analytics_events_type ON analytics_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_analytics_events_merchant ON analytics_events(merchant_id);
 
-INSERT INTO migrations (name, filename) VALUES ('Analytics Events Table', '011_analytics_events_table.sql')
-WHERE NOT EXISTS (
-    SELECT 1 FROM migrations WHERE filename = '012_analytics_events_table.sql'
-);

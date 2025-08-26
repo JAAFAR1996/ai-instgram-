@@ -459,8 +459,3 @@ CREATE TABLE IF NOT EXISTS migrations (
 );
 
 -- Record this migration
-INSERT INTO migrations (name, filename) 
-SELECT '001_initial_schema', '001_initial_schema.sql'
-WHERE NOT EXISTS (
-    SELECT 1 FROM migrations WHERE filename = '001_initial_schema.sql'
-);

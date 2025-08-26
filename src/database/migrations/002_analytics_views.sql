@@ -392,8 +392,3 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Record this migration
-INSERT INTO migrations (name, filename) 
-SELECT '002_analytics_views', '002_analytics_views.sql'
-WHERE NOT EXISTS (
-    SELECT 1 FROM migrations WHERE filename = '002_analytics_views.sql'
-);
