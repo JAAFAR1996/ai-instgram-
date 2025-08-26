@@ -139,23 +139,20 @@ CREATE INDEX IF NOT EXISTS idx_user_comment_history_vip ON user_comment_history(
 CREATE INDEX IF NOT EXISTS idx_user_comment_history_potential ON user_comment_history(is_potential_customer) WHERE is_potential_customer = TRUE;
 CREATE INDEX IF NOT EXISTS idx_user_comment_history_problematic ON user_comment_history(is_problematic) WHERE is_problematic = TRUE;
 
--- Create daily_analytics table if not exists, then add comment columns
+-- Create daily_analytics table with comment columns
 CREATE TABLE IF NOT EXISTS daily_analytics (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     date DATE NOT NULL,
     platform VARCHAR(20) DEFAULT 'INSTAGRAM',
+    comments_received INTEGER DEFAULT 0,
+    comments_responded INTEGER DEFAULT 0,
+    comment_response_rate DECIMAL(5,2),
+    comment_sentiment_avg DECIMAL(5,2),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(merchant_id, date, platform)
 );
-
--- Add comment-related columns
-ALTER TABLE daily_analytics 
-ADD COLUMN IF NOT EXISTS comments_received INTEGER DEFAULT 0,
-ADD COLUMN IF NOT EXISTS comments_responded INTEGER DEFAULT 0,
-ADD COLUMN IF NOT EXISTS comment_response_rate DECIMAL(5,2),
-ADD COLUMN IF NOT EXISTS comment_sentiment_avg DECIMAL(5,2);
 
 -- Create trigger to automatically update user_comment_history
 CREATE OR REPLACE FUNCTION update_user_comment_history()
