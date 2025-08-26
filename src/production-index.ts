@@ -105,6 +105,13 @@ async function bootstrap() {
       queueReady: !!redisStatus.queueManager
     });
 
+    // إضافة Database Job Processor إذا كان Redis غير متاح
+    if (redisStatus.mode !== 'active') {
+      const { startDatabaseJobProcessor } = await import('./services/database-job-processor.js');
+      startDatabaseJobProcessor();
+      log.info('✅ Database job processor started');
+    }
+
     // Schedule maintenance tasks
     scheduleMaintenance(pool);
     log.info('✅ Maintenance tasks scheduled');
