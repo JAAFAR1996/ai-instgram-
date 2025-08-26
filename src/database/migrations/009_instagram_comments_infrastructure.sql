@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS comment_moderation_rules (
 -- Create indexes for comment_moderation_rules
 CREATE INDEX IF NOT EXISTS idx_comment_moderation_merchant ON comment_moderation_rules(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_comment_moderation_active ON comment_moderation_rules(is_active) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_comment_moderation_priority ON comment_moderation_rules((action_config->>'priority')::int DESC) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_comment_moderation_priority ON comment_moderation_rules(((action_config->>'priority')::int) DESC) WHERE is_active = TRUE;
 
 -- Create comment_analytics_summary table for aggregated comment analytics
 CREATE TABLE IF NOT EXISTS comment_analytics_summary (
