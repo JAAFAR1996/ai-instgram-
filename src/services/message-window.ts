@@ -97,14 +97,14 @@ export class MessageWindowService {
     try {
       const sql = this.db.getSQL();
       
-      const result = await sql.unsafe<MessageWindowRow>(`
+      const result = await sql<MessageWindowRow>`
         SELECT * FROM check_message_window(
-          '${merchantId}'::uuid,
-          ${customer.phone ? `'${customer.phone}'` : 'null'},
-          ${customer.instagram ? `'${customer.instagram}'` : 'null'},
-          '${customer.platform}'
+          ${merchantId}::uuid,
+          ${customer.phone || null},
+          ${customer.instagram || null},
+          ${customer.platform}
         )
-      `);
+      `;
 
       if (result.length === 0) {
         return {
@@ -147,15 +147,15 @@ export class MessageWindowService {
       const isNewWindow = !existingWindow;
       
       // Update or create window
-      await sql.unsafe(`
+      await sql`
         SELECT update_message_window(
-          '${merchantId}'::uuid,
-          ${customer.phone ? `'${customer.phone}'` : 'null'},
-          ${customer.instagram ? `'${customer.instagram}'` : 'null'},
-          '${customer.platform}',
-          ${messageId ? `'${messageId}'::uuid` : 'null::uuid'}
+          ${merchantId}::uuid,
+          ${customer.phone || null},
+          ${customer.instagram || null},
+          ${customer.platform},
+          ${messageId || null}::uuid
         )
-      `);
+      `;
 
       // Get updated window info
       const updatedWindow = await this.getExistingWindow(merchantId, customer);
@@ -292,10 +292,10 @@ export class MessageWindowService {
     try {
       const sql = this.db.getSQL();
       
-      const result = await sql.unsafe<DeleteCountRow>(`
+      const result = await sql<DeleteCountRow>`
         DELETE FROM message_windows
         WHERE window_expires_at < NOW() - (${olderThanDays} * INTERVAL '1 day')
-      `);
+      `;
 
       const count = ((result[0] as unknown) as DeleteCountRow)?.count ?? 0;
       logger.info(`🧹 Cleaned up ${count} expired message windows`);
@@ -324,7 +324,7 @@ export class MessageWindowService {
     try {
       const sql = this.db.getSQL();
       
-      const stats = await sql.unsafe<WindowStatsRow>(`
+      const stats = await sql<WindowStatsRow>`
         SELECT
           COUNT(*) as total_windows,
           SUM(CASE WHEN is_expired = false THEN 1 ELSE 0 END) as active_windows,
@@ -335,7 +335,7 @@ export class MessageWindowService {
         FROM message_windows
         WHERE merchant_id = ${merchantId}::uuid
         AND created_at >= NOW() - INTERVAL '${days} days'
-      `);
+      `;
 
       const result = ((stats[0] as unknown) as WindowStatsRow);
       const totalCustomerMessages = parseInt(result?.total_customer_messages ?? '0', 10);
@@ -374,7 +374,7 @@ export class MessageWindowService {
     try {
       const sql = this.db.getSQL();
       
-      const windows = await sql.unsafe<ExpiringWindowRow>(`
+      const windows = await sql<ExpiringWindowRow>`
         SELECT
           COALESCE(customer_phone, customer_instagram) as customer_id,
           platform,
@@ -385,7 +385,7 @@ export class MessageWindowService {
         AND is_expired = false
         AND window_expires_at <= NOW() + INTERVAL '${minutesUntilExpiry} minutes'
         ORDER BY window_expires_at ASC
-      `);
+      `;
         
       return windows.map((window) => ({
         customerId: ((window as unknown) as ExpiringWindowRow)?.customer_id ?? '',
@@ -409,16 +409,16 @@ export class MessageWindowService {
     try {
       const sql = this.db.getSQL();
       
-      const windows = await sql.unsafe<MessageWindowRecord>(`
+      const windows = await sql<MessageWindowRecord>`
         SELECT *
         FROM message_windows
         WHERE merchant_id = ${merchantId}::uuid
-        AND platform = '${customer.platform}'
+        AND platform = ${customer.platform}
         AND (
-          (customer_phone = ${customer.phone ? `'${customer.phone}'` : 'null'} AND customer_phone IS NOT NULL) OR
-          (customer_instagram = ${customer.instagram ? `'${customer.instagram}'` : 'null'} AND customer_instagram IS NOT NULL)
+          (customer_phone = ${customer.phone || null} AND customer_phone IS NOT NULL) OR
+          (customer_instagram = ${customer.instagram || null} AND customer_instagram IS NOT NULL)
         )
-      `);
+      `;
 
       return windows.length > 0 ? ((windows[0] as unknown) as MessageWindowRecord) : null;
     } catch (error) {
