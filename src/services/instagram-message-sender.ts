@@ -44,8 +44,8 @@ export class InstagramMessageSender {
   /**
    * Get cached client or create new one
    */
-  private getClient(merchantId: string) {
-    return getInstagramClient(merchantId);
+  private async getClient(merchantId: string) {
+    return await getInstagramClient(merchantId);
   }
 
   private async getCredentials(merchantId: string): Promise<InstagramAPICredentials> {
@@ -54,7 +54,7 @@ export class InstagramMessageSender {
       return cached;
     }
 
-    const client = this.getClient(merchantId);
+    const client = await this.getClient(merchantId);
     const creds = await client.loadMerchantCredentials(merchantId);
     if (!creds) {
       throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
@@ -136,7 +136,7 @@ export class InstagramMessageSender {
       }
 
       // Get Instagram client and credentials
-      const client = this.getClient(merchantId);
+      const client = await this.getClient(merchantId);
       const credentials = await this.getCredentials(merchantId);
 
       // Send message via Instagram API
@@ -224,7 +224,7 @@ export class InstagramMessageSender {
       }
 
       // Get Instagram client and credentials
-      const client = this.getClient(merchantId);
+      const client = await this.getClient(merchantId);
       const credentials = await this.getCredentials(merchantId);
 
       // Upload media first if it's a local file and no attachment is provided
@@ -344,7 +344,7 @@ export class InstagramMessageSender {
       }
 
       // Get Instagram client and credentials
-      const client = this.getClient(merchantId);
+      const client = await this.getClient(merchantId);
       const credentials = await this.getCredentials(merchantId);
 
       // Convert template to Instagram format
@@ -426,7 +426,7 @@ export class InstagramMessageSender {
       logger.info(`💬 Replying to Instagram comment ${commentId}: ${replyText}`);
 
       // Get Instagram client and credentials
-      const client = this.getClient(merchantId);
+      const client = await this.getClient(merchantId);
       const credentials = await this.getCredentials(merchantId);
 
       // Reply to comment
@@ -499,7 +499,7 @@ export class InstagramMessageSender {
       }
 
       // Get Instagram client and credentials
-      const client = this.getClient(merchantId);
+      const client = await this.getClient(merchantId);
       const credentials = await this.getCredentials(merchantId);
 
       // Send message with quick replies
@@ -961,7 +961,7 @@ export class InstagramMessageSender {
     error?: string;
   }> {
     try {
-      const client = this.getClient(merchantId);
+      const client = await this.getClient(merchantId);
       const mediaId = await client.uploadMedia(mediaUrl, mediaType);
       
       return {
@@ -982,7 +982,7 @@ export class InstagramMessageSender {
     message: string
   ): Promise<SendResult> {
     try {
-      const client = this.getClient(merchantId);
+      const client = await this.getClient(merchantId);
       const credentials = await this.getCredentials(merchantId);
       
       // جرب إرسال template message

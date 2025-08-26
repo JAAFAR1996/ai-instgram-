@@ -47,7 +47,7 @@ import { CircuitBreaker } from './CircuitBreaker.js';
 
 import { getInstagramWebhookHandler } from './instagram-webhook.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
-import type { InstagramWebhookEvent, ProcessedWebhookResult } from './instagram-webhook.js';
+import type { InstagramWebhookEvent, ProcessedWebhookResult, InstagramWebhookHandler } from './instagram-webhook.js';
 import { getNotificationService } from './notification-service.js';
 import { getRepositories } from '../repositories/index.js';
 import { getInstagramClient } from './instagram-api.js';
@@ -142,7 +142,8 @@ export class ProductionQueueManager {
   private notification = getNotificationService();
   
   // Real processing services
-  private webhookHandler = getInstagramWebhookHandler();
+
+  private webhookHandler: InstagramWebhookHandler | null = null;
   private aiOrchestrator = getConversationAIOrchestrator();
   private repositories = getRepositories();
   private messageSender = getInstagramMessageSender();
@@ -183,7 +184,11 @@ export class ProductionQueueManager {
         }
       });
 
-      // 3. إعداد معالجات الأحداث والمهام
+      // 3. تهيئة webhook handler
+      this.webhookHandler = await getInstagramWebhookHandler();
+      this.logger.info('✅ تم تهيئة webhook handler');
+
+      // 4. إعداد معالجات الأحداث والمهام
       this.logger.info('🔧 بدء إعداد معالجات الأحداث والمهام...');
       await this.setupEventHandlers();
       this.logger.info('📡 تم إعداد معالجات الأحداث');
@@ -1130,6 +1135,9 @@ export class ProductionQueueManager {
       }
 
       // معالجة حقيقية باستخدام InstagramWebhookHandler
+      if (!this.webhookHandler) {
+        throw new Error('Webhook handler not initialized');
+      }
       const result = await this.webhookHandler.processWebhook(webhookEvent, jobData.merchantId);
       
       this.logger.info('✅ [INSTAGRAM-WEBHOOK] Instagram webhook معُولج', {
@@ -1809,7 +1817,7 @@ export class ProductionQueueManager {
     message: string
   ): Promise<{ success: boolean; platformMessageId?: string; error?: string }> {
     try {
-      const instagramClient = getInstagramClient(jobData.merchantId as string);
+      const instagramClient = await getInstagramClient(jobData.merchantId as string);
       const credentials = await instagramClient.loadMerchantCredentials(jobData.merchantId as string);
       if (!credentials) {
         throw new Error('Instagram credentials not found');

@@ -86,8 +86,8 @@ export class InstagramCommentsManager {
   private redis = getRedisConnectionManager();
   private credentialsCache = new ExpiringMap<string, InstagramAPICredentials>();
 
-  private getClient(merchantId: string) {
-    return getInstagramClient(merchantId);
+  private async getClient(merchantId: string) {
+    return await getInstagramClient(merchantId);
   }
 
   private async getCredentials(merchantId: string): Promise<InstagramAPICredentials> {
@@ -96,7 +96,7 @@ export class InstagramCommentsManager {
       return cached;
     }
 
-    const client = this.getClient(merchantId);
+    const client = await this.getClient(merchantId);
     const creds = await client.loadMerchantCredentials(merchantId);
     if (!creds) {
       throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
@@ -709,7 +709,7 @@ export class InstagramCommentsManager {
     merchantId: string
   ): Promise<boolean> {
     try {
-      const instagramClient = this.getClient(merchantId);
+      const instagramClient = await this.getClient(merchantId);
       const credentials = await this.getCredentials(merchantId);
 
       const result = await instagramClient.replyToComment(credentials, merchantId, commentId, replyText);
@@ -729,7 +729,7 @@ export class InstagramCommentsManager {
     merchantId: string
   ): Promise<boolean> {
     try {
-      const instagramClient = this.getClient(merchantId);
+      const instagramClient = await this.getClient(merchantId);
       const credentials = await this.getCredentials(merchantId);
 
       // Reply to comment with DM invitation

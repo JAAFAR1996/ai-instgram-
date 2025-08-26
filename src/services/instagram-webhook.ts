@@ -695,7 +695,7 @@ export class InstagramWebhookHandler {
     username: string
   ): Promise<boolean> {
     try {
-      const instagramClient = getInstagramClient(merchantId);
+      const instagramClient = await getInstagramClient(merchantId);
       const credentials = await instagramClient.loadMerchantCredentials(merchantId);
       if (!credentials) {
         throw new Error('Instagram credentials not found');
@@ -1270,7 +1270,7 @@ export class InstagramWebhookHandler {
       : 'شكراً لتفاعلك! راح نرد عليك قريباً 🙏';
       
     try {
-      const instagramClient = getInstagramClient(merchantId);
+      const instagramClient = await getInstagramClient(merchantId);
       const credentials = await instagramClient.loadMerchantCredentials(merchantId);
       
       if (credentials) {
@@ -1352,7 +1352,7 @@ export class InstagramWebhookHandler {
       `;
       
       // إرسال الرسالة
-      const instagramClient = getInstagramClient(merchantId);
+      const instagramClient = await getInstagramClient(merchantId);
       const credentials = await instagramClient.loadMerchantCredentials(merchantId);
       
       if (!credentials) {
@@ -1429,7 +1429,7 @@ let webhookHandlerInstance: InstagramWebhookHandler | null = null;
 /**
  * Get Instagram webhook handler instance
  */
-export function getInstagramWebhookHandler(): InstagramWebhookHandler {
+export async function getInstagramWebhookHandler(): Promise<InstagramWebhookHandler> {
   if (!webhookHandlerInstance) {
     webhookHandlerInstance = new InstagramWebhookHandler();
   }

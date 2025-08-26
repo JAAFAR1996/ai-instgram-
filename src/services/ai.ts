@@ -723,7 +723,7 @@ ${productsText}
     try {
       // أرسل إشعار للمستخدم مباشرة
       const { getInstagramClient } = await import('./instagram-api.js');
-      const client = getInstagramClient(context.merchantId);
+      const client = await getInstagramClient(context.merchantId);
       const credentials = await client.loadMerchantCredentials(context.merchantId);
       
       if (credentials && context.customerId) {
@@ -772,12 +772,9 @@ export function createAIService(container: DIContainer): AIService {
 }
 
 // Legacy support function (deprecated)
-export function getAIService(): AIService {
-  // إبقِ الواجهة متزامِنة لتوافق الكود الحالي
-  // وحافظ على require كحل توافقي في بيئات CJS/ESM الممزوجة
-  // (يمكن لاحقاً ترقية المشروع لاستيراد ديناميكي بالكامل)
-   
-  const { container } = require('../container/index.js');
+export async function getAIService(): Promise<AIService> {
+  // استخدام dynamic import بدلاً من require
+  const { container } = await import('../container/index.js');
   if (!container.has('aiService')) {
     container.registerSingleton('aiService', () => new AIService(container));
   }

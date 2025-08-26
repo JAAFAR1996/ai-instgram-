@@ -79,34 +79,53 @@ export interface ConversationPersonality {
 }
 
 export class ConversationAIOrchestrator {
-  private aiService!: ReturnType<typeof getAIService>;
+  private aiService!: Awaited<ReturnType<typeof getAIService>>;
   private instagramAI!: ReturnType<typeof getInstagramAIService>;
   private db!: ReturnType<typeof getDatabase>;
 
   constructor(container?: DIContainer) {
     if (container) {
-      this.initializeFromContainer(container);
+      this.initializeFromContainer(container).catch(error => {
+        logger.error('Failed to initialize from container', error);
+      });
     } else {
-      this.initializeLegacy();
+      this.initializeLegacy().catch(error => {
+        logger.error('Failed to initialize legacy', error);
+      });
     }
   }
 
-  private initializeFromContainer(container: DIContainer): void {
+  private async initializeFromContainer(container: DIContainer): Promise<void> {
     try {
       // Try to get services from container first
-      this.aiService = container.get<ReturnType<typeof getAIService>>('aiService') || getAIService();
+      this.aiService = container.get<Awaited<ReturnType<typeof getAIService>>>('aiService') || await getAIService();
       this.instagramAI = container.get<ReturnType<typeof getInstagramAIService>>('instagramAIService') || getInstagramAIService();
       this.db = container.get<ReturnType<typeof getDatabase>>('database') || getDatabase();
     } catch (error: unknown) {
       logger.warn('Container initialization failed, falling back to legacy methods', { error });
-      this.initializeLegacy();
+      await this.initializeLegacy();
     }
   }
 
-  private initializeLegacy(): void {
-    this.aiService = getAIService();
+  private async initializeLegacy(): Promise<void> {
+    this.aiService = await getAIService();
     this.instagramAI = getInstagramAIService();
     this.db = getDatabase();
+  }
+
+  /**
+   * Ensure services are initialized
+   */
+  private async ensureInitialized(): Promise<void> {
+    if (!this.aiService) {
+      this.aiService = await getAIService();
+    }
+    if (!this.instagramAI) {
+      this.instagramAI = getInstagramAIService();
+    }
+    if (!this.db) {
+      this.db = getDatabase();
+    }
   }
 
   /**
@@ -118,6 +137,7 @@ export class ConversationAIOrchestrator {
     platform: Platform
   ): Promise<PlatformAIResponse> {
     try {
+      await this.ensureInitialized();
       logger.info(`🤖 Generating ${platform} AI response for merchant: ${context.merchantId}`);
 
       // احترام Service Controller قبل تشغيل الذكاء

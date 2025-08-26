@@ -88,7 +88,7 @@ export class InstagramSetupService {
 
       // Step 3: Store encrypted credentials
       await this.executeStep(result, 'store_credentials', 'Storing encrypted credentials', async () => {
-        const credManager = getInstagramAPICredentialsManager();
+        const credManager = await getInstagramAPICredentialsManager();
         await credManager.storeCredentials(
           merchantId,
           {
@@ -105,7 +105,7 @@ export class InstagramSetupService {
       // Step 4: Initialize Instagram client
       let credentials: InstagramAPICredentials | null = null;
       await this.executeStep(result, 'initialize_client', 'Initializing Instagram client', async () => {
-        const client = getInstagramClient(merchantId);
+        const client = await getInstagramClient(merchantId);
         credentials = await client.loadMerchantCredentials(merchantId);
         if (!credentials) {
           throw new Error('Instagram credentials not found');
@@ -115,7 +115,7 @@ export class InstagramSetupService {
 
       // Step 5: Subscribe to webhooks
       await this.executeStep(result, 'setup_webhooks', 'Setting up webhook subscriptions', async () => {
-        const client = getInstagramClient(merchantId);
+        const client = await getInstagramClient(merchantId);
         const creds = credentials ?? await client.loadMerchantCredentials(merchantId);
         if (!creds) {
           throw new Error('Instagram credentials not found');
@@ -128,7 +128,7 @@ export class InstagramSetupService {
 
       // Step 6: Perform health check
       await this.executeStep(result, 'health_check', 'Performing final health check', async () => {
-        const client = getInstagramClient(merchantId);
+        const client = await getInstagramClient(merchantId);
         const creds = credentials ?? await client.loadMerchantCredentials(merchantId);
         const health = await client.healthCheck(creds, merchantId);
 
@@ -167,7 +167,7 @@ export class InstagramSetupService {
     const issues: string[] = [];
 
     try {
-      const client = getInstagramClient('validation'); // Use a temporary client
+      const client = await getInstagramClient('validation'); // Use a temporary client
 
       const res = await client.graphRequest(
         'GET',
@@ -365,7 +365,7 @@ export class InstagramSetupService {
     const errors: string[] = [];
 
     try {
-      const client = getInstagramClient(merchantId);
+      const client = await getInstagramClient(merchantId);
       const creds = await client.loadMerchantCredentials(merchantId);
       if (!creds) {
         throw new Error('Instagram credentials not found');
@@ -406,7 +406,7 @@ export class InstagramSetupService {
     error?: string;
   }> {
     try {
-      const credManager = getInstagramAPICredentialsManager();
+      const credManager = await getInstagramAPICredentialsManager();
       await credManager.removeCredentials(merchantId);
 
       // Log removal
@@ -489,7 +489,7 @@ export class InstagramSetupService {
   private async testInstagramAPI(
     config: InstagramSetupConfig
   ): Promise<BusinessAccountInfo> {
-    const client = getInstagramClient('setup-test');
+          const client = await getInstagramClient('setup-test');
     const res = await client.graphRequest(
       'GET',
       `/${config.businessAccountId}?fields=id,username,name,profile_picture_url,followers_count,media_count,biography`,

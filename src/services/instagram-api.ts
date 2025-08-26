@@ -981,10 +981,10 @@ const instagramClients = new Map<string, InstagramAPIClient>();
  * Get Instagram API client instance for a merchant
  * @deprecated Use DI container instead
  */
-export function getInstagramClient(merchantId: string): InstagramAPIClient {
+export async function getInstagramClient(merchantId: string): Promise<InstagramAPIClient> {
   let client = instagramClients.get(merchantId);
   if (!client) {
-    const { container } = require('../container/index.js');
+    const { container } = await import('../container/index.js');
     client = new InstagramAPIClient(container);
     instagramClients.set(merchantId, client);
   }
@@ -999,8 +999,8 @@ export function clearInstagramClient(merchantId: string): void {
  * Get credentials manager instance
  * @deprecated Use DI container instead
  */
-export function getInstagramAPICredentialsManager(): InstagramAPICredentialsManager {
-  const { container } = require('../container/index.js');
+export async function getInstagramAPICredentialsManager(): Promise<InstagramAPICredentialsManager> {
+  const { container } = await import('../container/index.js');
   if (!container.has('instagramCredentialsManager')) {
     container.registerSingleton('instagramCredentialsManager', () => 
       new InstagramAPICredentialsManager(container)

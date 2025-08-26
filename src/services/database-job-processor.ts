@@ -77,7 +77,7 @@ async function processWebhookFromDatabase(job: any) {
     });
 
     // استخدام InstagramWebhookHandler مباشرة
-    const webhookHandler = getInstagramWebhookHandler();
+    const webhookHandler = await getInstagramWebhookHandler();
     
     // التحقق من أن job data يحتوي على payload صحيح
     if (!job.jobData || !job.jobData.payload) {
