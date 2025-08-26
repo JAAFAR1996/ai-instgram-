@@ -392,4 +392,5 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Record this migration
-INSERT INTO migrations (name, filename) VALUES ('Analytics Views', '002_analytics_views.sql');
+INSERT INTO migrations (name, filename) VALUES ('Analytics Views', '002_analytics_views.sql')
+ON CONFLICT (name) DO NOTHING;

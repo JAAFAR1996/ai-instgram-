@@ -13,7 +13,7 @@ ADD COLUMN ai_config JSONB DEFAULT '{
 }'::jsonb;
 
 -- Add index for performance on ai_config queries
-CREATE INDEX idx_merchants_ai_config 
+CREATE INDEX IF NOT EXISTS idx_merchants_ai_config 
 ON merchants USING GIN (ai_config);
 
 -- Add constraint to ensure valid JSON structure

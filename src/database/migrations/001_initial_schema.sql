@@ -49,7 +49,7 @@ $$ LANGUAGE plpgsql;
 -- MERCHANTS TABLE
 -- ===============================================
 
-CREATE TABLE merchants (
+CREATE TABLE IF NOT EXISTS merchants (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     business_name VARCHAR(255) NOT NULL,
     business_category VARCHAR(100) DEFAULT 'general',
@@ -104,17 +104,17 @@ CREATE TABLE merchants (
 );
 
 -- Create indexes for merchants
-CREATE INDEX idx_merchants_whatsapp ON merchants (whatsapp_number);
-CREATE INDEX idx_merchants_subscription ON merchants (subscription_status, subscription_expires_at);
-CREATE INDEX idx_merchants_activity ON merchants (last_activity_at DESC);
-CREATE INDEX idx_merchants_search ON merchants USING GIN (search_vector);
-CREATE INDEX idx_merchants_settings ON merchants USING GIN (settings);
+CREATE INDEX IF NOT EXISTS idx_merchants_whatsapp ON merchants (whatsapp_number);
+CREATE INDEX IF NOT EXISTS idx_merchants_subscription ON merchants (subscription_status, subscription_expires_at);
+CREATE INDEX IF NOT EXISTS idx_merchants_activity ON merchants (last_activity_at DESC);
+CREATE INDEX IF NOT EXISTS idx_merchants_search ON merchants USING GIN (search_vector);
+CREATE INDEX IF NOT EXISTS idx_merchants_settings ON merchants USING GIN (settings);
 
 -- ===============================================
 -- PRODUCTS TABLE
 -- ===============================================
 
-CREATE TABLE products (
+CREATE TABLE IF NOT EXISTS products (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     
@@ -169,20 +169,20 @@ CREATE TABLE products (
 );
 
 -- Create indexes for products
-CREATE INDEX idx_products_merchant ON products (merchant_id, status);
-CREATE INDEX idx_products_category ON products (merchant_id, category, status);
-CREATE INDEX idx_products_stock ON products (merchant_id, stock_quantity) WHERE status = 'ACTIVE';
-CREATE INDEX idx_products_featured ON products (merchant_id, is_featured) WHERE is_featured = true;
-CREATE INDEX idx_products_sale ON products (merchant_id, is_on_sale, sale_ends_at) WHERE is_on_sale = true;
-CREATE INDEX idx_products_search ON products USING GIN (search_vector);
-CREATE INDEX idx_products_attributes ON products USING GIN (attributes);
-CREATE INDEX idx_products_tags ON products USING GIN (tags);
+CREATE INDEX IF NOT EXISTS idx_products_merchant ON products (merchant_id, status);
+CREATE INDEX IF NOT EXISTS idx_products_category ON products (merchant_id, category, status);
+CREATE INDEX IF NOT EXISTS idx_products_stock ON products (merchant_id, stock_quantity) WHERE status = 'ACTIVE';
+CREATE INDEX IF NOT EXISTS idx_products_featured ON products (merchant_id, is_featured) WHERE is_featured = true;
+CREATE INDEX IF NOT EXISTS idx_products_sale ON products (merchant_id, is_on_sale, sale_ends_at) WHERE is_on_sale = true;
+CREATE INDEX IF NOT EXISTS idx_products_search ON products USING GIN (search_vector);
+CREATE INDEX IF NOT EXISTS idx_products_attributes ON products USING GIN (attributes);
+CREATE INDEX IF NOT EXISTS idx_products_tags ON products USING GIN (tags);
 
 -- ===============================================
 -- ORDERS TABLE
 -- ===============================================
 
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     order_number TEXT UNIQUE NOT NULL DEFAULT generate_order_number(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE RESTRICT,
@@ -249,18 +249,18 @@ CREATE TABLE orders (
 );
 
 -- Create indexes for orders
-CREATE INDEX idx_orders_merchant ON orders (merchant_id, created_at DESC);
-CREATE INDEX idx_orders_status ON orders (merchant_id, status, created_at DESC);
-CREATE INDEX idx_orders_customer ON orders (merchant_id, customer_phone);
-CREATE INDEX idx_orders_source ON orders (merchant_id, order_source, created_at DESC);
-CREATE INDEX idx_orders_number ON orders (order_number);
-CREATE INDEX idx_orders_delivery ON orders (delivery_date, status) WHERE status IN ('CONFIRMED', 'PROCESSING', 'SHIPPED');
+CREATE INDEX IF NOT EXISTS idx_orders_merchant ON orders (merchant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (merchant_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders (merchant_id, customer_phone);
+CREATE INDEX IF NOT EXISTS idx_orders_source ON orders (merchant_id, order_source, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_number ON orders (order_number);
+CREATE INDEX IF NOT EXISTS idx_orders_delivery ON orders (delivery_date, status) WHERE status IN ('CONFIRMED', 'PROCESSING', 'SHIPPED');
 
 -- ===============================================
 -- CONVERSATIONS TABLE
 -- ===============================================
 
-CREATE TABLE conversations (
+CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     
@@ -314,18 +314,18 @@ CREATE TABLE conversations (
 );
 
 -- Create indexes for conversations
-CREATE INDEX idx_conversations_merchant ON conversations (merchant_id, last_message_at DESC);
-CREATE INDEX idx_conversations_platform ON conversations (merchant_id, platform, conversation_stage);
-CREATE INDEX idx_conversations_customer_phone ON conversations (customer_phone, platform) WHERE customer_phone IS NOT NULL;
-CREATE INDEX idx_conversations_customer_instagram ON conversations (customer_instagram, platform) WHERE customer_instagram IS NOT NULL;
-CREATE INDEX idx_conversations_stage ON conversations (merchant_id, conversation_stage, last_message_at DESC);
-CREATE INDEX idx_conversations_converted ON conversations (merchant_id, converted_to_order, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_merchant ON conversations (merchant_id, last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_platform ON conversations (merchant_id, platform, conversation_stage);
+CREATE INDEX IF NOT EXISTS idx_conversations_customer_phone ON conversations (customer_phone, platform) WHERE customer_phone IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_conversations_customer_instagram ON conversations (customer_instagram, platform) WHERE customer_instagram IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_conversations_stage ON conversations (merchant_id, conversation_stage, last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_converted ON conversations (merchant_id, converted_to_order, created_at DESC);
 
 -- ===============================================
 -- MESSAGE_LOGS TABLE
 -- ===============================================
 
-CREATE TABLE message_logs (
+CREATE TABLE IF NOT EXISTS message_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     
@@ -366,10 +366,10 @@ CREATE TABLE message_logs (
 );
 
 -- Create indexes for message_logs
-CREATE INDEX idx_message_logs_conversation ON message_logs (conversation_id, created_at DESC);
-CREATE INDEX idx_message_logs_platform ON message_logs (platform, direction, created_at DESC);
-CREATE INDEX idx_message_logs_unprocessed ON message_logs (ai_processed, created_at) WHERE ai_processed = false AND direction = 'INCOMING';
-CREATE INDEX idx_message_logs_search ON message_logs USING GIN (content_search);
+CREATE INDEX IF NOT EXISTS idx_message_logs_conversation ON message_logs (conversation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_logs_platform ON message_logs (platform, direction, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_logs_unprocessed ON message_logs (ai_processed, created_at) WHERE ai_processed = false AND direction = 'INCOMING';
+CREATE INDEX IF NOT EXISTS idx_message_logs_search ON message_logs USING GIN (content_search);
 
 -- ===============================================
 -- TRIGGERS
@@ -387,6 +387,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_update_merchant_search_vector ON merchants;
 CREATE TRIGGER trigger_update_merchant_search_vector
     BEFORE INSERT OR UPDATE ON merchants
     FOR EACH ROW EXECUTE FUNCTION update_merchant_search_vector();
@@ -406,6 +407,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_update_product_search_vector ON products;
 CREATE TRIGGER trigger_update_product_search_vector
     BEFORE INSERT OR UPDATE ON products
     FOR EACH ROW EXECUTE FUNCTION update_product_search_vector();
@@ -419,23 +421,28 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_update_message_content_search ON message_logs;
 CREATE TRIGGER trigger_update_message_content_search
     BEFORE INSERT OR UPDATE ON message_logs
     FOR EACH ROW EXECUTE FUNCTION update_message_content_search();
 
 -- Updated_at triggers
+DROP TRIGGER IF EXISTS trigger_merchants_updated_at ON merchants;
 CREATE TRIGGER trigger_merchants_updated_at
     BEFORE UPDATE ON merchants
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS trigger_products_updated_at ON products;
 CREATE TRIGGER trigger_products_updated_at
     BEFORE UPDATE ON products
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS trigger_orders_updated_at ON orders;
 CREATE TRIGGER trigger_orders_updated_at
     BEFORE UPDATE ON orders
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS trigger_conversations_updated_at ON conversations;
 CREATE TRIGGER trigger_conversations_updated_at
     BEFORE UPDATE ON conversations
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -452,4 +459,5 @@ CREATE TABLE IF NOT EXISTS migrations (
 );
 
 -- Record this migration
-INSERT INTO migrations (name, filename) VALUES ('Initial Schema', '001_initial_schema.sql');
+INSERT INTO migrations (name, filename) VALUES ('Initial Schema', '001_initial_schema.sql')
+ON CONFLICT (name) DO NOTHING;

@@ -9,7 +9,7 @@ BEGIN
     WHERE indexname = 'ux_mc_merchant_page'
   ) THEN
     -- Create the unique index for ON CONFLICT constraint matching
-    CREATE UNIQUE INDEX ux_mc_merchant_page
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mc_merchant_page
     ON merchant_credentials (merchant_id, instagram_page_id);
     
     RAISE NOTICE 'Created unique index ux_mc_merchant_page on merchant_credentials (merchant_id, instagram_page_id)';

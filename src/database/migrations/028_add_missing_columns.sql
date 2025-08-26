@@ -22,8 +22,8 @@ SET is_active = true
 WHERE is_active IS NULL;
 
 -- Add indexes for performance
-CREATE INDEX idx_merchants_is_active ON merchants(is_active);
-CREATE INDEX idx_conversations_is_active ON conversations(is_active);
+CREATE INDEX IF NOT EXISTS idx_merchants_is_active ON merchants(is_active);
+CREATE INDEX IF NOT EXISTS idx_conversations_is_active ON conversations(is_active);
 
 -- Add comments for documentation
 COMMENT ON COLUMN merchants.is_active IS 'Whether this merchant account is active';

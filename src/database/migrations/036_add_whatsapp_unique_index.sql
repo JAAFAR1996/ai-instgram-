@@ -10,7 +10,7 @@ BEGIN
         WHERE schemaname = 'public'
           AND indexname = 'uq_conversations_merchant_phone_platform'
     ) THEN
-        CREATE UNIQUE INDEX uq_conversations_merchant_phone_platform
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_conversations_merchant_phone_platform
         ON conversations(merchant_id, customer_phone, platform)
         WHERE customer_phone IS NOT NULL;
     END IF;

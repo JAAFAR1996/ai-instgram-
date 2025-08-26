@@ -320,24 +320,28 @@ ALTER TABLE customer_journey_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversation_merges ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for platform_switches
+DROP POLICY IF EXISTS platform_switches_tenant_policy ON platform_switches;
 CREATE POLICY platform_switches_tenant_policy ON platform_switches
     FOR ALL USING (
         merchant_id = current_setting('app.current_merchant_id', true)::UUID
     );
 
 -- RLS Policies for unified_customer_profiles
+DROP POLICY IF EXISTS unified_customer_profiles_tenant_policy ON unified_customer_profiles;
 CREATE POLICY unified_customer_profiles_tenant_policy ON unified_customer_profiles
     FOR ALL USING (
         merchant_id = current_setting('app.current_merchant_id', true)::UUID
     );
 
 -- RLS Policies for customer_journey_events
+DROP POLICY IF EXISTS customer_journey_events_tenant_policy ON customer_journey_events;
 CREATE POLICY customer_journey_events_tenant_policy ON customer_journey_events
     FOR ALL USING (
         merchant_id = current_setting('app.current_merchant_id', true)::UUID
     );
 
 -- RLS Policies for conversation_merges
+DROP POLICY IF EXISTS conversation_merges_tenant_policy ON conversation_merges;
 CREATE POLICY conversation_merges_tenant_policy ON conversation_merges
     FOR ALL USING (
         merchant_id = current_setting('app.current_merchant_id', true)::UUID
@@ -352,6 +356,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_unified_profiles_updated_at ON unified_customer_profiles;
 CREATE TRIGGER trigger_unified_profiles_updated_at
     BEFORE UPDATE ON unified_customer_profiles
     FOR EACH ROW
@@ -359,4 +364,5 @@ CREATE TRIGGER trigger_unified_profiles_updated_at
 
 -- Insert migration record
 INSERT INTO migrations (name, filename) 
-VALUES ('Cross-Platform Conversation Management Infrastructure', '006_cross_platform_infrastructure.sql');
+VALUES ('Cross-Platform Conversation Management Infrastructure', '006_cross_platform_infrastructure.sql')
+ON CONFLICT (name) DO NOTHING;

@@ -145,15 +145,19 @@ ALTER TABLE instagram_webhook_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE instagram_api_usage ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies
+DROP POLICY IF EXISTS merchant_integrations_isolation ON merchant_integrations;
 CREATE POLICY merchant_integrations_isolation ON merchant_integrations
     FOR ALL USING (merchant_id = current_setting('app.current_merchant_id', true)::UUID);
 
+DROP POLICY IF EXISTS oauth_states_isolation ON oauth_states;
 CREATE POLICY oauth_states_isolation ON oauth_states
     FOR ALL USING (merchant_id = current_setting('app.current_merchant_id', true)::UUID);
 
+DROP POLICY IF EXISTS instagram_webhook_events_isolation ON instagram_webhook_events;
 CREATE POLICY instagram_webhook_events_isolation ON instagram_webhook_events
     FOR ALL USING (merchant_id = current_setting('app.current_merchant_id', true)::UUID);
 
+DROP POLICY IF EXISTS instagram_api_usage_isolation ON instagram_api_usage;
 CREATE POLICY instagram_api_usage_isolation ON instagram_api_usage
     FOR ALL USING (merchant_id = current_setting('app.current_merchant_id', true)::UUID);
 
@@ -166,6 +170,7 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS merchant_integrations_updated_at ON merchant_integrations;
 CREATE TRIGGER merchant_integrations_updated_at
     BEFORE UPDATE ON merchant_integrations
     FOR EACH ROW

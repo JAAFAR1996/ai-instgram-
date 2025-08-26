@@ -130,38 +130,48 @@ ALTER TABLE instagram_business_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE compliance_logs ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for utility_message_templates
+DROP POLICY IF EXISTS utility_templates_merchant_access ON utility_message_templates;
 CREATE POLICY utility_templates_merchant_access ON utility_message_templates
     FOR ALL USING (merchant_id = current_setting('app.current_merchant_id')::uuid);
 
 -- RLS Policies for utility_message_logs
+DROP POLICY IF EXISTS utility_logs_merchant_access ON utility_message_logs;
 CREATE POLICY utility_logs_merchant_access ON utility_message_logs
     FOR ALL USING (merchant_id = current_setting('app.current_merchant_id')::uuid);
 
 -- RLS Policies for oauth_sessions
+DROP POLICY IF EXISTS oauth_sessions_merchant_access ON oauth_sessions;
 CREATE POLICY oauth_sessions_merchant_access ON oauth_sessions
     FOR ALL USING (merchant_id = current_setting('app.current_merchant_id')::uuid);
 
 -- RLS Policies for instagram_business_accounts
+DROP POLICY IF EXISTS ig_business_merchant_access ON instagram_business_accounts;
 CREATE POLICY ig_business_merchant_access ON instagram_business_accounts
     FOR ALL USING (merchant_id = current_setting('app.current_merchant_id')::uuid);
 
 -- RLS Policies for compliance_logs
+DROP POLICY IF EXISTS compliance_logs_merchant_access ON compliance_logs;
 CREATE POLICY compliance_logs_merchant_access ON compliance_logs
     FOR ALL USING (merchant_id = current_setting('app.current_merchant_id')::uuid);
 
 -- Admin policies (bypass RLS for admin users)
+DROP POLICY IF EXISTS utility_templates_admin_access ON utility_message_templates;
 CREATE POLICY utility_templates_admin_access ON utility_message_templates
     FOR ALL USING (current_setting('app.current_role', true) = 'admin');
 
+DROP POLICY IF EXISTS utility_logs_admin_access ON utility_message_logs;
 CREATE POLICY utility_logs_admin_access ON utility_message_logs
     FOR ALL USING (current_setting('app.current_role', true) = 'admin');
 
+DROP POLICY IF EXISTS oauth_sessions_admin_access ON oauth_sessions;
 CREATE POLICY oauth_sessions_admin_access ON oauth_sessions
     FOR ALL USING (current_setting('app.current_role', true) = 'admin');
 
+DROP POLICY IF EXISTS ig_business_admin_access ON instagram_business_accounts;
 CREATE POLICY ig_business_admin_access ON instagram_business_accounts
     FOR ALL USING (current_setting('app.current_role', true) = 'admin');
 
+DROP POLICY IF EXISTS compliance_logs_admin_access ON compliance_logs;
 CREATE POLICY compliance_logs_admin_access ON compliance_logs
     FOR ALL USING (current_setting('app.current_role', true) = 'admin');
 
@@ -203,10 +213,12 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Apply the trigger to relevant tables
+DROP TRIGGER IF EXISTS update_utility_templates_updated_at ON utility_message_templates;
 CREATE TRIGGER update_utility_templates_updated_at
     BEFORE UPDATE ON utility_message_templates
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_ig_business_updated_at ON instagram_business_accounts;
 CREATE TRIGGER update_ig_business_updated_at
     BEFORE UPDATE ON instagram_business_accounts
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

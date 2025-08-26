@@ -33,6 +33,7 @@ CREATE POLICY "webhook_events_tenant_isolation" ON webhook_events
   TO ai_sales
   USING (merchant_id = current_merchant_id() OR is_admin_user());
 
+DROP POLICY IF EXISTS "webhook_events_insert_own" ON webhook_events;
 CREATE POLICY "webhook_events_insert_own" ON webhook_events
   FOR INSERT 
   TO ai_sales

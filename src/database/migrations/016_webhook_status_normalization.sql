@@ -12,4 +12,5 @@ ADD CONSTRAINT webhook_logs_status_check
 CHECK (status IN ('RECEIVED','PROCESSED','SUCCESS','FAILED','PENDING'));
 
 -- Record this migration
-INSERT INTO migrations (name, filename) VALUES ('Webhook Status Normalization', '016_webhook_status_normalization.sql');
+INSERT INTO migrations (name, filename) VALUES ('Webhook Status Normalization', '016_webhook_status_normalization.sql')
+ON CONFLICT (name) DO NOTHING;

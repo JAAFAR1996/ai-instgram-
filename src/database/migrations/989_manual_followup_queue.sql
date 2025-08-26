@@ -20,10 +20,10 @@ CREATE TABLE IF NOT EXISTS manual_followup_queue (
 );
 
 -- Create indexes for performance
-CREATE INDEX idx_manual_followup_merchant ON manual_followup_queue (merchant_id);
-CREATE INDEX idx_manual_followup_status ON manual_followup_queue (status, priority, scheduled_for);
-CREATE INDEX idx_manual_followup_assigned ON manual_followup_queue (assigned_to) WHERE assigned_to IS NOT NULL;
-CREATE INDEX idx_manual_followup_conversation ON manual_followup_queue (conversation_id) WHERE conversation_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_manual_followup_merchant ON manual_followup_queue (merchant_id);
+CREATE INDEX IF NOT EXISTS idx_manual_followup_status ON manual_followup_queue (status, priority, scheduled_for);
+CREATE INDEX IF NOT EXISTS idx_manual_followup_assigned ON manual_followup_queue (assigned_to) WHERE assigned_to IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_manual_followup_conversation ON manual_followup_queue (conversation_id) WHERE conversation_id IS NOT NULL;
 
 -- Create function for updating timestamps
 CREATE OR REPLACE FUNCTION update_manual_followup_timestamp()
@@ -38,6 +38,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for updating timestamps
+DROP TRIGGER IF EXISTS update_manual_followup_timestamp ON manual_followup_queue;
 CREATE TRIGGER update_manual_followup_timestamp
     BEFORE UPDATE ON manual_followup_queue
     FOR EACH ROW EXECUTE FUNCTION update_manual_followup_timestamp();
@@ -46,18 +47,22 @@ CREATE TRIGGER update_manual_followup_timestamp
 ALTER TABLE manual_followup_queue ENABLE ROW LEVEL SECURITY;
 
 -- Policy for merchants to see only their followup items
+DROP POLICY IF EXISTS "Merchants can view their own followup items" ON manual_followup_queue;
 CREATE POLICY "Merchants can view their own followup items" ON manual_followup_queue
     FOR SELECT USING (merchant_id = current_setting('app.current_merchant_id')::UUID);
 
 -- Policy for merchants to insert their own followup items
+DROP POLICY IF EXISTS "Merchants can insert their own followup items" ON manual_followup_queue;
 CREATE POLICY "Merchants can insert their own followup items" ON manual_followup_queue
     FOR INSERT WITH CHECK (merchant_id = current_setting('app.current_merchant_id')::UUID);
 
 -- Policy for merchants to update their own followup items
+DROP POLICY IF EXISTS "Merchants can update their own followup items" ON manual_followup_queue;
 CREATE POLICY "Merchants can update their own followup items" ON manual_followup_queue
     FOR UPDATE USING (merchant_id = current_setting('app.current_merchant_id')::UUID);
 
 -- Policy for merchants to delete their own followup items
+DROP POLICY IF EXISTS "Merchants can delete their own followup items" ON manual_followup_queue;
 CREATE POLICY "Merchants can delete their own followup items" ON manual_followup_queue
     FOR DELETE USING (merchant_id = current_setting('app.current_merchant_id')::UUID);
 

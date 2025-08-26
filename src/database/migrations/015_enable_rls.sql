@@ -38,61 +38,72 @@ ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quality_metrics ENABLE ROW LEVEL SECURITY;
 
 -- 4. Create RLS policies for merchants table
+DROP POLICY IF EXISTS "merchants_tenant_isolation" ON merchants;
 CREATE POLICY "merchants_tenant_isolation" ON merchants
   FOR ALL 
   TO ai_sales
   USING (id = current_merchant_id() OR is_admin_user());
 
+DROP POLICY IF EXISTS "merchants_insert_own" ON merchants;
 CREATE POLICY "merchants_insert_own" ON merchants
   FOR INSERT 
   TO ai_sales
   WITH CHECK (id = current_merchant_id() OR is_admin_user());
 
 -- 5. Create RLS policies for merchant_credentials
+DROP POLICY IF EXISTS "credentials_tenant_isolation" ON merchant_credentials;
 CREATE POLICY "credentials_tenant_isolation" ON merchant_credentials
   FOR ALL 
   TO ai_sales
   USING (merchant_id = current_merchant_id() OR is_admin_user());
 
+DROP POLICY IF EXISTS "credentials_insert_own" ON merchant_credentials;
 CREATE POLICY "credentials_insert_own" ON merchant_credentials
   FOR INSERT 
   TO ai_sales
   WITH CHECK (merchant_id = current_merchant_id() OR is_admin_user());
 
 -- 6. Create RLS policies for products
+DROP POLICY IF EXISTS "products_tenant_isolation" ON products;
 CREATE POLICY "products_tenant_isolation" ON products
   FOR ALL 
   TO ai_sales
   USING (merchant_id = current_merchant_id() OR is_admin_user());
 
+DROP POLICY IF EXISTS "products_insert_own" ON products;
 CREATE POLICY "products_insert_own" ON products
   FOR INSERT 
   TO ai_sales
   WITH CHECK (merchant_id = current_merchant_id() OR is_admin_user());
 
 -- 7. Create RLS policies for orders
+DROP POLICY IF EXISTS "orders_tenant_isolation" ON orders;
 CREATE POLICY "orders_tenant_isolation" ON orders
   FOR ALL 
   TO ai_sales
   USING (merchant_id = current_merchant_id() OR is_admin_user());
 
+DROP POLICY IF EXISTS "orders_insert_own" ON orders;
 CREATE POLICY "orders_insert_own" ON orders
   FOR INSERT 
   TO ai_sales
   WITH CHECK (merchant_id = current_merchant_id() OR is_admin_user());
 
 -- 8. Create RLS policies for conversations
+DROP POLICY IF EXISTS "conversations_tenant_isolation" ON conversations;
 CREATE POLICY "conversations_tenant_isolation" ON conversations
   FOR ALL 
   TO ai_sales
   USING (merchant_id = current_merchant_id() OR is_admin_user());
 
+DROP POLICY IF EXISTS "conversations_insert_own" ON conversations;
 CREATE POLICY "conversations_insert_own" ON conversations
   FOR INSERT 
   TO ai_sales
   WITH CHECK (merchant_id = current_merchant_id() OR is_admin_user());
 
 -- 9. Create RLS policies for message_logs
+DROP POLICY IF EXISTS "message_logs_tenant_isolation" ON message_logs;
 CREATE POLICY "message_logs_tenant_isolation" ON message_logs
   FOR ALL 
   TO ai_sales
@@ -103,6 +114,7 @@ CREATE POLICY "message_logs_tenant_isolation" ON message_logs
     ) OR is_admin_user()
   );
 
+DROP POLICY IF EXISTS "message_logs_insert_own" ON message_logs;
 CREATE POLICY "message_logs_insert_own" ON message_logs
   FOR INSERT 
   TO ai_sales
@@ -114,17 +126,20 @@ CREATE POLICY "message_logs_insert_own" ON message_logs
   );
 
 -- 10. Create RLS policies for message_windows
+DROP POLICY IF EXISTS "message_windows_tenant_isolation" ON message_windows;
 CREATE POLICY "message_windows_tenant_isolation" ON message_windows
   FOR ALL 
   TO ai_sales
   USING (merchant_id = current_merchant_id() OR is_admin_user());
 
+DROP POLICY IF EXISTS "message_windows_insert_own" ON message_windows;
 CREATE POLICY "message_windows_insert_own" ON message_windows
   FOR INSERT 
   TO ai_sales
   WITH CHECK (merchant_id = current_merchant_id() OR is_admin_user());
 
 -- 11. Create RLS policies for audit_logs
+DROP POLICY IF EXISTS "audit_logs_tenant_isolation" ON audit_logs;
 CREATE POLICY "audit_logs_tenant_isolation" ON audit_logs
   FOR ALL 
   TO ai_sales
@@ -134,6 +149,7 @@ CREATE POLICY "audit_logs_tenant_isolation" ON audit_logs
     OR is_admin_user()
   );
 
+DROP POLICY IF EXISTS "audit_logs_insert_own" ON audit_logs;
 CREATE POLICY "audit_logs_insert_own" ON audit_logs
   FOR INSERT 
   TO ai_sales
@@ -144,11 +160,13 @@ CREATE POLICY "audit_logs_insert_own" ON audit_logs
   );
 
 -- 12. Create RLS policies for quality_metrics
+DROP POLICY IF EXISTS "quality_metrics_tenant_isolation" ON quality_metrics;
 CREATE POLICY "quality_metrics_tenant_isolation" ON quality_metrics
   FOR ALL 
   TO ai_sales
   USING (merchant_id = current_merchant_id() OR is_admin_user());
 
+DROP POLICY IF EXISTS "quality_metrics_insert_own" ON quality_metrics;
 CREATE POLICY "quality_metrics_insert_own" ON quality_metrics
   FOR INSERT 
   TO ai_sales

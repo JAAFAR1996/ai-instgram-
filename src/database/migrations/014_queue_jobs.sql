@@ -42,6 +42,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS queue_jobs_updated_at_trigger ON queue_jobs;
 CREATE TRIGGER queue_jobs_updated_at_trigger
     BEFORE UPDATE ON queue_jobs
     FOR EACH ROW

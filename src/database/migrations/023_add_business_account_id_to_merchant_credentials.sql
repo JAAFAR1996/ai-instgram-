@@ -19,4 +19,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_mc_merchant_page
 INSERT INTO migrations (name, filename) VALUES (
   'Add business_account_id and platform to merchant_credentials',
   '023_add_business_account_id_to_merchant_credentials.sql'
-);
+)
+ON CONFLICT (name) DO NOTHING;

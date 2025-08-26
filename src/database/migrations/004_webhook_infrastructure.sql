@@ -64,6 +64,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for webhook_subscriptions
+DROP TRIGGER IF EXISTS trigger_webhook_subscriptions_updated_at ON webhook_subscriptions;
 CREATE TRIGGER trigger_webhook_subscriptions_updated_at
     BEFORE UPDATE ON webhook_subscriptions
     FOR EACH ROW
@@ -128,18 +129,21 @@ ALTER TABLE webhook_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE webhook_delivery_attempts ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for webhook_logs
+DROP POLICY IF EXISTS webhook_logs_tenant_policy ON webhook_logs;
 CREATE POLICY webhook_logs_tenant_policy ON webhook_logs
     FOR ALL USING (
         merchant_id = current_setting('app.current_merchant_id', true)::UUID
     );
 
 -- RLS Policies for webhook_subscriptions  
+DROP POLICY IF EXISTS webhook_subscriptions_tenant_policy ON webhook_subscriptions;
 CREATE POLICY webhook_subscriptions_tenant_policy ON webhook_subscriptions
     FOR ALL USING (
         merchant_id = current_setting('app.current_merchant_id', true)::UUID
     );
 
 -- RLS Policies for webhook_delivery_attempts
+DROP POLICY IF EXISTS webhook_delivery_attempts_tenant_policy ON webhook_delivery_attempts;
 CREATE POLICY webhook_delivery_attempts_tenant_policy ON webhook_delivery_attempts
     FOR ALL USING (
         webhook_log_id IN (
@@ -150,4 +154,5 @@ CREATE POLICY webhook_delivery_attempts_tenant_policy ON webhook_delivery_attemp
 
 -- Insert migration record
 INSERT INTO migrations (name, filename) 
-VALUES ('Webhook Infrastructure', '004_webhook_infrastructure.sql');
+VALUES ('Webhook Infrastructure', '004_webhook_infrastructure.sql')
+ON CONFLICT (name) DO NOTHING;

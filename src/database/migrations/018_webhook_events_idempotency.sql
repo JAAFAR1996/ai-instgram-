@@ -36,6 +36,7 @@ FOREIGN KEY (merchant_id) REFERENCES merchants(id) ON DELETE CASCADE;
 ALTER TABLE webhook_events ENABLE ROW LEVEL SECURITY;
 
 -- RLS policy for merchant isolation
+DROP POLICY IF EXISTS webhook_events_merchant_policy ON webhook_events;
 CREATE POLICY webhook_events_merchant_policy ON webhook_events
 FOR ALL 
 TO authenticated_role

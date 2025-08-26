@@ -26,14 +26,15 @@ CREATE TABLE IF NOT EXISTS job_spool (
 );
 
 -- Indexes for efficient querying
-CREATE INDEX idx_job_spool_scheduled ON job_spool(scheduled_at, priority) WHERE processed_at IS NULL;
-CREATE INDEX idx_job_spool_merchant ON job_spool(merchant_id) WHERE processed_at IS NULL;
-CREATE INDEX idx_job_spool_type ON job_spool(job_type) WHERE processed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_job_spool_scheduled ON job_spool(scheduled_at, priority) WHERE processed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_job_spool_merchant ON job_spool(merchant_id) WHERE processed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_job_spool_type ON job_spool(job_type) WHERE processed_at IS NULL;
 
 -- Enable RLS for tenant isolation
 ALTER TABLE job_spool ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policy: Users can only see jobs for their merchant
+DROP POLICY IF EXISTS job_spool_tenant_isolation ON job_spool;
 CREATE POLICY job_spool_tenant_isolation ON job_spool
   USING (
     merchant_id::text = current_setting('app.current_merchant_id', true)
@@ -41,6 +42,7 @@ CREATE POLICY job_spool_tenant_isolation ON job_spool
   );
 
 -- RLS Policy: Tenant insert/update access
+DROP POLICY IF EXISTS job_spool_tenant_modify ON job_spool;
 CREATE POLICY job_spool_tenant_modify ON job_spool
   FOR ALL
   USING (

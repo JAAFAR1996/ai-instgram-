@@ -30,18 +30,19 @@ CREATE TABLE IF NOT EXISTS service_errors (
 );
 
 -- Add indexes for performance
-CREATE INDEX idx_webhook_events_merchant_id ON webhook_events(merchant_id);
-CREATE INDEX idx_webhook_events_webhook_id ON webhook_events(webhook_id);
-CREATE INDEX idx_webhook_events_created_at ON webhook_events(created_at);
-CREATE INDEX idx_service_errors_merchant_id ON service_errors(merchant_id);
-CREATE INDEX idx_service_errors_service_name ON service_errors(service_name);
-CREATE INDEX idx_service_errors_created_at ON service_errors(created_at);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_merchant_id ON webhook_events(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_webhook_id ON webhook_events(webhook_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_created_at ON webhook_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_service_errors_merchant_id ON service_errors(merchant_id);
+CREATE INDEX IF NOT EXISTS idx_service_errors_service_name ON service_errors(service_name);
+CREATE INDEX IF NOT EXISTS idx_service_errors_created_at ON service_errors(created_at);
 
 -- Add RLS policies
 ALTER TABLE webhook_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE service_errors ENABLE ROW LEVEL SECURITY;
 
 -- RLS policy for webhook_events 
+DROP POLICY IF EXISTS webhook_events_tenant_isolation ON webhook_events;
 CREATE POLICY webhook_events_tenant_isolation ON webhook_events
   USING (
     current_setting('app.admin_mode', true) = 'true' OR 
@@ -49,6 +50,7 @@ CREATE POLICY webhook_events_tenant_isolation ON webhook_events
   );
 
 -- RLS policy for service_errors
+DROP POLICY IF EXISTS service_errors_tenant_isolation ON service_errors;
 CREATE POLICY service_errors_tenant_isolation ON service_errors
   USING (
     current_setting('app.admin_mode', true) = 'true' OR 
