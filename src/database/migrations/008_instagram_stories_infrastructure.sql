@@ -76,26 +76,28 @@ CREATE INDEX IF NOT EXISTS idx_sales_opportunities_status ON sales_opportunities
 CREATE INDEX IF NOT EXISTS idx_sales_opportunities_created ON sales_opportunities(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sales_opportunities_value ON sales_opportunities(estimated_value DESC) WHERE estimated_value IS NOT NULL;
 
--- Create daily_analytics table if not exists, then add story metrics
+-- Create daily_analytics table with story metrics
 CREATE TABLE IF NOT EXISTS daily_analytics (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     date DATE NOT NULL,
+    story_interactions INTEGER DEFAULT 0,
+    unique_story_users INTEGER DEFAULT 0,
+    story_response_rate DECIMAL(5,2),
+    story_engagement_score DECIMAL(5,2),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(merchant_id, date)
 );
 
--- Add story metrics columns
-ALTER TABLE daily_analytics 
-ADD COLUMN IF NOT EXISTS story_interactions INTEGER DEFAULT 0,
-ADD COLUMN IF NOT EXISTS unique_story_users INTEGER DEFAULT 0,
-ADD COLUMN IF NOT EXISTS story_response_rate DECIMAL(5,2),
-ADD COLUMN IF NOT EXISTS story_engagement_score DECIMAL(5,2);
-
--- Add story-related columns to conversations table
-ALTER TABLE conversations 
-ADD COLUMN IF NOT EXISTS source_type VARCHAR(50) DEFAULT 'DIRECT' CHECK (source_type IN ('DIRECT', 'STORY', 'COMMENT', 'MENTION')),
-ADD COLUMN IF NOT EXISTS story_context JSONB DEFAULT '{}';
+-- Add story-related columns to conversations table (with existence check)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'conversations') THEN
+        ALTER TABLE conversations 
+        ADD COLUMN IF NOT EXISTS source_type VARCHAR(50) DEFAULT 'DIRECT' CHECK (source_type IN ('DIRECT', 'STORY', 'COMMENT', 'MENTION')),
+        ADD COLUMN IF NOT EXISTS story_context JSONB DEFAULT '{}';
+    END IF;
+END $$;
 
 -- Create story_analytics_summary table for aggregated analytics
 CREATE TABLE IF NOT EXISTS story_analytics_summary (
@@ -287,7 +289,7 @@ SELECT
     '{"text": "أهلاً بكم في متجرنا! 🛍️✨", "elements": {"polls": false, "questions": true, "hashtags": ["#ترحيب", "#عملاء_جدد"]}}',
     '{"type": "text", "content": "أهلاً وسهلاً! شكراً لمتابعتك ستورينا 🥰 إذا عندك أي استفسار عن منتجاتنا، لا تتردد تراسلني!", "quick_replies": [{"title": "المنتجات 🛍️", "payload": "PRODUCTS"}, {"title": "الأسعار 💰", "payload": "PRICES"}]}'
 FROM merchants 
-WHERE id IN (SELECT merchant_id FROM merchant_credentials WHERE instagram_token_encrypted IS NOT NULL)
+WHERE subscription_status = 'ACTIVE'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO story_templates (merchant_id, name, category, template_data, response_template)
@@ -298,7 +300,7 @@ SELECT
     '{"text": "شوفوا منتجاتنا الجديدة! 🔥", "elements": {"polls": true, "questions": false, "hashtags": ["#منتجات_جديدة", "#تسوق"]}}',
     '{"type": "text", "content": "حبيت المنتج؟ 😍 راسلني واحصل على تفاصيل أكثر وأسعار خاصة! ✨", "quick_replies": [{"title": "التفاصيل 📋", "payload": "DETAILS"}, {"title": "السعر 💰", "payload": "PRICE"}]}'
 FROM merchants 
-WHERE id IN (SELECT merchant_id FROM merchant_credentials WHERE instagram_token_encrypted IS NOT NULL)
+WHERE subscription_status = 'ACTIVE'
 ON CONFLICT DO NOTHING;
 
 -- Note: Migration tracking is handled automatically by the migration runner
