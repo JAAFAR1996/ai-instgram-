@@ -1,16 +1,9 @@
--- Migration 003: Products Search Optimization - Basic only
+-- Migration 003: Products Search Optimization - Minimal
 
--- Create basic search index for products
-CREATE INDEX IF NOT EXISTS idx_products_search_basic 
-ON products USING GIN (
-    to_tsvector('simple', 
-        COALESCE(name_ar, '') || ' ' || 
-        COALESCE(name_en, '') || ' ' || 
-        COALESCE(category, '')
-    )
-);
-
--- Note: Permissions will be granted in later migration after app_user role is created
+-- Create simple btree index on product names for basic search
+CREATE INDEX IF NOT EXISTS idx_products_name_ar ON products (name_ar);
+CREATE INDEX IF NOT EXISTS idx_products_name_en ON products (name_en);
+CREATE INDEX IF NOT EXISTS idx_products_category ON products (category);
 
 -- Record this migration
 INSERT INTO migrations (name, filename) VALUES ('Products Search Optimization', '003_products_search_optimization.sql')
