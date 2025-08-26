@@ -453,8 +453,8 @@ CREATE TRIGGER trigger_conversations_updated_at
 
 CREATE TABLE IF NOT EXISTS migrations (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    filename VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    filename VARCHAR(255) NOT NULL UNIQUE,
     executed_at TIMESTAMPTZ DEFAULT NOW()
 );
 

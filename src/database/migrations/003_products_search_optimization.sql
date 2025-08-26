@@ -17,10 +17,8 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX IF NOT EXISTS idx_products_search 
 ON products USING GIN (
     to_tsvector('simple', 
-        COALESCE(name_ar, '') || ' ' || 
-        COALESCE(name_en, '') || ' ' || 
-        COALESCE(description_ar, '') || ' ' || 
-        COALESCE(description_en, '') || ' ' || 
+        COALESCE(name, '') || ' ' || 
+        COALESCE(description, '') || ' ' || 
         COALESCE(category, '') || ' ' || 
         COALESCE(array_to_string(tags, ' '), '')
     )
