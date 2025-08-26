@@ -26,18 +26,22 @@ ON products USING GIN (
     )
 );
 
--- Create trigram index for fuzzy search
+-- Create trigram index for fuzzy search (only on non-NULL columns)
 CREATE INDEX IF NOT EXISTS idx_products_name_ar_trgm 
-ON products USING GIN (name_ar gin_trgm_ops);
+ON products USING GIN (name_ar gin_trgm_ops)
+WHERE name_ar IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_products_name_en_trgm 
-ON products USING GIN (name_en gin_trgm_ops);
+ON products USING GIN (name_en gin_trgm_ops)
+WHERE name_en IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_products_description_ar_trgm 
-ON products USING GIN (description_ar gin_trgm_ops);
+ON products USING GIN (description_ar gin_trgm_ops)
+WHERE description_ar IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_products_description_en_trgm 
-ON products USING GIN (description_en gin_trgm_ops);
+ON products USING GIN (description_en gin_trgm_ops)
+WHERE description_en IS NOT NULL;
 
 -- Create function for product search ranking
 CREATE OR REPLACE FUNCTION product_search_rank(
@@ -100,11 +104,18 @@ BEGIN
         ) as similarity
     FROM products p
     WHERE 
-        p.name_ar % search_term OR
-        p.name_en % search_term OR
-        p.description_ar % search_term OR
-        p.description_en % search_term OR
-        p.category % search_term
+        (p.name_ar IS NOT NULL AND p.name_ar % search_term) OR
+        (p.name_en IS NOT NULL AND p.name_en % search_term) OR
+        (p.description_ar IS NOT NULL AND p.description_ar % search_term) OR
+        (p.description_en IS NOT NULL AND p.description_en % search_term) OR
+        (p.category IS NOT NULL AND p.category % search_term)
+    HAVING GREATEST(
+        COALESCE(similarity(p.name_ar, search_term), 0),
+        COALESCE(similarity(p.name_en, search_term), 0),
+        COALESCE(similarity(p.description_ar, search_term), 0),
+        COALESCE(similarity(p.description_en, search_term), 0),
+        COALESCE(similarity(p.category, search_term), 0)
+    ) >= similarity_threshold
     ORDER BY similarity DESC;
 END;
 $$ LANGUAGE plpgsql STABLE;
