@@ -293,34 +293,39 @@ COMMENT ON TABLE comment_analytics_summary IS 'Daily aggregated analytics for In
 COMMENT ON TABLE user_comment_history IS 'Tracks individual user comment patterns and engagement levels';
 
 -- Insert default moderation rules for merchants with Instagram credentials
-INSERT INTO comment_moderation_rules (merchant_id, name, description, trigger_config, action_config)
-SELECT 
-    id as merchant_id,
-    'Auto-hide spam comments',
-    'Automatically hide comments containing spam keywords',
-    '{"type": "keyword", "value": "spam|follow4follow|dm for price|check my bio", "operator": "contains"}',
-    '{"type": "hide", "priority": 100}'
-FROM merchants 
-WHERE subscription_status = 'ACTIVE'
-  AND NOT EXISTS (
-    SELECT 1 FROM comment_moderation_rules cmr 
-    WHERE cmr.merchant_id = merchants.id 
-    AND cmr.name = 'Auto-hide spam comments'
-  );
+DO $$
+BEGIN
+    -- Insert spam moderation rule
+    INSERT INTO comment_moderation_rules (merchant_id, name, description, trigger_config, action_config)
+    SELECT 
+        id as merchant_id,
+        'Auto-hide spam comments',
+        'Automatically hide comments containing spam keywords',
+        '{"type": "keyword", "value": "spam|follow4follow|dm for price|check my bio", "operator": "contains"}'::jsonb,
+        '{"type": "hide", "priority": 100}'::jsonb
+    FROM merchants 
+    WHERE subscription_status = 'ACTIVE'
+      AND NOT EXISTS (
+        SELECT 1 FROM comment_moderation_rules cmr 
+        WHERE cmr.merchant_id = merchants.id 
+        AND cmr.name = 'Auto-hide spam comments'
+      );
 
-INSERT INTO comment_moderation_rules (merchant_id, name, description, trigger_config, action_config)
-SELECT 
-    id as merchant_id,
-    'Auto-invite sales inquiries to DM',
-    'Automatically invite detailed sales inquiries to private messages',
-    '{"type": "keyword", "value": "سعر|price|كم|how much|متوفر|available|أريد|want", "operator": "contains"}',
-    '{"type": "invite_dm", "template": "مرحباً راح أرسلك رسالة خاصة بكل التفاصيل", "priority": 80}'
-FROM merchants 
-WHERE subscription_status = 'ACTIVE'
-  AND NOT EXISTS (
-    SELECT 1 FROM comment_moderation_rules cmr 
-    WHERE cmr.merchant_id = merchants.id 
-    AND cmr.name = 'Auto-invite sales inquiries to DM'
-  );
+    -- Insert sales inquiry rule
+    INSERT INTO comment_moderation_rules (merchant_id, name, description, trigger_config, action_config)
+    SELECT 
+        id as merchant_id,
+        'Auto-invite sales inquiries to DM',
+        'Automatically invite detailed sales inquiries to private messages',
+        '{"type": "keyword", "value": "سعر|price|كم|how much|متوفر|available|أريد|want", "operator": "contains"}'::jsonb,
+        '{"type": "invite_dm", "template": "مرحباً راح أرسلك رسالة خاصة بكل التفاصيل", "priority": 80}'::jsonb
+    FROM merchants 
+    WHERE subscription_status = 'ACTIVE'
+      AND NOT EXISTS (
+        SELECT 1 FROM comment_moderation_rules cmr 
+        WHERE cmr.merchant_id = merchants.id 
+        AND cmr.name = 'Auto-invite sales inquiries to DM'
+      );
+END $$;
 
 -- Note: Migration tracking is handled automatically by the migration runner
