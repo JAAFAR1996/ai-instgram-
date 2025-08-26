@@ -107,64 +107,62 @@ export class ConversationRepository {
   }
 
   /**
-   * Create new conversation
+   * Create new conversation - SAFE VERSION (no ON CONFLICT dependency)
    */
   async create(
     data: CreateConversationRequest
   ): Promise<{ conversation: Conversation; isNew: boolean }> {
     const sql: Sql = this.db.getSQL();
     
-    // نفرّع بحسب المنصة لضمان مفتاح تعارض صحيح
-    const inserted =
-      data.platform === 'whatsapp'
-        ? await sql<ConversationRow>`
-            INSERT INTO conversations (
-              merchant_id,
-              customer_phone,
-              customer_instagram,
-              customer_name,
-              platform,
-              conversation_stage,
-              session_data,
-              last_message_at
-            ) VALUES (
-              ${data.merchantId}::uuid,
-              ${data.customerWhatsapp || null},
-              ${data.customerInstagram || null},
-              ${data.customerName || null},
-              ${data.platform},
-              ${data.conversationStage || 'GREETING'},
-              ${JSON.stringify(data.sessionData || {})},
-              NOW()
-            )
-            ON CONFLICT (merchant_id, customer_phone, platform)
-            DO NOTHING
-            RETURNING *
-          `
-        : await sql<ConversationRow>`
-            INSERT INTO conversations (
-              merchant_id,
-              customer_phone,
-              customer_instagram,
-              customer_name,
-              platform,
-              conversation_stage,
-              session_data,
-              last_message_at
-            ) VALUES (
-              ${data.merchantId}::uuid,
-              ${data.customerWhatsapp || null},
-              ${data.customerInstagram || null},
-              ${data.customerName || null},
-              ${data.platform},
-              ${data.conversationStage || 'GREETING'},
-              ${JSON.stringify(data.sessionData || {})},
-              NOW()
-            )
-            ON CONFLICT (merchant_id, customer_instagram, platform)
-            DO NOTHING
-            RETURNING *
-          `;
+    // First, try to find existing conversation
+    const existingQuery = data.platform === 'whatsapp'
+      ? sql<ConversationRow>`
+          SELECT * FROM conversations 
+          WHERE merchant_id = ${data.merchantId}::uuid 
+            AND customer_phone = ${data.customerWhatsapp || null}
+            AND platform = ${data.platform}
+          LIMIT 1
+        `
+      : sql<ConversationRow>`
+          SELECT * FROM conversations 
+          WHERE merchant_id = ${data.merchantId}::uuid 
+            AND customer_instagram = ${data.customerInstagram || null}
+            AND platform = ${data.platform}
+          LIMIT 1
+        `;
+    
+    const existing = await existingQuery;
+    if (existing.length > 0) {
+      // Return existing conversation
+      return {
+        conversation: this.mapToConversation(existing[0]!),
+        isNew: false
+      };
+    }
+    
+    // Create new conversation (no ON CONFLICT - safer)
+    const inserted = await sql<ConversationRow>`
+        INSERT INTO conversations (
+          merchant_id,
+          customer_phone,
+          customer_instagram,
+          customer_name,
+          platform,
+          conversation_stage,
+          session_data,
+          last_message_at
+        ) VALUES (
+          ${data.merchantId}::uuid,
+          ${data.customerWhatsapp || null},
+          ${data.customerInstagram || null},
+          ${data.customerName || null},
+          ${data.platform},
+          ${data.conversationStage || 'GREETING'},
+          ${JSON.stringify(data.sessionData || {})},
+          NOW()
+        )
+        RETURNING *
+      `;
 
     if (inserted.length > 0) {
       return { conversation: this.mapToConversation(inserted[0]!), isNew: true };

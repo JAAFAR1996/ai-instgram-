@@ -10,7 +10,8 @@
       "Bash(cd:*)",
       "Bash(find:*)",
       "mcp__render__list_logs",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []
