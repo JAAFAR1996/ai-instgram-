@@ -149,4 +149,6 @@ $$ LANGUAGE plpgsql;
 -- Insert migration record
 INSERT INTO migrations (name, filename) 
 VALUES ('Message Logs Enhancements for Instagram', '005_message_logs_enhancements.sql')
-ON CONFLICT (name) DO NOTHING;
+WHERE NOT EXISTS (
+    SELECT 1 FROM migrations WHERE filename = '005_message_logs_enhancements.sql'
+);

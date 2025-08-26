@@ -365,4 +365,6 @@ CREATE TRIGGER trigger_unified_profiles_updated_at
 -- Insert migration record
 INSERT INTO migrations (name, filename) 
 VALUES ('Cross-Platform Conversation Management Infrastructure', '006_cross_platform_infrastructure.sql')
-ON CONFLICT (name) DO NOTHING;
+WHERE NOT EXISTS (
+    SELECT 1 FROM migrations WHERE filename = '006_cross_platform_infrastructure.sql'
+);

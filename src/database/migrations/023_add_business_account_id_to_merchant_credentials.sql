@@ -20,4 +20,6 @@ INSERT INTO migrations (name, filename) VALUES (
   'Add business_account_id and platform to merchant_credentials',
   '023_add_business_account_id_to_merchant_credentials.sql'
 )
-ON CONFLICT (name) DO NOTHING;
+WHERE NOT EXISTS (
+    SELECT 1 FROM migrations WHERE filename = '023_add_business_account_id_to_merchant_credentials.sql'
+);

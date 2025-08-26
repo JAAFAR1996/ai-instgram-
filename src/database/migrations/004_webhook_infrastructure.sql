@@ -155,4 +155,6 @@ CREATE POLICY webhook_delivery_attempts_tenant_policy ON webhook_delivery_attemp
 -- Insert migration record
 INSERT INTO migrations (name, filename) 
 VALUES ('Webhook Infrastructure', '004_webhook_infrastructure.sql')
-ON CONFLICT (name) DO NOTHING;
+WHERE NOT EXISTS (
+    SELECT 1 FROM migrations WHERE filename = '004_webhook_infrastructure.sql'
+);
