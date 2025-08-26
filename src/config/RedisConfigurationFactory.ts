@@ -215,9 +215,6 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
   }
 
   private createCachingConfiguration(baseConfig: BaseRedisConfig): CachingRedisConfig {
-    const isUpstash = baseConfig.host?.includes('upstash.io') || 
-                     baseConfig.host?.includes('redis.upstash.com');
-    
     const config: CachingRedisConfig = {
       connectTimeout: 8000,
       lazyConnect: true,
@@ -236,9 +233,6 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
   }
 
   private createRateLimiterConfiguration(baseConfig: BaseRedisConfig): CachingRedisConfig {
-    const isUpstash = baseConfig.host?.includes('upstash.io') || 
-                     baseConfig.host?.includes('redis.upstash.com');
-    
     const config: CachingRedisConfig = {
       connectTimeout: 8000,
       lazyConnect: true,
