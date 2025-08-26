@@ -314,7 +314,7 @@ SELECT
     'Auto-invite sales inquiries to DM',
     'Automatically invite detailed sales inquiries to private messages',
     '{"type": "keyword", "value": "سعر|price|كم|how much|متوفر|available|أريد|want", "operator": "contains"}',
-    '{"type": "invite_dm", "template": "مرحباً! راح أرسلك رسالة خاصة بكل التفاصيل", "priority": 80}'
+    '{"type": "invite_dm", "template": "مرحباً راح أرسلك رسالة خاصة بكل التفاصيل", "priority": 80}'
 FROM merchants 
 WHERE subscription_status = 'ACTIVE'
   AND NOT EXISTS (
