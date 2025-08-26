@@ -91,9 +91,9 @@ export class RedisConnectionManager {
    * Get Redis connection for specific usage type
    */
   async getConnection(usageType: RedisUsageType): Promise<Redis> {
-    // Check if Redis is disabled via environment variable
-    if (process.env.DISABLE_REDIS === 'true' || process.env.DISABLE_REDIStrue === 'true') {
-      throw new Error('Redis is disabled by environment variable');
+    // Check if Redis is disabled via environment variable or URL missing
+    if (process.env.DISABLE_REDIS === 'true' || !process.env.REDIS_URL) {
+      throw new Error('Redis is disabled or not configured');
     }
     
     // Check if we have a healthy connection
