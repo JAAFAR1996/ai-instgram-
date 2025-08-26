@@ -1,6 +1,4 @@
--- Migration 003: Products Search Optimization - Simplified
--- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- Migration 003: Products Search Optimization - Basic only
 
 -- Create basic search index for products
 CREATE INDEX IF NOT EXISTS idx_products_search_basic 
@@ -11,10 +9,6 @@ ON products USING GIN (
         COALESCE(category, '')
     )
 );
-
--- Create simple trigram index for Arabic names only (most important)
-CREATE INDEX IF NOT EXISTS idx_products_name_ar_trgm 
-ON products USING GIN (name_ar gin_trgm_ops);
 
 -- Note: Permissions will be granted in later migration after app_user role is created
 
