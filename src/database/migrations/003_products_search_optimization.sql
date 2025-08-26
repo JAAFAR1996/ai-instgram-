@@ -16,11 +16,13 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- Create product search index
 CREATE INDEX IF NOT EXISTS idx_products_search 
 ON products USING GIN (
-    to_tsvector('english', 
-        COALESCE(name, '') || ' ' || 
-        COALESCE(description, '') || ' ' || 
+    to_tsvector('simple', 
+        COALESCE(name_ar, '') || ' ' || 
+        COALESCE(name_en, '') || ' ' || 
+        COALESCE(description_ar, '') || ' ' || 
+        COALESCE(description_en, '') || ' ' || 
         COALESCE(category, '') || ' ' || 
-        COALESCE(tags::text, '')
+        COALESCE(array_to_string(tags, ' '), '')
     )
 );
 
@@ -42,13 +44,13 @@ CREATE OR REPLACE FUNCTION product_search_rank(
 BEGIN
     RETURN (
         -- Name match (highest weight)
-        ts_rank(to_tsvector('english', COALESCE(product_name, '')), plainto_tsquery('english', search_query)) * 4.0 +
+        ts_rank(to_tsvector('simple', COALESCE(product_name, '')), plainto_tsquery('simple', search_query)) * 4.0 +
         -- Description match (medium weight)
-        ts_rank(to_tsvector('english', COALESCE(product_description, '')), plainto_tsquery('english', search_query)) * 2.0 +
+        ts_rank(to_tsvector('simple', COALESCE(product_description, '')), plainto_tsquery('simple', search_query)) * 2.0 +
         -- Category match (medium weight)
-        ts_rank(to_tsvector('english', COALESCE(product_category, '')), plainto_tsquery('english', search_query)) * 2.0 +
+        ts_rank(to_tsvector('simple', COALESCE(product_category, '')), plainto_tsquery('simple', search_query)) * 2.0 +
         -- Tags match (lower weight)
-        ts_rank(to_tsvector('english', COALESCE(product_tags::text, '')), plainto_tsquery('english', search_query)) * 1.0
+        ts_rank(to_tsvector('simple', COALESCE(product_tags::text, '')), plainto_tsquery('simple', search_query)) * 1.0
     );
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
@@ -113,7 +115,4 @@ COMMENT ON FUNCTION product_search_rank IS 'Calculate search relevance rank for 
 COMMENT ON FUNCTION fuzzy_product_search IS 'Perform fuzzy search on products with similarity scoring';
 COMMENT ON VIEW product_search_results IS 'View for optimized product search results with ranking';
 
--- Grant permissions
-GRANT EXECUTE ON FUNCTION product_search_rank TO app_user;
-GRANT EXECUTE ON FUNCTION fuzzy_product_search TO app_user;
-GRANT SELECT ON product_search_results TO app_user;
+-- Note: Permissions will be granted in later migration after app_user role is created
