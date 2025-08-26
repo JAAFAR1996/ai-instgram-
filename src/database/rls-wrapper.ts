@@ -52,9 +52,8 @@ export class RLSDatabase {
     const originalContext = { ...this.currentContext };
     
     try {
-      // سياق محلي داخل التراكنشن
-      await sql`SET LOCAL app.tenant_id = ${merchantId}`;
-      await sql`SET LOCAL app.current_merchant_id = ${merchantId}`;
+      // Use unified context function from migration 037
+      await sql`SELECT set_merchant_context(${merchantId}::uuid)`;
       
       this.currentContext = {
         merchantId,
@@ -94,7 +93,8 @@ export class RLSDatabase {
     const originalContext = { ...this.currentContext };
     
     try {
-      await sql`SET LOCAL app.is_admin = ${isAdmin ? 'true' : 'false'}`;
+      // Use unified admin context function from migration 037
+      await sql`SELECT set_admin_context(${isAdmin})`;
 
       this.currentContext = {
         isAdmin,
@@ -126,10 +126,8 @@ export class RLSDatabase {
     const originalContext = { ...this.currentContext };
     
     try {
-      // Clear all LOCAL settings (automatic at transaction end for pooled connections)
-      await sql`SET LOCAL app.tenant_id = DEFAULT`;
-      await sql`SET LOCAL app.current_merchant_id = DEFAULT`;
-      await sql`SET LOCAL app.is_admin = DEFAULT`;
+      // Use unified clear context function from migration 037
+      await sql`SELECT clear_context()`;
       this.currentContext = {};
       
       log.info('✅ RLS context cleared successfully');
@@ -152,16 +150,20 @@ export class RLSDatabase {
     isValid: boolean;
   }> {
     try {
-      const userId = this.currentContext.userId ?? 'system';
-      const rows = await q(RlsContextRow, 'select * from get_rls_context($1)', [userId]);
-      const r = must(rows[0], 'RLS: empty');
+      const sql: SqlFunction = this.db.getSQL();
+      const rows = await sql`SELECT * FROM validate_rls_context()`;
+      const r = rows[0];
+      
+      if (!r) {
+        throw new Error('No RLS context validation result');
+      }
       
       const result = {
-        hasMerchantContext: r.has_merchant_context,
-        ...(r.merchant_id ? { merchantId: r.merchant_id } : {}),
-        isAdmin: r.is_admin,
-        contextAgeSeconds: r.context_age_seconds,
-        isValid: r.has_merchant_context || r.is_admin
+        hasMerchantContext: Boolean(r.has_merchant_context),
+        ...(r.merchant_id ? { merchantId: String(r.merchant_id) } : {}),
+        isAdmin: Boolean(r.is_admin),
+        contextAgeSeconds: Number(r.context_age_seconds) || 0,
+        isValid: Boolean(r.has_merchant_context || r.is_admin)
       };
 
       if (!result.isValid) {

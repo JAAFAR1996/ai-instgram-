@@ -318,8 +318,8 @@ export function createMerchantIsolationMiddleware(
       const sql = db.getSQL();
       
       try {
-        // Set app.current_merchant_id for this connection
-        await sql`SELECT set_config('app.current_merchant_id', ${merchantId}, true)`;
+        // Use unified context function from migration 037
+        await sql`SELECT set_merchant_context(${merchantId}::uuid)`;
         
         log.info('RLS merchant isolation activated', {
           merchantId: merchantId.substring(0, 8) + '...', // Mask sensitive data
@@ -416,10 +416,10 @@ export function createMerchantSQL(sql: any) {
      */
     async getCurrentMerchant(): Promise<string | null> {
       try {
-        const result = await sql`SELECT current_setting('app.current_merchant_id', true) as merchant_id`;
+        const result = await sql`SELECT current_merchant_id() as merchant_id`;
         return result[0]?.merchant_id || null;
       } catch (error) {
-        log.warn('Could not get current merchant from GUC', { error: serr(error) });
+        log.warn('Could not get current merchant from unified function', { error: serr(error) });
         return null;
       }
     }

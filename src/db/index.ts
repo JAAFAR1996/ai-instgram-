@@ -36,12 +36,32 @@ interface RetryConfig {
   backoffMultiplier: number;
 }
 
+// ⚡ STAGE 3: Enhanced retry configuration for production resilience
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
-  maxRetries: 5,
-  baseDelay: 1000, // 1 second
-  maxDelay: 10000, // 10 seconds
-  backoffMultiplier: 2
+  maxRetries: process.env.NODE_ENV === 'production' ? 8 : 5,
+  baseDelay: 1500, // 1.5 seconds initial delay
+  maxDelay: 30000, // 30 seconds max delay for production
+  backoffMultiplier: 1.8 // More gradual backoff
 };
+
+// ⚡ Connection retry strategies
+interface RetryStrategy {
+  name: string;
+  shouldRetry: (error: Error, attempt: number) => boolean;
+  getDelay: (attempt: number, config: RetryConfig) => number;
+}
+
+// ⚡ STAGE 3: Adaptive timeout calculation
+function calculateAdaptiveTimeout(baseTimeout: number, attempt: number): number {
+  // زيادة التايم أوت مع المحاولات لتحسين فرص النجاح
+  const multiplier = 1 + (attempt * 0.3); // 30% زيادة لكل محاولة
+  const adaptiveTimeout = Math.min(baseTimeout * multiplier, baseTimeout * 2.5); // حد أقصى 2.5x
+  
+  // إضافة buffer إضافي للعمليات المعقدة في المحاولات المتأخرة
+  const complexityBuffer = attempt > 2 ? 5000 : 0;
+  
+  return Math.floor(adaptiveTimeout + complexityBuffer);
+}
 
 /**
  * Production-grade pool configuration using centralized config
@@ -49,19 +69,63 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
  */
 function createPoolConfig(): PoolConfig {
   const config = getConfig();
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
+  
+  // Enhanced SSL configuration for production
+  let sslConfig: any = false;
+  
+  if (config.database.ssl || isProduction || isRender) {
+    sslConfig = {
+      // Require SSL in production unless explicitly disabled
+      rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
+      // Enable SSL verification in production
+      checkServerIdentity: isProduction ? undefined : () => undefined,
+      // Minimum TLS version
+      minVersion: 'TLSv1.2',
+      // Secure cipher suites
+      ciphers: [
+        'ECDHE-RSA-AES128-GCM-SHA256',
+        'ECDHE-RSA-AES256-GCM-SHA384',
+        'ECDHE-RSA-AES128-SHA256',
+        'ECDHE-RSA-AES256-SHA384'
+      ].join(':'),
+      // Honor server cipher order
+      honorCipherOrder: true
+    };
+    
+    // Additional production SSL settings
+    if (isProduction) {
+      log.info('🔐 Using production SSL configuration for database', {
+        rejectUnauthorized: sslConfig.rejectUnauthorized,
+        minVersion: sslConfig.minVersion
+      });
+    }
+  }
+  
+  // ⚡ STAGE 3: Enhanced pool configuration for optimal performance
+  const maxConnections = Number(process.env.DB_MAX_CONNECTIONS || process.env.DATABASE_POOL_MAX || (isProduction ? 20 : 10));
+  const minConnections = Number(process.env.DATABASE_POOL_MIN || Math.max(2, Math.floor(maxConnections / 4)));
   
   return {
     connectionString: config.database.url,
-    ssl: config.database.ssl ? { 
-      rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false'
-    } : false,
-    max: Number(process.env.DB_MAX_CONNECTIONS || process.env.DATABASE_POOL_MAX || 15),
-    min: Number(process.env.DATABASE_POOL_MIN || Math.min(5, Math.floor(15 / 4))),
-    idleTimeoutMillis: 15000,
-    connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT || 8000),
-    allowExitOnIdle: false,
-    statement_timeout: 30000,
-    query_timeout: 30000,
+    ssl: sslConfig,
+    // ⚡ Optimized connection pool sizing
+    max: maxConnections,
+    min: minConnections,
+    // ⚡ Improved timeout settings
+    idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT || (isProduction ? 30000 : 15000)),
+    connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT || 10000),
+    // ⚡ Enhanced query timeouts
+    statement_timeout: Number(process.env.DB_STATEMENT_TIMEOUT || (isProduction ? 45000 : 30000)),
+    query_timeout: Number(process.env.DB_QUERY_TIMEOUT || (isProduction ? 40000 : 25000)),
+    // ⚡ Connection lifecycle management
+    allowExitOnIdle: !isProduction, // Keep connections alive in production
+    // ⚡ Monitoring and identification
+    application_name: `ai-sales-${process.env.NODE_ENV || 'dev'}-${process.pid}`,
+    // ⚡ Enhanced keepalive settings
+    keepAlive: true,
+    keepAliveInitialDelayMillis: isProduction ? 30000 : 10000,
   };
 }
 
@@ -180,19 +244,33 @@ export async function withTx<T>(
         timeout
       });
 
-      // Set transaction timeout
+      // ⚡ STAGE 3: Enhanced transaction timeout with proper cleanup
+      let timeoutId: NodeJS.Timeout | null = null;
+      const adaptiveTimeout = calculateAdaptiveTimeout(timeout, attempt);
+      
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
           poolHealthStats.transactionTimeouts++;
-          reject(new Error(`Transaction timeout after ${timeout}ms`));
-        }, timeout);
+          log.warn('⚡ Transaction timeout occurred', {
+            transactionId,
+            timeout: adaptiveTimeout,
+            attempt: attempt + 1,
+            avgResponseTime: poolHealthStats.avgResponseTime
+          });
+          reject(new Error(`Transaction timeout after ${adaptiveTimeout}ms (attempt ${attempt + 1})`));
+        }, adaptiveTimeout);
       });
 
-      // Execute transaction function with timeout
+      // Execute transaction function with adaptive timeout
       const result = await Promise.race([
         fn(client),
         timeoutPromise
       ]);
+      
+      // Clear timeout if successful
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       
       await client.query('COMMIT');
       const duration = Date.now() - startTime;
@@ -211,22 +289,15 @@ export async function withTx<T>(
       await client.query('ROLLBACK');
       const duration = Date.now() - startTime;
       
-      // Check for deadlock
+      // ⚡ STAGE 3: Enhanced deadlock and serialization handling
       const isDeadlock = isDeadlockError(error);
-      if (isDeadlock) {
-        poolHealthStats.deadlockCount++;
-        log.warn('Deadlock detected, will retry transaction', {
-          transactionId,
-          attempt: attempt + 1,
-          maxRetries: retries,
-          duration
-        });
-      }
-      
-      // Check for serialization failure
       const isSerializationFailure = isSerializationError(error);
       
-      // Retry conditions
+      if (isDeadlock) {
+        await handleDeadlockRecovery(error as Error, attempt, transactionId);
+      }
+      
+      // Retry conditions with enhanced logic
       const shouldRetry = attempt < retries && (isDeadlock || isSerializationFailure);
       
       if (shouldRetry) {
@@ -273,31 +344,100 @@ export async function withTx<T>(
 /**
  * Setup connection retry mechanism
  */
+// ⚡ STAGE 3: Advanced connection retry strategies
+const RETRY_STRATEGIES: Record<string, RetryStrategy> = {
+  exponentialBackoff: {
+    name: 'exponential-backoff',
+    shouldRetry: (error: Error, attempt: number) => {
+      const dbError = error as DatabaseError;
+      const retryableErrors = ['ECONNREFUSED', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE'];
+      return attempt < DEFAULT_RETRY_CONFIG.maxRetries && 
+             retryableErrors.includes(dbError.code || '');
+    },
+    getDelay: (attempt: number, config: RetryConfig) => {
+      const delay = Math.min(
+        config.baseDelay * Math.pow(config.backoffMultiplier, attempt - 1),
+        config.maxDelay
+      );
+      // Add jitter to prevent thundering herd
+      return delay + Math.random() * 1000;
+    }
+  },
+  linearBackoff: {
+    name: 'linear-backoff',
+    shouldRetry: (error: Error, attempt: number) => {
+      return attempt < DEFAULT_RETRY_CONFIG.maxRetries;
+    },
+    getDelay: (attempt: number, config: RetryConfig) => {
+      return Math.min(config.baseDelay * attempt, config.maxDelay);
+    }
+  }
+};
+
 function setupConnectionRetry(): void {
   if (!pool) return;
 
-  // Monitor failed connections and implement automatic retry
+  // ⚡ Enhanced connection error handling with smart retry strategies
   pool.on('error', async (err) => {
     if (isConnectionError(err)) {
       poolHealthStats.connectionRetries++;
-      log.warn('Connection error detected, initiating retry sequence', {
+      const strategy = RETRY_STRATEGIES.exponentialBackoff as RetryStrategy;
+      
+      log.warn('Connection error detected, initiating enhanced retry sequence', {
         error: err.message,
-        retryCount: poolHealthStats.connectionRetries
+        code: (err as DatabaseError).code,
+        retryCount: poolHealthStats.connectionRetries,
+        strategy: strategy.name
       });
       
-      // Wait before attempting to restore connections
-      await new Promise(resolve => setTimeout(resolve, DEFAULT_RETRY_CONFIG.baseDelay));
-      
-      try {
-        // Test connection recovery
-        await checkDatabaseHealth();
-        log.info('Database connection recovery successful');
-      } catch (recoveryError) {
-        log.error('Database connection recovery failed', { 
-          recoveryError: recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
-        });
-      }
+      // Execute retry strategy
+      await executeRetryStrategy(err, strategy);
     }
+  });
+}
+
+// ⚡ Execute sophisticated retry strategy
+async function executeRetryStrategy(error: Error, strategy: RetryStrategy): Promise<void> {
+  let attempt = 1;
+  
+  while (strategy.shouldRetry(error, attempt)) {
+    const delay = strategy.getDelay(attempt, DEFAULT_RETRY_CONFIG);
+    
+    log.info(`⚡ Attempting database recovery (${attempt}/${DEFAULT_RETRY_CONFIG.maxRetries})`, {
+      strategy: strategy.name,
+      delay,
+      attempt
+    });
+    
+    await new Promise(resolve => setTimeout(resolve, delay));
+    
+    try {
+      // Test connection recovery with timeout
+      await Promise.race([
+        checkDatabaseHealth(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Health check timeout')), 5000)
+        )
+      ]);
+      
+      log.info('✅ Database connection recovery successful', {
+        attempt,
+        totalRetries: poolHealthStats.connectionRetries
+      });
+      return;
+      
+    } catch (recoveryError) {
+      log.warn(`❌ Database recovery attempt ${attempt} failed`, { 
+        recoveryError: recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
+        nextAttemptIn: attempt < DEFAULT_RETRY_CONFIG.maxRetries ? strategy.getDelay(attempt + 1, DEFAULT_RETRY_CONFIG) : 'none'
+      });
+      attempt++;
+    }
+  }
+  
+  log.error('🚨 Database connection recovery exhausted all retry attempts', {
+    totalAttempts: attempt - 1,
+    maxRetries: DEFAULT_RETRY_CONFIG.maxRetries
   });
 }
 
@@ -490,15 +630,79 @@ function updatePerformanceStats(duration: number): void {
 }
 
 /**
- * Check if error is a deadlock
+ * ⚡ STAGE 3: Enhanced deadlock detection and classification
  */
 function isDeadlockError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   
   const pgError = error as DatabaseError;
-  return pgError.code === '40P01' || // deadlock_detected
-         pgError.code === '40001' || // serialization_failure  
-         Boolean(pgError.message && pgError.message.includes('deadlock'));
+  const deadlockCodes = [
+    '40P01', // deadlock_detected
+    '40001', // serialization_failure
+    '25P02', // in_failed_sql_transaction (can be related to deadlocks)
+    '57014'  // query_canceled (sometimes due to deadlock timeout)
+  ];
+  
+  const deadlockMessages = [
+    'deadlock detected',
+    'deadlock', 
+    'could not serialize access',
+    'concurrent update',
+    'tuple concurrently updated'
+  ];
+  
+  const hasDeadlockCode = deadlockCodes.includes(pgError.code || '');
+  const hasDeadlockMessage = pgError.message && 
+    deadlockMessages.some(msg => pgError.message.toLowerCase().includes(msg));
+  
+  return hasDeadlockCode || Boolean(hasDeadlockMessage);
+}
+
+/**
+ * ⚡ STAGE 3: Advanced deadlock handling with exponential backoff
+ */
+function calculateDeadlockDelay(attempt: number): number {
+  // تأخير متزايد مع jitter لتجنب thundering herd
+  const baseDelay = 100; // 100ms base
+  const exponentialDelay = Math.min(baseDelay * Math.pow(2, attempt - 1), 5000); // max 5s
+  const jitter = Math.random() * 0.3 * exponentialDelay; // 30% jitter
+  
+  return Math.floor(exponentialDelay + jitter);
+}
+
+/**
+ * ⚡ Enhanced deadlock recovery strategy
+ */
+async function handleDeadlockRecovery(
+  error: Error, 
+  attempt: number, 
+  transactionId: string
+): Promise<void> {
+  const delay = calculateDeadlockDelay(attempt);
+  
+  log.warn('🔄 Deadlock detected, initiating recovery', {
+    transactionId,
+    attempt,
+    delay,
+    errorCode: (error as DatabaseError).code,
+    deadlockCount: poolHealthStats.deadlockCount
+  });
+  
+  // تسجيل إحصائيات Deadlock للمراقبة
+  poolHealthStats.deadlockCount++;
+  
+  // تأخير متزايد قبل إعادة المحاولة
+  await new Promise(resolve => setTimeout(resolve, delay));
+  
+  // تسجيل معلومات إضافية للتشخيص
+  if (attempt === 1) {
+    log.info('📊 Deadlock analysis', {
+      currentConnections: pool?.totalCount || 0,
+      idleConnections: pool?.idleCount || 0,
+      avgResponseTime: poolHealthStats.avgResponseTime,
+      recentDeadlocks: poolHealthStats.deadlockCount
+    });
+  }
 }
 
 /**

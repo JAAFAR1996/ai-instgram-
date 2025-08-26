@@ -1,6 +1,7 @@
 /**
  * ===============================================
  * Startup Validation - Critical System Checks
+ * 🔧 Stage 5: Enhanced DevOps validation and monitoring
  * Validates all systems before application starts
  * ===============================================
  */
@@ -9,6 +10,7 @@ import { getConfig } from '../config/index.js';
 import { getDatabase } from '../db/adapter.js';
 import { GRAPH_API_BASE_URL } from '../config/graph-api.js';
 import { getLogger } from '../services/logger.js';
+import { getPool } from '../db/index.js';
 
 export interface ValidationResult {
   success: boolean;
@@ -149,20 +151,67 @@ async function validateEnvironmentConfiguration(): Promise<ValidationResult> {
       throw new Error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
     }
 
-    // Check for placeholder values that shouldn't be in production
-    const placeholderChecks = [
-      { var: 'IG_APP_SECRET', value: process.env.IG_APP_SECRET, placeholder: 'your_app_secret_here' },
-      { var: 'OPENAI_API_KEY', value: process.env.OPENAI_API_KEY, placeholder: 'sk-your_openai_api_key_here' },
-      { var: 'ENCRYPTION_KEY', value: process.env.ENCRYPTION_KEY, placeholder: 'your_32_character_encryption_key_here' },
-      { var: 'IG_VERIFY_TOKEN', value: process.env.IG_VERIFY_TOKEN, placeholder: 'your_webhook_verify_token_here' }
+    // Enhanced placeholder and security validation
+    const securityChecks = [
+      { 
+        var: 'IG_APP_SECRET', 
+        value: process.env.IG_APP_SECRET, 
+        validators: [
+          (v: string) => !v.match(/your_app_secret|placeholder|example|test|demo/i),
+          (v: string) => v.length >= 32,
+          (v: string) => !v.match(/^(secret|default|admin|password|123|abc)/i)
+        ],
+        error: 'Instagram app secret is invalid or contains placeholder'
+      },
+      { 
+        var: 'OPENAI_API_KEY', 
+        value: process.env.OPENAI_API_KEY, 
+        validators: [
+          (v: string) => v.startsWith('sk-'),
+          (v: string) => v.length >= 51,
+          (v: string) => !v.includes('your_openai_api_key')
+        ],
+        error: 'OpenAI API key is invalid or placeholder'
+      },
+      { 
+        var: 'ENCRYPTION_KEY', 
+        value: process.env.ENCRYPTION_KEY, 
+        validators: [
+          (v: string) => v.length >= 32,
+          (v: string) => !v.match(/your_.*_key|placeholder|example|test|demo/i),
+          (v: string) => !v.match(/^(key|secret|default|admin|password|123|abc)/i)
+        ],
+        error: 'Encryption key is too weak or contains placeholder'
+      },
+      { 
+        var: 'IG_VERIFY_TOKEN', 
+        value: process.env.IG_VERIFY_TOKEN, 
+        validators: [
+          (v: string) => !v.match(/your_.*_token|placeholder|example|test|demo/i),
+          (v: string) => v.length >= 10,
+          (v: string) => !v.match(/^(token|verify|default|admin|password|123|abc)/i)
+        ],
+        error: 'Instagram verify token is invalid or placeholder'
+      },
+      {
+        var: 'JWT_SECRET',
+        value: process.env.JWT_SECRET,
+        validators: [
+          (v: string) => v.length >= 32,
+          (v: string) => !v.match(/secret|default|test|admin|password|123|abc/i),
+          (v: string) => !v.match(/your_.*_secret|placeholder|example|demo/i)
+        ],
+        error: 'JWT secret is too weak or contains placeholder'
+      }
     ];
 
-    const placeholderLeaks = placeholderChecks.filter(check => 
-      check.value && check.value.includes(check.placeholder)
-    );
+    const securityViolations = securityChecks.filter(check => {
+      if (!check.value) return true; // Missing value
+      return !check.validators.every(validator => validator(check.value!));
+    });
 
-    if (placeholderLeaks.length > 0) {
-      throw new Error(`Placeholder values detected in production: ${placeholderLeaks.map(p => p.var).join(', ')}`);
+    if (securityViolations.length > 0) {
+      throw new Error(`Security validation failed: ${securityViolations.map(v => v.error).join('; ')}`);
     }
 
     const config = getConfig();

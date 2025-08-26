@@ -1,8 +1,34 @@
+/**
+ * 🔧 Stage 5: DevOps - Enhanced test setup with dual framework support
+ */
+
 import { config } from 'dotenv'
-import { vi } from 'vitest'
 
 // Load test environment variables
 config({ path: '.env.test' })
+
+// Detect test framework (Jest or Vitest)
+const isJest = typeof jest !== 'undefined'
+const isVitest = typeof vi !== 'undefined'
+
+// Import appropriate mocking framework
+let mockFramework: any
+if (isJest) {
+  mockFramework = { 
+    fn: jest.fn, 
+    mock: jest.mock,
+    clearAllMocks: jest.clearAllMocks,
+    restoreAllMocks: jest.restoreAllMocks
+  }
+} else if (isVitest) {
+  const { vi } = await import('vitest')
+  mockFramework = { 
+    fn: vi.fn, 
+    mock: vi.mock,
+    clearAllMocks: vi.clearAllMocks,
+    restoreAllMocks: vi.restoreAllMocks
+  }
+}
 
 // Mock the config module to avoid environment validation errors
 vi.mock('../src/config/index.js', () => ({

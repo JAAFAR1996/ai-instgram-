@@ -5,7 +5,7 @@ services:
     repo: https://github.com/YOUR_USERNAME/YOUR_REPO
     branch: main
     buildCommand: npm ci && npm run build
-    startCommand: node production.cjs
+    startCommand: node dist/production-index.js
     envVars:
       - key: NODE_ENV
         value: production

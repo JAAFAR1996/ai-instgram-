@@ -300,11 +300,106 @@ const MIGRATIONS = [
     description: 'Analytics events table'
   },
   { 
+    name: '037_unify_rls_systems.sql', 
+    required: true, 
+    dependencies: ['015_enable_rls.sql', '033_add_rls_functions.sql'],
+    category: 'SECURITY',
+    description: 'Unify RLS systems into consistent implementation'
+  },
+  { 
+    name: '039_enhanced_rls_security.sql', 
+    required: true, 
+    dependencies: ['037_unify_rls_systems.sql'],
+    category: 'SECURITY',
+    description: 'Enhanced RLS security policies with audit logging'
+  },
+  { 
+    name: '040_fix_placeholder_security.sql', 
+    required: true, 
+    dependencies: ['039_enhanced_rls_security.sql'],
+    category: 'SECURITY',
+    description: 'Fix placeholder values and enhance security validation'
+  },
+  { 
+    name: '041_enhance_ssl_tls.sql', 
+    required: true, 
+    dependencies: ['032_unify_migration_tracking.sql'],
+    category: 'SECURITY',
+    description: 'Enhanced SSL/TLS configuration and validation'
+  },
+  { 
+    name: '042_connection_encryption.sql', 
+    required: true, 
+    dependencies: ['041_enhance_ssl_tls.sql'],
+    category: 'SECURITY',
+    description: 'Connection encryption validation and enforcement'
+  },
+  { 
+    name: '043_migration_audit_logging.sql', 
+    required: true, 
+    dependencies: ['032_unify_migration_tracking.sql'],
+    category: 'AUDIT',
+    description: 'Comprehensive migration audit logging system'
+  },
+  { 
     name: '038_add_whatsapp_unique_index.sql', 
     required: false, 
     dependencies: ['006_cross_platform_infrastructure.sql'],
     category: 'PERFORMANCE',
     description: 'Add WhatsApp unique index'
+  },
+  
+  // ⚡ STAGE 3 PERFORMANCE IMPROVEMENTS
+  { 
+    name: '044_rls_performance_indexes.sql', 
+    required: true, 
+    dependencies: ['037_unify_rls_systems.sql'],
+    category: 'PERFORMANCE',
+    description: '⚡ Optimized RLS indexes for better query performance'
+  },
+  { 
+    name: '045_performance_optimizations.sql', 
+    required: true, 
+    dependencies: ['043_migration_audit_logging.sql'],
+    category: 'PERFORMANCE',
+    description: '⚡ Transaction timeout and deadlock handling optimizations'
+  },
+  
+  // 💾 STAGE 4 RISK MANAGEMENT
+  { 
+    name: '046_migration_backup_system.sql', 
+    required: true, 
+    dependencies: ['043_migration_audit_logging.sql'],
+    category: 'RISK_MANAGEMENT',
+    description: '💾 Comprehensive migration backup and recovery system'
+  },
+  { 
+    name: '047_rollback_procedures.sql', 
+    required: true, 
+    dependencies: ['046_migration_backup_system.sql'],
+    category: 'RISK_MANAGEMENT',
+    description: '💾 Advanced rollback procedures with emergency recovery'
+  },
+  { 
+    name: '048_comprehensive_health_checks.sql', 
+    required: true, 
+    dependencies: ['045_performance_optimizations.sql'],
+    category: 'RISK_MANAGEMENT',
+    description: '💾 Multi-category health monitoring system'
+  },
+  { 
+    name: '049_migration_monitoring.sql', 
+    required: true, 
+    dependencies: ['048_comprehensive_health_checks.sql'],
+    category: 'RISK_MANAGEMENT',
+    description: '💾 Real-time migration monitoring and alerting'
+  },
+  { 
+    name: '050_disaster_recovery_plan.sql', 
+    required: true, 
+    dependencies: ['047_rollback_procedures.sql', '049_migration_monitoring.sql'],
+    category: 'RISK_MANAGEMENT',
+    description: '💾 Complete disaster recovery and business continuity'
   }
 ];
 
@@ -455,16 +550,45 @@ class ProductionMigrationRunner {
 
     const client = await this.pool.connect();
     const startTime = Date.now();
+    let auditSessionId = null;
     
     try {
       console.log(`🔄 Executing migration: ${migration.name}`);
       
       await client.query('BEGIN');
       
+      // Start migration audit logging (if audit table exists)
+      try {
+        const auditResult = await client.query(`
+          SELECT log_migration_start($1, $2, $3, $4) as session_id
+        `, [
+          migration.name,
+          migration.description || migration.name,
+          [content.substring(0, 1000) + (content.length > 1000 ? '...' : '')], // Sample of SQL
+          JSON.stringify({
+            category: migration.category,
+            required: migration.required,
+            dependencies: migration.dependencies,
+            runner_version: 'production-v2',
+            environment: process.env.NODE_ENV || 'production'
+          })
+        ]);
+        auditSessionId = auditResult.rows[0]?.session_id;
+        if (auditSessionId) {
+          console.log(`📝 Audit session started: ${auditSessionId.substring(0, 8)}`);
+        }
+      } catch (auditError) {
+        console.warn(`⚠️ Could not start audit logging: ${auditError.message}`);
+      }
+      
       // Execute the migration
       await client.query(content);
       
-      // Record successful execution
+      // Analyze affected objects
+      const affectedTables = await this.getAffectedTables(content);
+      const affectedFunctions = await this.getAffectedFunctions(content);
+      
+      // Record successful execution in schema_migrations
       await client.query(`
         INSERT INTO schema_migrations (version, applied_at, execution_time_ms, checksum, success)
         VALUES ($1, NOW(), $2, $3, TRUE)
@@ -475,6 +599,27 @@ class ProductionMigrationRunner {
           success = TRUE
       `, [migration.name, Date.now() - startTime, checksum]);
       
+      // Complete migration audit logging
+      try {
+        await client.query(`
+          SELECT log_migration_completion($1, $2, $3, $4, $5, $6, $7)
+        `, [
+          migration.name,
+          'SUCCESS',
+          null, // no error message
+          null, // no error details
+          affectedTables,
+          affectedFunctions,
+          JSON.stringify({
+            checksum: checksum,
+            execution_environment: process.env.NODE_ENV,
+            migration_category: migration.category
+          })
+        ]);
+      } catch (auditError) {
+        console.warn(`⚠️ Could not complete audit logging: ${auditError.message}`);
+      }
+      
       await client.query('COMMIT');
       
       this.executedMigrations.add(migration.name);
@@ -483,7 +628,31 @@ class ProductionMigrationRunner {
     } catch (error) {
       await client.query('ROLLBACK');
       
-      // Record failure
+      // Complete migration audit logging with failure
+      try {
+        await client.query(`
+          SELECT log_migration_completion($1, $2, $3, $4, $5, $6, $7)
+        `, [
+          migration.name,
+          'FAILED',
+          error.message,
+          JSON.stringify({
+            error_name: error.name,
+            error_stack: error.stack ? error.stack.substring(0, 500) : null,
+            error_code: error.code
+          }),
+          null, // no affected tables on failure
+          null, // no affected functions on failure
+          JSON.stringify({
+            failure_point: 'EXECUTION',
+            execution_environment: process.env.NODE_ENV
+          })
+        ]);
+      } catch (auditError) {
+        console.warn(`⚠️ Could not log migration failure: ${auditError.message}`);
+      }
+      
+      // Record failure in schema_migrations
       await client.query(`
         INSERT INTO schema_migrations (version, applied_at, execution_time_ms, success)
         VALUES ($1, NOW(), $2, FALSE)
@@ -499,6 +668,51 @@ class ProductionMigrationRunner {
     } finally {
       client.release();
     }
+  }
+
+  // Helper method to extract affected tables from SQL content
+  async getAffectedTables(sqlContent) {
+    const tablePatterns = [
+      /CREATE TABLE\s+([^\s(]+)/gi,
+      /ALTER TABLE\s+([^\s]+)/gi,
+      /DROP TABLE\s+([^\s]+)/gi,
+      /INSERT INTO\s+([^\s(]+)/gi,
+      /UPDATE\s+([^\s]+)\s+SET/gi,
+      /DELETE FROM\s+([^\s]+)/gi
+    ];
+    
+    const tables = new Set();
+    for (const pattern of tablePatterns) {
+      const matches = sqlContent.matchAll(pattern);
+      for (const match of matches) {
+        if (match[1] && !match[1].includes('$')) {
+          tables.add(match[1].replace(/[`"]/g, ''));
+        }
+      }
+    }
+    
+    return Array.from(tables).slice(0, 20); // Limit to prevent overflow
+  }
+
+  // Helper method to extract affected functions from SQL content
+  async getAffectedFunctions(sqlContent) {
+    const functionPatterns = [
+      /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+([^\s(]+)/gi,
+      /DROP FUNCTION\s+([^\s(]+)/gi,
+      /ALTER FUNCTION\s+([^\s(]+)/gi
+    ];
+    
+    const functions = new Set();
+    for (const pattern of functionPatterns) {
+      const matches = sqlContent.matchAll(pattern);
+      for (const match of matches) {
+        if (match[1] && !match[1].includes('$')) {
+          functions.add(match[1].replace(/[`"]/g, ''));
+        }
+      }
+    }
+    
+    return Array.from(functions).slice(0, 20); // Limit to prevent overflow
   }
 
   async runMigrations() {

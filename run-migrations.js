@@ -46,6 +46,7 @@ const MIGRATIONS = [
   { name: 'Fix WhatsApp Number Constraints', file: './src/database/migrations/034_fix_whatsapp_number_constraints.sql', required: true },
   { name: 'Migration Validation Final', file: './src/database/migrations/035_migration_validation_final.sql', required: true },
   { name: 'Complete RLS Policies', file: './src/database/migrations/036_complete_rls_policies.sql', required: true },
+  { name: 'Unify RLS Systems', file: './src/database/migrations/037_unify_rls_systems.sql', required: true },
   { name: 'Add WhatsApp Unique Index', file: './src/database/migrations/038_add_whatsapp_unique_index.sql', required: false }
 ];
 
