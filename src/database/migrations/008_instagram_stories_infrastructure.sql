@@ -76,7 +76,16 @@ CREATE INDEX IF NOT EXISTS idx_sales_opportunities_status ON sales_opportunities
 CREATE INDEX IF NOT EXISTS idx_sales_opportunities_created ON sales_opportunities(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sales_opportunities_value ON sales_opportunities(estimated_value DESC) WHERE estimated_value IS NOT NULL;
 
--- Extend daily_analytics table to include story metrics
+-- Create daily_analytics table if not exists, then add story metrics
+CREATE TABLE IF NOT EXISTS daily_analytics (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(merchant_id, date)
+);
+
+-- Add story metrics columns
 ALTER TABLE daily_analytics 
 ADD COLUMN IF NOT EXISTS story_interactions INTEGER DEFAULT 0,
 ADD COLUMN IF NOT EXISTS unique_story_users INTEGER DEFAULT 0,
@@ -292,11 +301,4 @@ FROM merchants
 WHERE id IN (SELECT merchant_id FROM merchant_credentials WHERE instagram_token_encrypted IS NOT NULL)
 ON CONFLICT DO NOTHING;
 
--- Migration completion log
-INSERT INTO audit_logs (action, entity_type, details, success)
-VALUES (
-    'MIGRATION_EXECUTED',
-    'DATABASE_SCHEMA',
-    '{"migration": "007_instagram_stories_infrastructure", "description": "Added Instagram Stories advanced features support"}',
-    TRUE
-);
+-- Note: Migration tracking is handled automatically by the migration runner
