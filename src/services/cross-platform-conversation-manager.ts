@@ -744,7 +744,7 @@ export class CrossPlatformConversationManager {
     }
 
     // Create new conversation
-          const result = await sql.unsafe<ConversationRow>(`
+          const result = await sql<ConversationRow>`
       INSERT INTO conversations (
         merchant_id,
         customer_phone,
@@ -762,7 +762,7 @@ export class CrossPlatformConversationManager {
         ${sourceConversation.conversation_stage},
         ${sourceConversation.session_data}
       ) RETURNING *
-    `);
+    `;
 
           return must((result as ConversationRow[])[0], 'no conversation');
   }

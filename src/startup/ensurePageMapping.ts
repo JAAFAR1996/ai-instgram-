@@ -46,12 +46,12 @@ export async function ensurePageMapping(pool: Pool, pageId: string, businessAcco
     await client.query(`
       INSERT INTO merchant_credentials
         (merchant_id, instagram_page_id, instagram_business_account_id, business_account_id, platform, created_at, updated_at)
-      VALUES ($1, $2, $3, $3, 'INSTAGRAM', NOW(), NOW())
+      VALUES ($1, $2, $3, $3, 'instagram', NOW(), NOW())
       ON CONFLICT (merchant_id, instagram_page_id) DO UPDATE
       SET
         instagram_business_account_id = COALESCE(EXCLUDED.instagram_business_account_id, merchant_credentials.instagram_business_account_id),
         business_account_id = COALESCE(EXCLUDED.business_account_id, merchant_credentials.business_account_id),
-        platform = 'INSTAGRAM',
+        platform = 'instagram',
         updated_at = NOW()
     `, [merchantId, pageId, businessAccountId ?? null]);
 
