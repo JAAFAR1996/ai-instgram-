@@ -342,52 +342,58 @@ COMMENT ON TABLE media_responses IS 'Automated responses generated for media mes
 COMMENT ON TABLE media_analytics_summary IS 'Daily aggregated analytics for media engagement and performance';
 
 -- Insert default media templates for merchants with Instagram credentials
-INSERT INTO media_templates (merchant_id, name, category, media_type, template_url, description)
-SELECT 
-    id as merchant_id,
-    'ترحيب بالعملاء',
-    'greeting',
-    'image',
-    'https://placeholder.example.com/welcome.jpg',
-    'صورة ترحيب للعملاء الجدد'
-FROM merchants 
-WHERE subscription_status = 'ACTIVE'
-  AND NOT EXISTS (
-    SELECT 1 FROM media_templates mt 
-    WHERE mt.merchant_id = merchants.id 
-    AND mt.name = 'ترحيب بالعملاء'
-  );
+DO $$
+BEGIN
+    -- Insert welcome template
+    INSERT INTO media_templates (merchant_id, name, category, media_type, template_url, description)
+    SELECT 
+        id as merchant_id,
+        'ترحيب بالعملاء',
+        'greeting',
+        'image',
+        'https://placeholder.example.com/welcome.jpg',
+        'صورة ترحيب للعملاء الجدد'
+    FROM merchants 
+    WHERE subscription_status = 'ACTIVE'
+      AND NOT EXISTS (
+        SELECT 1 FROM media_templates mt 
+        WHERE mt.merchant_id = merchants.id 
+        AND mt.name = 'ترحيب بالعملاء'
+      );
 
-INSERT INTO media_templates (merchant_id, name, category, media_type, template_url, description)
-SELECT 
-    id as merchant_id,
-    'عرض المنتجات',
-    'product',
-    'image',
-    'https://placeholder.example.com/products.jpg',
-    'صورة عرض المنتجات'
-FROM merchants 
-WHERE subscription_status = 'ACTIVE'
-  AND NOT EXISTS (
-    SELECT 1 FROM media_templates mt 
-    WHERE mt.merchant_id = merchants.id 
-    AND mt.name = 'عرض المنتجات'
-  );
+    -- Insert product showcase template
+    INSERT INTO media_templates (merchant_id, name, category, media_type, template_url, description)
+    SELECT 
+        id as merchant_id,
+        'عرض المنتجات',
+        'product',
+        'image',
+        'https://placeholder.example.com/products.jpg',
+        'صورة عرض المنتجات'
+    FROM merchants 
+    WHERE subscription_status = 'ACTIVE'
+      AND NOT EXISTS (
+        SELECT 1 FROM media_templates mt 
+        WHERE mt.merchant_id = merchants.id 
+        AND mt.name = 'عرض المنتجات'
+      );
 
-INSERT INTO media_templates (merchant_id, name, category, media_type, template_url, description)
-SELECT 
-    id as merchant_id,
-    'شكر العملاء',
-    'thanks',
-    'image',
-    'https://placeholder.example.com/thanks.jpg',
-    'صورة شكر للعملاء'
-FROM merchants 
-WHERE subscription_status = 'ACTIVE'
-  AND NOT EXISTS (
-    SELECT 1 FROM media_templates mt 
-    WHERE mt.merchant_id = merchants.id 
-    AND mt.name = 'شكر العملاء'
-  );
+    -- Insert thank you template
+    INSERT INTO media_templates (merchant_id, name, category, media_type, template_url, description)
+    SELECT 
+        id as merchant_id,
+        'شكر العملاء',
+        'thanks',
+        'image',
+        'https://placeholder.example.com/thanks.jpg',
+        'صورة شكر للعملاء'
+    FROM merchants 
+    WHERE subscription_status = 'ACTIVE'
+      AND NOT EXISTS (
+        SELECT 1 FROM media_templates mt 
+        WHERE mt.merchant_id = merchants.id 
+        AND mt.name = 'شكر العملاء'
+      );
+END $$;
 
 -- Note: Migration tracking is handled automatically by the migration runner

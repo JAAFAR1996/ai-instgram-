@@ -182,7 +182,7 @@ BEGIN
         CASE WHEN NEW.is_complaint THEN 1 ELSE 0 END,
         CASE WHEN NEW.sentiment_score > 60 THEN 1 ELSE 0 END,
         CASE WHEN NEW.sentiment_score < 40 THEN 1 ELSE 0 END,
-        NEW.timestamp,
+        NEW.created_at,
         NOW()
     )
     ON CONFLICT (merchant_id, user_id)
@@ -196,7 +196,7 @@ BEGIN
             CASE WHEN NEW.sentiment_score > 60 THEN 1 ELSE 0 END,
         negative_comments = user_comment_history.negative_comments + 
             CASE WHEN NEW.sentiment_score < 40 THEN 1 ELSE 0 END,
-        last_comment_date = NEW.timestamp,
+        last_comment_date = NEW.created_at,
         username = NEW.username,
         updated_at = NOW();
     
