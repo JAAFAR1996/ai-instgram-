@@ -65,11 +65,11 @@ BEGIN
     INSERT INTO webhook_logs (
         merchant_id, platform, event_type, event_id, status, details, processed_at
     ) VALUES (
-        gen_random_uuid(), 'instagram', 'test_event', 'migration-test-017-ig', 'TEST', '{"test": true}', NOW()
+        uuid_generate_v4(), 'instagram', 'test_event', 'migration-test-017-ig', 'TEST', '{"test": true}', NOW()
     ), (
-        gen_random_uuid(), 'whatsapp', 'test_event', 'migration-test-017-wa', 'TEST', '{"test": true}', NOW()
+        uuid_generate_v4(), 'whatsapp', 'test_event', 'migration-test-017-wa', 'TEST', '{"test": true}', NOW()
     ), (
-        gen_random_uuid(), 'facebook', 'test_event', 'migration-test-017-fb', 'TEST', '{"test": true}', NOW()
+        uuid_generate_v4(), 'facebook', 'test_event', 'migration-test-017-fb', 'TEST', '{"test": true}', NOW()
     );
     
     -- Clean up test data

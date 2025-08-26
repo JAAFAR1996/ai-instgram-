@@ -4,7 +4,7 @@
 
 -- Create manual followup queue table
 CREATE TABLE IF NOT EXISTS manual_followup_queue (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     customer_id VARCHAR(255) NOT NULL,
     conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,

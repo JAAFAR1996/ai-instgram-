@@ -2,7 +2,7 @@
 -- When Redis is rate limited, jobs are spooled to database
 
 CREATE TABLE IF NOT EXISTS job_spool (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   job_id VARCHAR(255) UNIQUE NOT NULL,
   job_type VARCHAR(100) NOT NULL,
   job_data JSONB NOT NULL,

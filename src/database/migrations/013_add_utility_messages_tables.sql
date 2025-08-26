@@ -5,7 +5,7 @@
 
 -- Utility Message Templates Table
 CREATE TABLE IF NOT EXISTS utility_message_templates (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     type VARCHAR(50) NOT NULL CHECK (type IN ('ORDER_UPDATE', 'ACCOUNT_NOTIFICATION', 'APPOINTMENT_REMINDER', 'DELIVERY_NOTIFICATION', 'PAYMENT_UPDATE')),
@@ -26,7 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_utility_templates_approved ON utility_message_tem
 
 -- Utility Message Logs Table (for compliance tracking)
 CREATE TABLE IF NOT EXISTS utility_message_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     recipient_id VARCHAR(255) NOT NULL,
     template_id UUID NOT NULL REFERENCES utility_message_templates(id),
@@ -45,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_utility_logs_sent_at ON utility_message_logs(sent
 
 -- Enhanced OAuth Security Table (2025 Enhancement)
 CREATE TABLE IF NOT EXISTS oauth_sessions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     state VARCHAR(255) NOT NULL,
     code_verifier VARCHAR(255),
@@ -77,7 +77,7 @@ ADD COLUMN IF NOT EXISTS security_flags JSONB DEFAULT '{}'::jsonb;
 
 -- Enhanced Instagram Integration Table
 CREATE TABLE IF NOT EXISTS instagram_business_accounts (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     instagram_business_id VARCHAR(255) NOT NULL,
     instagram_username VARCHAR(255) NOT NULL,
@@ -106,7 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_ig_business_token_expires ON instagram_business_a
 
 -- Compliance Tracking Table (2025 Requirement)
 CREATE TABLE IF NOT EXISTS compliance_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     compliance_type VARCHAR(50) NOT NULL CHECK (compliance_type IN ('WEBHOOK_VERIFICATION', 'OAUTH_SECURITY', 'DATA_ENCRYPTION', 'TOKEN_REFRESH', 'UTILITY_MESSAGE')),
     event_data JSONB NOT NULL,

@@ -3,7 +3,7 @@
 
 -- Create webhook_logs table for monitoring webhook events
 CREATE TABLE IF NOT EXISTS webhook_logs (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     platform VARCHAR(20) NOT NULL CHECK (platform IN ('INSTAGRAM', 'WHATSAPP')),
     event_type VARCHAR(50) NOT NULL,
@@ -21,7 +21,7 @@ CREATE INDEX IF NOT EXISTS idx_webhook_logs_platform_time ON webhook_logs (platf
 
 -- Create webhook_subscriptions table to track active webhook subscriptions
 CREATE TABLE IF NOT EXISTS webhook_subscriptions (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     platform VARCHAR(20) NOT NULL CHECK (platform IN ('INSTAGRAM', 'WHATSAPP')),
     webhook_url TEXT NOT NULL,
@@ -40,7 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_webhook_subscriptions_status ON webhook_subscript
 
 -- Create webhook_delivery_attempts table for retry tracking
 CREATE TABLE IF NOT EXISTS webhook_delivery_attempts (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     webhook_log_id UUID REFERENCES webhook_logs(id) ON DELETE CASCADE,
     attempt_number INTEGER NOT NULL DEFAULT 1,
     response_status INTEGER,

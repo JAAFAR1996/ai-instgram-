@@ -3,7 +3,7 @@
 
 -- Create platform_switches table to track customer platform changes
 CREATE TABLE IF NOT EXISTS platform_switches (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     from_platform VARCHAR(20) NOT NULL CHECK (from_platform IN ('WHATSAPP', 'INSTAGRAM')),
     to_platform VARCHAR(20) NOT NULL CHECK (to_platform IN ('WHATSAPP', 'INSTAGRAM')),
@@ -26,7 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_platform_switches_conversations ON platform_switc
 
 -- Create unified_customer_profiles table for cross-platform customer data
 CREATE TABLE IF NOT EXISTS unified_customer_profiles (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     master_customer_id VARCHAR(255) NOT NULL, -- Primary identifier across platforms
     whatsapp_number VARCHAR(20),
@@ -57,7 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_unified_profiles_context ON unified_customer_prof
 
 -- Create customer_journey_events table for tracking cross-platform journey
 CREATE TABLE IF NOT EXISTS customer_journey_events (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     customer_profile_id UUID REFERENCES unified_customer_profiles(id) ON DELETE CASCADE,
     conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
@@ -78,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_journey_events_type ON customer_journey_events (e
 
 -- Create conversation_merges table to track conversation consolidation
 CREATE TABLE IF NOT EXISTS conversation_merges (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
     primary_conversation_id UUID REFERENCES conversations(id),
     merged_conversation_ids UUID[] NOT NULL,
@@ -172,7 +172,7 @@ DECLARE
     master_id VARCHAR(255);
 BEGIN
     -- Generate master customer ID
-    master_id := COALESCE(p_whatsapp_number, p_instagram_username, gen_random_uuid()::text);
+    master_id := COALESCE(p_whatsapp_number, p_instagram_username, uuid_generate_v4()::text);
     
     -- Try to insert new profile
     INSERT INTO unified_customer_profiles (

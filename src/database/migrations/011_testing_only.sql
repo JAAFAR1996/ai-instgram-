@@ -28,7 +28,7 @@ END $$;
 
 -- Create test_results table for storing individual test scenario results
 CREATE TABLE IF NOT EXISTS test_results (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     scenario_id VARCHAR(255) NOT NULL,
     scenario_name VARCHAR(255),
@@ -52,7 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_test_results_merchant_status ON test_results(merc
 
 -- Create test_execution_reports table for aggregated test reports
 CREATE TABLE IF NOT EXISTS test_execution_reports (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     execution_id VARCHAR(255) UNIQUE,
     total_scenarios INTEGER NOT NULL,
@@ -78,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_test_execution_environment ON test_execution_repo
 
 -- Create performance_test_results table for performance testing metrics
 CREATE TABLE IF NOT EXISTS performance_test_results (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     test_name VARCHAR(255),
     total_requests INTEGER NOT NULL,
@@ -106,7 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_performance_test_created ON performance_test_resu
 
 -- Create api_validation_results table for API health monitoring
 CREATE TABLE IF NOT EXISTS api_validation_results (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     validation_type VARCHAR(100) DEFAULT 'full_validation',
     api_health VARCHAR(20) NOT NULL CHECK (api_health IN ('healthy', 'degraded', 'unhealthy')),
@@ -130,7 +130,7 @@ CREATE INDEX IF NOT EXISTS idx_api_validation_credentials ON api_validation_resu
 
 -- Create test_schedules table for automated testing schedules
 CREATE TABLE IF NOT EXISTS test_schedules (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     schedule_name VARCHAR(255) NOT NULL,
     test_suites JSONB NOT NULL DEFAULT '[]', -- Array of test suite IDs to run
@@ -154,7 +154,7 @@ CREATE INDEX IF NOT EXISTS idx_test_schedules_next_execution ON test_schedules(n
 
 -- Create system_health_metrics table for overall system monitoring
 CREATE TABLE IF NOT EXISTS system_health_metrics (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     metric_type VARCHAR(100) NOT NULL, -- 'api_health', 'webhook_processing', 'ai_response_time', etc.
     metric_value DECIMAL(10,2) NOT NULL,

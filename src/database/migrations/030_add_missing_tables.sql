@@ -5,7 +5,7 @@
 
 -- Create webhook_events table
 CREATE TABLE IF NOT EXISTS webhook_events (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
   event_type VARCHAR(100) NOT NULL,
   platform VARCHAR(50) NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS webhook_events (
 
 -- Create service_errors table 
 CREATE TABLE IF NOT EXISTS service_errors (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   merchant_id UUID REFERENCES merchants(id) ON DELETE CASCADE,
   service_name VARCHAR(100) NOT NULL,
   error_type VARCHAR(100) NOT NULL,

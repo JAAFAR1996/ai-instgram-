@@ -37,7 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_comment_interactions_urgency ON comment_interacti
 
 -- Create comment_responses table for tracking responses to comments
 CREATE TABLE IF NOT EXISTS comment_responses (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     comment_id VARCHAR(255) NOT NULL REFERENCES comment_interactions(id) ON DELETE CASCADE,
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     response_type VARCHAR(50) NOT NULL CHECK (response_type IN ('reply', 'like', 'dm_invite', 'hide', 'escalate')),
@@ -60,7 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_comment_responses_created ON comment_responses(cr
 
 -- Create comment_moderation_rules table for automated comment moderation
 CREATE TABLE IF NOT EXISTS comment_moderation_rules (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
@@ -79,7 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_comment_moderation_priority ON comment_moderation
 
 -- Create comment_analytics_summary table for aggregated comment analytics
 CREATE TABLE IF NOT EXISTS comment_analytics_summary (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     date DATE NOT NULL,
     total_comments INTEGER DEFAULT 0,
@@ -106,7 +106,7 @@ CREATE INDEX IF NOT EXISTS idx_comment_analytics_merchant_date ON comment_analyt
 
 -- Create user_comment_history table for tracking individual user comment patterns
 CREATE TABLE IF NOT EXISTS user_comment_history (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     user_id VARCHAR(255) NOT NULL,
     username VARCHAR(255) NOT NULL,

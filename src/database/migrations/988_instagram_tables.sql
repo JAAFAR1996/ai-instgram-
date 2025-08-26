@@ -1,7 +1,7 @@
 
         -- Create Instagram integration tables
         CREATE TABLE IF NOT EXISTS instagram_accounts (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
           merchant_id UUID NOT NULL,
           instagram_user_id VARCHAR(100) UNIQUE NOT NULL,
           username VARCHAR(100) NOT NULL,
@@ -15,7 +15,7 @@
         );
 
         CREATE TABLE IF NOT EXISTS instagram_media (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
           merchant_id UUID NOT NULL,
           instagram_account_id UUID REFERENCES instagram_accounts(id) ON DELETE CASCADE,
           media_id VARCHAR(100) UNIQUE NOT NULL,

@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_story_interactions_merchant_created ON story_inte
 
 -- Create story_templates table for reusable story templates
 CREATE TABLE IF NOT EXISTS story_templates (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     category VARCHAR(100) NOT NULL CHECK (category IN ('product_showcase', 'engagement', 'promo', 'qa', 'behind_scenes')),
@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_story_templates_active ON story_templates(is_acti
 
 -- Create sales_opportunities table for tracking sales leads from various sources
 CREATE TABLE IF NOT EXISTS sales_opportunities (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     customer_id VARCHAR(255) NOT NULL,
     source_platform VARCHAR(50) NOT NULL CHECK (source_platform IN ('INSTAGRAM', 'WHATSAPP', 'TELEGRAM')),
@@ -90,7 +90,7 @@ ADD COLUMN IF NOT EXISTS story_context JSONB DEFAULT '{}';
 
 -- Create story_analytics_summary table for aggregated analytics
 CREATE TABLE IF NOT EXISTS story_analytics_summary (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     date DATE NOT NULL,
     total_interactions INTEGER DEFAULT 0,
@@ -116,7 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_story_analytics_merchant_date ON story_analytics_
 
 -- Create story_user_engagement table for tracking individual user engagement patterns
 CREATE TABLE IF NOT EXISTS story_user_engagement (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     user_id VARCHAR(255) NOT NULL,
     username VARCHAR(255),

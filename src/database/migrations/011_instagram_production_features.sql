@@ -5,7 +5,7 @@
 
 -- Create hashtag_mentions table (production feature)
 CREATE TABLE IF NOT EXISTS hashtag_mentions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     message_id VARCHAR(255) NOT NULL,
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     hashtag VARCHAR(255),
@@ -37,7 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_hashtag_mentions_marketing_value ON hashtag_menti
 
 -- Create hashtag_strategies table for hashtag monitoring strategies
 CREATE TABLE IF NOT EXISTS hashtag_strategies (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
@@ -59,7 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_hashtag_strategies_active ON hashtag_strategies(i
 
 -- Create hashtag_trends table for tracking hashtag popularity trends
 CREATE TABLE IF NOT EXISTS hashtag_trends (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     hashtag VARCHAR(255) NOT NULL,
     date DATE NOT NULL,
@@ -87,7 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_hashtag_trends_growth ON hashtag_trends(growth_ra
 
 -- Create marketing_opportunities table for tracking marketing leads
 CREATE TABLE IF NOT EXISTS marketing_opportunities (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     opportunity_type VARCHAR(100) NOT NULL,
     source_platform VARCHAR(50) NOT NULL CHECK (source_platform IN ('INSTAGRAM', 'WHATSAPP', 'TELEGRAM')),

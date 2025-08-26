@@ -5,7 +5,7 @@
 
 -- Create media_messages table for tracking all media content
 CREATE TABLE IF NOT EXISTS media_messages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     media_id VARCHAR(255) UNIQUE NOT NULL,
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
@@ -35,7 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_media_messages_status ON media_messages(upload_st
 
 -- Create media_analysis table for AI analysis of media content
 CREATE TABLE IF NOT EXISTS media_analysis (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     media_id VARCHAR(255) UNIQUE NOT NULL REFERENCES media_messages(media_id) ON DELETE CASCADE,
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     description TEXT,
@@ -61,7 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_media_analysis_created ON media_analysis(created_
 
 -- Create media_templates table for reusable media content
 CREATE TABLE IF NOT EXISTS media_templates (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     category VARCHAR(100) NOT NULL CHECK (category IN ('product', 'promo', 'greeting', 'thanks', 'story', 'faq')),
@@ -86,7 +86,7 @@ CREATE INDEX IF NOT EXISTS idx_media_templates_usage ON media_templates(usage_co
 
 -- Create media_responses table for tracking AI responses to media
 CREATE TABLE IF NOT EXISTS media_responses (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     media_id VARCHAR(255) NOT NULL REFERENCES media_messages(media_id) ON DELETE CASCADE,
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
@@ -112,7 +112,7 @@ CREATE INDEX IF NOT EXISTS idx_media_responses_created ON media_responses(create
 
 -- Create media_analytics_summary table for aggregated media analytics
 CREATE TABLE IF NOT EXISTS media_analytics_summary (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     date DATE NOT NULL,
     total_media_messages INTEGER DEFAULT 0,
