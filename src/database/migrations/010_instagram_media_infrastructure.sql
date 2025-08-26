@@ -351,7 +351,7 @@ SELECT
     'https://placeholder.example.com/welcome.jpg',
     'صورة ترحيب للعملاء الجدد'
 FROM merchants 
-WHERE id IN (SELECT merchant_id FROM merchant_credentials WHERE instagram_token_encrypted IS NOT NULL)
+WHERE subscription_status = 'ACTIVE'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO media_templates (merchant_id, name, category, media_type, template_url, description)
@@ -363,7 +363,7 @@ SELECT
     'https://placeholder.example.com/products.jpg',
     'صورة عرض المنتجات'
 FROM merchants 
-WHERE id IN (SELECT merchant_id FROM merchant_credentials WHERE instagram_token_encrypted IS NOT NULL)
+WHERE subscription_status = 'ACTIVE'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO media_templates (merchant_id, name, category, media_type, template_url, description)
@@ -375,14 +375,7 @@ SELECT
     'https://placeholder.example.com/thanks.jpg',
     'صورة شكر للعملاء'
 FROM merchants 
-WHERE id IN (SELECT merchant_id FROM merchant_credentials WHERE instagram_token_encrypted IS NOT NULL)
+WHERE subscription_status = 'ACTIVE'
 ON CONFLICT DO NOTHING;
 
--- Migration completion log
-INSERT INTO audit_logs (action, entity_type, details, success)
-VALUES (
-    'MIGRATION_EXECUTED',
-    'DATABASE_SCHEMA',
-    '{"migration": "009_instagram_media_infrastructure", "description": "Added Instagram Media-rich conversations support"}',
-    TRUE
-);
+-- Note: Migration tracking is handled automatically by the migration runner

@@ -262,19 +262,4 @@ COMMENT ON TABLE hashtag_strategies IS 'Merchant hashtag monitoring and response
 COMMENT ON TABLE hashtag_trends IS 'Hashtag popularity trends and growth analytics';
 COMMENT ON TABLE marketing_opportunities IS 'Marketing leads and opportunities from social interactions';
 
--- Migration completion log
-INSERT INTO audit_logs (action, entity_type, details, success)
-VALUES (
-    'MIGRATION_EXECUTED',
-    'DATABASE_SCHEMA',
-    '{"migration": "011_instagram_production_features", "description": "Added production Instagram features - hashtags, trends, marketing opportunities"}',
-    TRUE
-);
-
--- Success notification
-DO $$
-BEGIN
-    RAISE NOTICE '✅ Instagram production features migration completed successfully';
-    RAISE NOTICE '📊 Added: hashtag_mentions, hashtag_strategies, hashtag_trends, marketing_opportunities';
-    RAISE NOTICE '🚫 Testing tables excluded - use 011_testing_only.sql for development';
-END $$;
+-- Note: Migration tracking is handled automatically by the migration runner
