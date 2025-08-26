@@ -80,7 +80,18 @@ async function processWebhookFromDatabase(job: any) {
     const webhookHandler = await getInstagramWebhookHandler();
     
     // التحقق من أن job data يحتوي على payload صحيح
-    if (!job.jobData || !job.jobData.payload) {
+    if (!job.jobData) {
+      throw new Error('Invalid webhook job data: jobData is null or undefined');
+    }
+    
+    if (!job.jobData.payload) {
+      logger.error('Webhook job missing payload - debugging info', {
+        jobId: job.jobId,
+        jobDataKeys: job.jobData ? Object.keys(job.jobData) : 'null',
+        jobDataType: typeof job.jobData,
+        merchantId: job.merchantId,
+        jobData: job.jobData
+      });
       throw new Error('Invalid webhook job data: missing payload');
     }
 

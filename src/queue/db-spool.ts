@@ -279,13 +279,35 @@ export class DatabaseJobSpool {
   private mapSpooledJob(row: any): SpooledJob {
     let jobData: any;
     try {
-      jobData = typeof row.job_data === 'string' ? 
-        JSON.parse(row.job_data) : row.job_data;
-    } catch {
-      jobData = {};
-      this.logger.warn('Invalid JSON in spooled job data', { 
-        jobId: row.job_id 
+      if (typeof row.job_data === 'string') {
+        if (!row.job_data.trim()) {
+          throw new Error('Empty job_data string');
+        }
+        jobData = JSON.parse(row.job_data);
+      } else {
+        jobData = row.job_data;
+      }
+      
+      // Additional validation for webhook jobs
+      if (row.job_type === 'WEBHOOK_PROCESSING' && jobData) {
+        if (!jobData.payload) {
+          this.logger.error('Webhook job missing payload', {
+            jobId: row.job_id,
+            jobDataKeys: Object.keys(jobData),
+            jobDataType: typeof jobData,
+            rawJobData: typeof row.job_data === 'string' ? row.job_data.substring(0, 200) : row.job_data
+          });
+        }
+      }
+    } catch (error) {
+      this.logger.error('Failed to parse spooled job data', {
+        jobId: row.job_id,
+        jobType: row.job_type,
+        error: error instanceof Error ? error.message : String(error),
+        rawJobData: typeof row.job_data === 'string' ? row.job_data.substring(0, 500) : row.job_data,
+        jobDataType: typeof row.job_data
       });
+      jobData = null; // Use null instead of {} to clearly indicate parsing failure
     }
 
     const result: SpooledJob = {
