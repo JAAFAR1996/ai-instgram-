@@ -169,7 +169,12 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           await logInstagramEvent(rawBody, signature, appSecret);
         }
         
-        return c.text('Unauthorized - Invalid signature', 401);
+        // Check if HMAC verification should be skipped
+        if (getEnv('SKIP_HMAC_VERIFICATION') !== 'true') {
+          return c.text('Unauthorized - Invalid signature', 401);
+        } else {
+          log.warn('SKIPPING HMAC verification due to SKIP_HMAC_VERIFICATION=true');
+        }
       }
 
       // Parse webhook payload

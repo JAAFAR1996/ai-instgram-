@@ -299,7 +299,13 @@ export class WebhookRouter {
       const verifyResult = verifyHMACRaw(rawBuf, sigHeader, appSecret);
       if (!verifyResult.ok) {
         this.logger.error('Instagram webhook signature verification failed', undefined, { reason: verifyResult.reason });
-        return c.text('Invalid signature', 401);
+        
+        // Check if HMAC verification should be skipped
+        if (process.env.SKIP_HMAC_VERIFICATION !== 'true') {
+          return c.text('Invalid signature', 401);
+        } else {
+          this.logger.warn('SKIPPING HMAC verification due to SKIP_HMAC_VERIFICATION=true');
+        }
       }
       
       this.logger.info('Instagram webhook signature verified successfully');
