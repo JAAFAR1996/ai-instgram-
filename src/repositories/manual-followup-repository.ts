@@ -14,14 +14,14 @@ export interface CreateManualFollowupParams {
   conversationId?: string;
   originalMessage: string;
   reason: string;
-  priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
   scheduledFor?: Date;
   notes?: string;
 }
 
 export interface UpdateManualFollowupParams {
   id: string;
-  status?: 'PENDING' | 'ASSIGNED' | 'COMPLETED' | 'CANCELLED';
+  status?: 'pending' | 'processing' | 'completed' | 'cancelled';
   assignedTo?: string;
   notes?: string;
   scheduledFor?: Date;
@@ -29,8 +29,8 @@ export interface UpdateManualFollowupParams {
 
 export interface ManualFollowupFilters {
   merchantId?: string;
-  status?: 'PENDING' | 'ASSIGNED' | 'COMPLETED' | 'CANCELLED';
-  priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  status?: 'pending' | 'processing' | 'completed' | 'cancelled';
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
   assignedTo?: string;
   scheduledForBefore?: Date;
   scheduledForAfter?: Date;
@@ -61,7 +61,7 @@ export class ManualFollowupRepository {
         ${params.conversationId ? params.conversationId + '::uuid' : null},
         ${params.originalMessage},
         ${params.reason},
-        ${params.priority || 'MEDIUM'},
+        ${params.priority ? params.priority.toLowerCase() : 'normal'},
         ${params.scheduledFor || new Date()},
         ${params.notes || null}
       )
@@ -185,14 +185,14 @@ export class ManualFollowupRepository {
    * Get pending followups for a merchant
    */
   async getPendingForMerchant(merchantId: string, limit = 50): Promise<ManualFollowupRow[]> {
-    return this.find({ merchantId, status: 'PENDING' }, limit);
+    return this.find({ merchantId, status: 'pending' }, limit);
   }
 
   /**
    * Get urgent followups for a merchant
    */
   async getUrgentForMerchant(merchantId: string, limit = 20): Promise<ManualFollowupRow[]> {
-    return this.find({ merchantId, priority: 'URGENT' }, limit);
+    return this.find({ merchantId, priority: 'urgent' }, limit);
   }
 
   /**
@@ -226,14 +226,14 @@ export class ManualFollowupRepository {
    * Assign followup to staff member
    */
   async assign(id: string, assignedTo: string): Promise<ManualFollowupRow | null> {
-    return this.update({ id, status: 'ASSIGNED', assignedTo });
+    return this.update({ id, status: 'processing', assignedTo });
   }
 
   /**
    * Mark followup as completed
    */
   async complete(id: string, notes?: string): Promise<ManualFollowupRow | null> {
-    const updateParams: UpdateManualFollowupParams = { id, status: 'COMPLETED' };
+    const updateParams: UpdateManualFollowupParams = { id, status: 'completed' };
     if (notes !== undefined) {
       updateParams.notes = notes;
     }
@@ -244,7 +244,7 @@ export class ManualFollowupRepository {
    * Cancel followup
    */
   async cancel(id: string, notes?: string): Promise<ManualFollowupRow | null> {
-    const updateParams: UpdateManualFollowupParams = { id, status: 'CANCELLED' };
+    const updateParams: UpdateManualFollowupParams = { id, status: 'cancelled' };
     if (notes !== undefined) {
       updateParams.notes = notes;
     }
