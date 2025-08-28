@@ -1030,7 +1030,7 @@ export class InstagramMessageSender {
         ${recipientId},
         ${message},
         'MESSAGE_WINDOW_EXPIRED',
-        'HIGH',
+        'high',
         NOW(),
         NOW() + INTERVAL '1 hour'
       )
