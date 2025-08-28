@@ -59,7 +59,8 @@ export class InstagramMessageSender {
     if (!creds) {
       throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
     }
-    await client.validateCredentials(creds, merchantId);
+    // DISABLED: Instagram Direct API validation removed - using ManyChat Bridge only
+    // await client.validateCredentials(creds, merchantId);
 
     // Cache credentials until token expiry (default 1h if unknown)
     const ttlMs = creds.tokenExpiresAt

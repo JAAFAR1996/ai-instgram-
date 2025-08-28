@@ -110,7 +110,8 @@ export class InstagramSetupService {
         if (!credentials) {
           throw new Error('Instagram credentials not found');
         }
-        await client.validateCredentials(credentials, merchantId);
+        // DISABLED: Instagram Direct API validation removed - using ManyChat Bridge only
+        // await client.validateCredentials(credentials, merchantId);
       });
 
       // Step 5: Subscribe to webhooks
@@ -370,7 +371,8 @@ export class InstagramSetupService {
       if (!creds) {
         throw new Error('Instagram credentials not found');
       }
-      await client.validateCredentials(creds, merchantId);
+      // DISABLED: Instagram Direct API validation removed - using ManyChat Bridge only
+      // await client.validateCredentials(creds, merchantId);
 
       // Get account info
       const accountInfo = await client.getBusinessAccountInfo(creds, merchantId);

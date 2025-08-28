@@ -6,7 +6,7 @@
  */
 
 import * as crypto from 'crypto';
-import { getInstagramClient } from './instagram-api.js';
+// import { getInstagramClient } from './instagram-api.js'; // DISABLED: Direct Instagram API removed
 import { getMessageWindowService } from './message-window.js';
 import { getDatabase } from '../db/adapter.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
@@ -695,42 +695,13 @@ export class InstagramWebhookHandler {
     commentId: string,
     username: string
   ): Promise<boolean> {
-    try {
-      const instagramClient = await getInstagramClient(merchantId);
-      const credentials = await instagramClient.loadMerchantCredentials(merchantId);
-      if (!credentials) {
-        throw new Error('Instagram credentials not found');
-      }
-      await instagramClient.validateCredentials(credentials, merchantId);
-
-      const inviteMessage = `مرحباً @${username}! 👋 راح أرسلك رسالة خاصة عشان أقدر أساعدك أكثر ✨`;
-
-      const replyResult = await instagramClient.replyToComment(
-        credentials,
-        merchantId,
-        commentId,
-        inviteMessage
-      );
-
-      if (!replyResult.success) {
-        this.logger.error('Failed to invite to DM', replyResult.error, {
-          merchantId,
-          commentId,
-          username
-        });
-        return false;
-      }
-
-      this.logger.info('DM invitation sent', { username });
-      return true;
-    } catch (error) {
-      this.logger.error('Failed to invite to DM', error, {
-        merchantId,
-        commentId,
-        username
-      });
-      return false;
-    }
+    // DISABLED: Instagram Direct API calls removed - using ManyChat Bridge only
+    this.logger.info('DM invitation skipped - Instagram Direct API disabled', { 
+      merchantId, 
+      commentId, 
+      username 
+    });
+    return false;
   }
 
   /**

@@ -1822,7 +1822,8 @@ export class ProductionQueueManager {
       if (!credentials) {
         throw new Error('Instagram credentials not found');
       }
-      await instagramClient.validateCredentials(credentials, String((jobData as { merchantId?: unknown }).merchantId ?? ''));
+      // DISABLED: Instagram Direct API validation removed - using ManyChat Bridge only
+      // await instagramClient.validateCredentials(credentials, String((jobData as { merchantId?: unknown }).merchantId ?? ''));
 
       const result = await instagramClient.sendMessage(
         credentials,

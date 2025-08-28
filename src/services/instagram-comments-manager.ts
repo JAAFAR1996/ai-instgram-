@@ -101,7 +101,8 @@ export class InstagramCommentsManager {
     if (!creds) {
       throw new Error(`Instagram credentials not found for merchant: ${merchantId}`);
     }
-    await client.validateCredentials(creds, merchantId);
+    // DISABLED: Instagram Direct API validation removed - using ManyChat Bridge only
+    // await client.validateCredentials(creds, merchantId);
 
     const ttlMs = creds.tokenExpiresAt
       ? Math.max(creds.tokenExpiresAt.getTime() - Date.now(), 0)
@@ -725,32 +726,16 @@ export class InstagramCommentsManager {
    */
   private async inviteCommentToDM(
     comment: CommentInteraction,
-    inviteMessage: string,
+    _inviteMessage: string,
     merchantId: string
   ): Promise<boolean> {
-    try {
-      const instagramClient = await this.getClient(merchantId);
-      const credentials = await this.getCredentials(merchantId);
-
-      // Reply to comment with DM invitation
-      const replyResult = await instagramClient.replyToComment(credentials, merchantId, comment.id, inviteMessage);
-      
-      if (replyResult.success) {
-        // Send DM to user
-        const dmResult = await instagramClient.sendMessage(credentials, merchantId, {
-          recipientId: comment.userId,
-          messagingType: 'RESPONSE',
-          content: `مرحباً ${comment.username}! شكراً لتعليقك 🌹 كيف أقدر أساعدك؟`
-        });
-
-        return dmResult.success;
-      }
-
-      return false;
-    } catch (error) {
-      this.logger.error('Invite to DM failed', error, { merchantId, commentId: comment.id });
-      return false;
-    }
+    // DISABLED: Instagram Direct API calls removed - using ManyChat Bridge only
+    this.logger.info('Comment DM invitation skipped - Instagram Direct API disabled', { 
+      merchantId, 
+      commentId: comment.id, 
+      username: comment.username 
+    });
+    return false;
   }
 
   /**
