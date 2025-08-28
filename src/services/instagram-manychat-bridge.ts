@@ -270,15 +270,31 @@ export class InstagramManyChatBridge {
    */
   private async ensureSubscriberExists(data: BridgeMessageData): Promise<ManyChatSubscriber> {
     try {
-      // Try to get existing subscriber
-      const existingSubscriber = await this.manyChatService.getSubscriberInfo(
-        data.merchantId,
-        data.customerId
-      );
-      return existingSubscriber;
+      // Check database for existing mapping first
+      const sql = this.db.getSQL();
+      const existingMapping = await sql`
+        SELECT manychat_subscriber_id
+        FROM manychat_subscribers
+        WHERE merchant_id = ${data.merchantId}::uuid
+        AND instagram_customer_id = ${data.customerId}
+        AND status = 'active'
+        LIMIT 1
+      `;
 
-    } catch (error) {
-      // Subscriber doesn't exist, create new one
+      if (existingMapping.length > 0) {
+        const manychatId = existingMapping[0].manychat_subscriber_id;
+        // Get subscriber info from ManyChat
+        try {
+          return await this.manyChatService.getSubscriberInfo(data.merchantId, manychatId);
+        } catch (error) {
+          this.logger.warn('ManyChat subscriber not found by ID, will recreate', {
+            manychatId,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+
+      // Create new ManyChat subscriber
       this.logger.info('Creating new ManyChat subscriber', {
         merchantId: data.merchantId,
         customerId: data.customerId
@@ -287,7 +303,8 @@ export class InstagramManyChatBridge {
       const newSubscriber = await this.manyChatService.createSubscriber(
         data.merchantId,
         {
-          phone: data.customerId, // Using customer ID as phone for now
+          // Don't use customer ID as phone - use generated unique identifier instead
+          phone: `+964${Math.floor(1000000000 + Math.random() * 9000000000)}`, // Fake phone for Iraq
           first_name: 'Instagram',
           last_name: 'User',
           language: 'ar',
@@ -295,12 +312,58 @@ export class InstagramManyChatBridge {
           custom_fields: {
             instagram_id: data.customerId,
             platform: data.platform,
-            first_interaction: new Date().toISOString()
+            first_interaction: new Date().toISOString(),
+            source: 'instagram_bridge'
           }
         }
       );
 
+      // Save mapping to database
+      await sql`
+        INSERT INTO manychat_subscribers (
+          merchant_id,
+          manychat_subscriber_id,
+          instagram_customer_id,
+          first_name,
+          last_name,
+          language,
+          timezone,
+          custom_fields,
+          status,
+          created_at
+        ) VALUES (
+          ${data.merchantId}::uuid,
+          ${newSubscriber.id},
+          ${data.customerId},
+          'Instagram',
+          'User',
+          'ar',
+          'Asia/Baghdad',
+          ${JSON.stringify(newSubscriber.customFields || {})},
+          'active',
+          NOW()
+        )
+        ON CONFLICT (merchant_id, instagram_customer_id) 
+        DO UPDATE SET
+          manychat_subscriber_id = ${newSubscriber.id},
+          status = 'active',
+          updated_at = NOW()
+      `;
+
+      this.logger.info('✅ ManyChat subscriber created and mapped', {
+        manychatId: newSubscriber.id,
+        instagramId: data.customerId
+      });
+
       return newSubscriber;
+
+    } catch (error) {
+      this.logger.error('Failed to ensure subscriber exists', {
+        merchantId: data.merchantId,
+        customerId: data.customerId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
     }
   }
 
@@ -312,34 +375,62 @@ export class InstagramManyChatBridge {
     subscriber: ManyChatSubscriber,
     options: BridgeProcessingOptions
   ): Promise<void> {
-    const updates: Record<string, unknown> = {
-      custom_fields: {
-        ...subscriber.customFields,
-        last_interaction: new Date().toISOString(),
-        interaction_type: data.interactionType,
-        platform: data.platform
+    try {
+      const updates: Record<string, unknown> = {
+        custom_fields: {
+          ...subscriber.customFields,
+          last_interaction: new Date().toISOString(),
+          interaction_type: data.interactionType,
+          platform: data.platform
+        }
+      };
+
+      if (options.customFields) {
+        updates.custom_fields = {
+          ...(updates.custom_fields as Record<string, unknown>),
+          ...options.customFields
+        };
       }
-    };
 
-    if (options.customFields) {
-      updates.custom_fields = {
-        ...(updates.custom_fields as Record<string, unknown>),
-        ...options.customFields
-      };
+      if (data.mediaContext) {
+        updates.custom_fields = {
+          ...(updates.custom_fields as Record<string, unknown>),
+          last_media_context: data.mediaContext
+        };
+      }
+
+      // Update in ManyChat
+      await this.manyChatService.updateSubscriber(
+        data.merchantId,
+        subscriber.id,
+        updates
+      );
+
+      // Update in database
+      const sql = this.db.getSQL();
+      await sql`
+        UPDATE manychat_subscribers
+        SET 
+          custom_fields = ${JSON.stringify(updates.custom_fields)},
+          last_interaction_at = NOW(),
+          updated_at = NOW()
+        WHERE merchant_id = ${data.merchantId}::uuid
+        AND manychat_subscriber_id = ${subscriber.id}
+      `;
+
+      // Add tags if provided
+      if (options.tags && options.tags.length > 0) {
+        await this.addTagsToSubscriber(data.merchantId, subscriber.id, options.tags);
+      }
+
+    } catch (error) {
+      this.logger.error('Failed to update subscriber info', {
+        merchantId: data.merchantId,
+        subscriberId: subscriber.id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
     }
-
-    if (data.mediaContext) {
-      updates.custom_fields = {
-        ...(updates.custom_fields as Record<string, unknown>),
-        last_media_context: data.mediaContext
-      };
-    }
-
-    await this.manyChatService.updateSubscriber(
-      data.merchantId,
-      subscriber.id,
-      updates
-    );
   }
 
   /**
@@ -587,6 +678,30 @@ export class InstagramManyChatBridge {
       this.logger.warn('Failed to log fallback interaction', {
         error: error instanceof Error ? error.message : String(error)
       });
+    }
+  }
+
+  /**
+   * Add tags to subscriber (helper method)
+   */
+  private async addTagsToSubscriber(
+    merchantId: string,
+    subscriberId: string,
+    tags: string[]
+  ): Promise<void> {
+    try {
+      await this.manyChatService.addTags(merchantId, subscriberId, tags);
+      this.logger.info('Tags added to subscriber', {
+        subscriberId,
+        tags: tags.join(', ')
+      });
+    } catch (error) {
+      this.logger.error('Failed to add tags to subscriber', {
+        subscriberId,
+        tags: tags.join(', '),
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
     }
   }
 

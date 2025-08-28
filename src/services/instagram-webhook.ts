@@ -869,11 +869,43 @@ export class InstagramWebhookHandler {
 
       const aiResponse = aiResult.response;
 
-                // Store AI response as outgoing message with proper status tracking
-          const messageRecord = await this.storeOutgoingAIMessage(
-            conversationId,
-            aiResponse
-          );
+      // Try ManyChat Bridge as fallback after local AI
+      try {
+        const manyChatFallback = getInstagramManyChatBridge();
+        const fallbackResult = await manyChatFallback.processMessage({
+          merchantId,
+          customerId,
+          message: aiResponse.message,
+          conversationId,
+          interactionType,
+          platform: 'instagram'
+        }, {
+          useManyChat: true,
+          fallbackToLocalAI: false, // Already have local AI response
+          priority: 'normal',
+          tags: ['local_ai_fallback', `interaction_${interactionType}`]
+        });
+
+        if (fallbackResult.success) {
+          this.logger.info('✅ Local AI response sent through ManyChat Bridge', {
+            platform: fallbackResult.platform,
+            processingTime: fallbackResult.processingTime
+          });
+          return; // Bridge handled the sending
+        } else {
+          this.logger.warn('ManyChat Bridge failed for local AI response, using direct send', {
+            error: fallbackResult.error
+          });
+        }
+      } catch (bridgeError) {
+        this.logger.error('ManyChat Bridge error in fallback', bridgeError);
+      }
+
+      // Store AI response as outgoing message with proper status tracking
+      const messageRecord = await this.storeOutgoingAIMessage(
+        conversationId,
+        aiResponse
+      );
 
       // Send the message via Instagram API with transaction safety
       const deliveryResult = await this.sendAndUpdateMessage(
@@ -1318,6 +1350,30 @@ export class InstagramWebhookHandler {
       : 'شكراً لتفاعلك! راح نرد عليك قريباً 🙏';
       
     try {
+      // Try ManyChat Bridge first for immediate fallback
+      const manyChatBridge = getInstagramManyChatBridge();
+      const bridgeResult = await manyChatBridge.processMessage({
+        merchantId,
+        customerId,
+        message: fallbackMessage,
+        conversationId,
+        interactionType,
+        platform: 'instagram'
+      }, {
+        useManyChat: true,
+        fallbackToLocalAI: false, // Already have the fallback message
+        priority: 'high', // Fallback messages are high priority
+        tags: ['immediate_fallback', `interaction_${interactionType}`]
+      });
+
+      if (bridgeResult.success) {
+        this.logger.info('✅ Fallback message sent through ManyChat Bridge', { conversationId, customerId });
+        return;
+      } else {
+        this.logger.warn('ManyChat Bridge failed for fallback, using direct Instagram API');
+      }
+
+      // Fallback to direct Instagram API if ManyChat Bridge fails
       const instagramClient = await getInstagramClient(merchantId);
       const credentials = await instagramClient.loadMerchantCredentials(merchantId);
       
@@ -1328,7 +1384,7 @@ export class InstagramWebhookHandler {
           text: fallbackMessage
         });
         
-        this.logger.info('✅ Fallback message sent successfully', { conversationId, customerId });
+        this.logger.info('✅ Fallback message sent via direct Instagram API', { conversationId, customerId });
       }
     } catch (fallbackError) {
       this.logger.error('❌ Even fallback failed', fallbackError);
