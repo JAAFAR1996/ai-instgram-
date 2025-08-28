@@ -268,12 +268,12 @@ export class ManualFollowupRepository {
     const [stats] = await sql`
       SELECT 
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
-        COUNT(*) FILTER (WHERE status = 'ASSIGNED') as assigned,
-        COUNT(*) FILTER (WHERE status = 'COMPLETED') as completed,
-        COUNT(*) FILTER (WHERE status = 'CANCELLED') as cancelled,
-        COUNT(*) FILTER (WHERE priority = 'URGENT') as urgent,
-        COUNT(*) FILTER (WHERE scheduled_for < NOW() AND status = 'PENDING') as overdue
+        COUNT(*) FILTER (WHERE status = 'pending') as pending,
+        COUNT(*) FILTER (WHERE status = 'processing') as assigned,
+        COUNT(*) FILTER (WHERE status = 'completed') as completed,
+        COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled,
+        COUNT(*) FILTER (WHERE priority = 'urgent') as urgent,
+        COUNT(*) FILTER (WHERE scheduled_for < NOW() AND status = 'pending') as overdue
       FROM manual_followup_queue 
       WHERE merchant_id = ${merchantId}::uuid
     `;
@@ -324,7 +324,7 @@ export class ManualFollowupRepository {
     
     const [result] = await sql`
       DELETE FROM manual_followup_queue 
-      WHERE status = 'COMPLETED' 
+      WHERE status = 'completed' 
         AND completed_at < ${olderThan}
       RETURNING COUNT(*) as deleted_count
     `;

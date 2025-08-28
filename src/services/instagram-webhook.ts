@@ -768,12 +768,12 @@ export class InstagramWebhookHandler {
         platform: 'instagram' as const
       };
 
-      // Process through ManyChat Bridge with fallback
+      // Process through ManyChat Bridge with Local AI only (ManyChat disabled temporarily)
       const bridgeResult = await manyChatBridge.processMessage(bridgeData, {
-        useManyChat: true,
+        useManyChat: false, // Temporarily disable ManyChat API
         fallbackToLocalAI: true,
         priority: 'normal',
-        tags: [`interaction_${interactionType}`, 'platform_instagram']
+        tags: [`interaction_${interactionType}`, 'platform_instagram', 'local_ai_only']
       });
 
       if (bridgeResult.success) {
@@ -880,7 +880,7 @@ export class InstagramWebhookHandler {
           interactionType,
           platform: 'instagram'
         }, {
-          useManyChat: true,
+          useManyChat: false, // Temporarily disable ManyChat API
           fallbackToLocalAI: false, // Already have local AI response
           priority: 'normal',
           tags: ['local_ai_fallback', `interaction_${interactionType}`]
@@ -893,34 +893,20 @@ export class InstagramWebhookHandler {
           });
           return; // Bridge handled the sending
         } else {
-          this.logger.warn('ManyChat Bridge failed for local AI response, using direct send', {
-            error: fallbackResult.error
+          this.logger.error('❌ ManyChat Bridge failed completely - no fallback available', {
+            error: fallbackResult.error,
+            conversationId,
+            customerId
           });
+          return; // No fallback to direct Instagram API
         }
       } catch (bridgeError) {
-        this.logger.error('ManyChat Bridge error in fallback', bridgeError);
-      }
-
-      // Store AI response as outgoing message with proper status tracking
-      const messageRecord = await this.storeOutgoingAIMessage(
-        conversationId,
-        aiResponse
-      );
-
-      // Send the message via Instagram API with transaction safety
-      const deliveryResult = await this.sendAndUpdateMessage(
-        messageRecord.id,
-        merchantId,
-        customerId,
-        aiResponse.message
-      );
-
-      if (!deliveryResult.success) {
-        this.logger.error('❌ AI message delivery failed', {
+        this.logger.error('❌ ManyChat Bridge error in fallback - message not sent', {
+          error: bridgeError instanceof Error ? bridgeError.message : String(bridgeError),
           conversationId,
-          messageId: messageRecord.id,
-          error: deliveryResult.error
+          customerId
         });
+        return; // No fallback to direct Instagram API
       }
 
       // Update conversation stage if changed and valid
@@ -928,7 +914,7 @@ export class InstagramWebhookHandler {
                           'COMPLETED', 'ABANDONED', 'ESCALATED', 'FOLLOW_UP', 'CLOSING',
                           'AI_RESPONSE', 'WAITING_RESPONSE', 'PROCESSING', 'PENDING', 'ACTIVE'];
       
-      if (conversation && aiResponse.stage !== conversation.conversation_stage && validStages.includes(aiResponse.stage)) {
+      if (conversation && aiResponse.stage && aiResponse.stage !== conversation?.conversation_stage && validStages.includes(aiResponse.stage)) {
         await sql`
           UPDATE conversations
           SET conversation_stage = ${aiResponse.stage}
@@ -941,16 +927,17 @@ export class InstagramWebhookHandler {
         message: aiResponse.message
       });
       
-      // Log Instagram-specific AI features
-      if ('hashtagSuggestions' in aiResponse && aiResponse.hashtagSuggestions) {
+      // Log Instagram-specific AI features (if available)
+      const instagramAIResponse = aiResponse as any;
+      if (instagramAIResponse.hashtagSuggestions) {
         this.logger.info('Hashtag suggestions', {
-          suggestions: aiResponse.hashtagSuggestions
+          suggestions: instagramAIResponse.hashtagSuggestions
         });
       }
 
-      if ('engagement' in aiResponse && aiResponse.engagement) {
+      if (instagramAIResponse.engagement) {
         this.logger.info('Engagement prediction', {
-          viralPotential: aiResponse.engagement.viralPotential
+          viralPotential: instagramAIResponse.engagement.viralPotential
         });
       }
 
@@ -1360,8 +1347,8 @@ export class InstagramWebhookHandler {
         interactionType,
         platform: 'instagram'
       }, {
-        useManyChat: true,
-        fallbackToLocalAI: false, // Already have the fallback message
+        useManyChat: false, // Temporarily disable ManyChat API
+        fallbackToLocalAI: true, // Use local AI for fallback message
         priority: 'high', // Fallback messages are high priority
         tags: ['immediate_fallback', `interaction_${interactionType}`]
       });
@@ -1370,161 +1357,18 @@ export class InstagramWebhookHandler {
         this.logger.info('✅ Fallback message sent through ManyChat Bridge', { conversationId, customerId });
         return;
       } else {
-        this.logger.warn('ManyChat Bridge failed for fallback, using direct Instagram API');
-      }
-
-      // Fallback to direct Instagram API if ManyChat Bridge fails
-      const instagramClient = await getInstagramClient(merchantId);
-      const credentials = await instagramClient.loadMerchantCredentials(merchantId);
-      
-      if (credentials) {
-        await instagramClient.sendMessage(credentials, merchantId, {
-          recipientId: customerId,
-          messagingType: 'RESPONSE',
-          text: fallbackMessage
+        this.logger.error('❌ ManyChat Bridge failed for fallback - no message sent', {
+          error: bridgeResult.error,
+          conversationId,
+          customerId
         });
-        
-        this.logger.info('✅ Fallback message sent via direct Instagram API', { conversationId, customerId });
+        return; // No fallback to direct Instagram API
       }
     } catch (fallbackError) {
       this.logger.error('❌ Even fallback failed', fallbackError);
     }
   }
 
-  private async storeOutgoingAIMessage(
-    conversationId: string,
-    aiResponse: any
-  ): Promise<{ id: string; platformMessageId: string }> {
-    const sql = this.db.getSQL();
-    const platformMessageId = `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    const [messageRecord] = await sql`
-      INSERT INTO message_logs (
-        conversation_id,
-        direction,
-        platform,
-        message_type,
-        content,
-        platform_message_id,
-        ai_processed,
-        delivery_status,
-        ai_confidence,
-        ai_intent,
-        processing_time_ms,
-        created_at
-      ) VALUES (
-        ${conversationId}::uuid,
-        'OUTGOING',
-        'instagram',
-        'TEXT',
-        ${aiResponse.message},
-        ${platformMessageId},
-        true,
-        'PREPARING',
-        ${aiResponse.confidence || 0.8},
-        ${aiResponse.intent || 'RESPONSE'},
-        ${aiResponse.responseTime || 0},
-        NOW()
-      )
-      RETURNING id, platform_message_id
-    `;
-    
-    if (!messageRecord) {
-      throw new Error('Failed to insert message record');
-    }
-    
-    return { 
-      id: String(messageRecord.id), 
-      platformMessageId: String(messageRecord.platform_message_id) 
-    };
-  }
-
-  private async sendAndUpdateMessage(
-    messageId: string,
-    merchantId: string,
-    customerId: string,
-    messageContent: string
-  ): Promise<{ success: boolean; error?: string; messageId?: string }> {
-    const sql = this.db.getSQL();
-    
-    try {
-      // تحديث الحالة إلى "SENDING"
-      await sql`
-        UPDATE message_logs 
-        SET delivery_status = 'SENDING', updated_at = NOW()
-        WHERE id = ${messageId}
-      `;
-      
-      // إرسال الرسالة
-      const instagramClient = await getInstagramClient(merchantId);
-      const credentials = await instagramClient.loadMerchantCredentials(merchantId);
-      
-      if (!credentials) {
-        await sql`
-          UPDATE message_logs 
-          SET delivery_status = 'FAILED', 
-              error_message = 'Credentials not found',
-              updated_at = NOW()
-          WHERE id = ${messageId}
-        `;
-        return { success: false, error: 'Instagram credentials not found' };
-      }
-      
-      const sendResult = await instagramClient.sendMessage(credentials, merchantId, {
-        recipientId: customerId,
-        text: messageContent,
-        messagingType: 'RESPONSE'
-      });
-      
-      if (sendResult.success) {
-        // تحديث الحالة إلى "SENT"
-        await sql`
-          UPDATE message_logs 
-          SET 
-            delivery_status = 'SENT',
-            platform_message_id = ${sendResult.messageId || 'unknown'},
-            updated_at = NOW()
-          WHERE id = ${messageId}
-        `;
-        
-        return { 
-          success: true, 
-          ...(sendResult.messageId ? { messageId: sendResult.messageId } : {})
-        };
-      } else {
-        // تحديث الحالة إلى "FAILED"
-        await sql`
-          UPDATE message_logs 
-          SET 
-            delivery_status = 'FAILED',
-            error_message = ${sendResult.error || 'Unknown send error'},
-            updated_at = NOW()
-          WHERE id = ${messageId}
-        `;
-        
-        return { 
-          success: false, 
-          ...(sendResult.error ? { error: sendResult.error } : {})
-        };
-      }
-      
-    } catch (error) {
-      // تحديث الحالة إلى "FAILED" في حالة الخطأ
-      await sql`
-        UPDATE message_logs 
-        SET 
-          delivery_status = 'FAILED',
-          error_message = ${error instanceof Error ? error.message : String(error)},
-          updated_at = NOW()
-        WHERE id = ${messageId}
-      `;
-      
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : String(error) 
-      };
-    }
-  }
 }
 
 // Singleton instance
