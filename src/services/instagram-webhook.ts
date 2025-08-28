@@ -14,6 +14,7 @@ import { getRepositories } from '../repositories/index.js';
 import { getInstagramStoriesManager } from './instagram-stories-manager.js';
 import { getInstagramCommentsManager } from './instagram-comments-manager.js';
 import { getInstagramMediaManager } from './instagram-media-manager.js';
+import { getInstagramManyChatBridge } from './instagram-manychat-bridge.js';
 // import { getServiceController } from './service-controller.js';
 import { verifyHMACRaw } from './encryption.js';
 import { createLogger } from './logger.js';
@@ -746,6 +747,49 @@ export class InstagramWebhookHandler {
   ): Promise<void> {
     try {
       this.logger.info('Generating Instagram AI response', { interactionType });
+
+      // Initialize ManyChat Bridge
+      const manyChatBridge = getInstagramManyChatBridge();
+      
+      // Prepare bridge data
+      const bridgeData = {
+        merchantId,
+        customerId,
+        message: messageContent,
+        conversationId,
+        interactionType,
+        ...(mediaContext && mediaContext.mediaId ? {
+          mediaContext: {
+            mediaId: mediaContext.mediaId,
+            mediaType: 'photo', // Default type
+            caption: ''
+          }
+        } : {}),
+        platform: 'instagram' as const
+      };
+
+      // Process through ManyChat Bridge with fallback
+      const bridgeResult = await manyChatBridge.processMessage(bridgeData, {
+        useManyChat: true,
+        fallbackToLocalAI: true,
+        priority: 'normal',
+        tags: [`interaction_${interactionType}`, 'platform_instagram']
+      });
+
+      if (bridgeResult.success) {
+        this.logger.info('✅ Message processed through ManyChat Bridge', {
+          platform: bridgeResult.platform,
+          processingTime: bridgeResult.processingTime,
+          messageId: bridgeResult.messageId
+        });
+        return; // Bridge handled everything
+      } else {
+        this.logger.warn('ManyChat Bridge failed, falling back to local AI', {
+          error: bridgeResult.error,
+          platform: bridgeResult.platform
+        });
+        // Continue with local AI processing below
+      }
 
       // Get conversation context
       const sql = this.db.getSQL();

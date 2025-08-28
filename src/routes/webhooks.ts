@@ -330,6 +330,84 @@ const dumpPath = path.join(dir, first.f);
     });
   }
 
+  // ===============================================
+  // ManyChat Test Endpoint
+  // ===============================================
+  
+  app.post('/api/test/manychat', async (c) => {
+    try {
+      const body = await c.req.json();
+      const { merchantId, customerId, message } = body;
+      
+      if (!merchantId || !customerId || !message) {
+        return c.json({
+          success: false,
+          error: 'Missing required fields: merchantId, customerId, message'
+        }, 400);
+      }
+
+      // Import ManyChat Bridge
+      const { getInstagramManyChatBridge } = await import('../services/instagram-manychat-bridge.js');
+      const bridge = getInstagramManyChatBridge();
+
+      // Test ManyChat processing
+      const result = await bridge.processMessage({
+        merchantId,
+        customerId,
+        message,
+        interactionType: 'dm',
+        platform: 'instagram'
+      }, {
+        useManyChat: true,
+        fallbackToLocalAI: true,
+        priority: 'normal',
+        tags: ['test', 'api_test']
+      });
+
+      return c.json({
+        success: true,
+        result,
+        message: 'ManyChat integration test completed successfully'
+      });
+
+    } catch (error) {
+      log.error('ManyChat test endpoint error:', error);
+      return c.json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        message: 'ManyChat integration test failed'
+      }, 500);
+    }
+  });
+
+  // ManyChat Health Check Endpoint
+  app.get('/api/health/manychat', async (c) => {
+    try {
+      const { getInstagramManyChatBridge } = await import('../services/instagram-manychat-bridge.js');
+      const bridge = getInstagramManyChatBridge();
+      
+      const healthStatus = await bridge.getHealthStatus();
+      
+      return c.json({
+        success: true,
+        status: healthStatus.status,
+        manyChat: healthStatus.manyChat,
+        localAI: healthStatus.localAI,
+        instagram: healthStatus.instagram,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      log.error('ManyChat health check error:', error);
+      return c.json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        status: 'unhealthy',
+        timestamp: new Date().toISOString()
+      }, 500);
+    }
+  });
+
   log.info('Webhook routes registered successfully');
 }
 

@@ -43,6 +43,37 @@ services:
         sync: false
       - key: SENTRY_DSN
         sync: false
+      # ===============================================
+      # ManyChat Integration Environment Variables
+      # ===============================================
+      - key: MANYCHAT_API_KEY
+        sync: false
+      - key: MANYCHAT_BASE_URL
+        value: https://api.manychat.com
+      - key: MANYCHAT_WEBHOOK_SECRET
+        sync: false
+      - key: MANYCHAT_DEFAULT_FLOW_ID
+        sync: false
+      - key: MANYCHAT_WELCOME_FLOW_ID
+        sync: false
+      - key: MANYCHAT_AI_RESPONSE_FLOW_ID
+        sync: false
+      - key: MANYCHAT_COMMENT_RESPONSE_FLOW_ID
+        sync: false
+      - key: MANYCHAT_STORY_RESPONSE_FLOW_ID
+        sync: false
+      - key: MANYCHAT_RATE_LIMIT_RPS
+        value: "10"
+      - key: MANYCHAT_RATE_LIMIT_WINDOW_MS
+        value: "1000"
+      - key: MANYCHAT_MAX_RETRIES
+        value: "3"
+      - key: MANYCHAT_RETRY_DELAY_MS
+        value: "1000"
+      - key: MANYCHAT_FAILURE_THRESHOLD
+        value: "5"
+      - key: MANYCHAT_RESET_TIMEOUT_MS
+        value: "30000"
     healthCheckPath: /health
     autoDeploy: true
     plan: starter
