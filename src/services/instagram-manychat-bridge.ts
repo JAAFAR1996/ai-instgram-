@@ -282,15 +282,17 @@ export class InstagramManyChatBridge {
       `;
 
       if (existingMapping.length > 0) {
-        const manychatId = existingMapping[0].manychat_subscriber_id;
-        // Get subscriber info from ManyChat
-        try {
-          return await this.manyChatService.getSubscriberInfo(data.merchantId, manychatId);
-        } catch (error) {
-          this.logger.warn('ManyChat subscriber not found by ID, will recreate', {
-            manychatId,
-            error: error instanceof Error ? error.message : String(error)
-          });
+        const manychatId = existingMapping[0]?.manychat_subscriber_id;
+        if (manychatId && typeof manychatId === 'string') {
+          // Get subscriber info from ManyChat
+          try {
+            return await this.manyChatService.getSubscriberInfo(data.merchantId, manychatId);
+          } catch (error) {
+            this.logger.warn('ManyChat subscriber not found by ID, will recreate', {
+              manychatId,
+              error: error instanceof Error ? error.message : String(error)
+            });
+          }
         }
       }
 

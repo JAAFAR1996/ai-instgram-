@@ -1343,7 +1343,7 @@ export class InstagramWebhookHandler {
     conversationId: string,
     merchantId: string,
     customerId: string,
-    interactionType: string
+    interactionType: 'dm' | 'comment' | 'story_reply' | 'story_mention'
   ): Promise<void> {
     const fallbackMessage = interactionType === 'dm' 
       ? 'عذراً للانتظار! راح أرد عليك خلال دقائق ⏰'
