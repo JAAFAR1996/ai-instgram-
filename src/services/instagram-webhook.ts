@@ -741,7 +741,7 @@ export class InstagramWebhookHandler {
 
       // Process through ManyChat Bridge with Local AI only (ManyChat disabled temporarily)
       const bridgeResult = await manyChatBridge.processMessage(bridgeData, {
-        useManyChat: false, // Temporarily disable ManyChat API
+        useManyChat: true, // Enable ManyChat API
         fallbackToLocalAI: true,
         priority: 'normal',
         tags: [`interaction_${interactionType}`, 'platform_instagram', 'local_ai_only']
@@ -851,7 +851,7 @@ export class InstagramWebhookHandler {
           interactionType,
           platform: 'instagram'
         }, {
-          useManyChat: false, // Temporarily disable ManyChat API
+          useManyChat: true, // Enable ManyChat API
           fallbackToLocalAI: false, // Already have local AI response
           priority: 'normal',
           tags: ['local_ai_fallback', `interaction_${interactionType}`]
@@ -1318,7 +1318,7 @@ export class InstagramWebhookHandler {
         interactionType,
         platform: 'instagram'
       }, {
-        useManyChat: false, // Temporarily disable ManyChat API
+        useManyChat: true, // Enable ManyChat API
         fallbackToLocalAI: true, // Use local AI for fallback message
         priority: 'high', // Fallback messages are high priority
         tags: ['immediate_fallback', `interaction_${interactionType}`]

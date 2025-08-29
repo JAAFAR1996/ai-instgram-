@@ -54,7 +54,7 @@ function scheduleQueueMaintenanceTasks(queueManager: any): void {
   queueManager.addJob({
     type: 'CONVERSATION_CLEANUP',
     payload: { type: 'end_inactive_conversations', inactiveDays: 30 },
-    priority: 'LOW',
+    priority: 'low',
     scheduledAt: cleanupTime
   }).catch((error: any) => {
     log.error('Failed to schedule conversation cleanup:', error);
@@ -64,7 +64,7 @@ function scheduleQueueMaintenanceTasks(queueManager: any): void {
   queueManager.addJob({
     type: 'CONVERSATION_CLEANUP',
     payload: { type: 'delete_old_messages', days: 90 },
-    priority: 'LOW',
+    priority: 'low',
     scheduledAt: new Date(cleanupTime.getTime() + 30 * 60 * 1000)
   }).catch((error: any) => {
     log.error('Failed to schedule message cleanup:', error);
@@ -76,7 +76,7 @@ function scheduleQueueMaintenanceTasks(queueManager: any): void {
   queueManager.addJob({
     type: 'SYSTEM_MAINTENANCE',
     payload: { type: 'cleanup_old_jobs', days: 7 },
-    priority: 'LOW',
+    priority: 'low',
     scheduledAt: queueCleanupTime
   }).catch((error: any) => {
     log.error('Failed to schedule queue cleanup:', error);

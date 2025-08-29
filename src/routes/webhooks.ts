@@ -223,7 +223,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           jobId,
           jobType: 'WEBHOOK_PROCESSING',
           jobData: jobPayload,
-          priority: 'NORMAL',
+          priority: 'normal',
           merchantId
         });
         
@@ -358,7 +358,7 @@ const dumpPath = path.join(dir, first.f);
         interactionType: 'dm',
         platform: 'instagram'
       }, {
-        useManyChat: true,
+        useManyChat: true, // Production ManyChat enabled
         fallbackToLocalAI: true,
         priority: 'normal',
         tags: ['test', 'api_test']

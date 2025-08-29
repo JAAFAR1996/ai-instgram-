@@ -63,7 +63,7 @@ export interface QueueJob {
   payload: unknown;
   merchantId: string;
   platform: 'INSTAGRAM' | 'WHATSAPP' | 'FACEBOOK';
-  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  priority: 'low' | 'normal' | 'high' | 'urgent';
   metadata?: Record<string, unknown>;
 }
 
@@ -348,7 +348,7 @@ export class ProductionQueueManager {
             merchantId,
             platform,
             payload,
-            priority: 'MEDIUM',
+            priority: 'normal',
             metadata: { addedAt: Date.now(), source: 'webhook' }
           } as unknown as QueueJob);
           
@@ -847,7 +847,7 @@ export class ProductionQueueManager {
     payload: unknown,
     merchantId: string,
     platform: 'INSTAGRAM' | 'WHATSAPP' | 'FACEBOOK',
-    priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'MEDIUM'
+    priority: 'low' | 'normal' | 'high' | 'urgent' = 'normal'
   ): Promise<JobResult> {
     if (!this.queue) {
       return { 
@@ -882,9 +882,9 @@ export class ProductionQueueManager {
       const job = await this.queue.add('process-webhook', jobData, {
         priority: priorityValue,
         delay: 0, // 🚀 إزالة كل delay - Upstash لا يدعم delayed jobs بشكل صحيح
-        removeOnComplete: priority === 'CRITICAL' ? 200 : 100,
-        removeOnFail: priority === 'CRITICAL' ? 100 : 50,
-        attempts: priority === 'CRITICAL' ? 5 : 3
+        removeOnComplete: priority === 'urgent' ? 200 : 100,
+        removeOnFail: priority === 'urgent' ? 100 : 50,
+        attempts: priority === 'urgent' ? 5 : 3
       });
 
       this.logger.info('✅ [ADD-JOB] تم إضافة webhook job بنجاح', {
@@ -933,7 +933,7 @@ export class ProductionQueueManager {
     customerId: string,
     message: string,
     platform: 'INSTAGRAM' | 'WHATSAPP' | 'FACEBOOK',
-    priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'HIGH'
+    priority: 'low' | 'normal' | 'high' | 'urgent' = 'high'
   ): Promise<JobResult> {
     if (!this.queue) {
       return { success: false, error: 'مدير الطوابير غير مهيأ' };
@@ -1426,10 +1426,10 @@ export class ProductionQueueManager {
 
   private getPriorityValue(priority: string): number {
     switch (priority) {
-      case 'CRITICAL': return 1;
-      case 'HIGH': return 2;
-      case 'MEDIUM': return 3;
-      case 'LOW': return 4;
+      case 'urgent': return 1;
+      case 'high': return 2;
+      case 'normal': return 3;
+      case 'low': return 4;
       default: return 3;
     }
   }

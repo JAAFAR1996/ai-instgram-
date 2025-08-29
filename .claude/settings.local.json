@@ -12,7 +12,8 @@
       "mcp__render__list_logs",
       "Bash(grep:*)",
       "Bash(node:*)",
-      "mcp__render__query_render_postgres"
+      "mcp__render__query_render_postgres",
+      "mcp__render__get_deploy"
     ],
     "deny": [],
     "ask": []

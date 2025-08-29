@@ -14,7 +14,7 @@ export interface SpooledJob {
   jobId: string;
   jobType: string;
   jobData: any;
-  priority: 'LOW' | 'NORMAL' | 'HIGH' | 'CRITICAL';
+  priority: 'low' | 'normal' | 'high' | 'urgent';
   merchantId: string;
   scheduledAt: Date;
   createdAt: Date;
@@ -25,7 +25,7 @@ export interface SpoolJobRequest {
   jobId: string;
   jobType: string;
   jobData: any;
-  priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'CRITICAL';
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
   merchantId: string;
   scheduledAt?: Date;
 }
@@ -88,7 +88,7 @@ export class DatabaseJobSpool {
           ${request.jobId},
           ${request.jobType},
           ${JSON.stringify(request.jobData)},
-          ${request.priority || 'NORMAL'},
+          ${request.priority || 'normal'},
           ${request.merchantId},
           ${request.scheduledAt || new Date()}
         )
@@ -133,10 +133,10 @@ export class DatabaseJobSpool {
           AND scheduled_at <= NOW()
           ORDER BY 
             CASE priority
-              WHEN 'CRITICAL' THEN 1
-              WHEN 'HIGH' THEN 2  
-              WHEN 'NORMAL' THEN 3
-              WHEN 'LOW' THEN 4
+              WHEN 'urgent' THEN 1
+              WHEN 'high' THEN 2  
+              WHEN 'normal' THEN 3
+              WHEN 'low' THEN 4
             END,
             created_at ASC
           LIMIT ${limit}
