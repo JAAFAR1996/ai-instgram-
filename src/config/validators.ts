@@ -118,6 +118,33 @@ export const REQUIRED_ENV_VARS: Record<string, EnvVarRule> = {
     required: false,
     validator: (value: string) => value.length >= 3,
     error: 'MERCHANT_ID must be at least 3 characters long'
+  },
+  
+  // ManyChat Configuration (optional - system works with Local AI fallback)
+  'MANYCHAT_API_KEY': {
+    required: false,
+    validator: (value: string) => value.length >= 20,
+    error: 'MANYCHAT_API_KEY must be at least 20 characters long'
+  },
+  'MANYCHAT_DEFAULT_FLOW_ID': {
+    required: false,
+    validator: (value: string) => value.startsWith('content') && value.length >= 20,
+    error: 'MANYCHAT_DEFAULT_FLOW_ID must start with "content" and be at least 20 characters'
+  },
+  'MANYCHAT_WELCOME_FLOW_ID': {
+    required: false,
+    validator: (value: string) => value.startsWith('content') && value.length >= 20,
+    error: 'MANYCHAT_WELCOME_FLOW_ID must start with "content" and be at least 20 characters'
+  },
+  'MANYCHAT_AI_RESPONSE_FLOW_ID': {
+    required: false,
+    validator: (value: string) => value.startsWith('content') && value.length >= 20,
+    error: 'MANYCHAT_AI_RESPONSE_FLOW_ID must start with "content" and be at least 20 characters'
+  },
+  'MANYCHAT_WEBHOOK_SECRET': {
+    required: false,
+    validator: (value: string) => value.length >= 20,
+    error: 'MANYCHAT_WEBHOOK_SECRET must be at least 20 characters long'
   }
 } as const;
 
