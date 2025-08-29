@@ -50,8 +50,8 @@ export class CircuitBreaker {
   private readonly options: CircuitBreakerOptions;
 
   constructor(
-    failureThreshold: number = 5,
-    recoveryTimeout: number = 60000,
+    failureThreshold: number = 10,  // زيادة العتبة من 5 إلى 10
+    recoveryTimeout: number = 30000, // تقليل وقت الانتظار من دقيقة إلى 30 ثانية
     options: Partial<CircuitBreakerOptions> = {}
   ) {
     this.serviceName = options.serviceName || 'unknown-service';
@@ -60,9 +60,9 @@ export class CircuitBreaker {
       failureThreshold,
       recoveryTimeout,
       monitoringPeriod: options.monitoringPeriod || 300000,    // 5 دقائق
-      expectedErrorThreshold: options.expectedErrorThreshold || 50,  // 50%
-      halfOpenMaxCalls: options.halfOpenMaxCalls || 3,
-      timeout: options.timeout || 10000,  // 10 ثواني
+      expectedErrorThreshold: options.expectedErrorThreshold || 70,  // زيادة من 50% إلى 70%
+      halfOpenMaxCalls: options.halfOpenMaxCalls || 5,  // زيادة من 3 إلى 5
+      timeout: options.timeout || 15000,  // زيادة من 10 إلى 15 ثانية
       serviceName: this.serviceName,
       ...options
     };

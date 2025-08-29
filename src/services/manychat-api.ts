@@ -92,23 +92,24 @@ export class ManyChatService {
   private readonly RATE_LIMIT_WINDOW_MS = 1000;
 
   constructor() {
-    this.apiKey = getEnv('MANYCHAT_API_KEY', { required: true });
+    this.apiKey = getEnv('MANYCHAT_API_KEY', { required: true }); // Make required
     this.baseUrl = getEnv('MANYCHAT_BASE_URL') || 'https://api.manychat.com';
     this.circuitBreaker = new CircuitBreaker(
-      5, // failureThreshold
-      30000, // recoveryTimeout
+      15, // failureThreshold: زيادة من 5 إلى 15 لتجنب فتح الدائرة بسرعة
+      20000, // recoveryTimeout: تقليل من 30 ثانية إلى 20 ثانية
       {
         serviceName: 'ManyChatAPI',
-        timeout: 10000,
+        timeout: 15000, // زيادة timeout من 10 إلى 15 ثانية
         monitoringPeriod: 300000,
-        expectedErrorThreshold: 50,
-        halfOpenMaxCalls: 3
+        expectedErrorThreshold: 80, // زيادة من 50% إلى 80%
+        halfOpenMaxCalls: 8 // زيادة من 3 إلى 8 محاولات
       }
     );
 
     this.logger.info('✅ ManyChat Service initialized', {
       baseUrl: this.baseUrl,
-      hasApiKey: !!this.apiKey
+      hasApiKey: !!this.apiKey,
+      serviceName: 'ManyChatAPI'
     });
   }
 
@@ -622,7 +623,7 @@ export class ManyChatService {
     }
 
     // Get from database (simplified for now)
-    const defaultFlowId = getEnv('MANYCHAT_DEFAULT_FLOW_ID');
+    const defaultFlowId = getEnv('MANYCHAT_DEFAULT_FLOW_ID', { required: true });
     
     if (defaultFlowId) {
       // Cache for 1 hour
@@ -630,7 +631,7 @@ export class ManyChatService {
       return defaultFlowId;
     }
 
-    return '';
+    throw new Error('MANYCHAT_DEFAULT_FLOW_ID is required but not set');
   }
 
   /**

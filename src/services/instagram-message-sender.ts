@@ -110,27 +110,65 @@ export class InstagramMessageSender {
       if (conversationId) {
         const canSendMessage = await this.checkMessageWindow(merchantId, recipientId);
         if (!canSendMessage) {
-          // محاولة إرسال template message بدلاً من الرسالة العادية
-                    const templateResult = await this.sendTemplateOrBroadcast(
+          logger.warn('⚠️ Instagram message window expired, trying fallback options', {
             merchantId,
-            recipientId, 
-            message
-          );
-          
-          if (templateResult.success) {
-            logger.info('✅ Message sent via template (window expired)', { 
-              merchantId, 
-              recipientId, 
-              templateMessageId: templateResult.messageId 
-            });
-            return templateResult;
+            recipientId,
+            conversationId
+          });
+
+          // 1. محاولة إرسال عبر ManyChat API أولاً
+          try {
+            const manyChatService = await import('./manychat-api.js').then(m => m.getManyChatService());
+            const manyChatResult = await manyChatService.sendMessage(
+              merchantId,
+              recipientId,
+              message,
+              { messageTag: 'CUSTOMER_FEEDBACK', priority: 'normal' }
+            );
+
+            if (manyChatResult.success) {
+              logger.info('✅ Message sent via ManyChat (window expired)', {
+                merchantId,
+                recipientId,
+                messageId: manyChatResult.messageId
+              });
+              return {
+                success: true,
+                deliveryStatus: 'sent' as const,
+                timestamp: new Date(),
+                ...(manyChatResult.messageId && { messageId: manyChatResult.messageId }),
+                platform: 'manychat'
+              };
+            }
+          } catch (manyChatError) {
+            logger.warn('⚠️ ManyChat fallback failed', { error: manyChatError, merchantId, recipientId });
+          }
+
+          // 2. محاولة إرسال template message
+          try {
+            const templateResult = await this.sendTemplateOrBroadcast(
+              merchantId,
+              recipientId,
+              message
+            );
+            
+            if (templateResult.success) {
+              logger.info('✅ Message sent via template (window expired)', {
+                merchantId,
+                recipientId,
+                templateMessageId: templateResult.messageId
+              });
+              return templateResult;
+            }
+          } catch (templateError) {
+            logger.warn('⚠️ Template message fallback failed', { error: templateError, merchantId, recipientId });
           }
           
-                // إذا فشل Template أيضاً، سجل الرسالة للمتابعة اليدوية
-      await this.scheduleManualFollowup(merchantId, recipientId, message);
+          // 3. إذا فشلت جميع المحاولات، سجل الرسالة للمتابعة اليدوية
+          await this.scheduleManualFollowup(merchantId, recipientId, message);
           
           return createErrorResponse(
-            new Error('Message window expired - scheduled for manual followup'), 
+            new Error('Message window expired - all fallbacks failed, scheduled for manual followup'), 
             { merchantId, recipientId, conversationId }
           );
         }
@@ -140,12 +178,98 @@ export class InstagramMessageSender {
       const client = await this.getClient(merchantId);
       const credentials = await this.getCredentials(merchantId);
 
-      // Send message via Instagram API
-      const response = await client.sendMessage(credentials, merchantId, {
-        recipientId,
-        messagingType: 'RESPONSE',
-        text: message
-      });
+      // Send message via Instagram API with error handling
+      let response;
+      try {
+        response = await client.sendMessage(credentials, merchantId, {
+          recipientId,
+          messagingType: 'RESPONSE',
+          text: message
+        });
+
+        // If Instagram API fails, try fallback options
+        if (!response.success) {
+          logger.warn('⚠️ Instagram Direct API failed, trying fallback options', {
+            merchantId,
+            recipientId,
+            error: response.error
+          });
+
+          // 1. Try ManyChat fallback first
+          try {
+            const manyChatService = await import('./manychat-api.js').then(m => m.getManyChatService());
+            const manyChatResult = await manyChatService.sendMessage(
+              merchantId,
+              recipientId,
+              message,
+              { messageTag: 'CUSTOMER_FEEDBACK', priority: 'normal' }
+            );
+
+            if (manyChatResult.success) {
+              logger.info('✅ Message sent via ManyChat (Direct API failed)', {
+                merchantId,
+                recipientId,
+                messageId: manyChatResult.messageId
+              });
+              return {
+                success: true,
+                deliveryStatus: 'sent' as const,
+                timestamp: new Date(),
+                ...(manyChatResult.messageId && { messageId: manyChatResult.messageId }),
+                platform: 'manychat'
+              };
+            }
+          } catch (manyChatError) {
+            logger.warn('⚠️ ManyChat fallback failed', { error: manyChatError, merchantId, recipientId });
+          }
+
+          // 2. Schedule for manual followup as final fallback
+          await this.scheduleManualFollowup(merchantId, recipientId, message);
+          
+          return createErrorResponse(
+            new Error(`Instagram API failed: ${response.error || 'Unknown error'} - scheduled for manual followup`), 
+            { merchantId, recipientId, conversationId }
+          );
+        }
+      } catch (apiError) {
+        logger.error('❌ Instagram API error', { error: apiError, merchantId, recipientId });
+        
+        // Try ManyChat fallback on API error
+        try {
+          const manyChatService = await import('./manychat-api.js').then(m => m.getManyChatService());
+          const manyChatResult = await manyChatService.sendMessage(
+            merchantId,
+            recipientId,
+            message,
+            { messageTag: 'CUSTOMER_FEEDBACK', priority: 'normal' }
+          );
+
+          if (manyChatResult.success) {
+            logger.info('✅ Message sent via ManyChat (API error fallback)', {
+              merchantId,
+              recipientId,
+              messageId: manyChatResult.messageId
+            });
+            return {
+              success: true,
+              deliveryStatus: 'sent' as const,
+              timestamp: new Date(),
+              ...(manyChatResult.messageId && { messageId: manyChatResult.messageId }),
+              platform: 'manychat'
+            };
+          }
+        } catch (manyChatError) {
+          logger.warn('⚠️ ManyChat fallback failed', { error: manyChatError, merchantId, recipientId });
+        }
+
+        // Schedule for manual followup as final fallback
+        await this.scheduleManualFollowup(merchantId, recipientId, message);
+        
+        return createErrorResponse(
+          apiError instanceof Error ? apiError : new Error('Instagram API error - scheduled for manual followup'), 
+          { merchantId, recipientId, conversationId }
+        );
+      }
 
       // Update delivery status
       const result: SendResult = {

@@ -54,6 +54,7 @@ export interface SendResult {
   // تُستخدم في instagram-message-sender.ts
   deliveryStatus?: 'sent' | 'failed';
   timestamp?: Date;
+  platform?: string;
 }
 
 // طبقة خفيفة لتوافق صفوف SQL مع قيود DatabaseRow في generics
