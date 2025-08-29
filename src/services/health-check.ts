@@ -1,6 +1,7 @@
 import { getRedisConnectionManager } from './RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { performHealthCheck } from './RedisSimpleHealthCheck.js';
+import { getManyChatService } from './manychat-api.js';
 
 // Health check result types
 export interface HealthCheckResult {
@@ -26,6 +27,7 @@ export interface HealthDetails {
   redis: HealthCheckResult;
   database: DatabaseHealthResult;
   memory: MemoryHealthResult;
+  manychat?: HealthCheckResult;
 }
 
 export type HealthSnapshot = {
@@ -42,7 +44,8 @@ let snapshot: HealthSnapshot = {
   details: {
     redis: { ok: false },
     database: { ok: false, connected: false },
-    memory: { heapUsedMB: 0, heapTotalMB: 0, usagePercent: 0, ok: false }
+    memory: { heapUsedMB: 0, heapTotalMB: 0, usagePercent: 0, ok: false },
+    manychat: { ok: false }
   },
 };
 let timer: NodeJS.Timeout | null = null;
@@ -103,9 +106,29 @@ function memoryHealthProbe(): MemoryHealthResult {
   };
 }
 
+// ManyChat health probe
+async function manychatHealthProbe(): Promise<HealthCheckResult> {
+  try {
+    const manyChatService = getManyChatService();
+    const healthStatus = await manyChatService.getHealthStatus();
+    const result: HealthCheckResult = {
+      ok: healthStatus.status === 'healthy'
+    };
+    if (healthStatus.status !== 'healthy') {
+      result.error = 'Circuit breaker issues';
+    }
+    return result;
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'ManyChat service unavailable'
+    };
+  }
+}
+
 async function compute(): Promise<HealthSnapshot> {
   // فحص جميع الخدمات بالتوازي
-  const [redis, database, memory] = await Promise.all([
+  const [redis, database, memory, manychat] = await Promise.all([
     redisHealthProbe().catch((e) => ({ 
       ok: false, 
       error: e instanceof Error ? e.message : 'Unknown error' 
@@ -115,19 +138,24 @@ async function compute(): Promise<HealthSnapshot> {
       connected: false,
       error: e instanceof Error ? e.message : 'Unknown error' 
     })),
-    Promise.resolve(memoryHealthProbe())
+    Promise.resolve(memoryHealthProbe()),
+    manychatHealthProbe().catch((e) => ({
+      ok: false,
+      error: e instanceof Error ? e.message : 'ManyChat health check failed'
+    }))
   ]);
   
-  const details: HealthDetails = { redis, database, memory };
+  const details: HealthDetails = { redis, database, memory, manychat };
   
   // تحديد الحالة العامة
   const redisOk = details.redis.ok === true;
   const dbOk = details.database.ok === true;
   const memOk = details.memory.ok === true;
+  const manychatOk = details.manychat?.ok === true;
   
   // Render يتطلب فقط database ليكون ready
   const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
-  const ok = isRender ? dbOk : (redisOk && dbOk && memOk);
+  const ok = isRender ? dbOk : (redisOk && dbOk && memOk && manychatOk);
   
   return {
     ready: ok,
@@ -151,7 +179,8 @@ export function startHealth(refreshMs = 30000) { // 30 ثانية لـ Render
         details: {
           redis: { ok: false, error: errorMessage },
           database: { ok: false, connected: false, error: errorMessage },
-          memory: { heapUsedMB: 0, heapTotalMB: 0, usagePercent: 0, ok: false }
+          memory: { heapUsedMB: 0, heapTotalMB: 0, usagePercent: 0, ok: false },
+          manychat: { ok: false, error: errorMessage }
         }
       };
     }
@@ -171,4 +200,17 @@ export function stopHealth() {
 
 export function getHealthSnapshot(): HealthSnapshot {
   return snapshot;
+}
+
+/**
+ * Reset ManyChat circuit breaker for recovery
+ */
+export function resetManyChatCircuitBreaker(): void {
+  try {
+    const manyChatService = getManyChatService();
+    manyChatService.resetCircuitBreaker();
+    console.log('✅ ManyChat circuit breaker reset successfully');
+  } catch (error) {
+    console.error('❌ Failed to reset ManyChat circuit breaker:', error);
+  }
 }

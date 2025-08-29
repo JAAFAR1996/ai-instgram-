@@ -673,6 +673,16 @@ export class ManyChatService {
   }
 
   /**
+   * Reset circuit breaker (for debugging/recovery)
+   */
+  public resetCircuitBreaker(): void {
+    this.circuitBreaker.reset();
+    this.logger.info('🔄 Circuit Breaker reset manually', {
+      serviceName: 'ManyChatAPI'
+    });
+  }
+
+  /**
    * Dispose resources
    */
   public dispose(): void {

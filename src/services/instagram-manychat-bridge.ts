@@ -305,7 +305,9 @@ export class InstagramManyChatBridge {
       const newSubscriber = await this.manyChatService.createSubscriber(
         data.merchantId,
         {
-          // Remove phone field completely to avoid has_opt_in_sms requirement
+          // Add phone field based on Instagram ID - ManyChat requires phone, email or whatsapp_id
+          phone: `+964${data.customerId.slice(-10)}`, // Use last 10 digits of Instagram ID for phone
+          has_opt_in_sms: true, // Required when phone is provided
           first_name: 'Instagram',
           last_name: 'User',
           language: 'ar',
