@@ -169,6 +169,24 @@ export class InstagramManyChatBridge {
     data: BridgeMessageData,
     options: BridgeProcessingOptions
   ): Promise<ManyChatResponse> {
+    // Step 0: Try to reset circuit breaker if it's open
+    try {
+      const healthStatus = await this.manyChatService.getHealthStatus();
+      if (healthStatus.status === 'unhealthy') {
+        this.logger.warn('🔄 ManyChat circuit breaker is open, attempting reset', {
+          merchantId: data.merchantId,
+          customerId: data.customerId
+        });
+        this.manyChatService.resetCircuitBreaker();
+      }
+    } catch (error) {
+      this.logger.warn('Failed to check/reset ManyChat circuit breaker', {
+        error: error instanceof Error ? error.message : String(error),
+        merchantId: data.merchantId,
+        customerId: data.customerId
+      });
+    }
+
     // Step 1: Ensure subscriber exists in ManyChat
     let subscriber = await this.ensureSubscriberExists(data);
 
@@ -302,12 +320,12 @@ export class InstagramManyChatBridge {
         customerId: data.customerId
       });
 
+      // Try simple approach first - just email
       const newSubscriber = await this.manyChatService.createSubscriber(
         data.merchantId,
         {
-          // Add phone field based on Instagram ID - ManyChat requires phone, email or whatsapp_id
-          phone: `+964${data.customerId.slice(-10)}`, // Use last 10 digits of Instagram ID for phone
-          has_opt_in_sms: true, // Required when phone is provided
+          // Use email instead of phone to avoid SMS opt-in requirements
+          email: `instagram_${data.customerId}@temp.local`,
           first_name: 'Instagram',
           last_name: 'User',
           language: 'ar',

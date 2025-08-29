@@ -630,7 +630,7 @@ export class ManyChatService {
     }
 
     // Get from database (simplified for now)
-    const defaultFlowId = getEnv('MANYCHAT_DEFAULT_FLOW_ID', { required: true });
+    const defaultFlowId = getEnv('MANYCHAT_DEFAULT_FLOW_ID', { required: false });
     
     if (defaultFlowId) {
       // Cache for 1 hour
@@ -638,7 +638,9 @@ export class ManyChatService {
       return defaultFlowId;
     }
 
-    throw new Error('MANYCHAT_DEFAULT_FLOW_ID is required but not set');
+    // Use empty string as fallback - ManyChat API will use default flow
+    this.logger.warn('⚠️ MANYCHAT_DEFAULT_FLOW_ID not set, using empty flow ID (ManyChat will use default)');
+    return '';
   }
 
   /**
