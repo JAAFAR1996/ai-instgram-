@@ -81,11 +81,24 @@ async function redisHealthProbe(): Promise<HealthCheckResult> {
   }
 }
 
-// Simple database health check
+// Enhanced database health check with URL validation
 async function databaseHealthProbe(): Promise<DatabaseHealthResult> {
   try {
-    const { getDatabase } = await import('../db/adapter.js');
-    const db = getDatabase();
+    // First validate DATABASE_URL
+    const { validateDatabaseUrl } = await import('../db/validate-database-url.js');
+    const validation = validateDatabaseUrl(process.env.DATABASE_URL);
+    
+    if (!validation.isValid) {
+      return { 
+        ok: false, 
+        connected: false, 
+        error: `DATABASE_URL validation failed: ${validation.error}` 
+      };
+    }
+
+    // Then test actual connection with recovery
+    const { getDatabaseWithRecovery } = await import('../db/adapter.js');
+    const db = await getDatabaseWithRecovery();
     const dbHealthy = await db.health();
     return { ok: dbHealthy, connected: true };
   } catch (error: unknown) {

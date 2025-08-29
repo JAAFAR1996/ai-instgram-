@@ -26,106 +26,47 @@ let poolHealthStats = {
   transactionTimeouts: 0
 };
 
-/**
- * Connection retry configuration
- */
-interface RetryConfig {
-  maxRetries: number;
-  baseDelay: number;
-  maxDelay: number;
-  backoffMultiplier: number;
-}
+// Removed unused retry configuration for simplified implementation
 
-// ⚡ STAGE 3: Enhanced retry configuration for production resilience
-const DEFAULT_RETRY_CONFIG: RetryConfig = {
-  maxRetries: process.env.NODE_ENV === 'production' ? 8 : 5,
-  baseDelay: 1500, // 1.5 seconds initial delay
-  maxDelay: 30000, // 30 seconds max delay for production
-  backoffMultiplier: 1.8 // More gradual backoff
-};
+// Removed unused RetryStrategy interface
 
-// ⚡ Connection retry strategies
-interface RetryStrategy {
-  name: string;
-  shouldRetry: (error: Error, attempt: number) => boolean;
-  getDelay: (attempt: number, config: RetryConfig) => number;
-}
-
-// ⚡ STAGE 3: Adaptive timeout calculation
-function calculateAdaptiveTimeout(baseTimeout: number, attempt: number): number {
-  // زيادة التايم أوت مع المحاولات لتحسين فرص النجاح
-  const multiplier = 1 + (attempt * 0.3); // 30% زيادة لكل محاولة
-  const adaptiveTimeout = Math.min(baseTimeout * multiplier, baseTimeout * 2.5); // حد أقصى 2.5x
-  
-  // إضافة buffer إضافي للعمليات المعقدة في المحاولات المتأخرة
-  const complexityBuffer = attempt > 2 ? 5000 : 0;
-  
-  return Math.floor(adaptiveTimeout + complexityBuffer);
-}
+// Removed unused calculateAdaptiveTimeout function
 
 /**
- * Production-grade pool configuration using centralized config
- * محسّن لـ Render deployment
+ * SIMPLIFIED pool configuration for Render deployment
+ * Fixed for Node.js internal assertion errors
  */
 function createPoolConfig(): PoolConfig {
   const config = getConfig();
   const isProduction = process.env.NODE_ENV === 'production';
   const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
   
-  // Enhanced SSL configuration for production
+  // SIMPLIFIED SSL configuration
   let sslConfig: any = false;
-  
   if (config.database.ssl || isProduction || isRender) {
     sslConfig = {
-      // Require SSL in production unless explicitly disabled
-      rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
-      // Enable SSL verification in production
-      checkServerIdentity: isProduction ? undefined : () => undefined,
-      // Minimum TLS version
-      minVersion: 'TLSv1.2',
-      // Secure cipher suites
-      ciphers: [
-        'ECDHE-RSA-AES128-GCM-SHA256',
-        'ECDHE-RSA-AES256-GCM-SHA384',
-        'ECDHE-RSA-AES128-SHA256',
-        'ECDHE-RSA-AES256-SHA384'
-      ].join(':'),
-      // Honor server cipher order
-      honorCipherOrder: true
+      rejectUnauthorized: false // Simplified for Render
     };
     
-    // Additional production SSL settings
-    if (isProduction) {
-      log.info('🔐 Using production SSL configuration for database', {
-        rejectUnauthorized: sslConfig.rejectUnauthorized,
-        minVersion: sslConfig.minVersion
-      });
-    }
+    log.info('🔐 Using simplified SSL configuration for database');
   }
   
-  // ⚡ STAGE 3: Enhanced pool configuration for optimal performance
-  const maxConnections = Number(process.env.DB_MAX_CONNECTIONS || process.env.DATABASE_POOL_MAX || (isProduction ? 20 : 10));
-  const minConnections = Number(process.env.DATABASE_POOL_MIN || Math.max(2, Math.floor(maxConnections / 4)));
+  // SIMPLIFIED pool configuration to avoid Node.js internal assertions
+  const maxConnections = Math.min(Number(process.env.DB_MAX_CONNECTIONS || '10'), 20);
   
   return {
     connectionString: config.database.url,
     ssl: sslConfig,
-    // ⚡ Optimized connection pool sizing
+    // Simplified pool sizing
     max: maxConnections,
-    min: minConnections,
-    // ⚡ Improved timeout settings
-    idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT || (isProduction ? 30000 : 15000)),
-    connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT || 10000),
-    // ⚡ Enhanced query timeouts
-    statement_timeout: Number(process.env.DB_STATEMENT_TIMEOUT || (isProduction ? 45000 : 30000)),
-    query_timeout: Number(process.env.DB_QUERY_TIMEOUT || (isProduction ? 40000 : 25000)),
-    // ⚡ Connection lifecycle management
-    allowExitOnIdle: !isProduction, // Keep connections alive in production
-    // ⚡ Monitoring and identification
-    application_name: `ai-sales-${process.env.NODE_ENV || 'dev'}-${process.pid}`,
-    // ⚡ Enhanced keepalive settings
-    keepAlive: true,
-    keepAliveInitialDelayMillis: isProduction ? 30000 : 10000,
+    min: 1, // Start with minimum connections
+    // Conservative timeout settings
+    idleTimeoutMillis: 30000, // 30 seconds
+    connectionTimeoutMillis: 15000, // 15 seconds - shorter for faster failure
+    // Simplified application name
+    application_name: `ai-sales-${process.env.NODE_ENV || 'dev'}`,
+    // Basic keepalive
+    keepAlive: true
   };
 }
 
@@ -134,58 +75,40 @@ function createPoolConfig(): PoolConfig {
  */
 export function getPool(): Pool {
   if (!pool) {
-    const config = createPoolConfig();
-    pool = new Pool(config);
+    try {
+      const config = createPoolConfig();
+      pool = new Pool(config);
 
-    // Enhanced pool event handlers
-    pool.on('connect', () => {
-      poolHealthStats.totalConnections++;
-      poolHealthStats.successfulConnections++;
-      log.debug('New client connected to PostgreSQL', {
-        totalConnections: poolHealthStats.totalConnections,
-        poolStats: getPoolStats()
+      // SIMPLIFIED pool event handlers to avoid Node.js internal assertions
+      pool.on('connect', () => {
+        poolHealthStats.totalConnections++;
+        poolHealthStats.successfulConnections++;
+        log.debug('New client connected to PostgreSQL');
       });
-    });
 
-    pool.on('acquire', () => {
-      log.debug('Client acquired from pool', {
-        idleCount: pool?.idleCount,
-        totalCount: pool?.totalCount
+      pool.on('error', (err) => {
+        poolHealthStats.failedConnections++;
+        const dbError = err as DatabaseError;
+        log.error('Database pool error:', {
+          error: err.message,
+          code: dbError.code
+        });
       });
-    });
 
-    pool.on('error', (err) => {
-      poolHealthStats.failedConnections++;
-      const dbError = err as DatabaseError;
-      log.error('Database pool error:', {
-        error: err.message,
-        code: dbError.code,
-        totalConnections: poolHealthStats.totalConnections,
-        failedConnections: poolHealthStats.failedConnections
+      // Basic health monitoring only
+      startPoolHealthMonitoring();
+
+      log.info('PostgreSQL pool initialized', {
+        max: config.max,
+        min: config.min,
+        connectionTimeout: config.connectionTimeoutMillis
       });
-      
-      // Handle connection failure
-      handleConnectionFailure(err);
-    });
-
-    pool.on('remove', () => {
-      log.debug('Client removed from pool', {
-        reason: 'idle_timeout_or_error',
-        remainingConnections: pool?.totalCount
+    } catch (error) {
+      log.error('❌ Failed to create database pool', {
+        error: error instanceof Error ? error.message : String(error)
       });
-    });
-
-    // Setup connection monitoring
-    setupConnectionRetry();
-    startPoolHealthMonitoring();
-
-    log.info('PostgreSQL pool initialized with monitoring', {
-      max: config.max,
-      min: config.min,
-      idleTimeout: config.idleTimeoutMillis,
-      connectionTimeout: config.connectionTimeoutMillis,
-      monitoringEnabled: true
-    });
+      throw error;
+    }
   }
 
   return pool;
@@ -244,9 +167,9 @@ export async function withTx<T>(
         timeout
       });
 
-      // ⚡ STAGE 3: Enhanced transaction timeout with proper cleanup
+      // SIMPLIFIED transaction timeout
       let timeoutId: NodeJS.Timeout | null = null;
-      const adaptiveTimeout = calculateAdaptiveTimeout(timeout, attempt);
+      const adaptiveTimeout = timeout + (attempt * 5000); // Simple increasing timeout
       
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
@@ -297,16 +220,13 @@ export async function withTx<T>(
         await handleDeadlockRecovery(error as Error, attempt, transactionId);
       }
       
-      // Retry conditions with enhanced logic
+      // SIMPLIFIED retry conditions
       const shouldRetry = attempt < retries && (isDeadlock || isSerializationFailure);
       
       if (shouldRetry) {
         attempt++;
-        // Exponential backoff for retries
-        const backoffDelay = Math.min(
-          DEFAULT_RETRY_CONFIG.baseDelay * Math.pow(DEFAULT_RETRY_CONFIG.backoffMultiplier, attempt - 1),
-          DEFAULT_RETRY_CONFIG.maxDelay
-        );
+        // Simple exponential backoff
+        const backoffDelay = Math.min(1000 * Math.pow(1.5, attempt - 1), 10000);
         
         log.info('Retrying transaction after backoff', {
           transactionId,
@@ -344,106 +264,14 @@ export async function withTx<T>(
 /**
  * Setup connection retry mechanism
  */
-// ⚡ STAGE 3: Advanced connection retry strategies
-const RETRY_STRATEGIES: Record<string, RetryStrategy> = {
-  exponentialBackoff: {
-    name: 'exponential-backoff',
-    shouldRetry: (error: Error, attempt: number) => {
-      const dbError = error as DatabaseError;
-      const retryableErrors = ['ECONNREFUSED', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE'];
-      return attempt < DEFAULT_RETRY_CONFIG.maxRetries && 
-             retryableErrors.includes(dbError.code || '');
-    },
-    getDelay: (attempt: number, config: RetryConfig) => {
-      const delay = Math.min(
-        config.baseDelay * Math.pow(config.backoffMultiplier, attempt - 1),
-        config.maxDelay
-      );
-      // Add jitter to prevent thundering herd
-      return delay + Math.random() * 1000;
-    }
-  },
-  linearBackoff: {
-    name: 'linear-backoff',
-    shouldRetry: (error: Error, attempt: number) => {
-      log.debug('Linear backoff retry check', { error: error.message, attempt });
-      return attempt < DEFAULT_RETRY_CONFIG.maxRetries;
-    },
-    getDelay: (attempt: number, config: RetryConfig) => {
-      return Math.min(config.baseDelay * attempt, config.maxDelay);
-    }
-  }
-};
+// Removed unused RETRY_STRATEGIES for simplified implementation
 
-function setupConnectionRetry(): void {
-  if (!pool) return;
+// Removed unused setupConnectionRetry function for simplified implementation
 
-  // ⚡ Enhanced connection error handling with smart retry strategies
-  pool.on('error', async (err) => {
-    if (isConnectionError(err)) {
-      poolHealthStats.connectionRetries++;
-      const strategy = RETRY_STRATEGIES.exponentialBackoff as RetryStrategy;
-      
-      log.warn('Connection error detected, initiating enhanced retry sequence', {
-        error: err.message,
-        code: (err as DatabaseError).code,
-        retryCount: poolHealthStats.connectionRetries,
-        strategy: strategy.name
-      });
-      
-      // Execute retry strategy
-      await executeRetryStrategy(err, strategy);
-    }
-  });
-}
-
-// ⚡ Execute sophisticated retry strategy
-async function executeRetryStrategy(error: Error, strategy: RetryStrategy): Promise<void> {
-  let attempt = 1;
-  
-  while (strategy.shouldRetry(error, attempt)) {
-    const delay = strategy.getDelay(attempt, DEFAULT_RETRY_CONFIG);
-    
-    log.info(`⚡ Attempting database recovery (${attempt}/${DEFAULT_RETRY_CONFIG.maxRetries})`, {
-      strategy: strategy.name,
-      delay,
-      attempt
-    });
-    
-    await new Promise(resolve => setTimeout(resolve, delay));
-    
-    try {
-      // Test connection recovery with timeout
-      await Promise.race([
-        checkDatabaseHealth(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Health check timeout')), 5000)
-        )
-      ]);
-      
-      log.info('✅ Database connection recovery successful', {
-        attempt,
-        totalRetries: poolHealthStats.connectionRetries
-      });
-      return;
-      
-    } catch (recoveryError) {
-      log.warn(`❌ Database recovery attempt ${attempt} failed`, { 
-        recoveryError: recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
-        nextAttemptIn: attempt < DEFAULT_RETRY_CONFIG.maxRetries ? strategy.getDelay(attempt + 1, DEFAULT_RETRY_CONFIG) : 'none'
-      });
-      attempt++;
-    }
-  }
-  
-  log.error('🚨 Database connection recovery exhausted all retry attempts', {
-    totalAttempts: attempt - 1,
-    maxRetries: DEFAULT_RETRY_CONFIG.maxRetries
-  });
-}
+// Removed unused executeRetryStrategy function for simplified implementation
 
 /**
- * Start pool health monitoring
+ * Start SIMPLIFIED pool health monitoring for Render
  */
 function startPoolHealthMonitoring(): void {
   // Clear existing monitor if any
@@ -451,104 +279,29 @@ function startPoolHealthMonitoring(): void {
     clearInterval(connectionMonitor);
   }
   
+  // SIMPLIFIED monitoring - only basic health check
   connectionMonitor = setInterval(async () => {
-    await monitorPoolHealth();
-  }, 60000); // Check every minute
+    try {
+      const stats = getPoolStats();
+      if (stats) {
+        poolHealthStats.lastHealthCheck = new Date();
+        log.debug('Pool health check', {
+          total: stats.totalCount,
+          idle: stats.idleCount,
+          waiting: stats.waitingCount
+        });
+      }
+    } catch (error) {
+      log.warn('Pool health monitoring error', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }, 120000); // Check every 2 minutes - less frequent for Render
 }
 
-/**
- * Monitor pool health and log metrics
- */
-async function monitorPoolHealth(): Promise<void> {
-  try {
-    const stats = getPoolStats();
-    
-    if (!stats || !pool) return;
-    
-    // Calculate pool utilization
-    const utilization = ((stats.totalCount - stats.idleCount) / (stats.max || 1)) * 100;
-    
-    // Update health stats
-    poolHealthStats.lastHealthCheck = new Date();
-    
-    // Log health metrics
-    log.debug('Pool health check', {
-      utilization: Math.round(utilization),
-      totalConnections: stats.totalCount,
-      idleConnections: stats.idleCount,
-      waitingConnections: stats.waitingCount,
-      maxConnections: stats.max,
-      successfulConnections: poolHealthStats.successfulConnections,
-      failedConnections: poolHealthStats.failedConnections,
-      avgResponseTime: poolHealthStats.avgResponseTime,
-      transactionTimeouts: poolHealthStats.transactionTimeouts,
-      deadlockCount: poolHealthStats.deadlockCount
-    });
-    
-    // Warning thresholds
-    if (utilization > 80) {
-      log.warn('High database pool utilization', {
-        utilization: Math.round(utilization),
-        recommendation: 'Consider optimizing connection usage or increasing pool size'
-      });
-    }
-    
-    if (stats.waitingCount > 0) {
-      log.warn('Clients waiting for database connections', {
-        waitingCount: stats.waitingCount,
-        recommendation: 'Consider increasing pool size or optimizing query performance'
-      });
-    }
-    
-    // Memory leak detection
-    if (poolHealthStats.totalConnections > (stats.max || 10) * 10) {
-      log.error('Potential connection leak detected', {
-        totalConnectionsCreated: poolHealthStats.totalConnections,
-        currentConnections: stats.totalCount,
-        maxAllowed: stats.max,
-        recommendation: 'Investigate for connection leaks'
-      });
-    }
-    
-  } catch (error) {
-    log.error('Pool health monitoring failed', {
-      error: error instanceof Error ? error.message : String(error)
-    });
-  }
-}
+// Removed unused monitorPoolHealth function for simplified implementation
 
-/**
- * Handle connection failures with automatic recovery
- */
-function handleConnectionFailure(error: Error): void {
-  const dbError = error as DatabaseError;
-  log.error('Connection failure detected', {
-    error: error.message,
-    code: dbError.code,
-    connectionRetries: poolHealthStats.connectionRetries
-  });
-  
-  // Implement connection failure recovery strategies
-  const errorCode = dbError.code;
-  
-  switch (errorCode) {
-    case 'ECONNREFUSED':
-    case 'ENOTFOUND':
-      log.warn('Database server unreachable, will attempt reconnection');
-      break;
-      
-    case 'ECONNRESET':
-      log.warn('Connection reset by database server');
-      break;
-      
-    case 'ETIMEDOUT':
-      log.warn('Connection timeout, check network and database performance');
-      break;
-      
-    default:
-      log.warn('Unknown connection error', { errorCode });
-  }
-}
+// Removed unused handleConnectionFailure function for simplified implementation
 
 /**
  * Optimize pool configuration based on usage patterns
@@ -717,26 +470,7 @@ function isSerializationError(error: unknown): boolean {
          pgError.code === '25P02';   // transaction_integrity_constraint_violation
 }
 
-/**
- * Check if error is a connection-related error
- */
-function isConnectionError(error: Error): boolean {
-  const connectionCodes = [
-    'ECONNREFUSED',
-    'ECONNRESET', 
-    'ENOTFOUND',
-    'ETIMEDOUT',
-    'EPIPE',
-    'ENETUNREACH'
-  ];
-  
-  const pgError = error as DatabaseError;
-  return connectionCodes.includes(pgError.code || '') ||
-         connectionCodes.includes((pgError as any).errno || '') ||
-         (typeof error === 'object' && error !== null && 'message' in error && 
-          typeof error.message === 'string' && 
-          error.message.includes('connect'));
-}
+// Removed unused isConnectionError function for simplified implementation
 
 /**
  * Enhanced pool statistics for comprehensive monitoring

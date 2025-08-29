@@ -85,9 +85,20 @@ export class DatabaseAdapter implements IDatabase {
   private readonly DEFAULT_TRANSACTION_TIMEOUT = 60000; // 60 seconds
 
   constructor() {
-    this.pool = getPool();
-    this.sql = this.createSQLFunction();
-    this.setupPoolEventHandlers();
+    try {
+      this.pool = getPool();
+      this.sql = this.createSQLFunction();
+      this.setupPoolEventHandlers();
+      log.info('✅ Database adapter initialized successfully');
+    } catch (error) {
+      log.error('❌ Failed to initialize database adapter', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw new DatabaseError(
+        `Database initialization failed: ${error instanceof Error ? error.message : String(error)}`,
+        'INIT_FAILED'
+      );
+    }
   }
 
   /**
@@ -381,20 +392,33 @@ export class DatabaseAdapter implements IDatabase {
   }
 
   /**
-   * Health check with detailed diagnostics
+   * Enhanced health check with recovery mechanism
    */
   async health(): Promise<boolean> {
     try {
       const startTime = Date.now();
-      await this.pool.query('SELECT 1');
-      const duration = Date.now() - startTime;
       
+      // Validate pool first
+      if (!this.pool || this.pool.ended) {
+        log.warn('⚠️ Database pool is ended, attempting recovery...');
+        await this.recoverConnection();
+      }
+      
+      // Test with timeout
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Health check timeout')), 10000)
+      );
+      
+      const queryPromise = this.pool.query('SELECT 1 as test');
+      await Promise.race([queryPromise, timeoutPromise]);
+      
+      const duration = Date.now() - startTime;
       const poolStats = this.getPoolStats();
       
-      log.debug('🔍 Database health check', {
-        healthy: true,
+      log.debug('✅ Database health check passed', {
         duration,
-        poolStats
+        totalConnections: poolStats.totalCount,
+        idleConnections: poolStats.idleCount
       });
       
       return true;
@@ -404,8 +428,19 @@ export class DatabaseAdapter implements IDatabase {
       
       log.error('❌ Database health check failed', {
         error: dbError.message,
-        poolStats
+        poolStats,
+        recovery: 'attempting_connection_recovery'
       });
+      
+      // Attempt recovery on health check failure
+      try {
+        await this.recoverConnection();
+        log.info('🔄 Connection recovery completed after health check failure');
+      } catch (recoveryError) {
+        log.error('❌ Connection recovery failed', {
+          recoveryError: recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
+        });
+      }
       
       return false;
     }
@@ -492,6 +527,43 @@ export class DatabaseAdapter implements IDatabase {
   async isConnected(): Promise<boolean> {
     return await this.health();
   }
+
+  /**
+   * Recover database connection after failure
+   */
+  async recoverConnection(): Promise<void> {
+    try {
+      log.info('🔄 Starting database connection recovery...');
+      
+      // Close existing pool if it exists
+      if (this.pool && !this.pool.ended) {
+        await this.pool.end();
+      }
+      
+      // Import getPool to create a new pool
+      const { getPool } = await import('./index.js');
+      this.pool = getPool();
+      
+      // Recreate SQL function with new pool
+      this.sql = this.createSQLFunction();
+      
+      // Test the new connection
+      await this.pool.query('SELECT 1');
+      
+      log.info('✅ Database connection recovery successful');
+      
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log.error('❌ Database connection recovery failed', {
+        error: errorMessage
+      });
+      
+      throw new DatabaseError(
+        `Connection recovery failed: ${errorMessage}`,
+        'RECOVERY_FAILED'
+      );
+    }
+  }
 }
 
 /**
@@ -504,10 +576,51 @@ let dbAdapter: DatabaseAdapter | null = null;
  */
 export function getDatabase(): DatabaseAdapter {
   if (!dbAdapter) {
-    dbAdapter = new DatabaseAdapter();
-    log.info('✅ Database adapter initialized');
+    try {
+      dbAdapter = new DatabaseAdapter();
+      log.info('✅ Database adapter singleton created');
+    } catch (error) {
+      log.error('❌ Failed to create database adapter singleton', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
   }
   return dbAdapter;
+}
+
+/**
+ * Reset database adapter (for recovery scenarios)
+ */
+export function resetDatabase(): void {
+  log.info('🔄 Resetting database adapter singleton...');
+  dbAdapter = null;
+}
+
+/**
+ * Get database with automatic recovery attempt
+ */
+export async function getDatabaseWithRecovery(): Promise<DatabaseAdapter> {
+  try {
+    const db = getDatabase();
+    
+    // Test if connection is working
+    const isHealthy = await db.health();
+    if (!isHealthy) {
+      log.warn('⚠️ Database not healthy, attempting recovery...');
+      await db.recoverConnection();
+    }
+    
+    return db;
+  } catch (error) {
+    log.error('❌ Database recovery failed, resetting adapter', {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    
+    // Reset and try once more
+    resetDatabase();
+    return getDatabase();
+  }
 }
 
 /**
