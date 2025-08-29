@@ -454,7 +454,7 @@ export class ManyChatService {
           payload.has_opt_in_sms = true; // Default to true for phone subscribers
         }
 
-        const response = await this.makeAPIRequest('/fb/subscriber/create', {
+        const response = await this.makeAPIRequest('/fb/subscriber/createSubscriber', {
           method: 'POST',
           body: JSON.stringify(payload)
         });
