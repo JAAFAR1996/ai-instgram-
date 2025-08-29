@@ -305,8 +305,7 @@ export class InstagramManyChatBridge {
       const newSubscriber = await this.manyChatService.createSubscriber(
         data.merchantId,
         {
-          // Don't use customer ID as phone - use generated unique identifier instead
-          phone: `+964${Math.floor(1000000000 + Math.random() * 9000000000)}`, // Fake phone for Iraq
+          // Remove phone field completely to avoid has_opt_in_sms requirement
           first_name: 'Instagram',
           last_name: 'User',
           language: 'ar',

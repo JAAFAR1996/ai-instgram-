@@ -443,13 +443,20 @@ export class ManyChatService {
       language?: string;
       timezone?: string;
       custom_fields?: Record<string, unknown>;
+      has_opt_in_sms?: boolean;
     }
   ): Promise<ManyChatSubscriber> {
     const result = await this.circuitBreaker.execute(async () => {
       try {
+        // Validate has_opt_in_sms requirement if phone is provided
+        const payload = { ...subscriberData };
+        if (payload.phone && !payload.has_opt_in_sms) {
+          payload.has_opt_in_sms = true; // Default to true for phone subscribers
+        }
+
         const response = await this.makeAPIRequest('/fb/subscriber/create', {
           method: 'POST',
-          body: JSON.stringify(subscriberData)
+          body: JSON.stringify(payload)
         });
 
         if (response.status === 'success' && response.data) {
