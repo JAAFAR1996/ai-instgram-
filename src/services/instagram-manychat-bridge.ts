@@ -330,25 +330,51 @@ export class InstagramManyChatBridge {
       );
       
     } catch (error) {
+      // تسجيل تفصيلي للخطأ الأصلي
+      this.logger.error('❌ ManyChat sendMessage failed - analyzing error', {
+        customerId,
+        merchantId,
+        errorType: error?.constructor?.name,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined
+      });
+
       // إذا كان الخطأ "Subscriber does not exist"
       if (error instanceof Error) {
         const errorMsg = error.message.toLowerCase();
-        if (errorMsg.includes('subscriber does not exist') || 
-            errorMsg.includes('validation error')) {
-          
-          this.logger.info('🔄 Subscriber not found, creating and retrying...', { 
+        const isSubscriberError = errorMsg.includes('subscriber does not exist') || 
+                                 errorMsg.includes('validation error') ||
+                                 (errorMsg.includes('details:') && errorMsg.includes('subscriber'));
+        
+        if (isSubscriberError) {
+          this.logger.info('🔄 Detected subscriber error, attempting auto-creation', { 
             customerId, 
-            merchantId 
+            merchantId,
+            originalError: error.message
           });
           
-          // محاولة إنشاء subscriber
+          // محاولة إنشاء subscriber مع معلومات أفضل
           try {
-            await this.manyChatService.createSubscriber(merchantId, {
-              phone: `+964${customerId.slice(-10)}`,
-              has_opt_in_sms: true,
-              first_name: 'Instagram',
-              last_name: 'User',
-              language: 'ar'
+            // تحسين إنشاء المشترك
+            const subscriberData = this.generateSubscriberData(customerId);
+            
+            this.logger.info('📝 Creating ManyChat subscriber', {
+              customerId,
+              merchantId,
+              subscriberData: {
+                phone: subscriberData.phone,
+                first_name: subscriberData.first_name,
+                language: subscriberData.language
+              }
+            });
+            
+            // إنشاء subscriber مع retry logic
+            const createResult = await this.createSubscriberWithRetry(merchantId, subscriberData);
+            
+            this.logger.info('✅ Subscriber created successfully, retrying message send', {
+              customerId,
+              merchantId,
+              createResult: createResult ? 'Success' : 'Unknown'
             });
             
             // إعادة محاولة الإرسال بعد الإنشاء
@@ -360,11 +386,19 @@ export class InstagramManyChatBridge {
             );
             
           } catch (createError) {
-            this.logger.warn('⚠️ Could not create subscriber, will use fallback', {
+            this.logger.error('❌ Subscriber creation failed completely', {
               customerId,
-              createError: createError instanceof Error ? createError.message : String(createError)
+              merchantId,
+              createError: {
+                type: createError?.constructor?.name,
+                message: createError instanceof Error ? createError.message : String(createError),
+                stack: createError instanceof Error ? createError.stack : undefined
+              },
+              originalSendError: error.message
             });
-            throw error; // throw original error to trigger fallback
+            
+            // رمي الخطأ الأصلي لتفعيل fallback
+            throw error;
           }
         }
       }
@@ -374,7 +408,141 @@ export class InstagramManyChatBridge {
     }
   }
 
-  // updateSubscriberInfo removed - simplified in sendToManyChat
+  /**
+   * Generate optimized subscriber data for ManyChat creation
+   */
+  private generateSubscriberData(customerId: string): any {
+    // تحليل Instagram Customer ID لاستخراج معلومات أفضل
+    const timestamp = Date.now();
+    const shortId = customerId.slice(-6); // آخر 6 أرقام للتمييز
+    
+    // تجربة استخراج رقم هاتف أفضل
+    let phone = `+964${customerId.slice(-10)}`; // الطريقة الافتراضية
+    
+    // إذا كان customerId قصير جداً، استخدم timestamp
+    if (customerId.length < 10) {
+      phone = `+964${timestamp.toString().slice(-10)}`;
+    }
+    
+    return {
+      phone: phone,
+      has_opt_in_sms: true,
+      first_name: 'Instagram',
+      last_name: `User_${shortId}`,
+      language: 'ar',
+      custom_fields: {
+        instagram_id: customerId,
+        source: 'auto_created',
+        created_at: new Date().toISOString(),
+        customer_type: 'instagram_dm'
+      },
+      tags: ['auto_created', 'instagram_user', 'needs_verification']
+    };
+  }
+
+  /**
+   * Create ManyChat subscriber with production-grade retry logic
+   * Based on ManyChat API best practices 2025
+   */
+  private async createSubscriberWithRetry(
+    merchantId: string, 
+    subscriberData: any, 
+    maxRetries: number = 3
+  ): Promise<any> {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.logger.info(`📝 Creating subscriber (attempt ${attempt}/${maxRetries})`, {
+          merchantId,
+          customerId: subscriberData.custom_fields?.instagram_id,
+          attempt,
+          phone: subscriberData.phone
+        });
+        
+        const result = await this.manyChatService.createSubscriber(merchantId, subscriberData);
+        
+        this.logger.info('✅ Subscriber creation successful', {
+          merchantId,
+          customerId: subscriberData.custom_fields?.instagram_id,
+          attempt,
+          result: result ? 'Success' : 'Unknown'
+        });
+        
+        return result;
+        
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const errorMessage = lastError.message.toLowerCase();
+        
+        // تحليل نوع الخطأ حسب ManyChat API best practices
+        if (errorMessage.includes('429') || errorMessage.includes('rate limit')) {
+          // Rate limit error - wait with exponential backoff
+          const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Max 10 seconds
+          const jitter = Math.random() * 1000; // Add jitter
+          const totalDelay = delayMs + jitter;
+          
+          this.logger.warn(`⏱️ Rate limit hit, waiting ${Math.round(totalDelay)}ms before retry`, {
+            merchantId,
+            attempt,
+            maxRetries,
+            delayMs: Math.round(totalDelay)
+          });
+          
+          await new Promise(resolve => setTimeout(resolve, totalDelay));
+          continue;
+          
+        } else if (errorMessage.includes('502') || 
+                   errorMessage.includes('503') || 
+                   errorMessage.includes('504') ||
+                   errorMessage.includes('412')) {
+          // Server errors that should be retried
+          const delayMs = 2000 * attempt; // Linear backoff for server errors
+          
+          this.logger.warn(`🔄 Server error, retrying after ${delayMs}ms`, {
+            merchantId,
+            attempt,
+            errorMessage: lastError.message,
+            delayMs
+          });
+          
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue;
+          
+        } else if (errorMessage.includes('missing required field') ||
+                   errorMessage.includes('invalid phone number') ||
+                   errorMessage.includes('duplicate')) {
+          // Non-retryable errors
+          this.logger.error('❌ Non-retryable subscriber creation error', {
+            merchantId,
+            customerId: subscriberData.custom_fields?.instagram_id,
+            errorMessage: lastError.message,
+            subscriberData: {
+              phone: subscriberData.phone,
+              first_name: subscriberData.first_name,
+              language: subscriberData.language
+            }
+          });
+          
+          throw lastError;
+        }
+        
+        // Generic error - try once more
+        if (attempt < maxRetries) {
+          this.logger.warn(`⚠️ Subscriber creation failed, retrying...`, {
+            merchantId,
+            attempt,
+            errorMessage: lastError.message
+          });
+          
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
+      }
+    }
+    
+    // All retries failed
+    throw lastError || new Error('Subscriber creation failed after all retries');
+  }
 
   /**
    * Generate AI response
