@@ -299,7 +299,12 @@ export class InstagramManyChatBridge {
       );
       
     } catch (error) {
-      if (error instanceof Error && error.message.includes('Subscriber does not exist')) {
+      // Check for subscriber not existing error in different formats
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const hasSubscriberError = errorMessage.includes('Subscriber does not exist') ||
+        (error as any)?.apiError?.details?.messages?.[0]?.message?.includes('Subscriber does not exist');
+      
+      if (hasSubscriberError) {
         
         this.logger.info('📝 Subscriber not found, creating...', { customerId });
         
