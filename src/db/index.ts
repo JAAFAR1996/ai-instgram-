@@ -377,7 +377,17 @@ export function optimizePoolConfiguration(): {
   if (!stats) {
     return {
       recommendations: ['Pool not initialized'],
-      currentStats: null,
+      currentStats: {
+        totalCount: 0,
+        idleCount: 0,
+        waitingCount: 0,
+        max: 0,
+        min: 0,
+        utilization: 0,
+        healthStats: poolHealthStats,
+        uptime: 0,
+        poolEnded: true
+      },
       healthStats: poolHealthStats
     };
   }
