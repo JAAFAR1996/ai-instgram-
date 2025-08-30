@@ -126,11 +126,6 @@ export const REQUIRED_ENV_VARS: Record<string, EnvVarRule> = {
     validator: (value: string) => value.length >= 20,
     error: 'MANYCHAT_API_KEY must be at least 20 characters long'
   },
-  'MANYCHAT_DEFAULT_FLOW_ID': {
-    required: false,
-    validator: (value: string) => value.startsWith('content') && value.length >= 20,
-    error: 'MANYCHAT_DEFAULT_FLOW_ID must start with "content" and be at least 20 characters'
-  },
   'MANYCHAT_WELCOME_FLOW_ID': {
     required: false,
     validator: (value: string) => value.startsWith('content') && value.length >= 20,

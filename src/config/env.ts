@@ -29,12 +29,7 @@ export const MANYCHAT_CONFIG = {
   BASE_URL: 'MANYCHAT_BASE_URL',
   WEBHOOK_SECRET: 'MANYCHAT_WEBHOOK_SECRET',
   
-  // Flow Configuration
-  DEFAULT_FLOW_ID: 'MANYCHAT_DEFAULT_FLOW_ID',
-  WELCOME_FLOW_ID: 'MANYCHAT_WELCOME_FLOW_ID',
-  AI_RESPONSE_FLOW_ID: 'MANYCHAT_AI_RESPONSE_FLOW_ID',
-  COMMENT_RESPONSE_FLOW_ID: 'MANYCHAT_COMMENT_RESPONSE_FLOW_ID',
-  STORY_RESPONSE_FLOW_ID: 'MANYCHAT_STORY_RESPONSE_FLOW_ID',
+  // Flow Configuration (removed - using ManyChat defaults)
   
   // Rate Limiting
   RATE_LIMIT_RPS: 10,
@@ -117,8 +112,6 @@ export function validateManyChatConfig(): {
   
   // Optional but recommended variables
   const recommendedVars = [
-    MANYCHAT_CONFIG.DEFAULT_FLOW_ID,
-    MANYCHAT_CONFIG.WELCOME_FLOW_ID,
     MANYCHAT_CONFIG.WEBHOOK_SECRET
   ];
   
@@ -157,11 +150,6 @@ export function getManyChatConfig(): {
   return {
     apiKey: getManyChatEnv('API_KEY', { required: true }),
     baseUrl: getManyChatEnv('BASE_URL', { defaultValue: 'https://api.manychat.com' }),
-    webhookSecret: getManyChatEnv('WEBHOOK_SECRET'),
-    defaultFlowId: getManyChatEnv('DEFAULT_FLOW_ID'),
-    welcomeFlowId: getManyChatEnv('WELCOME_FLOW_ID'),
-    aiResponseFlowId: getManyChatEnv('AI_RESPONSE_FLOW_ID'),
-    commentResponseFlowId: getManyChatEnv('COMMENT_RESPONSE_FLOW_ID'),
-    storyResponseFlowId: getManyChatEnv('STORY_RESPONSE_FLOW_ID')
+    webhookSecret: getManyChatEnv('WEBHOOK_SECRET')
   };
 }

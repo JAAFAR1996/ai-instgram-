@@ -62,8 +62,12 @@ export interface ManyChatSendContentPayload {
 
 export interface ManyChatAPIErrorResponse {
   status: string;
-  error: string;
-  details?: Record<string, unknown>;
+  message?: string;
+  error?: string;
+  details?: {
+    messages?: Array<{ message: string }>;
+    [key: string]: unknown;
+  };
 }
 
 export class ManyChatAPIError extends Error {
@@ -72,7 +76,20 @@ export class ManyChatAPIError extends Error {
     public status: number,
     public apiError?: ManyChatAPIErrorResponse
   ) {
-    super(message);
+    // Create detailed error message
+    let detailedMessage = message;
+    if (apiError) {
+      detailedMessage = `${message} | API Status: ${apiError.status}`;
+      if (apiError.message) {
+        detailedMessage += ` | API Message: ${apiError.message}`;
+      }
+      if (apiError.details?.messages && apiError.details.messages.length > 0) {
+        const detailMessages = apiError.details.messages.map((m: any) => m.message).join(', ');
+        detailedMessage += ` | Details: ${detailMessages}`;
+      }
+    }
+    
+    super(detailedMessage);
     this.name = 'ManyChatAPIError';
   }
 }

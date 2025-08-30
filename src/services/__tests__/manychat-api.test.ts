@@ -20,14 +20,12 @@ vi.mock('../logger.js', () => ({
 // Mock environment variables
 process.env.MANYCHAT_API_KEY = 'test_api_key';
 process.env.MANYCHAT_BASE_URL = 'https://api.manychat.com';
-process.env.MANYCHAT_DEFAULT_FLOW_ID = 'test_flow_id';
 
 vi.mock('../config/env.js', () => ({
   getEnv: vi.fn((name: string) => {
     const envVars: Record<string, string> = {
       MANYCHAT_API_KEY: 'test_api_key',
       MANYCHAT_BASE_URL: 'https://api.manychat.com',
-      MANYCHAT_DEFAULT_FLOW_ID: 'test_flow_id'
     };
     return envVars[name] || '';
   })
