@@ -537,12 +537,23 @@ export class DatabaseAdapter implements IDatabase {
       
       // Close existing pool if it exists
       if (this.pool && !this.pool.ended) {
-        await this.pool.end();
+        try {
+          await this.pool.end();
+        } catch (endError) {
+          log.warn('⚠️ Error ending existing pool during recovery', {
+            error: endError instanceof Error ? endError.message : String(endError)
+          });
+        }
       }
       
-      // Import getPool to create a new pool
-      const { getPool } = await import('./index.js');
-      this.pool = getPool();
+      // Force pool recreation by importing and resetting
+      const dbModule = await import('./index.js');
+      
+      // Reset the global pool to force recreation
+      (dbModule as any).pool = null;
+      
+      // Create new pool
+      this.pool = dbModule.getPool();
       
       // Recreate SQL function with new pool
       this.sql = this.createSQLFunction();

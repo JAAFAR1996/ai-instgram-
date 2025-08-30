@@ -41,14 +41,16 @@ function createPoolConfig(): PoolConfig {
   const isProduction = process.env.NODE_ENV === 'production';
   const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
   
-  // SIMPLIFIED SSL configuration
+  // ULTRA-SIMPLIFIED SSL configuration for Render Postgres
   let sslConfig: any = false;
   if (config.database.ssl || isProduction || isRender) {
+    // Render PostgreSQL requires SSL but with minimal config
     sslConfig = {
-      rejectUnauthorized: false // Simplified for Render
+      rejectUnauthorized: false,
+      // Remove all other SSL options to avoid Node.js internal assertions
     };
     
-    log.info('🔐 Using simplified SSL configuration for database');
+    log.info('🔐 Using ultra-simplified SSL for Render PostgreSQL');
   }
   
   // SIMPLIFIED pool configuration to avoid Node.js internal assertions
@@ -74,12 +76,24 @@ function createPoolConfig(): PoolConfig {
  * Get database pool instance with comprehensive monitoring
  */
 export function getPool(): Pool {
-  if (!pool) {
+  if (!pool || pool.ended) {
     try {
+      // Reset pool if it was ended
+      if (pool && pool.ended) {
+        log.warn('🔄 Pool was ended, creating new pool...');
+        pool = null;
+      }
+
       const config = createPoolConfig();
+      
+      // Validate DATABASE_URL before creating pool
+      if (!config.connectionString) {
+        throw new Error('DATABASE_URL is not configured');
+      }
+
       pool = new Pool(config);
 
-      // SIMPLIFIED pool event handlers to avoid Node.js internal assertions
+      // SIMPLIFIED pool event handlers with null checks
       pool.on('connect', () => {
         poolHealthStats.totalConnections++;
         poolHealthStats.successfulConnections++;
@@ -91,24 +105,42 @@ export function getPool(): Pool {
         const dbError = err as DatabaseError;
         log.error('Database pool error:', {
           error: err.message,
-          code: dbError.code
+          code: dbError.code,
+          poolEnded: pool?.ended || false
         });
+        
+        // Mark pool for recreation on critical errors
+        if (err.message.includes('internal assertion') || err.message.includes('Node.js internals')) {
+          log.error('🚨 Critical pool error detected, marking for recreation');
+          if (pool && !pool.ended) {
+            pool.end().catch(() => {}); // Don't wait for this
+          }
+          pool = null;
+        }
       });
 
       // Basic health monitoring only
       startPoolHealthMonitoring();
 
-      log.info('PostgreSQL pool initialized', {
+      log.info('PostgreSQL pool initialized successfully', {
         max: config.max,
         min: config.min,
+        connectionString: config.connectionString.substring(0, 30) + '...',
         connectionTimeout: config.connectionTimeoutMillis
       });
     } catch (error) {
       log.error('❌ Failed to create database pool', {
         error: error instanceof Error ? error.message : String(error)
       });
+      
+      // Ensure pool is null on failure
+      pool = null;
       throw error;
     }
+  }
+
+  if (!pool) {
+    throw new Error('Database pool is null after initialization attempt');
   }
 
   return pool;
@@ -279,24 +311,52 @@ function startPoolHealthMonitoring(): void {
     clearInterval(connectionMonitor);
   }
   
-  // SIMPLIFIED monitoring - only basic health check
+  // SIMPLIFIED monitoring with pool recovery
   connectionMonitor = setInterval(async () => {
     try {
       const stats = getPoolStats();
       if (stats) {
         poolHealthStats.lastHealthCheck = new Date();
-        log.debug('Pool health check', {
-          total: stats.totalCount,
-          idle: stats.idleCount,
-          waiting: stats.waitingCount
-        });
+        
+        // Check for critical pool state
+        if (stats.totalCount === 0 && stats.idleCount === 0) {
+          log.warn('🚨 Pool shows 0 connections, attempting recreation...');
+          
+          // Force pool recreation by setting to null
+          if (pool && !pool.ended) {
+            await pool.end().catch(() => {}); // Don't wait for this
+          }
+          pool = null;
+          
+          // Recreate pool
+          try {
+            getPool(); // This will recreate the pool
+            log.info('✅ Pool recreation successful');
+          } catch (recreateError) {
+            log.error('❌ Pool recreation failed', {
+              error: recreateError instanceof Error ? recreateError.message : String(recreateError)
+            });
+          }
+        } else {
+          log.debug('Pool health check', {
+            total: stats.totalCount,
+            idle: stats.idleCount,
+            waiting: stats.waitingCount
+          });
+        }
       }
     } catch (error) {
       log.warn('Pool health monitoring error', {
         error: error instanceof Error ? error.message : String(error)
       });
+      
+      // On monitoring error, try to recreate pool
+      if (error instanceof Error && error.message.includes('internal assertion')) {
+        log.error('🚨 Internal assertion in monitoring, forcing pool recreation');
+        pool = null;
+      }
     }
-  }, 120000); // Check every 2 minutes - less frequent for Render
+  }, 60000); // Check every minute for more responsive recovery
 }
 
 // Removed unused monitorPoolHealth function for simplified implementation
@@ -476,19 +536,51 @@ function isSerializationError(error: unknown): boolean {
  * Enhanced pool statistics for comprehensive monitoring
  */
 export function getPoolStats() {
-  if (!pool) return null;
+  if (!pool || pool.ended) {
+    return {
+      totalCount: 0,
+      idleCount: 0,
+      waitingCount: 0,
+      max: 0,
+      min: 0,
+      utilization: 0,
+      healthStats: poolHealthStats,
+      uptime: 0,
+      poolEnded: true
+    };
+  }
 
-  return {
-    totalCount: pool.totalCount,
-    idleCount: pool.idleCount,
-    waitingCount: pool.waitingCount,
-    max: pool.options.max,
-    min: pool.options.min,
-    // Extended statistics
-    utilization: ((pool.totalCount - pool.idleCount) / (pool.options.max || 1)) * 100,
-    healthStats: poolHealthStats,
-    uptime: Date.now() - poolHealthStats.lastHealthCheck.getTime()
-  };
+  try {
+    return {
+      totalCount: pool.totalCount || 0,
+      idleCount: pool.idleCount || 0,
+      waitingCount: pool.waitingCount || 0,
+      max: pool.options?.max || 0,
+      min: pool.options?.min || 0,
+      // Extended statistics
+      utilization: ((pool.totalCount - pool.idleCount) / (pool.options?.max || 1)) * 100,
+      healthStats: poolHealthStats,
+      uptime: Date.now() - poolHealthStats.lastHealthCheck.getTime(),
+      poolEnded: false
+    };
+  } catch (error) {
+    log.error('❌ Error reading pool stats, returning fallback', {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    
+    return {
+      totalCount: 0,
+      idleCount: 0,
+      waitingCount: 0,
+      max: 0,
+      min: 0,
+      utilization: 0,
+      healthStats: poolHealthStats,
+      uptime: 0,
+      poolEnded: true,
+      error: true
+    };
+  }
 }
 
 /**
