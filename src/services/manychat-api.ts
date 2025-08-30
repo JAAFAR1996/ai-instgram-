@@ -13,7 +13,6 @@ import { ExpiringMap } from '../utils/expiring-map.js';
 // Types
 export interface ManyChatOptions {
   messageTag?: string;
-  flowId?: string;
   priority?: 'low' | 'normal' | 'high';
 }
 
@@ -59,7 +58,6 @@ export interface ManyChatSendContentPayload {
     caption?: string;
   }>;
   message_tag?: string;
-  flow_id?: string;
 }
 
 export interface ManyChatAPIErrorResponse {
@@ -137,7 +135,6 @@ export class ManyChatService {
             text: message
           }],
           message_tag: options?.messageTag || 'CUSTOMER_FEEDBACK',
-          flow_id: options?.flowId || await this.getDefaultFlowId(merchantId)
         };
 
         const response = await this.makeAPIRequest('/fb/sending/sendContent', {
@@ -619,29 +616,6 @@ export class ManyChatService {
     return this.sendMessage(merchantId, recipientId, message, options);
   }
 
-  /**
-   * Get default flow ID for merchant
-   */
-  private async getDefaultFlowId(merchantId: string): Promise<string> {
-    // Check cache first
-    const cached = this.credentialsCache.get(merchantId);
-    if (cached) {
-      return cached;
-    }
-
-    // Get from database (simplified for now)
-    const defaultFlowId = getEnv('MANYCHAT_DEFAULT_FLOW_ID', { required: false });
-    
-    if (defaultFlowId) {
-      // Cache for 1 hour
-      this.credentialsCache.set(merchantId, defaultFlowId, 60 * 60 * 1000);
-      return defaultFlowId;
-    }
-
-    // Use empty string as fallback - ManyChat API will use default flow
-    this.logger.warn('⚠️ MANYCHAT_DEFAULT_FLOW_ID not set, using empty flow ID (ManyChat will use default)');
-    return '';
-  }
 
   /**
    * Get service health status

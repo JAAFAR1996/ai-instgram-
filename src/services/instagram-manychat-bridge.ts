@@ -197,7 +197,6 @@ export class InstagramManyChatBridge {
       aiResponse,
       {
         messageTag: this.getMessageTag(data.interactionType),
-        flowId: await this.getFlowId(data.merchantId, data.interactionType),
         priority: options.priority
       }
     );
@@ -415,14 +414,6 @@ export class InstagramManyChatBridge {
     }
   }
 
-  /**
-   * Get flow ID for ManyChat
-   */
-  private async getFlowId(_merchantId: string, _interactionType: string): Promise<string> {
-    // This would typically come from merchant configuration
-    // For now, return default flow ID
-    return '';
-  }
 
   /**
    * Get fallback response
