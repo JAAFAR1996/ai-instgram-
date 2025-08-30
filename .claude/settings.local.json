@@ -14,7 +14,8 @@
       "Bash(node:*)",
       "mcp__render__query_render_postgres",
       "mcp__render__get_deploy",
-      "mcp__render__list_services"
+      "mcp__render__list_services",
+      "mcp__render__list_deploys"
     ],
     "deny": [],
     "ask": []

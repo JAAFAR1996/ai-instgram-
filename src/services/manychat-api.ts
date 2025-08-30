@@ -164,9 +164,16 @@ export class ManyChatService {
         }
 
       } catch (error) {
-        this.logger.error('❌ ManyChat message sending failed', error, {
+        this.logger.error('❌ ManyChat message sending failed', {
           merchantId,
-          recipientId
+          recipientId,
+          error: error instanceof Error ? error.message : String(error),
+          errorDetails: error instanceof ManyChatAPIError ? error.apiError : null,
+          payload: {
+            subscriber_id: recipientId,
+            content: [{ type: 'text', text: message }],
+            message_tag: options?.messageTag || 'CUSTOMER_FEEDBACK'
+          }
         });
 
         // Retry with exponential backoff
