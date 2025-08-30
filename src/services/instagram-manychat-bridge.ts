@@ -280,7 +280,7 @@ export class InstagramManyChatBridge {
   // ensureSubscriberExists removed - now handled by sendToManyChat
 
   /**
-   * إرسال رسالة مع إنشاء subscriber إذا لم يكن موجود
+   * إرسال رسالة مباشرة: Instagram → Server → AI → ManyChat → Instagram
    */
   private async sendToManyChat(
     merchantId: string, 
@@ -289,45 +289,13 @@ export class InstagramManyChatBridge {
     options?: any
   ): Promise<ManyChatResponse> {
     
-    try {
-      // جرب الإرسال مباشرة
-      return await this.manyChatService.sendMessage(
-        merchantId, 
-        customerId, 
-        message, 
-        options
-      );
-      
-    } catch (error) {
-      // Check for subscriber not existing error in different formats
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const hasSubscriberError = errorMessage.includes('Subscriber does not exist') ||
-        (error as any)?.apiError?.details?.messages?.[0]?.message?.includes('Subscriber does not exist');
-      
-      if (hasSubscriberError) {
-        
-        this.logger.info('📝 Subscriber not found, creating...', { customerId });
-        
-        // إنشاء subscriber جديد
-        await this.manyChatService.createSubscriber(merchantId, {
-          phone: `+964${customerId.slice(-10)}`,
-          has_opt_in_sms: true,
-          first_name: 'Instagram',
-          last_name: 'User',
-          language: 'ar'
-        });
-        
-        // إرسال الرسالة بعد الإنشاء
-        return await this.manyChatService.sendMessage(
-          merchantId, 
-          customerId, 
-          message, 
-          options
-        );
-      }
-      
-      throw error;
-    }
+    // إرسال الرسالة مباشرة فقط
+    return await this.manyChatService.sendMessage(
+      merchantId, 
+      customerId, 
+      message, 
+      options
+    );
   }
 
   // updateSubscriberInfo removed - simplified in sendToManyChat
