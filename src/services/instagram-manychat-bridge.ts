@@ -187,19 +187,13 @@ export class InstagramManyChatBridge {
       });
     }
 
-    // Step 1: Ensure subscriber exists in ManyChat
-    let subscriber = await this.ensureSubscriberExists(data);
-
-    // Step 2: Update subscriber with latest information
-    await this.updateSubscriberInfo(data, subscriber, options);
-
-    // Step 3: Generate AI response
+    // Step 1: Generate AI response
     const aiResponse = await this.generateAIResponse(data);
 
-    // Step 4: Send through ManyChat
-    const manyChatResult = await this.manyChatService.sendMessage(
+    // Step 2: Send through ManyChat with auto subscriber creation
+    const manyChatResult = await this.sendToManyChat(
       data.merchantId,
-      subscriber.id,
+      data.customerId,
       aiResponse,
       {
         messageTag: this.getMessageTag(data.interactionType),
@@ -208,8 +202,8 @@ export class InstagramManyChatBridge {
       }
     );
 
-    // Step 5: Add relevant tags
-    await this.addRelevantTags(data, subscriber.id, aiResponse, options);
+    // Step 3: Add relevant tags (use customerId directly)
+    await this.addRelevantTags(data, data.customerId, aiResponse, options);
 
     // Step 6: Log the interaction
     await this.logManyChatInteraction(data, manyChatResult, aiResponse);
@@ -283,10 +277,8 @@ export class InstagramManyChatBridge {
     }
   }
 
-  /**
-   * Ensure subscriber exists in ManyChat
-   */
-  private async ensureSubscriberExists(data: BridgeMessageData): Promise<ManyChatSubscriber> {
+  // Removed ensureSubscriberExists - now handled by sendToManyChat
+  private async ensureSubscriberExists_UNUSED(data: BridgeMessageData): Promise<ManyChatSubscriber> {
     try {
       // Check database for existing mapping first
       const sql = this.db.getSQL();
@@ -389,9 +381,53 @@ export class InstagramManyChatBridge {
   }
 
   /**
-   * Update subscriber information
+   * إرسال رسالة مع إنشاء subscriber إذا لم يكن موجود
    */
-  private async updateSubscriberInfo(
+  private async sendToManyChat(
+    merchantId: string, 
+    customerId: string, 
+    message: string, 
+    options?: any
+  ): Promise<ManyChatResponse> {
+    
+    try {
+      // جرب الإرسال مباشرة
+      return await this.manyChatService.sendMessage(
+        merchantId, 
+        customerId, 
+        message, 
+        options
+      );
+      
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Subscriber does not exist')) {
+        
+        this.logger.info('📝 Subscriber not found, creating...', { customerId });
+        
+        // إنشاء subscriber جديد
+        await this.manyChatService.createSubscriber(merchantId, {
+          phone: `+964${customerId.slice(-10)}`,
+          has_opt_in_sms: true,
+          first_name: 'Instagram',
+          last_name: 'User',
+          language: 'ar'
+        });
+        
+        // إرسال الرسالة بعد الإنشاء
+        return await this.manyChatService.sendMessage(
+          merchantId, 
+          customerId, 
+          message, 
+          options
+        );
+      }
+      
+      throw error;
+    }
+  }
+
+  // Removed updateSubscriberInfo - simplified in sendToManyChat
+  private async updateSubscriberInfo_UNUSED(
     data: BridgeMessageData,
     subscriber: ManyChatSubscriber,
     options: BridgeProcessingOptions
