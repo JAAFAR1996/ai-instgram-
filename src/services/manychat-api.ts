@@ -199,6 +199,10 @@ export class ManyChatService {
     });
 
     if (!result.success) {
+      // Preserve original error if it's a ManyChatAPIError
+      if (result.originalError && result.originalError instanceof ManyChatAPIError) {
+        throw result.originalError;
+      }
       throw new Error(result.error || 'Circuit breaker failed');
     }
 

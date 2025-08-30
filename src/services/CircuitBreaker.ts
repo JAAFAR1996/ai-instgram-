@@ -14,6 +14,7 @@ export interface CircuitBreakerResult<T> {
   success: boolean;
   result?: T;
   error?: string;
+  originalError?: Error | undefined;
   fallbackUsed: boolean;
   state: CircuitBreakerState;
   executionTime: number;
@@ -118,7 +119,8 @@ export class CircuitBreaker {
             fallbackUsed: true,
             state: this.state,
             executionTime,
-            error: error instanceof Error ? error.message : String(error)
+            error: error instanceof Error ? error.message : String(error),
+            originalError: error instanceof Error ? error : undefined
           };
         } catch (fallbackError) {
           return {
@@ -136,7 +138,8 @@ export class CircuitBreaker {
         fallbackUsed: false,
         state: this.state,
         executionTime,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        originalError: error instanceof Error ? error : undefined
       };
     }
   }
@@ -183,6 +186,7 @@ export class CircuitBreaker {
           state: this.state,
           executionTime,
           error: error instanceof Error ? error.message : String(error),
+          originalError: error instanceof Error ? error : undefined,
           circuitOpenSince: new Date(this.lastStateChange)
         };
       }
