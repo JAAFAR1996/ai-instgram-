@@ -279,7 +279,8 @@ export class InstagramManyChatBridge {
   // ensureSubscriberExists removed - now handled by sendToManyChat
 
   /**
-   * إرسال رسالة مباشرة: Instagram → Server → AI → ManyChat → Instagram
+   * إرسال رسالة: Instagram → Server → AI → ManyChat → Instagram
+   * مع فحص وجود subscriber أولاً
    */
   private async sendToManyChat(
     merchantId: string, 
@@ -288,13 +289,58 @@ export class InstagramManyChatBridge {
     options?: any
   ): Promise<ManyChatResponse> {
     
-    // إرسال الرسالة مباشرة فقط
-    return await this.manyChatService.sendMessage(
-      merchantId, 
-      customerId, 
-      message, 
-      options
-    );
+    try {
+      // محاولة إرسال الرسالة مباشرة
+      return await this.manyChatService.sendMessage(
+        merchantId, 
+        customerId, 
+        message, 
+        options
+      );
+      
+    } catch (error) {
+      // إذا كان الخطأ "Subscriber does not exist"
+      if (error instanceof Error) {
+        const errorMsg = error.message.toLowerCase();
+        if (errorMsg.includes('subscriber does not exist') || 
+            errorMsg.includes('validation error')) {
+          
+          this.logger.info('🔄 Subscriber not found, creating and retrying...', { 
+            customerId, 
+            merchantId 
+          });
+          
+          // محاولة إنشاء subscriber
+          try {
+            await this.manyChatService.createSubscriber(merchantId, {
+              phone: `+964${customerId.slice(-10)}`,
+              has_opt_in_sms: true,
+              first_name: 'Instagram',
+              last_name: 'User',
+              language: 'ar'
+            });
+            
+            // إعادة محاولة الإرسال بعد الإنشاء
+            return await this.manyChatService.sendMessage(
+              merchantId, 
+              customerId, 
+              message, 
+              options
+            );
+            
+          } catch (createError) {
+            this.logger.warn('⚠️ Could not create subscriber, will use fallback', {
+              customerId,
+              createError: createError instanceof Error ? createError.message : String(createError)
+            });
+            throw error; // throw original error to trigger fallback
+          }
+        }
+      }
+      
+      // إذا لم يكن الخطأ متعلق بـ subscriber، throw الخطأ الأصلي
+      throw error;
+    }
   }
 
   // updateSubscriberInfo removed - simplified in sendToManyChat
