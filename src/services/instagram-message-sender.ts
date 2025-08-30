@@ -116,32 +116,45 @@ export class InstagramMessageSender {
             conversationId
           });
 
-          // 1. محاولة إرسال عبر ManyChat API أولاً
+          // 1. محاولة إرسال عبر InstagramManyChatBridge (مع auto-creation)
           try {
-            const manyChatService = await import('./manychat-api.js').then(m => m.getManyChatService());
-            const manyChatResult = await manyChatService.sendMessage(
+            const { getInstagramManyChatBridge } = await import('./instagram-manychat-bridge.js');
+            const bridge = getInstagramManyChatBridge();
+            
+            const bridgeResult = await bridge.processMessage({
               merchantId,
-              recipientId,
+              customerId: recipientId,
               message,
-              { messageTag: 'CUSTOMER_FEEDBACK', priority: 'normal' }
-            );
-
-            if (manyChatResult.success) {
-              logger.info('✅ Message sent via ManyChat (window expired)', {
+              conversationId,
+              interactionType: 'dm',
+              platform: 'instagram'
+            }, {
+              useManyChat: true,
+              fallbackToLocalAI: false,
+              priority: 'high'
+            });
+            
+            if (bridgeResult.success) {
+              logger.info('✅ ManyChat fallback successful via Bridge', {
                 merchantId,
                 recipientId,
-                messageId: manyChatResult.messageId
+                messageId: bridgeResult.messageId
               });
+              
               return {
                 success: true,
-                deliveryStatus: 'sent' as const,
-                timestamp: new Date(),
-                ...(manyChatResult.messageId && { messageId: manyChatResult.messageId }),
+                messageId: bridgeResult.messageId || 'manychat-success',
                 platform: 'manychat'
               };
             }
+            
           } catch (manyChatError) {
-            logger.warn('⚠️ ManyChat fallback failed', { error: manyChatError, merchantId, recipientId });
+            logger.warn('⚠️ ManyChat fallback failed', {
+              merchantId,
+              recipientId,
+              error: manyChatError instanceof Error ? manyChatError.message : String(manyChatError)
+            });
+            // Continue to other fallback options below
           }
 
           // 2. محاولة إرسال template message
