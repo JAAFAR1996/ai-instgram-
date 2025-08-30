@@ -245,6 +245,25 @@ export class InstagramManyChatBridge {
     data: BridgeMessageData
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
+      // Check if Instagram message window is still valid
+      const isWindowValid = await this.checkMessageWindow(data.merchantId, data.customerId);
+      
+      if (!isWindowValid) {
+        this.logger.warn('📅 Instagram message window expired, scheduling for follow-up', {
+          merchantId: data.merchantId,
+          customerId: data.customerId,
+          interactionType: data.interactionType
+        });
+
+        // Schedule for manual follow-up or future delivery
+        await this.scheduleForFollowUp(data);
+        
+        return {
+          success: false,
+          error: 'Message window expired - scheduled for follow-up'
+        };
+      }
+
       // Simple fallback response
       const fallbackResponse = this.getFallbackResponse(data.interactionType);
       
@@ -268,6 +287,18 @@ export class InstagramManyChatBridge {
         merchantId: data.merchantId,
         customerId: data.customerId
       });
+
+      // Check if error is due to message window expiration
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('message window') || errorMessage.includes('24 hours')) {
+        this.logger.warn('📅 Message window expired during fallback, scheduling for follow-up');
+        await this.scheduleForFollowUp(data);
+        
+        return {
+          success: false,
+          error: 'Message window expired - scheduled for follow-up'
+        };
+      }
 
       return {
         success: false,
@@ -460,6 +491,73 @@ export class InstagramManyChatBridge {
     }
   }
 
+
+  /**
+   * Check if Instagram message window is still valid (24 hours)
+   */
+  private async checkMessageWindow(merchantId: string, customerId: string): Promise<boolean> {
+    try {
+      // Get last interaction time from database
+      const lastInteraction = await this.db.query(
+        `SELECT created_at FROM messages 
+         WHERE merchant_id = $1 AND sender_id = $2 AND platform = 'instagram'
+         ORDER BY created_at DESC LIMIT 1`,
+        [merchantId, customerId]
+      );
+
+      if (!lastInteraction?.length) {
+        return false; // No previous interactions
+      }
+
+      const lastInteractionTime = new Date((lastInteraction[0] as any).created_at);
+      const now = new Date();
+      const hoursDiff = (now.getTime() - lastInteractionTime.getTime()) / (1000 * 60 * 60);
+
+      return hoursDiff <= 24; // Instagram allows 24 hours
+    } catch (error) {
+      this.logger.warn('Failed to check message window', {
+        error: error instanceof Error ? error.message : String(error),
+        merchantId,
+        customerId
+      });
+      return false; // Assume expired on error
+    }
+  }
+
+  /**
+   * Schedule message for follow-up delivery
+   */
+  private async scheduleForFollowUp(data: BridgeMessageData): Promise<void> {
+    try {
+      await this.db.query(
+        `INSERT INTO message_followups (
+          merchant_id, customer_id, message, interaction_type, platform, 
+          scheduled_for, created_at, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')`,
+        [
+          data.merchantId,
+          data.customerId,
+          data.message,
+          data.interactionType,
+          data.platform,
+          new Date(Date.now() + 24 * 60 * 60 * 1000), // Schedule for 24 hours later
+          new Date(),
+        ]
+      );
+
+      this.logger.info('📅 Message scheduled for follow-up', {
+        merchantId: data.merchantId,
+        customerId: data.customerId,
+        interactionType: data.interactionType
+      });
+    } catch (error) {
+      this.logger.error('Failed to schedule follow-up', {
+        error: error instanceof Error ? error.message : String(error),
+        merchantId: data.merchantId,
+        customerId: data.customerId
+      });
+    }
+  }
 
   /**
    * Get fallback response
