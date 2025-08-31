@@ -27,24 +27,10 @@ export class ServiceController {
   private db!: Database;
 
   constructor(container?: DIContainer) {
-    if (container) {
-      this.db = getDatabase() as Database; // يوفّر getSQL متوافق
-    } else {
-      // Legacy fallback
-      this.initializeLegacy();
-    }
-  }
-
-  // private async getSQLFromPool() {
-  //   const { getSQLClient } = await import('../db/index.js');
-  //   return getSQLClient(this.pool);
-  // }
-
-  private async initializeLegacy(): Promise<void> {
-    const { getDatabase } = await import('../db/adapter.js');
-    
+    // Always initialize synchronously
     this.db = getDatabase() as Database;
   }
+
 
   private get sql() {
     return this.db.getSQL();
