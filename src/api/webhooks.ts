@@ -101,6 +101,9 @@ export class WebhookRouter {
     this.app.get('/webhooks/instagram', this.handleInstagramVerification.bind(this));
     this.app.post('/webhooks/instagram', this.handleInstagramWebhook.bind(this));
     
+    // ManyChat webhook routes
+    this.app.post('/webhooks/manychat', this.handleManyChatWebhook.bind(this));
+    
     // WhatsApp webhook routes - DISABLED
     this.app.get('/webhooks/whatsapp', (c) => c.text('WhatsApp features disabled', 503));
     this.app.post('/webhooks/whatsapp', (c) => c.text('WhatsApp features disabled', 503));
@@ -112,7 +115,8 @@ export class WebhookRouter {
         timestamp: new Date().toISOString(),
         platforms: {
           instagram: 'active',
-          whatsapp: 'disabled'
+          whatsapp: 'disabled',
+          manychat: 'active'
         }
       });
     });
@@ -413,6 +417,68 @@ export class WebhookRouter {
   }
 
 
+
+  /**
+   * Handle ManyChat webhook events (POST request)
+   */
+  private async handleManyChatWebhook(c: Context) {
+    try {
+      this.logger.info('📩 ManyChat webhook received');
+      
+      const body = await c.req.json();
+      const { merchant_id, instagram_user_id, subscriber_id, event_type, data } = body;
+
+      // Log the webhook data
+      this.logger.info('📩 ManyChat webhook data', { 
+        merchant_id, 
+        instagram_user_id, 
+        subscriber_id,
+        event_type,
+        dataKeys: data ? Object.keys(data) : []
+      });
+
+      // If we have both instagram_user_id and subscriber_id, update mapping
+      if (merchant_id && instagram_user_id && subscriber_id) {
+        try {
+          const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
+          await upsertManychatMapping(merchant_id, instagram_user_id, subscriber_id);
+          
+          this.logger.info('✅ Updated ManyChat subscriber mapping', {
+            merchant_id,
+            instagram_user_id,
+            subscriber_id
+          });
+        } catch (mappingError) {
+          this.logger.error('❌ Failed to update ManyChat mapping', mappingError, {
+            merchant_id,
+            instagram_user_id,
+            subscriber_id
+          });
+        }
+      }
+
+      // Log to database for monitoring
+      if (merchant_id) {
+        await this.logWebhookEvent('instagram', merchant_id, 'SUCCESS', {
+          source: 'manychat',
+          event_type,
+          instagram_user_id,
+          subscriber_id
+        });
+      }
+
+      // Return success response
+      return c.json({ ok: true, timestamp: new Date().toISOString() });
+
+    } catch (error) {
+      this.logger.error('❌ ManyChat webhook processing failed', error);
+      
+      return c.json({ 
+        error: 'Webhook processing failed',
+        timestamp: new Date().toISOString()
+      }, 500);
+    }
+  }
 
   /**
    * Process Instagram webhook entry
