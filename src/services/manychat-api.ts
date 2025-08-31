@@ -133,7 +133,7 @@ export class ManyChatService {
    */
   public async sendMessage(
     merchantId: string,
-    recipientId: string,
+    subscriberId: string,
     message: string,
     options?: ManyChatOptions
   ): Promise<ManyChatResponse> {
@@ -141,12 +141,12 @@ export class ManyChatService {
       try {
         this.logger.info('📤 Sending ManyChat message', {
           merchantId,
-          recipientId,
+          subscriberId,
           messageLength: message.length
         });
 
         const payload: ManyChatSendContentPayload = {
-          subscriber_id: recipientId,
+          subscriber_id: subscriberId,
           content: [{
             type: 'text',
             text: message
@@ -162,7 +162,7 @@ export class ManyChatService {
         if (response.status === 'success') {
           this.logger.info('✅ ManyChat message sent successfully', {
             merchantId,
-            recipientId,
+            subscriberId,
             messageId: response.message_id
           });
 
@@ -183,18 +183,18 @@ export class ManyChatService {
       } catch (error) {
         this.logger.error('❌ ManyChat message sending failed', {
           merchantId,
-          recipientId,
+          subscriberId,
           error: error instanceof Error ? error.message : String(error),
           errorDetails: error instanceof ManyChatAPIError ? error.apiError : null,
           payload: {
-            subscriber_id: recipientId,
+            subscriber_id: subscriberId,
             content: [{ type: 'text', text: message }],
             message_tag: options?.messageTag || 'CUSTOMER_FEEDBACK'
           }
         });
 
         // Retry with exponential backoff
-        return await this.retryMessage(merchantId, recipientId, message, options);
+        return await this.retryMessage(merchantId, subscriberId, message, options);
       }
     });
 
@@ -611,7 +611,7 @@ export class ManyChatService {
    */
   private async retryMessage(
     merchantId: string,
-    recipientId: string,
+    subscriberId: string,
     message: string,
     options?: ManyChatOptions,
     retryCount = 0
@@ -622,7 +622,7 @@ export class ManyChatService {
     if (retryCount >= maxRetries) {
       this.logger.error('❌ Max retries exceeded for ManyChat message', {
         merchantId,
-        recipientId,
+        subscriberId,
         retryCount
       });
 
@@ -638,10 +638,10 @@ export class ManyChatService {
 
     this.logger.info(`🔄 Retrying ManyChat message (attempt ${retryCount + 1})`, {
       merchantId,
-      recipientId
+      subscriberId
     });
 
-    return this.sendMessage(merchantId, recipientId, message, options);
+    return this.sendMessage(merchantId, subscriberId, message, options);
   }
 
 
@@ -692,6 +692,78 @@ export class ManyChatService {
   public dispose(): void {
     this.credentialsCache.dispose();
     this.rateLimiter.clear();
+  }
+
+  /**
+   * Send text message using ManyChat subscriber ID
+   */
+  public async sendText(
+    merchantId: string,
+    subscriberId: string,
+    message: string,
+    options?: { tag?: string }
+  ): Promise<ManyChatResponse> {
+    return this.sendMessage(merchantId, subscriberId, message, {
+      messageTag: options?.tag || 'CUSTOMER_FEEDBACK'
+    });
+  }
+
+  /**
+   * Create or lookup subscriber by Instagram ID
+   */
+  public async createOrLookupSubscriberByInstagram(
+    merchantId: string,
+    igUserId: string
+  ): Promise<{ subscriber_id: string }> {
+    // First, try to find existing subscriber by custom field
+    try {
+      // Search for subscriber with Instagram ID in custom fields
+      const response = await this.makeAPIRequest(
+        `/fb/subscriber/findByCustomField?field_name=instagram_user_id&field_value=${igUserId}`,
+        { method: 'GET' }
+      );
+
+      if (response.status === 'success' && response.data?.id) {
+        this.logger.info('✅ Found existing ManyChat subscriber', {
+          merchantId,
+          igUserId,
+          subscriberId: response.data.id
+        });
+        return { subscriber_id: response.data.id };
+      }
+    } catch (error) {
+      this.logger.warn('Could not find existing subscriber, will create new', {
+        merchantId,
+        igUserId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    // If not found, create new subscriber with Instagram ID as custom field
+    try {
+      const subscriber = await this.createSubscriber(merchantId, {
+        custom_fields: {
+          instagram_user_id: igUserId
+        },
+        first_name: `IG_${igUserId.slice(-6)}`, // Use last 6 chars as default name
+        has_opt_in_sms: false // Instagram users don't have SMS by default
+      });
+
+      this.logger.info('✅ Created new ManyChat subscriber', {
+        merchantId,
+        igUserId,
+        subscriberId: subscriber.id
+      });
+
+      return { subscriber_id: subscriber.id };
+    } catch (error) {
+      this.logger.error('❌ Failed to create ManyChat subscriber', {
+        merchantId,
+        igUserId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
   }
 }
 
