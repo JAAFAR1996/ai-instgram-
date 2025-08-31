@@ -172,8 +172,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
 
           // Store incoming message
           await pool.query(`
-            INSERT INTO message_history (conversation_id, content, message_type, direction, created_at)
-            VALUES ($1, $2, 'TEXT', 'INCOMING', NOW())
+            INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, created_at)
+            VALUES ($1, $2, 'TEXT', 'INCOMING', 'INSTAGRAM', NOW())
           `, [conversationId, messageText]);
 
           // 🤖 PRODUCTION: Generate AI response
@@ -215,8 +215,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
 
           // Store AI response
           await pool.query(`
-            INSERT INTO message_history (conversation_id, content, message_type, direction, created_at)
-            VALUES ($1, $2, 'TEXT', 'OUTGOING', NOW())
+            INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, created_at)
+            VALUES ($1, $2, 'TEXT', 'OUTGOING', 'INSTAGRAM', NOW())
           `, [conversationId, aiResponse]);
 
           // Update conversation stats
