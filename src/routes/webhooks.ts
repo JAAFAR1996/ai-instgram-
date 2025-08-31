@@ -193,24 +193,31 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 conversationHistory: []
               }),
               new Promise<never>((_, reject) => 
-                setTimeout(() => reject(new Error('AI timeout')), 30000)
+                setTimeout(() => reject(new Error('AI timeout')), 8000)
               )
             ]);
             
-            aiResponse = aiResult.message || 'مرحباً! شكراً لتواصلك معنا.';
+            aiResponse = aiResult?.message;
+            
+            // Validate AI response
+            if (!aiResponse || aiResponse.trim().length === 0) {
+              log.warn('Empty AI response received', { aiResult });
+              return c.json({
+                version: "v2",
+                messages: [{ type: "text", text: "تعذر توليد رد مناسب. جرّب رسالة أخرى." }],
+                set_attributes: { ai_reply: "EMPTY_RESPONSE", processing_time: Date.now() - processingStartTime }
+              });
+            }
             
           } catch (aiError) {
             log.error('❌ AI service failed', { error: String(aiError) });
             
-            // 🛡️ Intelligent Arabic fallback based on message content
-            const lowerText = messageText.toLowerCase();
-            if (lowerText.includes('سعر') || lowerText.includes('price')) {
-              aiResponse = 'مرحباً! سأساعدك في معرفة الأسعار. يرجى تحديد المنتج الذي تريد السؤال عنه.';
-            } else if (lowerText.includes('طلب') || lowerText.includes('order')) {
-              aiResponse = 'مرحباً! سأساعدك في إتمام طلبك. يرجى إرسال تفاصيل المنتجات التي تريدها.';
-            } else {
-              aiResponse = 'مرحباً! شكراً لتواصلك معنا. نحن هنا لمساعدتك، كيف يمكنني خدمتك؟';
-            }
+            // لا ترجع محتوى بديل. أعطِ إشارة فشل واضحة للمراقبة
+            return c.json({
+              version: "v2",
+              messages: [{ type: "text", text: "تعذر توليد رد الآن. جرّب رسالة أقصر." }],
+              set_attributes: { ai_reply: "AI_ERROR", processing_time: Date.now() - processingStartTime }
+            });
           }
 
           // Store AI response
@@ -250,9 +257,9 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           // 🎯 PRODUCTION: Return ManyChat-compatible response
           return c.json({
             version: "v2",
-            messages: [{ type: "text", text: aiResponse }],
+            messages: [{ type: "text", text: aiResponse ?? "تعذر توليد رد." }],
             set_attributes: { 
-              ai_reply: aiResponse.substring(0, 100),
+              ai_reply: aiResponse ?? "AI_ERROR",
               conversation_id: conversationId,
               processing_time: processingTime
             }
