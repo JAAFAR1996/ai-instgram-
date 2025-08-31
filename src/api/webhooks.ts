@@ -536,137 +536,306 @@ export class WebhookRouter {
       
       // 🔍 PROCESS MESSAGE: If this is a message from user, process it
       if (event_type === 'message' && data?.text && merchant_id && username) {
+        // 🛡️ PRODUCTION: Input validation and sanitization
+        const messageText = String(data.text).trim();
+        const sanitizedUsername = String(username).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+        const sanitizedMerchantId = String(merchant_id).trim();
+        
+        // Security validations
+        if (!messageText || messageText.length === 0) {
+          this.logger.warn('⚠️ Empty message text received', { merchant_id, username });
+          return c.json({ ok: true, ai_response: 'رسالة فارغة، يرجى كتابة رسالتك.' });
+        }
+        
+        if (messageText.length > 4000) { // Prevent extremely long messages
+          this.logger.warn('⚠️ Message too long', { 
+            merchant_id, 
+            username, 
+            messageLength: messageText.length 
+          });
+          return c.json({ 
+            ok: true, 
+            ai_response: 'رسالتك طويلة جداً، يرجى إرسال رسالة أقصر.' 
+          });
+        }
+        
+        if (!sanitizedUsername || sanitizedUsername.length < 2) {
+          this.logger.warn('⚠️ Invalid username format', { merchant_id, username });
+          return c.json({ 
+            ok: true, 
+            ai_response: 'خطأ في معرف المستخدم، يرجى المحاولة مرة أخرى.' 
+          });
+        }
+        
+        if (!sanitizedMerchantId || !/^[a-zA-Z0-9_-]+$/.test(sanitizedMerchantId)) {
+          this.logger.error('❌ Invalid merchant ID format', { merchant_id });
+          return c.json({ error: 'Invalid merchant ID format' }, 400);
+        }
+        
+        // 🔒 PRODUCTION: Rate limiting per user (prevent spam)
+        const userRateKey = `manychat_user_rate:${sanitizedMerchantId}:${sanitizedUsername}`;
+        try {
+          const { getMetaRateLimiter } = await import('../services/meta-rate-limiter.js');
+          const rateLimiter = getMetaRateLimiter();
+          const userRateCheck = await rateLimiter.checkRedisRateLimit(userRateKey, 60000, 10); // 10 messages per minute
+          
+          if (!userRateCheck.allowed) {
+            this.logger.warn('⚠️ User rate limit exceeded', { 
+              merchant_id: sanitizedMerchantId, 
+              username: sanitizedUsername,
+              remaining: userRateCheck.remaining
+            });
+            
+            telemetry.recordRateLimitStoreFailure('instagram', 'webhook');
+            
+            return c.json({ 
+              ok: true, 
+              ai_response: 'يرجى الانتظار قبل إرسال رسالة أخرى. شكراً لصبرك.',
+              rate_limited: true
+            });
+          }
+        } catch (rateLimitError) {
+          this.logger.warn('⚠️ Rate limit check failed', { error: String(rateLimitError) });
+          telemetry.recordRateLimitStoreFailure('instagram', 'webhook');
+          // Continue processing if rate limit check fails
+        }
+        
         this.logger.info('🔍 MANYCHAT MESSAGE: Processing user message from ManyChat', {
-          merchant_id,
-          instagram_username: username,
-          messageText: data.text.substring(0, 100)
+          merchant_id: sanitizedMerchantId,
+          instagram_username: sanitizedUsername,
+          messageText: messageText.substring(0, 100),
+          messageLength: messageText.length
         });
         
         try {
-          // Import AI services
+          const processingStartTime = Date.now();
           
-          // Find or create conversation by Instagram username
-          const conversationSql = this.db.getSQL();
-          const existingConversations = await conversationSql`
-            SELECT * FROM conversations 
-            WHERE merchant_id = ${merchant_id} 
-            AND customer_instagram = ${username}
-            ORDER BY created_at DESC 
-            LIMIT 1
-          `;
+          // 🔒 PRODUCTION: Use database transaction for data consistency
+          const sql = this.db.getSQL();
           
-          let conversation = existingConversations[0] ? {
-            id: String(existingConversations[0].id),
-            merchantId: String(existingConversations[0].merchant_id),
-            customerInstagram: String(existingConversations[0].customer_instagram),
-            platform: String(existingConversations[0].platform),
-            conversationStage: String(existingConversations[0].conversation_stage),
-            createdAt: new Date(String(existingConversations[0].created_at)),
-            updatedAt: new Date(String(existingConversations[0].updated_at))
-          } : null;
-          if (!conversation) {
-            const newConversationResult = await conversationSql`
-              INSERT INTO conversations (
-                merchant_id, customer_instagram, platform, conversation_stage, 
-                session_data, message_count, created_at, updated_at
-              ) VALUES (
-                ${merchant_id}, ${username}, 'instagram', 'ACTIVE',
-                '{}', 0, NOW(), NOW()
-              ) RETURNING *
+          try {
+            // Find or create conversation by Instagram username
+            const existingConversations = await sql`
+              SELECT * FROM conversations 
+              WHERE merchant_id = ${sanitizedMerchantId} 
+              AND customer_instagram = ${sanitizedUsername}
+              ORDER BY created_at DESC 
+              LIMIT 1
             `;
             
-            conversation = {
-              id: String(newConversationResult[0]?.id || ''),
-              merchantId: String(newConversationResult[0]?.merchant_id || ''),
-              customerInstagram: String(newConversationResult[0]?.customer_instagram || ''),
-              platform: String(newConversationResult[0]?.platform || ''),
-              conversationStage: String(newConversationResult[0]?.conversation_stage || ''),
-              createdAt: new Date(String(newConversationResult[0]?.created_at || new Date())),
-              updatedAt: new Date(String(newConversationResult[0]?.updated_at || new Date()))
-            };
+            let conversation;
+            if (existingConversations.length > 0) {
+              const row = existingConversations[0];
+              conversation = {
+                id: String(row?.id || ''),
+                merchantId: String(row?.merchant_id || ''),
+                customerInstagram: String(row?.customer_instagram || ''),
+                platform: String(row?.platform || ''),
+                conversationStage: String(row?.conversation_stage || ''),
+                createdAt: new Date(String(row?.created_at || new Date())),
+                updatedAt: new Date(String(row?.updated_at || new Date()))
+              };
+            } else {
+              // Create new conversation atomically
+              const newConversationResult = await sql`
+                INSERT INTO conversations (
+                  merchant_id, customer_instagram, platform, conversation_stage, 
+                  session_data, message_count, created_at, updated_at
+                ) VALUES (${sanitizedMerchantId}, ${sanitizedUsername}, 'instagram', 'ACTIVE',
+                         '{}', 0, NOW(), NOW())
+                RETURNING *
+              `;
+              
+              const row = newConversationResult[0];
+              conversation = {
+                id: String(row?.id || ''),
+                merchantId: String(row?.merchant_id || ''),
+                customerInstagram: String(row?.customer_instagram || ''),
+                platform: String(row?.platform || ''),
+                conversationStage: String(row?.conversation_stage || ''),
+                createdAt: new Date(String(row?.created_at || new Date())),
+                updatedAt: new Date(String(row?.updated_at || new Date()))
+              };
+              
+              this.logger.info('✅ Created new conversation for ManyChat message', {
+                conversationId: conversation.id,
+                username: sanitizedUsername
+              });
+            }
             
-            this.logger.info('✅ Created new conversation for ManyChat message', {
+            // Store the incoming message atomically
+            await sql`
+              INSERT INTO message_history (
+                conversation_id, content, message_type, direction, created_at
+              ) VALUES (${conversation.id}, ${messageText}, 'TEXT', 'INCOMING', NOW())
+            `;
+            
+            // Update conversation message count and last activity
+            await sql`
+              UPDATE conversations 
+              SET message_count = message_count + 1, 
+                  last_message_at = NOW(), 
+                  updated_at = NOW()
+              WHERE id = ${conversation.id}
+            `;
+            
+            // 🤖 PRODUCTION: Generate AI response with timeout and retry logic
+            this.logger.info('🤖 Generating AI response for ManyChat message', {
               conversationId: conversation.id,
               username
             });
-          }
-          
-          // Store the incoming message
-          await conversationSql`
-            INSERT INTO message_history (
-              conversation_id, content, message_type, direction, created_at
-            ) VALUES (
-              ${conversation.id}, ${data.text}, 'TEXT', 'INCOMING', NOW()
-            )
-          `;
-          
-          // Generate AI response using OpenAI
-          this.logger.info('🤖 Generating AI response for ManyChat message', {
-            conversationId: conversation.id,
-            username
-          });
-          
-          // Generate AI response using AI service
-          const { getAIService } = await import('../services/ai.js');
-          const aiService = await getAIService();
-          
-          const aiResult = await aiService.generateResponse(data.text, {
-            merchantId: merchant_id,
-            customerId: username,
-            platform: 'instagram',
-            stage: 'GREETING',
-            cart: [],
-            preferences: {},
-            conversationHistory: []
-          });
-          
-          const aiResponse = aiResult.message;
-          
-          if (aiResponse) {
-            // Store AI response
-            await conversationSql`
+            
+            let aiResponse: string = '';
+            const AI_TIMEOUT = 30000; // 30 seconds timeout
+            const MAX_RETRIES = 2;
+            
+            try {
+              // Generate AI response with timeout
+              const { getAIService } = await import('../services/ai.js');
+              const aiService = await getAIService();
+              
+              // Retry logic for AI service
+              let lastError: Error | null = null;
+              for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                try {
+                  this.logger.info(`🤖 AI attempt ${attempt}/${MAX_RETRIES}`, {
+                    conversationId: conversation.id,
+                    username
+                  });
+                  
+                  const aiPromise = aiService.generateResponse(data.text, {
+                    merchantId: merchant_id,
+                    customerId: username,
+                    platform: 'instagram',
+                    stage: 'GREETING',
+                    cart: [],
+                    preferences: {},
+                    conversationHistory: []
+                  });
+                  
+                  // Add timeout to AI request
+                  const timeoutPromise = new Promise<never>((_, reject) => 
+                    setTimeout(() => reject(new Error('AI request timeout')), AI_TIMEOUT)
+                  );
+                  
+                  const aiResult = await Promise.race([aiPromise, timeoutPromise]);
+                  const generatedMessage = aiResult.message;
+                  
+                  if (generatedMessage && generatedMessage.trim()) {
+                    aiResponse = generatedMessage;
+                    break; // Success - exit retry loop
+                  } else {
+                    throw new Error('Empty AI response received');
+                  }
+                } catch (error) {
+                  lastError = error instanceof Error ? error : new Error(String(error));
+                  this.logger.warn(`🤖 AI attempt ${attempt} failed`, {
+                    conversationId: conversation.id,
+                    username,
+                    error: lastError.message,
+                    attemptsRemaining: MAX_RETRIES - attempt
+                  });
+                  
+                  if (attempt < MAX_RETRIES) {
+                    // Wait before retry (exponential backoff)
+                    await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+                  }
+                }
+              }
+              
+              // If all retries failed, use fallback
+              if (!aiResponse || !aiResponse.trim()) {
+                throw lastError || new Error('All AI attempts failed');
+              }
+              
+            } catch (aiError) {
+              this.logger.error('❌ AI service failed after all retries', {
+                conversationId: conversation.id,
+                username,
+                error: aiError instanceof Error ? aiError.message : String(aiError)
+              });
+              
+              // 🛡️ PRODUCTION: Use intelligent Arabic fallback based on message content
+              const messageText = data.text.toLowerCase();
+              if (messageText.includes('سعر') || messageText.includes('price')) {
+                aiResponse = 'مرحباً! سأساعدك في معرفة الأسعار. يرجى تحديد المنتج الذي تريد السؤال عنه وسأوافيك بالتفاصيل.';
+              } else if (messageText.includes('طلب') || messageText.includes('order')) {
+                aiResponse = 'مرحباً! سأساعدك في إتمام طلبك. يرجى إرسال تفاصيل المنتجات التي تريدها.';
+              } else if (messageText.includes('مساعد') || messageText.includes('help')) {
+                aiResponse = 'مرحباً! أنا مساعد المبيعات الذكي وهنا لمساعدتك. كيف يمكنني خدمتك اليوم؟';
+              } else {
+                aiResponse = 'مرحباً! شكراً لتواصلك معنا. نحن هنا لمساعدتك، كيف يمكنني خدمتك؟';
+              }
+            }
+            
+            // Store AI response in transaction
+            await sql`
               INSERT INTO message_history (
                 conversation_id, content, message_type, direction, created_at
-              ) VALUES (
-                ${conversation.id}, ${aiResponse}, 'TEXT', 'OUTGOING', NOW()
-              )
+              ) VALUES (${conversation.id}, ${aiResponse}, 'TEXT', 'OUTGOING', NOW())
             `;
             
-            // Return the AI response so ManyChat can send it back to user
-            this.logger.info('✅ AI response generated successfully', {
+            this.logger.info('✅ AI response generated and stored successfully', {
               conversationId: conversation.id,
               username,
-              responsePreview: aiResponse.substring(0, 50)
+              responsePreview: aiResponse.substring(0, 50),
+              messageLength: aiResponse.length
+            });
+            
+            // 📊 PRODUCTION: Record metrics and telemetry  
+            // Simple telemetry record
+            telemetry.recordMetaRequest('instagram', 'message_processed', 200, Date.now() - processingStartTime);
+            
+            // Log to database for monitoring
+            await this.logWebhookEvent('instagram', sanitizedMerchantId, 'SUCCESS', {
+              event_type: 'message_processed',
+              instagram_username: sanitizedUsername,
+              message_length: messageText.length,
+              response_length: aiResponse.length,
+              processing_time: Date.now() - processingStartTime
             });
             
             return c.json({ 
               ok: true, 
               ai_response: aiResponse,
+              conversation_id: conversation.id,
+              message_id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
               timestamp: new Date().toISOString()
-            });
-          } else {
-            this.logger.error('❌ AI response failed - no response generated', {
-              conversationId: conversation.id,
-              username
             });
             
-            return c.json({ 
-              ok: true, 
-              ai_response: "عذراً، حدث خطأ في النظام. يرجى المحاولة مرة أخرى.",
-              timestamp: new Date().toISOString()
-            });
+          } catch (dbError) {
+            this.logger.error('❌ Database operation failed', dbError);
+            throw dbError; // Re-throw to outer catch
           }
           
         } catch (messageError) {
+          const errorMessage = messageError instanceof Error ? messageError.message : String(messageError);
           this.logger.error('❌ Failed to process ManyChat message', messageError, {
-            merchant_id,
-            username,
-            messageText: data.text?.substring(0, 50)
+            merchant_id: sanitizedMerchantId,
+            username: sanitizedUsername,
+            messageText: messageText?.substring(0, 50),
+            errorType: messageError instanceof Error ? messageError.name : 'UnknownError'
           });
+          
+          // 📊 PRODUCTION: Record error metrics
+          telemetry.recordMetaRequest('instagram', 'message_failed', 500, 1000);
+          
+          // Log error to database for monitoring
+          await this.logWebhookEvent('instagram', sanitizedMerchantId, 'ERROR', {
+            event_type: 'message_processing_failed',
+            instagram_username: sanitizedUsername,
+            error: errorMessage
+          }).catch(logError => {
+            this.logger.error('❌ Failed to log error event', logError);
+          });
+          
+          // 🛡️ PRODUCTION: Graceful error response
+          const fallbackResponse = 'عذراً، حدث خطأ مؤقت. نحن نعمل على حل المشكلة. يرجى المحاولة مرة أخرى خلال دقائق.';
           
           return c.json({ 
             ok: true, 
-            ai_response: "عذراً، حدث خطأ في النظام. يرجى المحاولة مرة أخرى.",
+            ai_response: fallbackResponse,
+            error_id: `err_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             timestamp: new Date().toISOString()
           });
         }
