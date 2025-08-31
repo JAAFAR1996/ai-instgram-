@@ -192,6 +192,13 @@ export class InstagramWebhookHandler {
     payload: InstagramWebhookEvent,
     merchantId: string
   ): Promise<ProcessedWebhookResult> {
+    // 🔍 DEBUG: Log webhook processing start
+    this.logger.info('🔍 WEBHOOK START: Processing Instagram webhook', {
+      merchantId,
+      entriesCount: payload.entry?.length || 0,
+      object: payload.object
+    });
+    
     const result: ProcessedWebhookResult = {
       success: true,
       eventsProcessed: 0,
@@ -202,6 +209,33 @@ export class InstagramWebhookHandler {
 
     try {
       this.logger.info('📥 Processing Instagram webhook', { merchantId });
+      
+      // 🔍 DEBUG: Log each entry before processing
+      if (payload.entry && payload.entry.length > 0) {
+        for (let i = 0; i < payload.entry.length; i++) {
+          const entry = payload.entry[i];
+          if (entry) {
+            this.logger.info(`🔍 ENTRY ${i + 1}/${payload.entry.length}: Structure`, {
+              id: entry.id,
+              time: entry.time,
+              hasMessaging: !!entry.messaging,
+              messagingEvents: entry.messaging?.length || 0
+            });
+            
+            if (entry.messaging) {
+              entry.messaging.forEach((msg, msgIdx) => {
+                this.logger.info(`🔍 MESSAGING ${msgIdx + 1}: Event type check`, {
+                  hasMessage: !!msg.message,
+                  hasSender: !!msg.sender,
+                  senderUsername: msg.sender?.username || 'NO_USERNAME',
+                  timestamp: msg.timestamp
+                });
+              });
+            }
+          }
+        }
+      }
+      
       const entryPromises = payload.entry.map(entry =>
         this.processWebhookEntry(entry, merchantId)
       );
@@ -356,13 +390,25 @@ export class InstagramWebhookHandler {
         throw new Error('Missing sender ID in messaging event');
       }
       
+      // 🔍 DEBUG: Log message details before processing
+      this.logger.info('🔍 DM RECEIVED: Instagram direct message details', {
+        merchantId,
+        hasMessage: !!event.message,
+        hasSender: !!event.sender,
+        senderUsername: event.sender?.username || 'MISSING',
+        senderId: event.sender?.id || 'MISSING', 
+        messageText: event.message?.text?.substring(0, 100) || 'NO_TEXT',
+        timestamp: event.timestamp
+      });
+
       // 🛡️ ARCHITECTURE ENFORCEMENT: Username-only, no ID resolution
       let customerUsername = event.sender?.username;
       if (!customerUsername) {
         this.logger.info('IGNORED_NO_USERNAME: Instagram message received without username', {
           merchantId,
           messageType: 'dm',
-          reason: 'no_username_provided'
+          reason: 'no_username_provided',
+          senderId: event.sender?.id || 'MISSING'
         });
         return 0; // Skip processing - ManyChat-only architecture
       }
@@ -370,6 +416,15 @@ export class InstagramWebhookHandler {
       // Normalize username: lowercase, remove @
       customerUsername = customerUsername.toLowerCase().replace(/^@/, '').trim();
       const timestamp = new Date(event.timestamp);
+      
+      // 🔍 DEBUG: Log normalized username and processing decision
+      this.logger.info('🔍 DM PROCESSING: Normalized username and ready to process', {
+        merchantId,
+        originalUsername: event.sender?.username,
+        normalizedUsername: customerUsername,
+        messageText: event.message?.text?.substring(0, 100) || 'NO_TEXT',
+        timestamp: timestamp.toISOString()
+      });
 
       // Check if this is a message or postback (story reply)
       const isMessage = !!event.message;
@@ -455,9 +510,26 @@ export class InstagramWebhookHandler {
 
       result.messagesProcessed++;
 
+      // 🔍 DEBUG: Log message processing success and next steps
+      this.logger.info('🔍 MESSAGE STORED: Ready to generate AI response', {
+        conversationId: conversation.id,
+        merchantId,
+        customerUsername,
+        messageText: messageContent.substring(0, 50),
+        messageType,
+        hasValidContent: !!messageContent.trim()
+      });
+
       // Generate AI response for the message
       if (messageContent.trim()) {
         try {
+          this.logger.info('🔍 AI RESPONSE START: Generating AI response via ManyChat', {
+            conversationId: conversation.id,
+            merchantId,
+            customerUsername,
+            messageType: messageType === 'STORY_REPLY' ? 'story_reply' : 'dm'
+          });
+          
           await this.generateAIResponse(
             conversation.id,
             merchantId,
@@ -466,6 +538,12 @@ export class InstagramWebhookHandler {
             messageType === 'STORY_REPLY' ? 'story_reply' : 'dm',
             event.message?.mid
           );
+          
+          this.logger.info('🔍 AI RESPONSE SUCCESS: AI response sent successfully', {
+            conversationId: conversation.id,
+            merchantId,
+            customerUsername
+          });
         } catch (aiError) {
           this.logger.error('❌ AI Response Failed - sending fallback', { 
             error: aiError instanceof Error ? aiError.message : String(aiError),
@@ -477,6 +555,12 @@ export class InstagramWebhookHandler {
           // إرسال رسالة fallback فورية
           await this.sendImmediateFallback(conversation.id, merchantId, customerUsername, 'dm');
         }
+      } else {
+        this.logger.info('🔍 SKIPPED AI: Empty message content, no AI response needed', {
+          conversationId: conversation.id,
+          merchantId,
+          customerUsername
+        });
       }
 
       this.logger.info('Instagram message processed', {

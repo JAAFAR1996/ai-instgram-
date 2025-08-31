@@ -367,6 +367,13 @@ export class WebhookRouter {
 
       if (event.object !== 'instagram') return c.text('Wrong object', 400);
 
+      // 🔍 DEBUG: Log incoming webhook payload structure
+      this.logger.info('🔍 WEBHOOK DEBUG: Instagram payload received', {
+        entries: event.entry?.length || 0,
+        entryIds: event.entry?.map(e => e.id) || [],
+        hasMessaging: event.entry?.some(e => e.messaging) || false
+      });
+
       // Determine merchant ID from header or page mapping
       merchantId = c.req.header('x-merchant-id') || undefined;
       if (!merchantId) {
@@ -417,7 +424,13 @@ export class WebhookRouter {
         return c.text('EVENT_RECEIVED', 200);
       }
 
+      // 🔍 DEBUG: Log each entry processing
       for (const entry of event.entry) {
+        this.logger.info('🔍 PROCESSING ENTRY:', {
+          entryId: entry.id,
+          hasMessaging: !!entry.messaging,
+          messagingCount: entry.messaging?.length || 0
+        });
         await this.processInstagramEntry(entry);
       }
 
@@ -517,8 +530,147 @@ export class WebhookRouter {
         instagram_username: username, 
         subscriber_id,
         event_type,
-        dataKeys: data ? Object.keys(data) : []
+        dataKeys: data ? Object.keys(data) : [],
+        messageText: data?.text || 'NO_TEXT'
       });
+      
+      // 🔍 PROCESS MESSAGE: If this is a message from user, process it
+      if (event_type === 'message' && data?.text && merchant_id && username) {
+        this.logger.info('🔍 MANYCHAT MESSAGE: Processing user message from ManyChat', {
+          merchant_id,
+          instagram_username: username,
+          messageText: data.text.substring(0, 100)
+        });
+        
+        try {
+          // Import AI services
+          
+          // Find or create conversation by Instagram username
+          const conversationSql = this.db.getSQL();
+          const existingConversations = await conversationSql`
+            SELECT * FROM conversations 
+            WHERE merchant_id = ${merchant_id} 
+            AND customer_instagram = ${username}
+            ORDER BY created_at DESC 
+            LIMIT 1
+          `;
+          
+          let conversation = existingConversations[0] ? {
+            id: String(existingConversations[0].id),
+            merchantId: String(existingConversations[0].merchant_id),
+            customerInstagram: String(existingConversations[0].customer_instagram),
+            platform: String(existingConversations[0].platform),
+            conversationStage: String(existingConversations[0].conversation_stage),
+            createdAt: new Date(String(existingConversations[0].created_at)),
+            updatedAt: new Date(String(existingConversations[0].updated_at))
+          } : null;
+          if (!conversation) {
+            const newConversationResult = await conversationSql`
+              INSERT INTO conversations (
+                merchant_id, customer_instagram, platform, conversation_stage, 
+                session_data, message_count, created_at, updated_at
+              ) VALUES (
+                ${merchant_id}, ${username}, 'instagram', 'ACTIVE',
+                '{}', 0, NOW(), NOW()
+              ) RETURNING *
+            `;
+            
+            conversation = {
+              id: String(newConversationResult[0]?.id || ''),
+              merchantId: String(newConversationResult[0]?.merchant_id || ''),
+              customerInstagram: String(newConversationResult[0]?.customer_instagram || ''),
+              platform: String(newConversationResult[0]?.platform || ''),
+              conversationStage: String(newConversationResult[0]?.conversation_stage || ''),
+              createdAt: new Date(String(newConversationResult[0]?.created_at || new Date())),
+              updatedAt: new Date(String(newConversationResult[0]?.updated_at || new Date()))
+            };
+            
+            this.logger.info('✅ Created new conversation for ManyChat message', {
+              conversationId: conversation.id,
+              username
+            });
+          }
+          
+          // Store the incoming message
+          await conversationSql`
+            INSERT INTO message_history (
+              conversation_id, content, message_type, direction, created_at
+            ) VALUES (
+              ${conversation.id}, ${data.text}, 'TEXT', 'INCOMING', NOW()
+            )
+          `;
+          
+          // Generate AI response using OpenAI
+          this.logger.info('🤖 Generating AI response for ManyChat message', {
+            conversationId: conversation.id,
+            username
+          });
+          
+          // Generate AI response using AI service
+          const { getAIService } = await import('../services/ai.js');
+          const aiService = await getAIService();
+          
+          const aiResult = await aiService.generateResponse(data.text, {
+            merchantId: merchant_id,
+            customerId: username,
+            platform: 'instagram',
+            stage: 'GREETING',
+            cart: [],
+            preferences: {},
+            conversationHistory: []
+          });
+          
+          const aiResponse = aiResult.message;
+          
+          if (aiResponse) {
+            // Store AI response
+            await conversationSql`
+              INSERT INTO message_history (
+                conversation_id, content, message_type, direction, created_at
+              ) VALUES (
+                ${conversation.id}, ${aiResponse}, 'TEXT', 'OUTGOING', NOW()
+              )
+            `;
+            
+            // Return the AI response so ManyChat can send it back to user
+            this.logger.info('✅ AI response generated successfully', {
+              conversationId: conversation.id,
+              username,
+              responsePreview: aiResponse.substring(0, 50)
+            });
+            
+            return c.json({ 
+              ok: true, 
+              ai_response: aiResponse,
+              timestamp: new Date().toISOString()
+            });
+          } else {
+            this.logger.error('❌ AI response failed - no response generated', {
+              conversationId: conversation.id,
+              username
+            });
+            
+            return c.json({ 
+              ok: true, 
+              ai_response: "عذراً، حدث خطأ في النظام. يرجى المحاولة مرة أخرى.",
+              timestamp: new Date().toISOString()
+            });
+          }
+          
+        } catch (messageError) {
+          this.logger.error('❌ Failed to process ManyChat message', messageError, {
+            merchant_id,
+            username,
+            messageText: data.text?.substring(0, 50)
+          });
+          
+          return c.json({ 
+            ok: true, 
+            ai_response: "عذراً، حدث خطأ في النظام. يرجى المحاولة مرة أخرى.",
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
 
       // If we have both username and subscriber_id, update mapping
       if (merchant_id && username && subscriber_id) {
