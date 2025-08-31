@@ -175,16 +175,6 @@ export class AIService {
     this.logger.info('AI Service initialized successfully');
   }
 
-  /** Basic runtime validation for AIResponse payload */
-  private validateAIResponse(payload: unknown): payload is AIResponse {
-    return !!payload
-      && typeof (payload as AIResponse).message === 'string'
-      && typeof (payload as AIResponse).intent === 'string'
-      && typeof (payload as AIResponse).stage === 'string'
-      && Array.isArray((payload as AIResponse).actions)
-      && Array.isArray((payload as AIResponse).products)
-      && typeof (((payload as AIResponse).confidence) ?? 0.0) === 'number';
-  }
 
   /** Mask PII (phones/IG handles) before logging */
   private maskPII(text: string): string {
