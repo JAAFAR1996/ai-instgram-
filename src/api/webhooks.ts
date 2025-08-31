@@ -665,9 +665,9 @@ export class WebhookRouter {
             
             // Store the incoming message atomically
             await sql`
-              INSERT INTO message_history (
-                conversation_id, content, message_type, direction, created_at
-              ) VALUES (${conversation.id}, ${messageText}, 'TEXT', 'INCOMING', NOW())
+              INSERT INTO message_logs (
+                conversation_id, content, message_type, direction, platform, created_at
+              ) VALUES (${conversation.id}, ${messageText}, 'TEXT', 'INCOMING', 'instagram', NOW())
             `;
             
             // Update conversation message count and last activity
@@ -770,9 +770,9 @@ export class WebhookRouter {
             
             // Store AI response in transaction
             await sql`
-              INSERT INTO message_history (
-                conversation_id, content, message_type, direction, created_at
-              ) VALUES (${conversation.id}, ${aiResponse}, 'TEXT', 'OUTGOING', NOW())
+              INSERT INTO message_logs (
+                conversation_id, content, message_type, direction, platform, created_at
+              ) VALUES (${conversation.id}, ${aiResponse}, 'TEXT', 'OUTGOING', 'instagram', NOW())
             `;
             
             this.logger.info('✅ AI response generated and stored successfully', {

@@ -18,3 +18,4 @@ CREATE INDEX IF NOT EXISTS idx_message_windows_instagram_username
   WHERE platform = 'instagram';
 
 COMMIT;
+

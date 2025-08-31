@@ -63,3 +63,4 @@ $$ LANGUAGE sql STABLE;
 COMMENT ON FUNCTION get_manychat_subscriber_by_instagram IS 'Legacy function - now uses username instead of ID';
 
 COMMIT;
+

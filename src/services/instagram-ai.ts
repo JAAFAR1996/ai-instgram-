@@ -255,55 +255,17 @@ export class InstagramAIService {
       // Build Instagram-specific prompt
       const prompt = await this.buildInstagramConversationPrompt(customerMessage, context);
 
-      // Call OpenAI with merchant-specific settings and rate limit protection
-      let completion;
-      try {
-        completion = await this.openai.chat.completions.create({
-          model: config.aiModel,
-          messages: prompt,
-          temperature: this.clampTemperature(config.temperature),
-          max_tokens: Math.min(config.maxTokens, InstagramAIService.MAX_TOKENS_HARD_CAP),
-          top_p: 0.95,
-          frequency_penalty: 0.2,
-          presence_penalty: 0.3,
-          response_format: { type: 'json_object' }
-        });
-      } catch (error: any) {
-        const msg = String(error?.message || error);
-        
-        // 🛡️ ARCHITECTURE ENFORCEMENT: Rate limit guard with static response
-        if (msg.includes('429') || /rate limit/i.test(msg) || msg.includes('quota')) {
-          this.logger.warn('🛑 OpenAI rate limit - sending static response via ManyChat', {
-            merchantId: context.merchantId,
-            error: msg,
-            context: 'rate_limit_guard'
-          });
-          
-          // Return static Arabic response - ManyChat will send it
-          const rateLimitMessage = '😊 عذراً للانتظار! النظام مشغول حالياً. سأرد عليك خلال دقائق ✨';
-          return {
-            message: rateLimitMessage,
-            messageAr: rateLimitMessage,
-            intent: 'rate_limit_error',
-            stage: 'SUPPORT' as const,
-            actions: [],
-            products: [],
-            confidence: 0.5,
-            tokens: { prompt: 0, completion: 0, total: 0 },
-            responseTime: Date.now() - startTime,
-            mediaRecommendations: [],
-            hashtagSuggestions: [],
-            visualStyle: 'direct' as const,
-            engagement: {
-              likelyToShare: false,
-              viralPotential: 0.1,
-              userGeneratedContent: false
-            }
-          };
-        }
-        
-        throw error;
-      }
+      // Call OpenAI with merchant-specific settings
+      const completion = await this.openai.chat.completions.create({
+        model: config.aiModel,
+        messages: prompt,
+        temperature: this.clampTemperature(config.temperature),
+        max_tokens: Math.min(config.maxTokens, InstagramAIService.MAX_TOKENS_HARD_CAP),
+        top_p: 0.95,
+        frequency_penalty: 0.2,
+        presence_penalty: 0.3,
+        response_format: { type: 'json_object' }
+      });
 
       const responseTime = Date.now() - startTime;
       const response = completion.choices?.[0]?.message?.content || '';
@@ -357,42 +319,13 @@ export class InstagramAIService {
     try {
       const prompt = this.buildStoryReplyPrompt(storyReaction, storyContext, context);
 
-      let completion;
-      try {
-        completion = await this.openai.chat.completions.create({
-          model: getEnv('OPENAI_MODEL') || 'gpt-4o-mini',
-          messages: prompt,
-          temperature: 0.9, // Very creative for story interactions
-          max_tokens: 200,
-          response_format: { type: 'json_object' }
-        });
-      } catch (error: any) {
-        // 🛡️ Rate limit guard for story replies
-        const msg = String(error?.message || error);
-        if (msg.includes('429') || /rate limit/i.test(msg)) {
-          const storyMessage = '🎉 شكراً لتفاعلك! سأرد عليك قريباً 😊';
-          return {
-            message: storyMessage,
-            messageAr: storyMessage,
-            intent: 'rate_limit_error',
-            stage: 'SUPPORT' as const,
-            actions: [],
-            products: [],
-            confidence: 0.5,
-            tokens: { prompt: 0, completion: 0, total: 0 },
-            responseTime: 0,
-            mediaRecommendations: [],
-            hashtagSuggestions: [],
-            visualStyle: 'story' as const,
-            engagement: {
-              likelyToShare: false,
-              viralPotential: 0.1,
-              userGeneratedContent: false
-            }
-          };
-        }
-        throw error;
-      }
+      const completion = await this.openai.chat.completions.create({
+        model: getEnv('OPENAI_MODEL') || 'gpt-4o-mini',
+        messages: prompt,
+        temperature: 0.9, // Very creative for story interactions
+        max_tokens: 200,
+        response_format: { type: 'json_object' }
+      });
 
       const response = completion.choices?.[0]?.message?.content;
       const parsed = this.parseJsonSafe<InstagramAIResponse>(response ?? undefined);
