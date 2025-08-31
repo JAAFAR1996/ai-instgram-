@@ -3,7 +3,8 @@ import { getPool } from '../db/index.js';
 export async function getManychatIdByInstagram(merchantId: string, igUserId: string): Promise<string | null> {
   const pool = getPool();
   const { rows } = await pool.query<{ manychat_subscriber_id: string }>(
-    'select manychat_subscriber_id from get_manychat_subscriber_by_instagram($1,$2) as t(manychat_subscriber_id text)',
+    `select manychat_subscriber_id
+     from get_manychat_subscriber_by_instagram($1::uuid, $2::text) as t(manychat_subscriber_id text)`,
     [merchantId, igUserId]
   );
   return rows[0]?.manychat_subscriber_id ?? null;
