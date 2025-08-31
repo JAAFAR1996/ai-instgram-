@@ -144,7 +144,7 @@ export class ConversationAIOrchestrator {
       try {
         const { getServiceController } = await import('./service-controller.js');
         const sc = getServiceController();
-        const enabled = await sc.isServiceEnabled(context.merchantId, 'ai_processing');
+        const enabled = await sc.isServiceEnabled(context.merchantId, 'AI_RESPONSES');
         if (!enabled) {
           return this.getFallbackPlatformResponse(platform, context);
         }

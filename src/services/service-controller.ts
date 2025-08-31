@@ -214,8 +214,8 @@ export class ServiceController {
   ): Promise<boolean> {
     try {
       // First check if Instagram integration is enabled
-      if (service !== 'instagram') {
-        const platformEnabled = await this.getServiceStatus(merchantId, 'instagram');
+      if (service !== 'INSTAGRAM_MESSAGING') {
+        const platformEnabled = await this.getServiceStatus(merchantId, 'INSTAGRAM_MESSAGING');
         if (!platformEnabled) {
           return false;
         }

@@ -234,7 +234,7 @@ export class AIService {
     try {
       const { getServiceController } = await import('./service-controller.js');
       const sc = getServiceController();
-      return await sc.isServiceEnabled(merchantId, 'ai_processing');
+      return await sc.isServiceEnabled(merchantId, 'AI_RESPONSES');
     } catch (error: unknown) {
       this.logger.warn('Failed to check AI service status, defaulting to enabled:', { merchantId, error });
       return true;
