@@ -4,7 +4,7 @@ export async function getManychatIdByInstagram(merchantId: string, igUserId: str
   const pool = getPool();
   const { rows } = await pool.query<{ manychat_subscriber_id: string }>(
     `select manychat_subscriber_id
-     from get_manychat_subscriber_by_instagram($1::uuid, $2::text) as t(manychat_subscriber_id text)`,
+     from public.get_manychat_subscriber_by_instagram($1::uuid, $2::text)`,
     [merchantId, igUserId]
   );
   return rows[0]?.manychat_subscriber_id ?? null;

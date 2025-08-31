@@ -16,7 +16,9 @@
       "mcp__render__get_deploy",
       "mcp__render__list_services",
       "mcp__render__list_deploys",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "WebSearch",
+      "Bash(psql:*)"
     ],
     "deny": [],
     "ask": []
