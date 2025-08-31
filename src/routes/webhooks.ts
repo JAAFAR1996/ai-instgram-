@@ -275,6 +275,56 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
     }
   });
 
+  // ManyChat webhook route
+  app.post('/webhooks/manychat', async (c) => {
+    try {
+      log.info('📩 ManyChat webhook received');
+      
+      const body = await c.req.json();
+      const { merchant_id, instagram_user_id, subscriber_id, event_type, data } = body;
+
+      // Log the webhook data
+      log.info('📩 ManyChat webhook data', { 
+        merchant_id, 
+        instagram_user_id, 
+        subscriber_id,
+        event_type,
+        dataKeys: data ? Object.keys(data) : []
+      });
+
+      // If we have both instagram_user_id and subscriber_id, update mapping
+      if (merchant_id && instagram_user_id && subscriber_id) {
+        try {
+          const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
+          await upsertManychatMapping(merchant_id, instagram_user_id, subscriber_id);
+          
+          log.info('✅ Updated ManyChat subscriber mapping', {
+            merchant_id,
+            instagram_user_id,
+            subscriber_id
+          });
+        } catch (mappingError) {
+          log.error('❌ Failed to update ManyChat mapping', mappingError, {
+            merchant_id,
+            instagram_user_id,
+            subscriber_id
+          });
+        }
+      }
+
+      // Return success response
+      return c.json({ ok: true, timestamp: new Date().toISOString() });
+
+    } catch (error) {
+      log.error('❌ ManyChat webhook processing failed', error);
+      
+      return c.json({ 
+        error: 'Webhook processing failed',
+        timestamp: new Date().toISOString()
+      }, 500);
+    }
+  });
+
   // WhatsApp webhook routes - DISABLED
   app.get('/webhooks/whatsapp', (c) => c.text('WhatsApp features disabled', 503));
   app.post('/webhooks/whatsapp', (c) => c.text('WhatsApp features disabled', 503));
@@ -286,7 +336,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       timestamp: new Date().toISOString(),
       platforms: {
         instagram: 'active',
-        whatsapp: 'disabled'
+        whatsapp: 'disabled',
+        manychat: 'active'
       }
     });
   });
