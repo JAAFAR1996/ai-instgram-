@@ -11,23 +11,23 @@ async function runSpecificMigration() {
     console.log('🔗 Connecting to database...');
     await client.connect();
     
-    // Check if column already exists
-    const existingColumn = await client.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
+    // Check if constraint already exists
+    const existingConstraint = await client.query(`
+      SELECT constraint_name 
+      FROM information_schema.table_constraints 
       WHERE table_name = 'manychat_subscribers' 
-      AND column_name = 'instagram_username'
+      AND constraint_name = 'uk_manychat_subscribers_merchant_instagram_username'
     `);
     
-    if (existingColumn.rows.length > 0) {
-      console.log('✅ Column instagram_username already exists');
+    if (existingConstraint.rows.length > 0) {
+      console.log('✅ Constraint uk_manychat_subscribers_merchant_instagram_username already exists');
       return;
     }
     
-    // Read and execute the migration
-    const migrationSQL = readFileSync('src/database/migrations/006_add_instagram_username_to_manychat.sql', 'utf8');
+    // Read and execute the constraint fix
+    const migrationSQL = readFileSync('fix-manychat-constraint.sql', 'utf8');
     
-    console.log('🔄 Executing migration 006 - Adding instagram_username column...');
+    console.log('🔄 Executing constraint fix - Adding unique constraint...');
     await client.query('BEGIN');
     
     // Split SQL commands and execute individually
@@ -41,20 +41,20 @@ async function runSpecificMigration() {
     }
     
     await client.query('COMMIT');
-    console.log('✅ Migration 006 completed successfully!');
+    console.log('✅ Constraint fix completed successfully!');
     
-    // Verify the column was added
-    const columnCheck = await client.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
+    // Verify the constraint was added
+    const constraintCheck = await client.query(`
+      SELECT constraint_name 
+      FROM information_schema.table_constraints 
       WHERE table_name = 'manychat_subscribers' 
-      AND column_name = 'instagram_username'
+      AND constraint_name = 'uk_manychat_subscribers_merchant_instagram_username'
     `);
     
-    if (columnCheck.rows.length > 0) {
-      console.log('✅ instagram_username column successfully added!');
+    if (constraintCheck.rows.length > 0) {
+      console.log('✅ Unique constraint successfully added!');
     } else {
-      console.log('❌ instagram_username column not found after migration');
+      console.log('❌ Unique constraint not found after migration');
     }
     
   } catch (error) {
