@@ -8,16 +8,10 @@
 import { Hono } from 'hono';
 import type { Pool } from 'pg';
 import { getLogger } from '../services/logger.js';
-import { verifyHMACRaw, type HmacVerifyResult } from '../services/encryption.js';
-import { pushDLQ } from '../queue/dead-letter.js';
 import { telemetry } from '../services/telemetry.js';
 import { z } from 'zod';
-import type { IGWebhookPayload } from '../types/instagram.js';
-import { randomUUID, createHmac } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import { getPool } from '../db/index.js';
-import * as MerchantRepo from '../repos/merchant.repo.js';
-import { getDatabaseJobSpool, type InstagramWebhookJob } from '../queue/index.js';
-import { getMerchantCache } from '../cache/index.js';
 import { getEnv } from '../config/env.js';
 
 const log = getLogger({ component: 'webhooks-routes' });
@@ -29,65 +23,8 @@ const InstagramWebhookVerificationSchema = z.object({
   'hub.challenge': z.string()
 });
 
-const WebhookEventSchema = z.object({
-  object: z.string(),
-  entry: z.array(z.object({
-    id: z.string(),
-    time: z.number(),
-    messaging: z.array(z.unknown()).optional(),
-    changes: z.array(z.unknown()).optional()
-  }))
-});
-
-// In-memory cache for mapping Instagram page IDs to merchant IDs
-// const pageMerchantCache = new Map<string, { merchantId: string; expiresAt: number }>(); // unused
-// const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes // unused
-
 export interface WebhookDependencies {
   pool: Pool;
-}
-
-/**
- * Extract merchant ID from Instagram webhook by looking up Page ID
- */
-async function extractMerchantId(webhookEvent: IGWebhookPayload | { entry?: Array<{ id?: string }> }): Promise<string> {
-  try {
-    // Get the first entry's Instagram Business Account ID
-    if (Array.isArray((webhookEvent as { entry?: Array<{ id?: string }> }).entry) && (webhookEvent as { entry?: Array<{ id?: string }> }).entry!.length > 0) {
-      const pageId = (webhookEvent as { entry: Array<{ id?: string }> }).entry[0]?.id;
-      if (!pageId) throw new Error('MISSING_PAGE_ID');
-      const merchantCache = getMerchantCache();
-      
-      // Check Redis cache first using new cache layer
-      let merchantId = await merchantCache.getMerchantByPageId(pageId);
-      
-      if (!merchantId) {
-        // Cache miss - lookup in database using repository
-        const pool = getPool();
-        merchantId = await MerchantRepo.getMerchantIdByPageId(pool, pageId);
-        
-        if (merchantId) {
-          // Cache the result for future lookups
-          await merchantCache.setMerchantByPageId(pageId, merchantId);
-        }
-      }
-      
-      if (merchantId) {
-        return merchantId;
-      }
-    }
-    
-    // Fallback to default merchant if no mapping found
-    log.warn('No merchant mapping found for Instagram webhook', {
-      pageId: (webhookEvent as { entry?: Array<{ id?: string }> }).entry?.[0]?.id,
-      entryCount: (webhookEvent as { entry?: Array<{ id?: string }> }).entry?.length
-    });
-    
-    return 'default-merchant-id';
-  } catch (error: unknown) {
-    log.error('Error extracting merchant ID:', error instanceof Error ? { message: error.message } : { error });
-    return 'default-merchant-id';
-  }
 }
 
 /**
@@ -133,254 +70,227 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
     }
   });
 
-  // Instagram webhook event handler (POST)
+  // Instagram direct webhook - DISABLED (using ManyChat flow only)
   app.post('/webhooks/instagram', async (c) => {
-    try {
-      // Get raw body for HMAC verification
-      const rawBody = (c as unknown as { rawBody?: Buffer }).rawBody;
-      if (!rawBody) {
-        log.error('No raw body available for HMAC verification');
-        return c.text('Bad Request - Raw body required', 400);
-      }
-
-      // Verify HMAC signature
-      const signature = c.req.header('x-hub-signature-256');
-      if (!signature) {
-        log.warn('Instagram webhook missing signature header');
-        return c.text('Unauthorized - Missing signature', 401);
-      }
-
-      const appSecret = (getEnv('META_APP_SECRET') || '').trim();
-      if (!appSecret) {
-        log.error('META_APP_SECRET not configured');
-        return c.text('Internal Server Error', 500);
-      }
-
-      const verification: HmacVerifyResult = verifyHMACRaw(rawBody, signature, appSecret);
-      if (!verification.ok) {
-        log.warn('Instagram webhook HMAC verification failed', {
-          reason: verification.reason,
-          signatureLength: signature.length,
-          bodyLength: rawBody.length
-        });
-        
-        // Log the event for debugging (in development only)
-        if (getEnv('NODE_ENV') !== 'production') {
-          await logInstagramEvent(rawBody, signature, appSecret);
-        }
-        
-        // Check if HMAC verification should be skipped
-        if (getEnv('SKIP_HMAC_VERIFICATION') !== 'true') {
-          return c.text('Unauthorized - Invalid signature', 401);
-        } else {
-          log.warn('SKIPPING HMAC verification due to SKIP_HMAC_VERIFICATION=true');
-        }
-      }
-
-      // Parse webhook payload
-      const body = await c.req.json();
-      const validation = WebhookEventSchema.safeParse(body);
-      
-      if (!validation.success) {
-        log.warn('Instagram webhook payload validation failed', {
-          errors: validation.error.errors,
-          body
-        });
-        return c.text('Bad Request - Invalid payload', 400);
-      }
-
-      const webhookEvent = validation.data;
-      
-      // Log successful webhook reception
-      log.info('Instagram webhook received', {
-        object: webhookEvent.object,
-        entryCount: webhookEvent.entry.length,
-        timestamp: new Date().toISOString()
-      });
-
-      // Extract merchant ID for routing
-      const merchantId = await extractMerchantId(webhookEvent);
-      
-      // Queue-first pattern: Only verify HMAC and enqueue
-      const requestStartTime = Date.now();
-      
-      try {
-        const jobPayload: InstagramWebhookJob = {
-          merchantId,
-          payload: webhookEvent as any, // Type mismatch between schemas
-          signature: signature,
-          timestamp: new Date(),
-          headers: {
-            'x-hub-signature-256': signature,
-            'content-type': c.req.header('content-type') || 'application/json'
-          }
-        };
-
-        // Enqueue for background processing
-        const spool = getDatabaseJobSpool();
-        const jobId = randomUUID();
-        await spool.spoolJob({
-          jobId,
-          jobType: 'WEBHOOK_PROCESSING',
-          jobData: jobPayload,
-          priority: 'normal',
-          merchantId
-        });
-        
-        const processingTime = Date.now() - requestStartTime;
-        
-        // Record fast webhook acceptance telemetry
-        telemetry.recordMetaRequest('instagram', 'webhook', 200, processingTime, false);
-        
-        log.info('Instagram webhook enqueued successfully', {
-          jobId,
-          merchantId,
-          entryCount: webhookEvent.entry.length,
-          processingTimeMs: processingTime
-        });
-        
-        // Fast response (target: < 150ms)
-        return c.text('OK', 200);
-        
-      } catch (enqueueError: unknown) {
-        const processingTime = Date.now() - requestStartTime;
-        
-        log.error('Failed to enqueue Instagram webhook', {
-          error: (enqueueError as { message?: string } | undefined)?.message ?? 'unknown',
-          merchantId,
-          processingTimeMs: processingTime
-        });
-        
-        telemetry.recordMetaRequest('instagram', 'webhook', 500, processingTime, false);
-        return c.text('Service Temporarily Unavailable', 503);
-      }
-    } catch (error: unknown) {
-      log.error('Instagram webhook processing error:', error instanceof Error ? { message: error.message, stack: error.stack } : { error });
-      
-      // Push to dead letter queue for retry
-      try {
-        await Promise.resolve(pushDLQ({
-          reason: 'webhook_processing_failed',
-          payload: {
-            platform: 'instagram',
-            error: (error as { message?: string } | undefined)?.message ?? 'unknown',
-            timestamp: new Date().toISOString()
-          }
-        }));
-      } catch (dlqError: unknown) {
-        log.error('Failed to push to DLQ:', dlqError instanceof Error ? { message: dlqError.message } : { dlqError });
-      }
-
-      return c.text('Internal Server Error', 500);
-    }
+    log.info('🚫 Instagram direct webhook disabled - using ManyChat flow only');
+    return c.text('Gone - Using ManyChat integration only', 410);
   });
 
-  // ManyChat webhook route - Production-ready simple solution
+  // ManyChat webhook route - PRODUCTION with AI integration
   app.post('/webhooks/manychat', async (c) => {
     try {
+      // 🔒 PRODUCTION: Bearer token authentication
+      const authHeader = c.req.header('authorization');
+      const expectedBearer = (getEnv('MANYCHAT_BEARER') || '').trim();
+      if (expectedBearer && !authHeader?.startsWith(`Bearer ${expectedBearer}`)) {
+        log.warn('❌ ManyChat webhook unauthorized', { hasAuth: !!authHeader });
+        return c.json({ error: 'unauthorized' }, 401);
+      }
+      
       log.info('📩 ManyChat webhook received');
+      const processingStartTime = Date.now();
       
       const body = await c.req.json();
-      
-      // Extract Instagram username only (no more ID mixing!)
-      const instagram_username =
-        body.instagram_username || 
-        body.user?.instagram_username || 
-        body.data?.instagram_username;
+      const { merchant_id, instagram_username, subscriber_id, event_type, data } = body;
 
-      if (!instagram_username) {
+      // 🛡️ PRODUCTION: Input validation and sanitization
+      if (!instagram_username || !merchant_id) {
         return c.json({ 
           ok: false, 
-          error: 'instagram_username required' 
+          error: 'instagram_username and merchant_id required' 
         }, 400);
       }
 
-      const merchant_id = body.merchant_id || 'merchant-default-001';
-      const subscriber_id = body.subscriber_id || body.user?.id;
-      const user_name = body.user?.name || body.user?.first_name || body.data?.user_name;
+      const sanitizedUsername = String(instagram_username).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+      const sanitizedMerchantId = String(merchant_id).trim();
+      
+      if (!sanitizedUsername || sanitizedUsername.length < 2) {
+        return c.json({ 
+          ok: false, 
+          error: 'invalid username format' 
+        }, 400);
+      }
 
-      log.info('📩 ManyChat webhook processed', { 
-        merchant_id,
-        instagram_username, 
+      log.info('📩 ManyChat data', { 
+        merchant_id: sanitizedMerchantId,
+        instagram_username: sanitizedUsername,
         subscriber_id,
-        user_name,
-        event_type: body.event_type
+        event_type,
+        hasMessage: !!data?.text
       });
 
-      // Process conversation using existing infrastructure
-      if (merchant_id && instagram_username) {
-        try {
-          const { getConversationRepository } = await import('../repositories/conversation-repository.js');
-          const conversationRepo = getConversationRepository();
-          
-          // Use username for conversation tracking
-          const result = await conversationRepo.create({
-            merchantId: merchant_id,
-            customerInstagram: instagram_username,  // Always username
-            customerName: user_name,
-            platform: 'instagram',
-            conversationStage: 'active'
+      // 🔍 PROCESS MESSAGE: If this is a message from user, process with AI
+      if (event_type === 'message' && data?.text) {
+        const messageText = String(data.text).trim();
+        
+        if (messageText.length > 4000) {
+          return c.json({
+            version: "v2",
+            messages: [{ type: "text", text: "رسالتك طويلة جداً، يرجى إرسال رسالة أقصر." }],
+            set_attributes: { ai_reply: "message_too_long" }
           });
-          
-          const conversation = result.conversation;
-          
-          log.info('✅ Processed ManyChat conversation', {
-            merchant_id,
-            instagram_username,
-            conversation_id: conversation.id
-          });
+        }
 
-          // Update ManyChat mapping using username
-          if (subscriber_id) {
-            try {
-              const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
-              await upsertManychatMapping(merchant_id, instagram_username, subscriber_id);
+        try {
+          // 🔒 PRODUCTION: Database operations with proper error handling
+          const pool = getPool();
+          
+          // Find or create conversation
+          let conversationId: string;
+          try {
+            const existingConversations = await pool.query(`
+              SELECT id FROM conversations 
+              WHERE merchant_id = $1 AND customer_instagram = $2
+              ORDER BY created_at DESC LIMIT 1
+            `, [sanitizedMerchantId, sanitizedUsername]);
+            
+            if (existingConversations.rows.length > 0) {
+              conversationId = existingConversations.rows[0].id;
+            } else {
+              const newConversation = await pool.query(`
+                INSERT INTO conversations (
+                  merchant_id, customer_instagram, platform, conversation_stage, 
+                  session_data, message_count, created_at, updated_at
+                ) VALUES ($1, $2, 'instagram', 'ACTIVE', '{}', 0, NOW(), NOW())
+                RETURNING id
+              `, [sanitizedMerchantId, sanitizedUsername]);
               
-              log.info('✅ Updated ManyChat mapping', {
-                merchant_id,
-                instagram_username,
-                subscriber_id
-              });
-            } catch (mappingError) {
-              log.warn('⚠️ ManyChat mapping failed (non-critical)', { error: mappingError });
+              conversationId = newConversation.rows[0].id;
+              log.info('✅ Created conversation for ManyChat', { conversationId, username: sanitizedUsername });
+            }
+          } catch (dbError) {
+            log.error('❌ Database operation failed', { error: String(dbError) });
+            return c.json({
+              version: "v2", 
+              messages: [{ type: "text", text: "عذراً، حدث خطأ في النظام. يرجى المحاولة مرة أخرى." }],
+              set_attributes: { ai_reply: "database_error" }
+            });
+          }
+
+          // Store incoming message
+          await pool.query(`
+            INSERT INTO message_history (conversation_id, content, message_type, direction, created_at)
+            VALUES ($1, $2, 'TEXT', 'INCOMING', NOW())
+          `, [conversationId, messageText]);
+
+          // 🤖 PRODUCTION: Generate AI response
+          let aiResponse: string;
+          try {
+            const { getAIService } = await import('../services/ai.js');
+            const aiService = await getAIService();
+            
+            const aiResult = await Promise.race([
+              aiService.generateResponse(messageText, {
+                merchantId: sanitizedMerchantId,
+                customerId: sanitizedUsername,
+                platform: 'instagram',
+                stage: 'GREETING',
+                cart: [],
+                preferences: {},
+                conversationHistory: []
+              }),
+              new Promise<never>((_, reject) => 
+                setTimeout(() => reject(new Error('AI timeout')), 30000)
+              )
+            ]);
+            
+            aiResponse = aiResult.message || 'مرحباً! شكراً لتواصلك معنا.';
+            
+          } catch (aiError) {
+            log.error('❌ AI service failed', { error: String(aiError) });
+            
+            // 🛡️ Intelligent Arabic fallback based on message content
+            const lowerText = messageText.toLowerCase();
+            if (lowerText.includes('سعر') || lowerText.includes('price')) {
+              aiResponse = 'مرحباً! سأساعدك في معرفة الأسعار. يرجى تحديد المنتج الذي تريد السؤال عنه.';
+            } else if (lowerText.includes('طلب') || lowerText.includes('order')) {
+              aiResponse = 'مرحباً! سأساعدك في إتمام طلبك. يرجى إرسال تفاصيل المنتجات التي تريدها.';
+            } else {
+              aiResponse = 'مرحباً! شكراً لتواصلك معنا. نحن هنا لمساعدتك، كيف يمكنني خدمتك؟';
             }
           }
 
-          return c.json({ 
-            ok: true, 
-            timestamp: new Date().toISOString(),
-            processed: {
-              conversation_id: conversation.id,
-              instagram_username,
-              merchant_id
+          // Store AI response
+          await pool.query(`
+            INSERT INTO message_history (conversation_id, content, message_type, direction, created_at)
+            VALUES ($1, $2, 'TEXT', 'OUTGOING', NOW())
+          `, [conversationId, aiResponse]);
+
+          // Update conversation stats
+          await pool.query(`
+            UPDATE conversations 
+            SET message_count = message_count + 2, last_message_at = NOW(), updated_at = NOW()
+            WHERE id = $1
+          `, [conversationId]);
+
+          // Update ManyChat mapping
+          if (subscriber_id) {
+            try {
+              const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
+              await upsertManychatMapping(sanitizedMerchantId, sanitizedUsername, subscriber_id);
+            } catch (mappingError) {
+              log.warn('⚠️ ManyChat mapping failed', { error: String(mappingError) });
+            }
+          }
+
+          const processingTime = Date.now() - processingStartTime;
+          log.info('✅ ManyChat message processed successfully', {
+            conversationId,
+            username: sanitizedUsername,
+            responseLength: aiResponse.length,
+            processingTime
+          });
+
+          // 📊 Record telemetry
+          telemetry.recordMetaRequest('instagram', 'manychat_processed', 200, processingTime);
+
+          // 🎯 PRODUCTION: Return ManyChat-compatible response
+          return c.json({
+            version: "v2",
+            messages: [{ type: "text", text: aiResponse }],
+            set_attributes: { 
+              ai_reply: aiResponse.substring(0, 100),
+              conversation_id: conversationId,
+              processing_time: processingTime
             }
           });
 
-        } catch (conversationError) {
-          log.error('❌ Failed to process conversation', conversationError);
+        } catch (error) {
+          log.error('❌ ManyChat message processing failed', error);
+          telemetry.recordMetaRequest('instagram', 'manychat_error', 500, Date.now() - processingStartTime);
           
-          return c.json({ 
-            ok: true, 
-            timestamp: new Date().toISOString(),
-            warning: 'Processing failed but acknowledged'
+          return c.json({
+            version: "v2",
+            messages: [{ type: "text", text: "عذراً، حدث خطأ مؤقت. يرجى المحاولة مرة أخرى." }],
+            set_attributes: { ai_reply: "processing_error" }
           });
+        }
+      }
+
+      // Handle non-message events (mapping updates, etc.)
+      if (merchant_id && instagram_username && subscriber_id) {
+        try {
+          const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
+          await upsertManychatMapping(sanitizedMerchantId, sanitizedUsername, subscriber_id);
+          
+          log.info('✅ Updated ManyChat mapping', {
+            merchant_id: sanitizedMerchantId,
+            instagram_username: sanitizedUsername,
+            subscriber_id
+          });
+        } catch (mappingError) {
+          log.warn('⚠️ ManyChat mapping failed', { error: String(mappingError) });
         }
       }
 
       return c.json({ 
         ok: true, 
-        timestamp: new Date().toISOString(),
-        note: 'Insufficient data but webhook acknowledged'
+        timestamp: new Date().toISOString()
       });
 
     } catch (error) {
       log.error('❌ ManyChat webhook error', error);
-      
-      return c.json({ 
-        ok: true,
-        timestamp: new Date().toISOString(),
-        error: 'Error occurred but acknowledged'
-      });
+      return c.json({ ok: true, error: 'acknowledged' });
     }
   });
 
@@ -521,30 +431,3 @@ const dumpPath = path.join(dir, first.f);
   log.info('Webhook routes registered successfully');
 }
 
-/**
- * Log Instagram event for debugging (development only)
- */
-async function logInstagramEvent(rawBody: Buffer, signature: string, appSecret: string): Promise<void> {
-  try {
-    const fs = await import('fs');
-    const path = await import('path');
-    
-    const timestamp = Date.now();
-    const dumpPath = path.join('/var/tmp', `ig_${timestamp}.raw`);
-    
-    await fs.promises.writeFile(dumpPath, rawBody);
-    
-    const expected = createHmac('sha256', appSecret)
-      .update(rawBody)
-      .digest('hex');
-    
-    log.debug('Instagram event logged for debugging', {
-      dumpPath,
-      signature,
-      expected: `sha256=${expected}`,
-      bodyLength: rawBody.length
-    });
-  } catch (error: any) {
-    log.error('Failed to log Instagram event:', error);
-  }
-}
