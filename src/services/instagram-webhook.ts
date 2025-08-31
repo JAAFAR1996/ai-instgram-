@@ -356,31 +356,19 @@ export class InstagramWebhookHandler {
         throw new Error('Missing sender ID in messaging event');
       }
       
-      // Try to get username from webhook first, then resolve from ID
+      // 🛡️ ARCHITECTURE ENFORCEMENT: Username-only, no ID resolution
       let customerUsername = event.sender?.username;
       if (!customerUsername) {
-        try {
-          // Import username resolver
-          const { resolveUsernameByIgId } = await import('./username-resolver.js');
-          const resolvedUsername = await resolveUsernameByIgId(merchantId, senderId!);
-          customerUsername = resolvedUsername || `user_${senderId}`;
-          
-          if (!customerUsername) {
-            this.logger.warn('Could not resolve username from IG ID, using ID as fallback', {
-              senderId,
-              merchantId
-            });
-            customerUsername = `user_${senderId}`;  // Fallback username
-          }
-        } catch (resolverError) {
-          this.logger.warn('Username resolution failed, using ID as fallback', {
-            senderId,
-            merchantId,
-            error: resolverError instanceof Error ? resolverError.message : String(resolverError)
-          });
-          customerUsername = `user_${senderId}`;  // Fallback username
-        }
+        this.logger.info('IGNORED_NO_USERNAME: Instagram message received without username', {
+          merchantId,
+          messageType: 'dm',
+          reason: 'no_username_provided'
+        });
+        return 0; // Skip processing - ManyChat-only architecture
       }
+      
+      // Normalize username: lowercase, remove @
+      customerUsername = customerUsername.toLowerCase().replace(/^@/, '').trim();
       const timestamp = new Date(event.timestamp);
 
       // Check if this is a message or postback (story reply)
@@ -516,7 +504,20 @@ export class InstagramWebhookHandler {
   ): Promise<number> {
     let commentId: string | undefined;
     try {
-      const customerUsername = event.value.from.username;
+      // 🛡️ ARCHITECTURE ENFORCEMENT: Username-only
+      let customerUsername = event.value.from.username;
+      if (!customerUsername) {
+        this.logger.info('IGNORED_NO_USERNAME: Instagram comment received without username', {
+          merchantId,
+          messageType: 'comment',
+          reason: 'no_username_provided'
+        });
+        return 0; // Skip processing - ManyChat-only architecture
+      }
+      
+      // Normalize username: lowercase, remove @
+      customerUsername = customerUsername.toLowerCase().replace(/^@/, '').trim();
+      
       const commentText = event.value.text;
       const mediaId = event.value.media.id;
       commentId = event.value.id;
@@ -581,7 +582,20 @@ export class InstagramWebhookHandler {
     merchantId: string
   ): Promise<number> {
     try {
-      const customerUsername = event.value.from.username;
+      // 🛡️ ARCHITECTURE ENFORCEMENT: Username-only
+      let customerUsername = event.value.from.username;
+      if (!customerUsername) {
+        this.logger.info('IGNORED_NO_USERNAME: Instagram mention received without username', {
+          merchantId,
+          messageType: 'mention',
+          reason: 'no_username_provided'
+        });
+        return 0; // Skip processing - ManyChat-only architecture
+      }
+      
+      // Normalize username: lowercase, remove @
+      customerUsername = customerUsername.toLowerCase().replace(/^@/, '').trim();
+      
       const mediaId = event.value.media.id;
       const mediaUrl = event.value.media.media_url;
       const timestamp = new Date(event.value.created_time);
@@ -1054,18 +1068,19 @@ export class InstagramWebhookHandler {
     
     try {
       
-      // 🛡️ ARCHITECTURE ENFORCEMENT: Resolve to username only
+      // 🛡️ ARCHITECTURE ENFORCEMENT: Username-only, no ID resolution
       customerUsername = event.sender?.username || '';
       if (!customerUsername) {
-        try {
-          const { resolveUsernameByIgId } = await import('./username-resolver.js');
-          const resolvedUsername = await resolveUsernameByIgId(merchantId, event.sender.id);
-          customerUsername = resolvedUsername || `user_${event.sender.id}`;
-        } catch (resolverError) {
-          this.logger.error('Failed to resolve username from ID', resolverError);
-          customerUsername = `user_${event.sender.id}`;
-        }
+        this.logger.info('IGNORED_NO_USERNAME: Instagram story mention received without username', {
+          merchantId,
+          messageType: 'story_mention',
+          reason: 'no_username_provided'
+        });
+        return 0; // Skip processing - ManyChat-only architecture
       }
+      
+      // Normalize username: lowercase, remove @
+      customerUsername = customerUsername.toLowerCase().replace(/^@/, '').trim();
       
       const timestamp = new Date(event.timestamp);
       const content = event.postback?.title || event.postback?.payload || '';
@@ -1119,7 +1134,20 @@ export class InstagramWebhookHandler {
     merchantId: string
   ): Promise<number> {
     try {
-      const customerUsername = event.value.from.username;
+      // 🛡️ ARCHITECTURE ENFORCEMENT: Username-only
+      let customerUsername = event.value.from.username;
+      if (!customerUsername) {
+        this.logger.info('IGNORED_NO_USERNAME: Legacy mention received without username', {
+          merchantId,
+          messageType: 'legacy_mention',
+          reason: 'no_username_provided'
+        });
+        return 0; // Skip processing - ManyChat-only architecture
+      }
+      
+      // Normalize username: lowercase, remove @
+      customerUsername = customerUsername.toLowerCase().replace(/^@/, '').trim();
+      
       const mediaId = event.value.media.id;
       const mediaUrl = event.value.media.media_url;
       const timestamp = new Date(event.value.created_time);
@@ -1169,7 +1197,20 @@ export class InstagramWebhookHandler {
   ): Promise<number> {
     let commentId: string | undefined;
     try {
-      const customerUsername = event.value.from.username;
+      // 🛡️ ARCHITECTURE ENFORCEMENT: Username-only
+      let customerUsername = event.value.from.username;
+      if (!customerUsername) {
+        this.logger.info('IGNORED_NO_USERNAME: Legacy comment received without username', {
+          merchantId,
+          messageType: 'legacy_comment',
+          reason: 'no_username_provided'
+        });
+        return 0; // Skip processing - ManyChat-only architecture
+      }
+      
+      // Normalize username: lowercase, remove @
+      customerUsername = customerUsername.toLowerCase().replace(/^@/, '').trim();
+      
       const commentText = event.value.text;
       const mediaId = event.value.media.id;
       commentId = event.value.id;
