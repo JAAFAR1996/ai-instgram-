@@ -109,13 +109,11 @@ export function getPool(): Pool {
           poolEnded: pool?.ended || false
         });
         
-        // Mark pool for recreation on critical errors
+        // FIXED: Do NOT call pool.end() automatically on errors
+        // This was causing "Cannot use a pool after calling end" errors
+        // Instead, just log the error and let health monitoring handle recovery
         if (err.message.includes('internal assertion') || err.message.includes('Node.js internals')) {
-          log.error('🚨 Critical pool error detected, marking for recreation');
-          if (pool && !pool.ended) {
-            pool.end().catch(() => {}); // Don't wait for this
-          }
-          pool = null;
+          log.warn('⚠️ Node.js internal error detected - will rely on health monitoring for recovery');
         }
       });
 
@@ -320,23 +318,13 @@ function startPoolHealthMonitoring(): void {
         
         // Check for critical pool state
         if (stats.totalCount === 0 && stats.idleCount === 0) {
-          log.warn('🚨 Pool shows 0 connections, attempting recreation...');
+          log.warn('🚨 Pool shows 0 connections, marking for recreation...');
           
-          // Force pool recreation by setting to null
-          if (pool && !pool.ended) {
-            await pool.end().catch(() => {}); // Don't wait for this
-          }
+          // FIXED: Do NOT call pool.end() in health monitoring
+          // Just mark pool as null to force recreation on next getPool() call
           pool = null;
           
-          // Recreate pool
-          try {
-            getPool(); // This will recreate the pool
-            log.info('✅ Pool recreation successful');
-          } catch (recreateError) {
-            log.error('❌ Pool recreation failed', {
-              error: recreateError instanceof Error ? recreateError.message : String(recreateError)
-            });
-          }
+          log.info('⚡ Pool marked for recreation - will be recreated on next database operation');
         } else {
           log.debug('Pool health check', {
             total: stats.totalCount,
@@ -350,9 +338,9 @@ function startPoolHealthMonitoring(): void {
         error: error instanceof Error ? error.message : String(error)
       });
       
-      // On monitoring error, try to recreate pool
+      // On monitoring error, mark pool for recreation
       if (error instanceof Error && error.message.includes('internal assertion')) {
-        log.error('🚨 Internal assertion in monitoring, forcing pool recreation');
+        log.warn('⚠️ Internal assertion in monitoring, marking pool for recreation');
         pool = null;
       }
     }
