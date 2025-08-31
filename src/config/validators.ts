@@ -140,6 +140,11 @@ export const REQUIRED_ENV_VARS: Record<string, EnvVarRule> = {
     required: false,
     validator: (value: string) => value.length >= 20,
     error: 'MANYCHAT_WEBHOOK_SECRET must be at least 20 characters long'
+  },
+  'MANYCHAT_IG_FIELD_ID': {
+    required: true,
+    validator: (value: string) => value.startsWith('cf_') && value.length >= 10,
+    error: 'MANYCHAT_IG_FIELD_ID must start with "cf_" and be at least 10 characters long'
   }
 } as const;
 

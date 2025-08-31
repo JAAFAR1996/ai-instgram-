@@ -4,6 +4,16 @@ import { getLogger } from './logger.js';
 const logger = getLogger({ component: 'UsernameResolver' });
 
 /**
+ * Normalize Instagram username for consistent storage/search
+ */
+function normalizeUsername(username: string): string {
+  return username
+    .toLowerCase()
+    .replace(/^@/, '') // Remove @ prefix
+    .trim();
+}
+
+/**
  * Resolve Instagram User ID from username using Business Discovery API
  * This is the official Meta way to derive ID from username
  */
@@ -13,11 +23,12 @@ export async function resolveIgIdByUsername(
   username: string
 ): Promise<string | null> {
   try {
-    logger.info('🔍 Resolving IG ID from username', { merchantId, username });
+    const normalizedUsername = normalizeUsername(username);
+    logger.info('🔍 Resolving IG ID from username', { merchantId, username: normalizedUsername });
     
     // GET /{businessAccountId}?fields=business_discovery.username({username}){id,username}
     const path = `/${businessAccountId}`;
-    const fields = `business_discovery.username(${username}){id,username}`;
+    const fields = `business_discovery.username(${normalizedUsername}){id,username}`;
     
     const client = await getInstagramClient(merchantId);
     const credentials = await client.loadMerchantCredentials(merchantId);
@@ -38,7 +49,7 @@ export async function resolveIgIdByUsername(
     const id = response?.business_discovery?.id;
     
     if (id) {
-      logger.info('✅ Successfully resolved IG ID', { username, igId: id });
+      logger.info('✅ Successfully resolved IG ID', { username: normalizedUsername, igId: id });
       return id;
     } else {
       logger.warn('⚠️ No IG ID found for username', { username });
@@ -126,8 +137,9 @@ export async function resolveUsernameByIgId(
     
     const username = response?.username;
     if (username) {
-      logger.info('✅ Resolved username from IG ID', { igUserId, username });
-      return username;
+      const normalizedUsername = normalizeUsername(username);
+      logger.info('✅ Resolved username from IG ID', { igUserId, username: normalizedUsername });
+      return normalizedUsername;
     }
     
     logger.warn('⚠️ No username found for IG ID', { igUserId });

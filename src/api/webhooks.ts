@@ -105,8 +105,14 @@ export class WebhookRouter {
         .update(rawBody, 'utf8')
         .digest('hex');
       
-      // Remove 'sha256=' prefix if present
-      const receivedSignature = signature.replace(/^sha256=/, '');
+      // Handle multiple signature formats
+      let receivedSignature = signature;
+      
+      // Remove common prefixes: 'sha256=', 'signature=', 'algorithm=HMAC-SHA256,'
+      receivedSignature = receivedSignature
+        .replace(/^sha256=/, '')
+        .replace(/^signature=/, '')
+        .replace(/^algorithm=HMAC-SHA256,\s*/, '');
       
       // Constant time comparison
       return crypto.timingSafeEqual(
@@ -454,8 +460,11 @@ export class WebhookRouter {
       
       const rawBody = await c.req.text();
       
-      // Verify HMAC signature if secret is configured
-      const signature = c.req.header('x-hub-signature-256') || c.req.header('x-signature-256');
+      // Verify HMAC signature if secret is configured - support multiple formats
+      const signature = c.req.header('x-hub-signature-256') || 
+                       c.req.header('x-signature-256') || 
+                       c.req.header('x-signature') ||
+                       c.req.header('signature');
       const webhookSecret = process.env.MANYCHAT_WEBHOOK_SECRET;
       
       if (webhookSecret && signature) {

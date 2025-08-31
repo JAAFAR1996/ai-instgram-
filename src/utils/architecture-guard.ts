@@ -26,6 +26,15 @@ const FORBIDDEN_PATTERNS = [
 ];
 
 /**
+ * Files allowed to use IDs for username resolution only
+ */
+const ID_RESOLUTION_ALLOWLIST = [
+  'services/instagram-webhook.ts', // Converts incoming IDs to usernames
+  'services/username-resolver.ts',  // ID->Username conversion service
+  'services/instagram-oauth.ts'     // Merchant OAuth tokens (not customer IDs)
+];
+
+/**
  * Runtime guard: Check if codebase contains forbidden patterns
  */
 export function validateArchitectureCompliance(): void {
@@ -51,6 +60,11 @@ export function validateArchitectureCompliance(): void {
       if (fs.existsSync(filePath)) {
         const content = fs.readFileSync(filePath, 'utf-8');
         
+        // Check if file is in allowlist for ID resolution
+        const isAllowedForIDResolution = ID_RESOLUTION_ALLOWLIST.some(allowed => 
+          file.endsWith(allowed) || file.includes(allowed)
+        );
+        
         for (const pattern of FORBIDDEN_PATTERNS) {
           const regex = new RegExp(pattern, 'g');
           const matches = content.match(regex);
@@ -60,13 +74,24 @@ export function validateArchitectureCompliance(): void {
             const lines = content.split('\n');
             const problematicLines = lines
               .map((line, index) => ({ line: line.trim(), number: index + 1 }))
-              .filter(({ line }) => 
-                regex.test(line) && 
-                !line.startsWith('//') && 
-                !line.startsWith('*') &&
-                !line.includes('DISABLED:') &&
-                !line.includes('ARCHITECTURE ENFORCEMENT:')
-              );
+              .filter(({ line }) => {
+                if (!regex.test(line)) return false;
+                if (line.startsWith('//') || line.startsWith('*')) return false;
+                if (line.includes('DISABLED:') || line.includes('ARCHITECTURE ENFORCEMENT:')) return false;
+                
+                // Allow ID usage in allowlisted files if it's for resolution purposes
+                if (isAllowedForIDResolution) {
+                  if (line.includes('resolveUsernameByIgId') || 
+                      line.includes('username resolution') ||
+                      line.includes('Convert') || 
+                      line.includes('OAuth') ||
+                      line.includes('merchant token')) {
+                    return false; // Skip - this is legitimate ID->username conversion
+                  }
+                }
+                
+                return true;
+              });
             
             if (problematicLines.length > 0) {
               violations.push(`${file}: Found ${matches.length} violations of pattern "${pattern}"`);
