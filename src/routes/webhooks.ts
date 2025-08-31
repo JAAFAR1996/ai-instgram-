@@ -93,16 +93,19 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       const body = await c.req.json();
       const { merchant_id, instagram_username, subscriber_id, event_type, data } = body;
 
-      // 🛡️ PRODUCTION: Input validation and sanitization
-      if (!instagram_username || !merchant_id) {
+      // 🛡️ PRODUCTION: Input validation and sanitization - use fallback for merchant_id
+      const fallbackMerchantId = getEnv('MERCHANT_ID') || 'merchant-default-001';
+      const finalMerchantId = merchant_id || fallbackMerchantId;
+      
+      if (!instagram_username || !finalMerchantId) {
         return c.json({ 
           ok: false, 
-          error: 'instagram_username and merchant_id required' 
+          error: 'instagram_username required and merchant_id missing (no fallback available)' 
         }, 400);
       }
 
       const sanitizedUsername = String(instagram_username).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
-      const sanitizedMerchantId = String(merchant_id).trim();
+      const sanitizedMerchantId = String(finalMerchantId).trim();
       
       if (!sanitizedUsername || sanitizedUsername.length < 2) {
         return c.json({ 
@@ -268,7 +271,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       }
 
       // Handle non-message events (mapping updates, etc.)
-      if (merchant_id && instagram_username && subscriber_id) {
+      if (finalMerchantId && instagram_username && subscriber_id) {
         try {
           const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
           await upsertManychatMapping(sanitizedMerchantId, sanitizedUsername, subscriber_id);
