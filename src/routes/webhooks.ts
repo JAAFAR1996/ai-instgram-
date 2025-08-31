@@ -72,8 +72,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
 
   // Instagram direct webhook - DISABLED (using ManyChat flow only)
   app.post('/webhooks/instagram', async (c) => {
-    log.info('🚫 Instagram direct webhook disabled - using ManyChat flow only');
-    return c.text('Gone - Using ManyChat integration only', 410);
+    log.info('🚫 Instagram → ManyChat flow required. Direct Instagram processing disabled.');
+    return c.text('Use ManyChat flow: Instagram → ManyChat → Server → AI → Server → ManyChat → Instagram', 410);
   });
 
   // ManyChat webhook route - PRODUCTION with AI integration
