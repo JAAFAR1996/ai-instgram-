@@ -154,7 +154,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 INSERT INTO conversations (
                   merchant_id, customer_instagram, platform, conversation_stage, 
                   session_data, message_count, created_at, updated_at
-                ) VALUES ($1, $2, 'instagram', 'ACTIVE', '{}', 0, NOW(), NOW())
+                ) VALUES ($1, $2, 'INSTAGRAM', 'GREETING', '{}', 0, NOW(), NOW())
                 RETURNING id
               `, [sanitizedMerchantId, sanitizedUsername]);
               
