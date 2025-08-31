@@ -26,7 +26,7 @@ import type {
 export class ServiceController {
   private db!: Database;
 
-  constructor(container?: DIContainer) {
+  constructor(_container?: DIContainer) {
     // Always initialize synchronously
     this.db = getDatabase() as Database;
   }
