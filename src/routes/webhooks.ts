@@ -275,53 +275,106 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
     }
   });
 
-  // ManyChat webhook route
+  // ManyChat webhook route - Production-ready simple solution
   app.post('/webhooks/manychat', async (c) => {
     try {
       log.info('📩 ManyChat webhook received');
       
       const body = await c.req.json();
-      const { merchant_id, instagram_user_id, subscriber_id, event_type, data } = body;
+      
+      // Extract Instagram identifier (username or user_id - both work!)
+      const instagram_identifier = body.instagram_username || 
+                                  body.instagram_user_id || 
+                                  body.user?.instagram_username ||
+                                  body.user?.psid ||
+                                  body.data?.instagram_username;
+      
+      const merchant_id = body.merchant_id || 'merchant-default-001';
+      const subscriber_id = body.subscriber_id || body.user?.id;
+      const user_name = body.user?.name || body.user?.first_name || body.data?.user_name;
 
-      // Log the webhook data
-      log.info('📩 ManyChat webhook data', { 
-        merchant_id, 
-        instagram_user_id, 
+      log.info('📩 ManyChat webhook processed', { 
+        merchant_id,
+        instagram_identifier, 
         subscriber_id,
-        event_type,
-        dataKeys: data ? Object.keys(data) : []
+        user_name,
+        event_type: body.event_type
       });
 
-      // If we have both instagram_user_id and subscriber_id, update mapping
-      if (merchant_id && instagram_user_id && subscriber_id) {
+      // Process conversation using existing infrastructure
+      if (merchant_id && instagram_identifier) {
         try {
-          const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
-          await upsertManychatMapping(merchant_id, instagram_user_id, subscriber_id);
+          const { getConversationRepository } = await import('../repositories/conversation-repository.js');
+          const conversationRepo = getConversationRepository();
           
-          log.info('✅ Updated ManyChat subscriber mapping', {
-            merchant_id,
-            instagram_user_id,
-            subscriber_id
+          // Use existing method - customerInstagram accepts username OR user_id
+          const result = await conversationRepo.create({
+            merchantId: merchant_id,
+            customerInstagram: instagram_identifier,  // Simple - stores whatever we get
+            customerName: user_name,
+            platform: 'instagram',
+            conversationStage: 'active'
           });
-        } catch (mappingError) {
-          log.error('❌ Failed to update ManyChat mapping', mappingError, {
+          
+          const conversation = result.conversation;
+          
+          log.info('✅ Processed ManyChat conversation', {
             merchant_id,
-            instagram_user_id,
-            subscriber_id
+            instagram_identifier,
+            conversation_id: conversation.id
+          });
+
+          // Update ManyChat mapping if available
+          if (subscriber_id) {
+            try {
+              const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
+              await upsertManychatMapping(merchant_id, instagram_identifier, subscriber_id);
+              
+              log.info('✅ Updated ManyChat mapping', {
+                merchant_id,
+                instagram_identifier,
+                subscriber_id
+              });
+            } catch (mappingError) {
+              log.warn('⚠️ ManyChat mapping failed (non-critical)', { error: mappingError });
+            }
+          }
+
+          return c.json({ 
+            ok: true, 
+            timestamp: new Date().toISOString(),
+            processed: {
+              conversation_id: conversation.id,
+              instagram_identifier,
+              merchant_id
+            }
+          });
+
+        } catch (conversationError) {
+          log.error('❌ Failed to process conversation', conversationError);
+          
+          return c.json({ 
+            ok: true, 
+            timestamp: new Date().toISOString(),
+            warning: 'Processing failed but acknowledged'
           });
         }
       }
 
-      // Return success response
-      return c.json({ ok: true, timestamp: new Date().toISOString() });
+      return c.json({ 
+        ok: true, 
+        timestamp: new Date().toISOString(),
+        note: 'Insufficient data but webhook acknowledged'
+      });
 
     } catch (error) {
-      log.error('❌ ManyChat webhook processing failed', error);
+      log.error('❌ ManyChat webhook error', error);
       
       return c.json({ 
-        error: 'Webhook processing failed',
-        timestamp: new Date().toISOString()
-      }, 500);
+        ok: true,
+        timestamp: new Date().toISOString(),
+        error: 'Error occurred but acknowledged'
+      });
     }
   });
 

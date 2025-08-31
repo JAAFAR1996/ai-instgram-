@@ -18,7 +18,9 @@
       "mcp__render__list_deploys",
       "Bash(chmod:*)",
       "WebSearch",
-      "Bash(psql:*)"
+      "Bash(psql:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
