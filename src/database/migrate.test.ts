@@ -716,8 +716,7 @@ describe('Database Migration System - Production Tests', () => {
         CREATE TABLE instagram_accounts (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           merchant_id UUID NOT NULL,
-          instagram_user_id VARCHAR(100) UNIQUE NOT NULL,
-          username VARCHAR(100) NOT NULL,
+          username VARCHAR(100) UNIQUE NOT NULL,
           access_token_encrypted TEXT NOT NULL,
           page_id VARCHAR(100),
           account_type VARCHAR(20) DEFAULT 'business',
@@ -803,14 +802,14 @@ describe('Database Migration System - Production Tests', () => {
 
       // Test the relationship and trigger
       await sql`
-        INSERT INTO instagram_accounts (merchant_id, instagram_user_id, username, access_token_encrypted)
-        VALUES (gen_random_uuid(), 'test_user_123', 'test_username', 'encrypted_token')
+        INSERT INTO instagram_accounts (merchant_id, username, access_token_encrypted)
+        VALUES (gen_random_uuid(), 'test_username', 'encrypted_token')
       `;
 
       const account = await sql`
         SELECT id, created_at, updated_at 
         FROM instagram_accounts 
-        WHERE instagram_user_id = 'test_user_123'
+        WHERE username = 'test_username'
       `;
 
       expect(account.length).toBe(1);
@@ -821,13 +820,13 @@ describe('Database Migration System - Production Tests', () => {
       await sql`
         UPDATE instagram_accounts 
         SET username = 'updated_username' 
-        WHERE instagram_user_id = 'test_user_123'
+        WHERE username = 'test_username'
       `;
 
       const updatedAccount = await sql`
         SELECT created_at, updated_at 
         FROM instagram_accounts 
-        WHERE instagram_user_id = 'test_user_123'
+        WHERE username = 'updated_username'
       `;
 
       expect(updatedAccount[0].updated_at.getTime()).toBeGreaterThan(

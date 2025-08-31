@@ -282,35 +282,41 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       
       const body = await c.req.json();
       
-      // Extract Instagram identifier (username or user_id - both work!)
-      const instagram_identifier = body.instagram_username || 
-                                  body.instagram_user_id || 
-                                  body.user?.instagram_username ||
-                                  body.user?.psid ||
-                                  body.data?.instagram_username;
-      
+      // Extract Instagram username only (no more ID mixing!)
+      const instagram_username =
+        body.instagram_username || 
+        body.user?.instagram_username || 
+        body.data?.instagram_username;
+
+      if (!instagram_username) {
+        return c.json({ 
+          ok: false, 
+          error: 'instagram_username required' 
+        }, 400);
+      }
+
       const merchant_id = body.merchant_id || 'merchant-default-001';
       const subscriber_id = body.subscriber_id || body.user?.id;
       const user_name = body.user?.name || body.user?.first_name || body.data?.user_name;
 
       log.info('📩 ManyChat webhook processed', { 
         merchant_id,
-        instagram_identifier, 
+        instagram_username, 
         subscriber_id,
         user_name,
         event_type: body.event_type
       });
 
       // Process conversation using existing infrastructure
-      if (merchant_id && instagram_identifier) {
+      if (merchant_id && instagram_username) {
         try {
           const { getConversationRepository } = await import('../repositories/conversation-repository.js');
           const conversationRepo = getConversationRepository();
           
-          // Use existing method - customerInstagram accepts username OR user_id
+          // Use username for conversation tracking
           const result = await conversationRepo.create({
             merchantId: merchant_id,
-            customerInstagram: instagram_identifier,  // Simple - stores whatever we get
+            customerInstagram: instagram_username,  // Always username
             customerName: user_name,
             platform: 'instagram',
             conversationStage: 'active'
@@ -320,19 +326,19 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           
           log.info('✅ Processed ManyChat conversation', {
             merchant_id,
-            instagram_identifier,
+            instagram_username,
             conversation_id: conversation.id
           });
 
-          // Update ManyChat mapping if available
+          // Update ManyChat mapping using username
           if (subscriber_id) {
             try {
               const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
-              await upsertManychatMapping(merchant_id, instagram_identifier, subscriber_id);
+              await upsertManychatMapping(merchant_id, instagram_username, subscriber_id);
               
               log.info('✅ Updated ManyChat mapping', {
                 merchant_id,
-                instagram_identifier,
+                instagram_username,
                 subscriber_id
               });
             } catch (mappingError) {
@@ -345,7 +351,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             timestamp: new Date().toISOString(),
             processed: {
               conversation_id: conversation.id,
-              instagram_identifier,
+              instagram_username,
               merchant_id
             }
           });

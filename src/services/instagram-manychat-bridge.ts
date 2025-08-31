@@ -11,7 +11,8 @@ import { getManyChatService, type ManyChatResponse } from './manychat-api.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import { getInstagramMessageSender } from './instagram-message-sender.js';
 import { getDatabase } from '../db/adapter.js';
-import { getManychatIdByInstagram, upsertManychatMapping } from '../repositories/manychat.repo.js';
+import { getManychatIdByInstagramUsername, upsertManychatMapping } from '../repositories/manychat.repo.js';
+import { guardManyChatOperation } from '../utils/architecture-guard.js';
 
 import type { InstagramContext } from './instagram-ai.js';
 import type { Platform } from '../types/database.js';
@@ -29,7 +30,7 @@ export interface BridgeProcessingResult {
 
 export interface BridgeMessageData {
   merchantId: string;
-  customerId: string;
+  customerId: string; // This should contain username, not ID
   message: string;
   conversationId?: string;
   interactionType: 'dm' | 'comment' | 'story_reply' | 'story_mention';
@@ -204,7 +205,7 @@ export class InstagramManyChatBridge {
       );
 
       // Success - add tags and log
-      await this.addRelevantTags(data, data.customerId, aiResponse, options);
+      await this.addRelevantTags(data, manyChatResult.mcId || data.customerId, aiResponse, options);
       await this.logManyChatInteraction(data, manyChatResult, aiResponse);
       
       return manyChatResult;
@@ -348,39 +349,40 @@ export class InstagramManyChatBridge {
 
   /**
    * إرسال رسالة: Instagram → Server → AI → ManyChat → Instagram
-   * مع فحص وجود subscriber أولاً
+   * Updated to use username instead of user ID
    */
   private async sendToManyChat(
     merchantId: string, 
-    customerId: string, 
+    username: string, 
     message: string, 
     options?: any
-  ): Promise<ManyChatResponse> {
-    const igUserId = customerId; // Keep reference to original IG ID
+  ): Promise<ManyChatResponse & { mcId?: string }> {
+    // 🛡️ ARCHITECTURE GUARD: Validate username-only operation
+    guardManyChatOperation(merchantId, username, 'sendToManyChat');
     
-    // Step 1: Get ManyChat subscriber ID mapping from database
-    let mcId = await getManychatIdByInstagram(merchantId, igUserId);
+    // Step 1: Get ManyChat subscriber ID mapping from database using username
+    let mcId = await getManychatIdByInstagramUsername(merchantId, username);
     
     if (!mcId) {
-      this.logger.info('🔍 No local mapping found, checking ManyChat directly', { merchantId, igUserId });
+      this.logger.info('🔍 No local mapping found, checking ManyChat directly', { merchantId, username });
       
-      // Step 2: Try to find subscriber directly in ManyChat by custom field
-      const found = await this.manyChatService.findSubscriberByInstagram(merchantId, igUserId);
+      // Step 2: Try to find subscriber directly in ManyChat by username
+      const found = await this.manyChatService.findSubscriberByInstagram(merchantId, username);
       
       if (found) {
         // Found in ManyChat but not in our DB - update our mapping
         mcId = found.subscriber_id;
-        await upsertManychatMapping(merchantId, igUserId, mcId);
+        await upsertManychatMapping(merchantId, username, mcId);
         this.logger.info('✅ Found subscriber in ManyChat, updated local mapping', { 
           merchantId, 
-          igUserId, 
+          username, 
           mcId 
         });
       } else {
         // No subscriber found - Instagram user hasn't opted into ManyChat yet
-        this.logger.info('❌ No ManyChat subscriber found for IG user - user must message first', { 
+        this.logger.info('❌ No ManyChat subscriber found for username - user must message first', { 
           merchantId, 
-          igUserId 
+          username 
         });
         
         // Cannot proceed with ManyChat - throw error to trigger fallback
@@ -392,12 +394,13 @@ export class InstagramManyChatBridge {
     
     try {
       // Send using the ManyChat subscriber ID, not the Instagram ID
-      return await this.manyChatService.sendText(merchantId, mcId, message, { tag: options?.messageTag });
+      const result = await this.manyChatService.sendText(merchantId, mcId, message, { tag: options?.messageTag });
+      return { ...result, mcId };
       
     } catch (error) {
       // Enhanced error handling with resync capability
       this.logger.error('❌ ManyChat sendText failed', {
-        igUserId,
+        username,
         mcId,
         merchantId,
         errorType: error?.constructor?.name,
@@ -408,17 +411,17 @@ export class InstagramManyChatBridge {
       if (this.isSubscriberDoesNotExist(error)) {
         this.logger.warn('🔄 ManyChat says subscriber missing. Resyncing...', { 
           merchantId, 
-          igUserId, 
+          username, 
           mcId 
         });
         
         try {
           // Try to find subscriber again in ManyChat directly
-          const found = await this.manyChatService.findSubscriberByInstagram(merchantId, igUserId);
+          const found = await this.manyChatService.findSubscriberByInstagram(merchantId, username);
           
           if (found) {
             // Update our mapping and retry
-            await upsertManychatMapping(merchantId, igUserId, found.subscriber_id);
+            await upsertManychatMapping(merchantId, username, found.subscriber_id);
             return await this.manyChatService.sendText(merchantId, found.subscriber_id, message, { tag: options?.messageTag });
           } else {
             // Still no subscriber - throw error to trigger fallback
@@ -429,7 +432,7 @@ export class InstagramManyChatBridge {
             
         } catch (resyncError) {
           this.logger.error('❌ Subscriber resync failed', {
-            igUserId,
+            username,
             merchantId,
             resyncError: resyncError instanceof Error ? resyncError.message : String(resyncError),
             originalSendError: error instanceof Error ? error.message : String(error)
@@ -676,7 +679,7 @@ export class InstagramManyChatBridge {
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           data.merchantId,
-          data.customerId,
+          (manyChatResult as any).mcId || data.customerId,
           manyChatResult.messageId,
           'send_message',
           manyChatResult.success ? 'success' : 'failed',

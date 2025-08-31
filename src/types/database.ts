@@ -208,7 +208,6 @@ export interface Merchant extends TimestampedEntity {
   
   // Contact Information
   instagram_username?: string;
-  instagram_user_id?: string;
   email?: string;
   
   // Subscription Management

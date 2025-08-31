@@ -709,29 +709,30 @@ export class ManyChatService {
   }
 
   /**
-   * Find existing subscriber by Instagram ID (no creation attempt)
+   * Find existing subscriber by Instagram username (no creation attempt)
+   * Updated to search by username instead of user ID
    */
   public async findSubscriberByInstagram(
     merchantId: string,
-    igUserId: string
+    username: string
   ): Promise<{ subscriber_id: string } | null> {
-    const fieldId = getEnv('MANYCHAT_IG_FIELD_ID');
+    const fieldId = getEnv('MANYCHAT_IG_FIELD_ID'); // This should be the username field in ManyChat
     if (!fieldId) {
-      this.logger.error('❌ MANYCHAT_IG_FIELD_ID not configured', { merchantId, igUserId });
+      this.logger.error('❌ MANYCHAT_IG_FIELD_ID not configured', { merchantId, username });
       throw new Error('MANYCHAT_IG_FIELD_ID environment variable required');
     }
 
     try {
-      // Search for subscriber using proper field_id
+      // Search for subscriber using username field
       const response = await this.makeAPIRequest(
-        `/fb/subscriber/findByCustomField?field_id=${fieldId}&field_value=${igUserId}`,
+        `/fb/subscriber/findByCustomField?field_id=${fieldId}&field_value=${encodeURIComponent(username)}`,
         { method: 'GET' }
       );
 
       if (response.status === 'success' && response.data?.id) {
         this.logger.info('✅ Found existing ManyChat subscriber', {
           merchantId,
-          igUserId,
+          username,
           fieldId,
           subscriberId: response.data.id
         });
@@ -739,9 +740,9 @@ export class ManyChatService {
       }
 
       // No subscriber found - this is normal for new IG users
-      this.logger.info('🔍 No ManyChat subscriber found for IG user', {
+      this.logger.info('🔍 No ManyChat subscriber found for username', {
         merchantId,
-        igUserId,
+        username,
         fieldId
       });
       return null;
@@ -749,7 +750,7 @@ export class ManyChatService {
     } catch (error) {
       this.logger.warn('❌ ManyChat subscriber lookup failed', {
         merchantId,
-        igUserId,
+        username,
         fieldId,
         error: error instanceof Error ? error.message : String(error)
       });
@@ -759,12 +760,13 @@ export class ManyChatService {
 
   /**
    * @deprecated Use findSubscriberByInstagram instead - IG subscribers cannot be created via API
+   * Updated to use username instead of igUserId
    */
   public async createOrLookupSubscriberByInstagram(
     merchantId: string,
-    igUserId: string
+    username: string
   ): Promise<{ subscriber_id: string }> {
-    const existing = await this.findSubscriberByInstagram(merchantId, igUserId);
+    const existing = await this.findSubscriberByInstagram(merchantId, username);
     if (existing) {
       return existing;
     }
@@ -773,7 +775,7 @@ export class ManyChatService {
     const error = new Error('Instagram subscribers cannot be created via API - user must message first');
     this.logger.error('❌ Cannot create IG subscriber via API', {
       merchantId,
-      igUserId,
+      username,
       error: error.message
     });
     throw error;

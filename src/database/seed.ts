@@ -115,7 +115,6 @@ export class DatabaseSeeder {
           whatsapp_number: '+9647801234567',
           whatsapp_number_id: 'WA001',
           instagram_username: '@ahmed_mobiles',
-          instagram_user_id: 'IG001',
           email: 'ahmed@example.com',
           subscription_status: 'ACTIVE' as const,
           subscription_tier: 'PREMIUM' as const,
@@ -128,7 +127,6 @@ export class DatabaseSeeder {
           whatsapp_number: '+9647801234568',
           whatsapp_number_id: 'WA002',
           instagram_username: '@sara_boutique',
-          instagram_user_id: 'IG002',
           email: 'sara@example.com',
           subscription_status: 'ACTIVE' as const,
           subscription_tier: 'BASIC' as const,
@@ -141,7 +139,6 @@ export class DatabaseSeeder {
           whatsapp_number: '+9647801234569',
           whatsapp_number_id: 'WA003',
           instagram_username: '@alnoor_books',
-          instagram_user_id: 'IG003',
           email: 'noor@example.com',
           subscription_status: 'TRIAL' as const,
           subscription_tier: 'BASIC' as const,
@@ -153,13 +150,13 @@ export class DatabaseSeeder {
         INSERT INTO merchants (
           business_name, business_category, business_address,
           whatsapp_number, whatsapp_number_id, instagram_username, 
-          instagram_user_id, email, subscription_status, 
+          email, subscription_status, 
           subscription_tier, subscription_expires_at
         ) 
         VALUES ${merchantsData.map((m) => [
           m.business_name, m.business_category, m.business_address,
           m.whatsapp_number, m.whatsapp_number_id, m.instagram_username,
-          m.instagram_user_id, m.email, m.subscription_status,
+          m.email, m.subscription_status,
           m.subscription_tier, m.subscription_expires_at
         ])}
         RETURNING id

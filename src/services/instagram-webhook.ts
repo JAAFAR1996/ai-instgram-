@@ -18,6 +18,7 @@ import { getInstagramManyChatBridge } from './instagram-manychat-bridge.js';
 // import { getServiceController } from './service-controller.js';
 import { verifyHMACRaw } from './encryption.js';
 import { createLogger } from './logger.js';
+import { guardConversationOperation } from '../utils/architecture-guard.js';
 import type { ConversationRow, MessageHistoryRow as DBMessageHistoryRow } from '../types/database-rows.js';
 import type { ConversationStage } from '../types/database.js';
 import type { Sql } from '../types/sql.js';
@@ -58,6 +59,7 @@ export interface InstagramWebhookEntry {
 export interface InstagramMessagingEvent {
   sender: {
     id: string;
+    username?: string; // May not always be present
   };
   recipient: {
     id: string;
@@ -340,17 +342,44 @@ export class InstagramWebhookHandler {
   }
 
   /**
-   * Private: Process messaging event (DM or story reply)
+   * Private: Process messaging event (DM or story reply) 
+   * Updated to resolve username from ID
    */
   private async processMessagingEvent(
     event: InstagramMessagingEvent,
     merchantId: string,
     result: ProcessedWebhookResult
   ): Promise<number> {
-    const customerId: string | undefined = event.sender?.id;
+    const senderId: string | undefined = event.sender?.id;
     try {
-      if (!customerId) {
+      if (!senderId) {
         throw new Error('Missing sender ID in messaging event');
+      }
+      
+      // Try to get username from webhook first, then resolve from ID
+      let customerUsername = event.sender?.username;
+      if (!customerUsername) {
+        try {
+          // Import username resolver
+          const { resolveUsernameByIgId } = await import('./username-resolver.js');
+          const resolvedUsername = await resolveUsernameByIgId(merchantId, senderId!);
+          customerUsername = resolvedUsername || `user_${senderId}`;
+          
+          if (!customerUsername) {
+            this.logger.warn('Could not resolve username from IG ID, using ID as fallback', {
+              senderId,
+              merchantId
+            });
+            customerUsername = `user_${senderId}`;  // Fallback username
+          }
+        } catch (resolverError) {
+          this.logger.warn('Username resolution failed, using ID as fallback', {
+            senderId,
+            merchantId,
+            error: resolverError instanceof Error ? resolverError.message : String(resolverError)
+          });
+          customerUsername = `user_${senderId}`;  // Fallback username
+        }
       }
       const timestamp = new Date(event.timestamp);
 
@@ -363,11 +392,15 @@ export class InstagramWebhookHandler {
         return 0;
       }
 
-      // Find or create conversation
+      // 🛡️ ARCHITECTURE GUARD: Validate username-only conversation
+      guardConversationOperation(merchantId, customerUsername, 'instagram', 'create_conversation');
+      
+      // Find or create conversation using username
       const conversation = await this.findOrCreateConversation(
         merchantId,
-        customerId,
-        'instagram'
+        customerUsername, // Use username instead of ID
+        'instagram',
+        customerUsername
       );
 
       if (!conversation) {
@@ -382,7 +415,7 @@ export class InstagramWebhookHandler {
       // Update message window (customer initiated contact)
       await this.messageWindowService.updateCustomerMessageTime(
         merchantId,
-        { instagram: customerId, platform: 'instagram' },
+        { instagram: customerUsername, platform: 'instagram' }, // Use username
         conversation.id
       );
 
@@ -406,7 +439,7 @@ export class InstagramWebhookHandler {
               attachment,
               conversation.id,
               merchantId,
-              customerId,
+              customerUsername, // Use username
               content,
               timestamp
             );
@@ -440,7 +473,7 @@ export class InstagramWebhookHandler {
           await this.generateAIResponse(
             conversation.id,
             merchantId,
-            customerId,
+            customerUsername, // Use username
             messageContent,
             messageType === 'STORY_REPLY' ? 'story_reply' : 'dm',
             event.message?.mid
@@ -450,16 +483,16 @@ export class InstagramWebhookHandler {
             error: aiError instanceof Error ? aiError.message : String(aiError),
             conversationId: conversation.id,
             merchantId,
-            customerId
+            customerUsername
           });
           
           // إرسال رسالة fallback فورية
-          await this.sendImmediateFallback(conversation.id, merchantId, customerId, 'dm');
+          await this.sendImmediateFallback(conversation.id, merchantId, customerUsername, 'dm');
         }
       }
 
       this.logger.info('Instagram message processed', {
-        customerId,
+        customerUsername,
         preview: messageContent.substring(0, 50)
       });
 
@@ -467,7 +500,8 @@ export class InstagramWebhookHandler {
     } catch (error) {
       this.logger.error('Messaging event processing failed', error, {
         merchantId,
-        ...(customerId ? { customerId } : {})
+        senderInfo: 'username-only-architecture', // No IDs logged
+        errorContext: error instanceof Error ? error.message : String(error)
       });
       throw error;
     }
@@ -482,7 +516,6 @@ export class InstagramWebhookHandler {
   ): Promise<number> {
     let commentId: string | undefined;
     try {
-      const customerId = event.value.from.id;
       const customerUsername = event.value.from.username;
       const commentText = event.value.text;
       const mediaId = event.value.media.id;
@@ -498,7 +531,7 @@ export class InstagramWebhookHandler {
       const commentInteraction: CommentInteraction = {
         id: commentId!,
         postId: mediaId,
-        userId: customerId,
+        userId: customerUsername, // Use username instead of ID
         username: customerUsername,
         content: commentText,
         timestamp: timestamp,
@@ -548,7 +581,6 @@ export class InstagramWebhookHandler {
     merchantId: string
   ): Promise<number> {
     try {
-      const customerId = event.value.from.id;
       const customerUsername = event.value.from.username;
       const mediaId = event.value.media.id;
       const mediaUrl = event.value.media.media_url;
@@ -564,7 +596,7 @@ export class InstagramWebhookHandler {
         id: `mention_${event.value.comment_id}_${Date.now()}`,
         type: 'story_mention',
         storyId: mediaId,
-        userId: customerId,
+        userId: customerUsername, // Use username instead of ID
         username: customerUsername,
         ...(mediaUrl ? { mediaUrl } : {}),
         timestamp: timestamp,
@@ -606,30 +638,45 @@ export class InstagramWebhookHandler {
    */
   private async findOrCreateConversation(
     merchantId: string,
-    customerId: string,
+    customerUsername: string, // USERNAME-ONLY: Must be actual username
     platform: 'instagram',
-    username?: string
+    displayName?: string
   ): Promise<{ id: string; isNew: boolean } | null> {
     try {
+      // ARCHITECTURE ENFORCEMENT: Only usernames allowed for Instagram
+      if (platform === 'instagram') {
+        if (!customerUsername || customerUsername.trim() === '') {
+          throw new Error('Instagram conversations require valid username');
+        }
+        
+        // Reject ID-like patterns
+        if (/^user_\d+$/.test(customerUsername) || /^\d+$/.test(customerUsername)) {
+          throw new Error('Instagram conversations cannot use ID patterns - username required');
+        }
+      }
+      
       const { conversation, isNew } = await this.repositories.conversation.create({
         merchantId,
-        customerInstagram: customerId,
+        customerInstagram: customerUsername, // Store actual username
         platform,
         conversationStage: 'GREETING',
         sessionData: {
           cart: [],
           preferences: {},
           context: {},
-          interaction_count: 1
+          interaction_count: 1,
+          architecture: 'username-only', // Track architecture compliance
+          username_verified: true
         },
-        ...(username ? { customerName: username } : {})
+        customerName: displayName || customerUsername
       });
 
       return { id: conversation.id, isNew };
     } catch (error) {
       this.logger.error('Failed to find/create conversation', error, {
         merchantId,
-        customerId
+        customerUsername,
+        error: error instanceof Error ? error.message : String(error)
       });
       return null;
     }
@@ -1003,20 +1050,34 @@ export class InstagramWebhookHandler {
     event: InstagramMessagingEvent,
     merchantId: string
   ): Promise<number> {
-    let customerId: string | undefined;
+    let customerUsername: string = 'unknown_user';
+    
     try {
-      customerId = event.sender.id;
+      
+      // 🛡️ ARCHITECTURE ENFORCEMENT: Resolve to username only
+      customerUsername = event.sender?.username || '';
+      if (!customerUsername) {
+        try {
+          const { resolveUsernameByIgId } = await import('./username-resolver.js');
+          const resolvedUsername = await resolveUsernameByIgId(merchantId, event.sender.id);
+          customerUsername = resolvedUsername || `user_${event.sender.id}`;
+        } catch (resolverError) {
+          this.logger.error('Failed to resolve username from ID', resolverError);
+          customerUsername = `user_${event.sender.id}`;
+        }
+      }
+      
       const timestamp = new Date(event.timestamp);
       const content = event.postback?.title || event.postback?.payload || '';
 
-      this.logger.info('Instagram story reply received', { customerId, content });
+      this.logger.info('Instagram story reply received', { customerUsername, content });
 
       // Create story interaction for Stories Manager
       const storyInteraction: StoryInteraction = {
         id: `reply_${event.postback?.mid}_${Date.now()}`,
         type: 'story_reply',
         storyId: event.postback?.payload || 'unknown_story',
-        userId: customerId,
+        userId: customerUsername, // USERNAME-ONLY architecture
         content: content,
         timestamp: timestamp,
         metadata: {
@@ -1039,13 +1100,13 @@ export class InstagramWebhookHandler {
       } else {
         this.logger.error('Stories Manager failed for story reply', storyResult.error, {
           merchantId,
-          customerId
+          customerUsername
         });
         throw new Error(`Story reply processing failed: ${storyResult.error}`);
       }
 
     } catch (error) {
-      this.logger.error('Story reply processing failed', error, { merchantId, customerId: event.sender.id });
+      this.logger.error('Story reply processing failed', error, { merchantId, customerUsername });
       throw error;
     }
   }
@@ -1058,7 +1119,6 @@ export class InstagramWebhookHandler {
     merchantId: string
   ): Promise<number> {
     try {
-      const customerId = event.value.from.id;
       const customerUsername = event.value.from.username;
       const mediaId = event.value.media.id;
       const mediaUrl = event.value.media.media_url;
@@ -1066,10 +1126,10 @@ export class InstagramWebhookHandler {
 
       this.logger.info('Using legacy processing for story mention', { customerUsername });
 
-      // Find or create conversation
+      // Find or create conversation using username
       const conversation = await this.findOrCreateConversation(
         merchantId,
-        customerId,
+        customerUsername,
         'instagram',
         customerUsername
       );
@@ -1094,7 +1154,7 @@ export class InstagramWebhookHandler {
     } catch (error) {
       this.logger.error('Legacy mention event processing failed', error, {
         merchantId,
-        customerId: event.value.from.id
+        customerUsername: event.value.from.username
       });
       throw error;
     }
@@ -1109,7 +1169,6 @@ export class InstagramWebhookHandler {
   ): Promise<number> {
     let commentId: string | undefined;
     try {
-      const customerId = event.value.from.id;
       const customerUsername = event.value.from.username;
       const commentText = event.value.text;
       const mediaId = event.value.media.id;
@@ -1121,10 +1180,10 @@ export class InstagramWebhookHandler {
         commentText
       });
 
-      // Find or create conversation
+      // Find or create conversation using username
       const conversation = await this.findOrCreateConversation(
         merchantId,
-        customerId,
+        customerUsername,
         'instagram',
         customerUsername
       );
@@ -1148,7 +1207,7 @@ export class InstagramWebhookHandler {
       await this.generateAIResponse(
         conversation.id,
         merchantId,
-        customerId,
+        customerUsername, // Use username
         commentText,
         'comment',
         commentId,
@@ -1169,7 +1228,7 @@ export class InstagramWebhookHandler {
       this.logger.error('Legacy comment event processing failed', error, {
         merchantId,
         commentId,
-        customerId: event.value.from.id
+        customerUsername: event.value.from.username
       });
       throw error;
     }
@@ -1300,7 +1359,7 @@ export class InstagramWebhookHandler {
   private async sendImmediateFallback(
     conversationId: string,
     merchantId: string,
-    customerId: string,
+    customerUsername: string, // Now expects username
     interactionType: 'dm' | 'comment' | 'story_reply' | 'story_mention'
   ): Promise<void> {
     const fallbackMessage = interactionType === 'dm' 
@@ -1312,7 +1371,7 @@ export class InstagramWebhookHandler {
       const manyChatBridge = getInstagramManyChatBridge();
       const bridgeResult = await manyChatBridge.processMessage({
         merchantId,
-        customerId,
+        customerId: customerUsername, // Pass username
         message: fallbackMessage,
         conversationId,
         interactionType,
@@ -1325,13 +1384,13 @@ export class InstagramWebhookHandler {
       });
 
       if (bridgeResult.success) {
-        this.logger.info('✅ Fallback message sent through ManyChat Bridge', { conversationId, customerId });
+        this.logger.info('✅ Fallback message sent through ManyChat Bridge', { conversationId, customerUsername });
         return;
       } else {
         this.logger.error('❌ ManyChat Bridge failed for fallback - no message sent', {
           error: bridgeResult.error,
           conversationId,
-          customerId
+          customerUsername
         });
         return; // No fallback to direct Instagram API
       }

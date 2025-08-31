@@ -12,6 +12,10 @@ import './boot/error-handlers.js';
 import { assertEnvStrict } from './startup/security-validations.js';
 assertEnvStrict();
 
+// 3) Validate username-only architecture compliance
+import { validateArchitectureCompliance } from './utils/architecture-guard.js';
+validateArchitectureCompliance();
+
 // 3) Core imports
 import { Hono } from 'hono';
 

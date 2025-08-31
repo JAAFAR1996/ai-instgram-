@@ -91,7 +91,33 @@ export class WebhookRouter {
     this.app.use('/webhooks/*', rateLimiter);
   }
 
-  // getAppSecret removed - not used
+  /**
+   * Verify ManyChat webhook HMAC signature
+   */
+  private async verifyManyChatSignature(
+    rawBody: string,
+    signature: string,
+    secret: string
+  ): Promise<boolean> {
+    try {
+      const expectedSignature = crypto
+        .createHmac('sha256', secret)
+        .update(rawBody, 'utf8')
+        .digest('hex');
+      
+      // Remove 'sha256=' prefix if present
+      const receivedSignature = signature.replace(/^sha256=/, '');
+      
+      // Constant time comparison
+      return crypto.timingSafeEqual(
+        Buffer.from(expectedSignature, 'hex'),
+        Buffer.from(receivedSignature, 'hex')
+      );
+    } catch (error) {
+      this.logger.error('❌ ManyChat signature verification error', error);
+      return false;
+    }
+  }
 
   /**
    * Setup webhook routes - Instagram only
@@ -420,38 +446,86 @@ export class WebhookRouter {
 
   /**
    * Handle ManyChat webhook events (POST request)
+   * Updated to use instagram_username and includes HMAC verification
    */
   private async handleManyChatWebhook(c: Context) {
     try {
       this.logger.info('📩 ManyChat webhook received');
       
-      const body = await c.req.json();
-      const { merchant_id, instagram_user_id, subscriber_id, event_type, data } = body;
+      const rawBody = await c.req.text();
+      
+      // Verify HMAC signature if secret is configured
+      const signature = c.req.header('x-hub-signature-256') || c.req.header('x-signature-256');
+      const webhookSecret = process.env.MANYCHAT_WEBHOOK_SECRET;
+      
+      if (webhookSecret && signature) {
+        try {
+          const isValid = await this.verifyManyChatSignature(rawBody, signature, webhookSecret);
+          if (!isValid) {
+            this.logger.error('❌ ManyChat webhook signature verification failed');
+            return c.json({ error: 'Invalid signature' }, 401);
+          }
+          this.logger.info('✅ ManyChat webhook signature verified');
+        } catch (signatureError) {
+          this.logger.error('❌ ManyChat signature verification error', signatureError);
+          return c.json({ error: 'Signature verification failed' }, 401);
+        }
+      } else if (webhookSecret) {
+        this.logger.warn('⚠️ ManyChat webhook secret configured but no signature provided');
+        return c.json({ error: 'Signature required' }, 401);
+      } else {
+        this.logger.warn('⚠️ ManyChat webhook has no signature verification (MANYCHAT_WEBHOOK_SECRET not set)');
+      }
+      
+      let body: any;
+      
+      try {
+        body = JSON.parse(rawBody);
+      } catch (parseError) {
+        this.logger.error('❌ Failed to parse ManyChat webhook JSON', parseError);
+        return c.json({ error: 'Invalid JSON payload' }, 400);
+      }
+      
+      // Extract data - STRICT: Only instagram_username allowed
+      const { merchant_id, instagram_username, subscriber_id, event_type, data } = body;
+      
+      // ARCHITECTURE ENFORCEMENT: No backward compatibility with IDs
+      if (body.instagram_user_id) {
+        this.logger.error('❌ ManyChat webhook contains deprecated instagram_user_id - system is username-only', { body });
+        return c.json({ error: 'instagram_user_id is deprecated - use instagram_username only' }, 400);
+      }
+      
+      if (!instagram_username || typeof instagram_username !== 'string' || instagram_username.trim() === '') {
+        this.logger.error('❌ ManyChat webhook missing or invalid instagram_username', { body });
+        return c.json({ error: 'Valid instagram_username required (string, non-empty)' }, 400);
+      }
+      
+      const username = instagram_username.trim();
 
       // Log the webhook data
       this.logger.info('📩 ManyChat webhook data', { 
         merchant_id, 
-        instagram_user_id, 
+        instagram_username: username, 
         subscriber_id,
         event_type,
         dataKeys: data ? Object.keys(data) : []
       });
 
-      // If we have both instagram_user_id and subscriber_id, update mapping
-      if (merchant_id && instagram_user_id && subscriber_id) {
+      // If we have both username and subscriber_id, update mapping
+      if (merchant_id && username && subscriber_id) {
         try {
           const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
-          await upsertManychatMapping(merchant_id, instagram_user_id, subscriber_id);
+          await upsertManychatMapping(merchant_id, username, subscriber_id);
           
           this.logger.info('✅ Updated ManyChat subscriber mapping', {
             merchant_id,
-            instagram_user_id,
+            instagram_username: username,
             subscriber_id
           });
         } catch (mappingError) {
           this.logger.error('❌ Failed to update ManyChat mapping', mappingError, {
             merchant_id,
-            instagram_user_id,
+            instagram_username: username,
             subscriber_id
           });
         }
@@ -462,7 +536,7 @@ export class WebhookRouter {
         await this.logWebhookEvent('instagram', merchant_id, 'SUCCESS', {
           source: 'manychat',
           event_type,
-          instagram_user_id,
+          instagram_username: username,
           subscriber_id
         });
       }

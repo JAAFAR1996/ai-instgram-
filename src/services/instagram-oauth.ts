@@ -589,7 +589,6 @@ export class InstagramOAuthService {
         await sql`
           UPDATE merchant_credentials SET
             instagram_access_token = ${tokens.longLivedToken},
-            instagram_user_id = ${tokens.igUserId},
             instagram_username = ${profile.username},
             instagram_scopes = ${JSON.stringify(tokens.scopes)},
             token_expires_at = ${expiresAt},
@@ -603,7 +602,6 @@ export class InstagramOAuthService {
           INSERT INTO merchant_credentials (
             merchant_id,
             instagram_access_token,
-            instagram_user_id,
             instagram_username,
             instagram_scopes,
             token_expires_at,
@@ -613,7 +611,6 @@ export class InstagramOAuthService {
           ) VALUES (
             ${merchantId}::uuid,
             ${tokens.longLivedToken},
-            ${tokens.igUserId},
             ${profile.username},
             ${JSON.stringify(tokens.scopes)},
             ${expiresAt},
@@ -1008,7 +1005,6 @@ export class InstagramOAuthService {
       const result = await sql`
         SELECT
           instagram_token_encrypted,
-          instagram_user_id,
           instagram_username,
           instagram_scopes,
           token_expires_at
@@ -1036,7 +1032,6 @@ export class InstagramOAuthService {
 
       return {
         isAuthorized: true,
-        igUserId: record.instagram_user_id as string,
         username: record.instagram_username as string,
         tokenExpiresAt: expiresAt,
         scopes: JSON.parse((record.instagram_scopes as string | undefined) ?? '[]') as string[]

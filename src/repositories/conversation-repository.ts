@@ -61,6 +61,7 @@ export interface CreateConversationRequest {
   merchantId: string;
   /** لواتساب نخزنها في عمود customer_phone */
   customerWhatsapp?: string;
+  /** Instagram: MUST be username (not ID) */
   customerInstagram?: string;
   customerName?: string;
   platform: 'instagram' | 'whatsapp';
