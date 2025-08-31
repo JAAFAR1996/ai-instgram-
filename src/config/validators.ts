@@ -143,8 +143,8 @@ export const REQUIRED_ENV_VARS: Record<string, EnvVarRule> = {
   },
   'MANYCHAT_IG_FIELD_ID': {
     required: true,
-    validator: (value: string) => value.startsWith('cf_') && value.length >= 10,
-    error: 'MANYCHAT_IG_FIELD_ID must start with "cf_" and be at least 10 characters long'
+    validator: (value: string) => /^(cf_[A-Za-z0-9_-]{6,}|[0-9]{5,})$/.test(value),
+    error: 'MANYCHAT_IG_FIELD_ID must be either numeric field ID (5+ digits) or cf_ prefixed custom field (6+ chars)'
   }
 } as const;
 

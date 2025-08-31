@@ -178,7 +178,7 @@ async function compute(): Promise<HealthSnapshot> {
   };
 }
 
-export function startHealth(refreshMs = 30000) { // 30 ثانية لـ Render
+export function startHealth(refreshMs = 120000) { // 2 دقيقة لتوفير الموارد في Render
   if (timer) return;
   const tick = async () => {
     try { 

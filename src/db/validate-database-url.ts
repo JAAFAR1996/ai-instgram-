@@ -7,6 +7,11 @@ import { getLogger } from '../services/logger.js';
 
 const log = getLogger({ component: 'db-validation' });
 
+// Add global type declaration to avoid spam logs
+declare global {
+  var __DATABASE_URL_VALIDATION_LOGGED: boolean | undefined;
+}
+
 export interface DatabaseUrlValidation {
   isValid: boolean;
   error?: string;
@@ -86,13 +91,17 @@ export function validateDatabaseUrl(databaseUrl?: string): DatabaseUrlValidation
       };
     }
 
-    log.info('✅ DATABASE_URL validation passed', {
-      host: details.host,
-      port: details.port,
-      database: details.database,
-      username: details.username,
-      hasPassword: details.hasPassword
-    });
+    // Only log validation success once per session to avoid spam
+    if (!global.__DATABASE_URL_VALIDATION_LOGGED) {
+      log.info('✅ DATABASE_URL validation passed', {
+        host: details.host,
+        port: details.port,
+        database: details.database,
+        username: details.username,
+        hasPassword: details.hasPassword
+      });
+      global.__DATABASE_URL_VALIDATION_LOGGED = true;
+    }
 
     return {
       isValid: true,
