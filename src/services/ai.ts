@@ -282,7 +282,7 @@ export class AIService {
           top_p: 0.9,
           frequency_penalty: 0.1,
           presence_penalty: 0.1,
-          response_format: { type: 'json_object' },
+          // response_format: { type: 'json_object' },
         }),
         'openai.chat.completions'
       ).finally(() => clearTimeout(timer));
@@ -294,21 +294,22 @@ export class AIService {
         throw new Error('No response from OpenAI');
       }
 
-      // Parse & validate AI response
-      let aiResponse: AIResponse;
-      try { 
-        aiResponse = JSON.parse(response) as AIResponse; 
-      } catch (error: unknown) {
-        // ✅ تحسين تسجيل الخطأ
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        this.logger.error("Invalid AI JSON response", { 
-          error: errorMessage,
-          response: response.substring(0, 200), // ✅ قص الرد لتجنب logs كبيرة
-          merchantId: context.merchantId,
-          customerId: context.customerId
-        });
-        return this.getFallbackResponse();
-      }
+      // Create simple AI response from text
+      const aiResponse: AIResponse = {
+        message: response.trim(),
+        messageAr: response.trim(),
+        intent: 'conversation',
+        stage: context.stage,
+        actions: [],
+        products: [],
+        confidence: 0.9,
+        tokens: {
+          prompt: completion.usage?.prompt_tokens || 0,
+          completion: completion.usage?.completion_tokens || 0,
+          total: completion.usage?.total_tokens || 0
+        },
+        responseTime: responseTime
+      };
       
       if (!this.validateAIResponse(aiResponse)) {
         this.logger.error("AI JSON schema validation failed", { got: aiResponse });
@@ -482,16 +483,14 @@ export class AIService {
 6. استخدم رموز تعبيرية مناسبة
 7. حافظ على الطابع المحلي العراقي
 
-يجب أن تكون إجابتك بصيغة JSON:
-{
-  "message": "الرد بالعربية",
-  "messageAr": "نفس الرد",
-  "intent": "نية العميل",
-  "stage": "المرحلة التالية",
-  "actions": [{"type": "نوع العمل", "data": {}, "priority": 1}],
-  "products": [{"productId": "", "sku": "", "name": "", "price": 0, "confidence": 0.8, "reason": ""}],
-  "confidence": 0.9
-}`;
+إرشادات إضافية:
+- إذا سأل عن منتج معين، اسأل عن التفاصيل (مقاس، لون، موديل)
+- إذا سأل عن أسعار، اعطي أسعار معقولة (مثلاً قميص 15-25$، فستان 20-35$)
+- إذا لم تتأكد من التوفر، قل "راح أتأكد لك وأرد عليك بسرعة"
+- كن محادث طبيعي وودود، مو روبوت
+- اجعل كل رد مختلف ومناسب للسياق
+
+اجب مباشرة باللهجة العراقية بدون أي تنسيق خاص أو JSON`;
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt }
