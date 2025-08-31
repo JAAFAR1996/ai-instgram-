@@ -191,24 +191,60 @@ export class InstagramManyChatBridge {
     // Step 1: Generate AI response
     const aiResponse = await this.generateAIResponse(data);
 
-    // Step 2: Send through ManyChat with auto subscriber creation
-    const manyChatResult = await this.sendToManyChat(
-      data.merchantId,
-      data.customerId,
-      aiResponse,
-      {
-        messageTag: this.getMessageTag(data.interactionType),
-        priority: options.priority
+    // Step 2: Try to send through ManyChat first
+    try {
+      const manyChatResult = await this.sendToManyChat(
+        data.merchantId,
+        data.customerId,
+        aiResponse,
+        {
+          messageTag: this.getMessageTag(data.interactionType),
+          priority: options.priority
+        }
+      );
+
+      // Success - add tags and log
+      await this.addRelevantTags(data, data.customerId, aiResponse, options);
+      await this.logManyChatInteraction(data, manyChatResult, aiResponse);
+      
+      return manyChatResult;
+      
+    } catch (error) {
+      // Check if subscriber not found - fallback to local AI
+      if (error && typeof error === 'object' && (error as any).code === 'SUBSCRIBER_NOT_FOUND') {
+        this.logger.info('🔄 ManyChat subscriber not found, falling back to local AI', {
+          merchantId: data.merchantId,
+          customerId: data.customerId
+        });
+        
+        // Fallback to local AI processing
+        const localResult = await this.processWithLocalAI(data, {
+          ...options,
+          useManyChat: false,
+          fallbackToLocalAI: true
+        });
+        
+        // Convert to ManyChatResponse format
+        const response: ManyChatResponse = {
+          success: localResult.success,
+          timestamp: new Date(),
+          platform: 'instagram'
+        };
+        
+        if (localResult.messageId) {
+          response.messageId = localResult.messageId;
+        }
+        
+        if (!localResult.success) {
+          response.error = 'Fallback to local AI';
+        }
+        
+        return response;
       }
-    );
-
-    // Step 3: Add relevant tags (use customerId directly)
-    await this.addRelevantTags(data, data.customerId, aiResponse, options);
-
-    // Step 6: Log the interaction
-    await this.logManyChatInteraction(data, manyChatResult, aiResponse);
-
-    return manyChatResult;
+      
+      // Other errors - propagate up
+      throw error;
+    }
   }
 
   /**
@@ -322,14 +358,36 @@ export class InstagramManyChatBridge {
   ): Promise<ManyChatResponse> {
     const igUserId = customerId; // Keep reference to original IG ID
     
-    // Step 1: Get or create ManyChat subscriber ID mapping
+    // Step 1: Get ManyChat subscriber ID mapping from database
     let mcId = await getManychatIdByInstagram(merchantId, igUserId);
     
     if (!mcId) {
-      this.logger.info('📝 Creating/Syncing ManyChat subscriber', { merchantId, igUserId });
-      const created = await this.manyChatService.createOrLookupSubscriberByInstagram(merchantId, igUserId);
-      mcId = created.subscriber_id;
-      await upsertManychatMapping(merchantId, igUserId, mcId);
+      this.logger.info('🔍 No local mapping found, checking ManyChat directly', { merchantId, igUserId });
+      
+      // Step 2: Try to find subscriber directly in ManyChat by custom field
+      const found = await this.manyChatService.findSubscriberByInstagram(merchantId, igUserId);
+      
+      if (found) {
+        // Found in ManyChat but not in our DB - update our mapping
+        mcId = found.subscriber_id;
+        await upsertManychatMapping(merchantId, igUserId, mcId);
+        this.logger.info('✅ Found subscriber in ManyChat, updated local mapping', { 
+          merchantId, 
+          igUserId, 
+          mcId 
+        });
+      } else {
+        // No subscriber found - Instagram user hasn't opted into ManyChat yet
+        this.logger.info('❌ No ManyChat subscriber found for IG user - user must message first', { 
+          merchantId, 
+          igUserId 
+        });
+        
+        // Cannot proceed with ManyChat - throw error to trigger fallback
+        const error = new Error('Instagram subscriber not found in ManyChat - user must opt-in first');
+        (error as any).code = 'SUBSCRIBER_NOT_FOUND';
+        throw error;
+      }
     }
     
     try {
@@ -355,12 +413,19 @@ export class InstagramManyChatBridge {
         });
         
         try {
-          // Re-create/lookup subscriber and update mapping
-          const recreated = await this.manyChatService.createOrLookupSubscriberByInstagram(merchantId, igUserId);
-          await upsertManychatMapping(merchantId, igUserId, recreated.subscriber_id);
+          // Try to find subscriber again in ManyChat directly
+          const found = await this.manyChatService.findSubscriberByInstagram(merchantId, igUserId);
           
-          // Retry sending with new subscriber ID
-          return await this.manyChatService.sendText(merchantId, recreated.subscriber_id, message, { tag: options?.messageTag });
+          if (found) {
+            // Update our mapping and retry
+            await upsertManychatMapping(merchantId, igUserId, found.subscriber_id);
+            return await this.manyChatService.sendText(merchantId, found.subscriber_id, message, { tag: options?.messageTag });
+          } else {
+            // Still no subscriber - throw error to trigger fallback
+            const fallbackError = new Error('Instagram subscriber still not found in ManyChat after resync');
+            (fallbackError as any).code = 'SUBSCRIBER_NOT_FOUND';
+            throw fallbackError;
+          }
             
         } catch (resyncError) {
           this.logger.error('❌ Subscriber resync failed', {

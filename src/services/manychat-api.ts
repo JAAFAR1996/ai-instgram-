@@ -709,17 +709,22 @@ export class ManyChatService {
   }
 
   /**
-   * Create or lookup subscriber by Instagram ID
+   * Find existing subscriber by Instagram ID (no creation attempt)
    */
-  public async createOrLookupSubscriberByInstagram(
+  public async findSubscriberByInstagram(
     merchantId: string,
     igUserId: string
-  ): Promise<{ subscriber_id: string }> {
-    // First, try to find existing subscriber by custom field
+  ): Promise<{ subscriber_id: string } | null> {
+    const fieldId = getEnv('MANYCHAT_IG_FIELD_ID');
+    if (!fieldId) {
+      this.logger.error('❌ MANYCHAT_IG_FIELD_ID not configured', { merchantId, igUserId });
+      throw new Error('MANYCHAT_IG_FIELD_ID environment variable required');
+    }
+
     try {
-      // Search for subscriber with Instagram ID in custom fields
+      // Search for subscriber using proper field_id
       const response = await this.makeAPIRequest(
-        `/fb/subscriber/findByCustomField?field_name=instagram_user_id&field_value=${igUserId}`,
+        `/fb/subscriber/findByCustomField?field_id=${fieldId}&field_value=${igUserId}`,
         { method: 'GET' }
       );
 
@@ -727,43 +732,51 @@ export class ManyChatService {
         this.logger.info('✅ Found existing ManyChat subscriber', {
           merchantId,
           igUserId,
+          fieldId,
           subscriberId: response.data.id
         });
         return { subscriber_id: response.data.id };
       }
-    } catch (error) {
-      this.logger.warn('Could not find existing subscriber, will create new', {
+
+      // No subscriber found - this is normal for new IG users
+      this.logger.info('🔍 No ManyChat subscriber found for IG user', {
         merchantId,
         igUserId,
+        fieldId
+      });
+      return null;
+
+    } catch (error) {
+      this.logger.warn('❌ ManyChat subscriber lookup failed', {
+        merchantId,
+        igUserId,
+        fieldId,
         error: error instanceof Error ? error.message : String(error)
       });
+      return null;
+    }
+  }
+
+  /**
+   * @deprecated Use findSubscriberByInstagram instead - IG subscribers cannot be created via API
+   */
+  public async createOrLookupSubscriberByInstagram(
+    merchantId: string,
+    igUserId: string
+  ): Promise<{ subscriber_id: string }> {
+    const existing = await this.findSubscriberByInstagram(merchantId, igUserId);
+    if (existing) {
+      return existing;
     }
 
-    // If not found, create new subscriber with Instagram ID as custom field
-    try {
-      const subscriber = await this.createSubscriber(merchantId, {
-        custom_fields: {
-          instagram_user_id: igUserId
-        },
-        first_name: `IG_${igUserId.slice(-6)}`, // Use last 6 chars as default name
-        has_opt_in_sms: false // Instagram users don't have SMS by default
-      });
-
-      this.logger.info('✅ Created new ManyChat subscriber', {
-        merchantId,
-        igUserId,
-        subscriberId: subscriber.id
-      });
-
-      return { subscriber_id: subscriber.id };
-    } catch (error) {
-      this.logger.error('❌ Failed to create ManyChat subscriber', {
-        merchantId,
-        igUserId,
-        error: error instanceof Error ? error.message : String(error)
-      });
-      throw error;
-    }
+    // Cannot create IG subscribers via API - they must opt-in through Instagram first
+    const error = new Error('Instagram subscribers cannot be created via API - user must message first');
+    this.logger.error('❌ Cannot create IG subscriber via API', {
+      merchantId,
+      igUserId,
+      error: error.message
+    });
+    throw error;
   }
 }
 
