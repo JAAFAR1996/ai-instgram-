@@ -206,7 +206,11 @@ export async function readRawBody(c: any, maxBytes = 1024 * 1024): Promise<Buffe
       if (value) {
         size += value.length;
         if (size > maxBytes) {
-          try { await reader.cancel(); } catch {}
+          try { await reader.cancel(); } catch (e) {
+            // Non-fatal: log at debug level, continue throwing 413
+            const log = getLogger({ component: 'encryption' });
+            log.debug('reader.cancel failed after exceeding maxBytes', { error: String(e) });
+          }
           if (typeof c.throw === 'function') {
             c.throw(413, 'payload too large');
           }

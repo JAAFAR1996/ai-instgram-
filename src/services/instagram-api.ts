@@ -278,7 +278,8 @@ export class InstagramAPIClient {
 
     const fileBuffer = await fs.readFile(mediaPath);
     const form = new FormData();
-    form.append('file', new Blob([fileBuffer as any]), path.basename(mediaPath));
+    // Use Uint8Array to avoid unsafe casting
+    form.append('file', new Blob([new Uint8Array(fileBuffer)]), path.basename(mediaPath));
     form.append('media_type', mediaType);
 
     const uploadUrl = `${GRAPH_API_BASE_URL}/${this.credentials.businessAccountId}/media?access_token=${encodeURIComponent(

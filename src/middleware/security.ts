@@ -7,6 +7,8 @@
 
 import type { MiddlewareHandler, Context, Next } from 'hono';
 import { RateLimiterRedis } from 'rate-limiter-flexible';
+import type { RateLimiterRes } from 'rate-limiter-flexible';
+import type { Redis } from 'ioredis';
 import crypto from 'crypto';
 import { getMessageWindowService } from '../services/message-window.js';
 import { getDatabase } from '../db/adapter.js';
@@ -19,15 +21,14 @@ const clean = (v?: string | null) =>
   (v ?? '').replace(/[\r\n]/g, '').trim();
 
 const config = getConfig();
-let redisClient: any = null;
+let redisClient: Redis | null = null;
 
-async function getRedisClient() {
+async function getRedisClient(): Promise<Redis | null> {
   if (process.env.REDIS_ENABLED === 'false') return null;
   
   if (!redisClient) {
     try {
-      redisClient = await getRedisConnectionManager()
-        .getConnection(RedisUsageType.CACHING);
+      redisClient = await getRedisConnectionManager().getConnection(RedisUsageType.CACHING);
     } catch (error) {
       console.warn('Redis not available, using memory fallback');
       return null;
@@ -40,9 +41,12 @@ async function getRedisClient() {
 const DEFAULT_RATE_LIMIT = parseInt(process.env.RATE_LIMIT_MAX || '100');
 const DEFAULT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000');
 
-const rateLimiters: any = {};
+type RateLimiter = {
+  consume: (key: string) => Promise<unknown>;
+};
+const rateLimiters: Record<string, RateLimiter> = {};
 
-async function getRateLimiter(type: string) {
+async function getRateLimiter(type: string): Promise<RateLimiter> {
   if (rateLimiters[type]) return rateLimiters[type];
   
   const redis = await getRedisClient();
@@ -112,13 +116,16 @@ export function rateLimitMiddleware(limiterType: string = 'general') {
     try {
       await limiter.consume(key);
       return await next();
-    } catch (rejRes: any) {
-      const secs = Math.round(rejRes.msBeforeNext / 1000) || 1;
+    } catch (rej) {
+      const res = rej as RateLimiterRes;
+      const secs = Math.round((res?.msBeforeNext ?? 0) / 1000) || 1;
       
       c.header('Retry-After', String(secs));
-      c.header('X-RateLimit-Limit', String(limiter.points));
-      c.header('X-RateLimit-Remaining', String(rejRes.remainingPoints || 0));
-      c.header('X-RateLimit-Reset', String(new Date(Date.now() + rejRes.msBeforeNext)));
+      c.header('X-RateLimit-Limit', String(DEFAULT_RATE_LIMIT));
+      c.header('X-RateLimit-Remaining', String(res?.remainingPoints ?? 0));
+      if (typeof res?.msBeforeNext === 'number') {
+        c.header('X-RateLimit-Reset', String(new Date(Date.now() + res.msBeforeNext)));
+      }
       
       return c.json({
         error: 'Rate limit exceeded',
@@ -243,14 +250,15 @@ export function messagingRateLimitMiddleware() {
       }, 400);
     }
 
-    const limiter = rateLimiters.messaging;
+    const limiter = await getRateLimiter('messaging');
     const key = `messaging_${merchantId}_${customerId}`;
     
     try {
       await limiter.consume(key);
       return await next();
-    } catch (rejRes: any) {
-      const secs = Math.round(rejRes.msBeforeNext / 1000) || 1;
+    } catch (rej) {
+      const res = rej as RateLimiterRes;
+      const secs = Math.round((res?.msBeforeNext ?? 0) / 1000) || 1;
       
       return c.json({
         error: 'Messaging rate limit exceeded',

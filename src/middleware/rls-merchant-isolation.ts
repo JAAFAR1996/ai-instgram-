@@ -34,7 +34,9 @@ async function validateAndExtractMerchantId(c: Context, config: MerchantIsolatio
   
   try {
     const payload = jwt.verify(token, jwtSecret);
-    return (payload as any).merchantId || null;
+    if (typeof payload === 'string') return null;
+    const { merchantId } = payload as jwt.JwtPayload & { merchantId?: string };
+    return merchantId ?? null;
   } catch (error) {
     throw new Error('Invalid authentication token');
   }
