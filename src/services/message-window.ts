@@ -267,7 +267,7 @@ export class MessageWindowService {
           merchant_response_count
         FROM message_windows
         WHERE merchant_id = ${merchantId}::uuid
-        AND is_expired = false
+        AND window_expires_at > NOW()
         ORDER BY window_expires_at ASC
       `;
 
@@ -327,8 +327,8 @@ export class MessageWindowService {
       const stats = await sql<WindowStatsRow>`
         SELECT
           COUNT(*) as total_windows,
-          SUM(CASE WHEN is_expired = false THEN 1 ELSE 0 END) as active_windows,
-          SUM(CASE WHEN is_expired = true THEN 1 ELSE 0 END) as expired_windows,
+          SUM(CASE WHEN window_expires_at > NOW() THEN 1 ELSE 0 END) as active_windows,
+          SUM(CASE WHEN window_expires_at <= NOW() THEN 1 ELSE 0 END) as expired_windows,
           AVG(EXTRACT(EPOCH FROM (window_expires_at - created_at))/3600) as avg_duration_hours,
           SUM(message_count_in_window) as total_customer_messages,
           SUM(merchant_response_count) as total_merchant_responses
@@ -382,7 +382,7 @@ export class MessageWindowService {
           EXTRACT(EPOCH FROM (window_expires_at - NOW()))/60 as minutes_remaining
         FROM message_windows
         WHERE merchant_id = ${merchantId}::uuid
-        AND is_expired = false
+        AND window_expires_at > NOW()
         AND window_expires_at <= NOW() + INTERVAL '${minutesUntilExpiry} minutes'
         ORDER BY window_expires_at ASC
       `;

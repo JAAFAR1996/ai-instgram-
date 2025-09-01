@@ -768,7 +768,7 @@ export class MonitoringService {
           ${status},
           NOW()
         )
-        ON CONFLICT (merchant_id, platform, DATE(created_at))
+        ON CONFLICT (merchant_id, platform, metric_date)
         DO UPDATE SET
           quality_rating = EXCLUDED.quality_rating,
           messaging_quality_score = EXCLUDED.messaging_quality_score,

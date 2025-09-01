@@ -111,19 +111,20 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         }
       }
       const body = rawBody ? JSON.parse(rawBody) : {};
-      const { merchant_id, instagram_username, subscriber_id, event_type, data } = body;
+      const { merchant_id, instagram_username, merchant_username, subscriber_id, event_type, data } = body as any;
 
       // 🛡️ PRODUCTION: Input validation and sanitization - use fallback for merchant_id
       const finalMerchantId = (merchant_id || '').trim();
       
-      if (!instagram_username || !finalMerchantId) {
+      const incomingUsername = (merchant_username ?? instagram_username) as string | undefined;
+      if (!incomingUsername || !finalMerchantId) {
         return c.json({ 
           ok: false, 
-          error: 'instagram_username required and merchant_id missing (no fallback available)' 
+          error: 'username (merchant_username/instagram_username) required and merchant_id missing' 
         }, 400);
       }
 
-      const sanitizedUsername = String(instagram_username).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+      const sanitizedUsername = String(incomingUsername).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
       const sanitizedMerchantId = String(finalMerchantId).trim();
       
       if (!sanitizedUsername || sanitizedUsername.length < 2) {
@@ -203,6 +204,30 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             });
           }
 
+          // Load last 20 messages as conversation history (oldest -> newest)
+          let historyIds: string[] = [];
+          let conversationHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: Date }> = [];
+          try {
+            const historyResult = await pool.query(
+              `SELECT id, content, direction, created_at
+               FROM message_logs
+               WHERE conversation_id = $1
+               ORDER BY created_at DESC
+               LIMIT 20`,
+              [conversationId]
+            );
+            historyIds = historyResult.rows.map((r: any) => r.id);
+            conversationHistory = historyResult.rows
+              .map((r: any) => ({
+                role: (r.direction === 'OUTGOING' ? 'assistant' : 'user') as 'user' | 'assistant',
+                content: r.content || '',
+                timestamp: r.created_at as Date,
+              }))
+              .reverse();
+          } catch (histErr) {
+            log.warn('Failed to load conversation history, proceeding without it', { error: String(histErr) });
+          }
+
           // Store incoming message
           await pool.query(`
             INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, created_at)
@@ -223,7 +248,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 stage: messageCount > 0 ? 'BROWSING' : 'GREETING',
                 cart: [],
                 preferences: {},
-                conversationHistory: []
+                conversationHistory,
               }),
               new Promise<never>((_, reject) => 
                 setTimeout(() => reject(new Error('AI timeout')), 8000)
@@ -265,6 +290,15 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             SET message_count = message_count + 2, last_message_at = NOW(), updated_at = NOW()
             WHERE id = $1
           `, [conversationId]);
+
+          // Delete the consumed history messages (keep DB light as requested)
+          try {
+            if (historyIds.length > 0) {
+              await pool.query('DELETE FROM message_logs WHERE id = ANY($1::uuid[])', [historyIds]);
+            }
+          } catch (delErr) {
+            log.warn('Failed to delete consumed history messages', { error: String(delErr), count: historyIds.length });
+          }
 
           // Update ManyChat mapping
           if (subscriber_id) {
@@ -311,7 +345,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       }
 
       // Handle non-message events (mapping updates, etc.)
-      if (finalMerchantId && instagram_username && subscriber_id) {
+      if (finalMerchantId && incomingUsername && subscriber_id) {
         try {
           const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
           await upsertManychatMapping(sanitizedMerchantId, sanitizedUsername, subscriber_id);
@@ -473,4 +507,5 @@ const dumpPath = path.join(dir, first.f);
 
   log.info('Webhook routes registered successfully');
 }
+
 
