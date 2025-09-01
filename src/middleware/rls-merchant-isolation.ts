@@ -62,9 +62,11 @@ export interface MerchantIsolationConfig {
 }
 
 const DEFAULT_CONFIG: MerchantIsolationConfig = {
-  strictMode: false,
-  softMode: true,
-  allowedPublicPaths: ['/', '/health', '/ready', '/webhooks/instagram', '/internal/diagnostics/meta-ping', '/webhook', '/auth', '/favicon.ico', '/robots.txt'],
+  strictMode: true,
+  softMode: false,
+  // Allow ManyChat webhook to enforce merchant_id at route-level
+  // Also allow admin UI/API (protected separately via Basic Auth)
+  allowedPublicPaths: ['/', '/health', '/ready', '/webhooks/instagram', '/webhooks/manychat', '/internal/diagnostics/meta-ping', '/webhook', '/auth', '/favicon.ico', '/robots.txt', '/admin'],
   headerName: 'x-merchant-id',
   queryParam: 'merchant_id',
   rateLimitConfig: {
@@ -320,8 +322,8 @@ export function createMerchantIsolationMiddleware(
       const sql = db.getSQL();
       
       try {
-        // Use unified context function from migration 037
-        await sql`SELECT set_merchant_context(${merchantId}::uuid)`;
+        // Set PostgreSQL app variable for RLS in current transaction/session
+        await sql`SELECT set_config('app.current_merchant_id', ${merchantId}::text, true)`;
         
         log.info('RLS merchant isolation activated', {
           merchantId: merchantId.substring(0, 8) + '...', // Mask sensitive data

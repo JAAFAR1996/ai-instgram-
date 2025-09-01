@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ===============================================
  * Production Entry Point - AI Sales Platform
  * Modular, secure, and production-ready initialization
@@ -25,7 +25,7 @@ import { serve } from '@hono/node-server';
 import { getLogger } from './services/logger.js';
 import { initTelemetry, telemetry } from './services/telemetry.js';
 import { randomUUID } from 'crypto';
-// اجعل prom-client اختيارياً
+// Ø§Ø¬Ø¹Ù„ prom-client Ø§Ø®ØªÙŠØ§Ø±ÙŠØ§Ù‹
 let promClient: typeof import('prom-client') | null = null;
 try { promClient = await import('prom-client'); } catch { /* prom-client not available */ }
 
@@ -40,7 +40,8 @@ import { createIdempotencyMiddleware } from './middleware/idempotency.js';
 import rlsMiddleware from './middleware/rls-merchant-isolation.js';
 // 7) Routes imports
 import { registerWebhookRoutes } from './routes/webhooks.js';
-import { registerUtilityMessageRoutes } from './routes/utility-messages.js';
+import { registerMerchantAdminRoutes } from './routes/merchant-admin.js';
+import { registerAdminRoutes } from './routes/admin.js';
 
 // 8) Health monitoring
 import { getHealthSnapshot, startHealth } from './services/health-check.js';
@@ -50,11 +51,11 @@ const log = getLogger({ component: 'bootstrap' });
 
 async function bootstrap() {
   try {
-    log.info('🚀 Starting AI Sales Platform...');
+    log.info('ðŸš€ Starting AI Sales Platform...');
 
     // Initialize telemetry first
     await initTelemetry();
-    log.info('✅ Telemetry initialized');
+    log.info('âœ… Telemetry initialized');
 
     // Validate required environment variables
     const requiredEnvVars = ['META_APP_SECRET', 'IG_VERIFY_TOKEN', 'ENCRYPTION_KEY_HEX'];
@@ -80,7 +81,7 @@ async function bootstrap() {
       }
     }
     
-    log.info('✅ Environment variables and security requirements validated');
+    log.info('âœ… Environment variables and security requirements validated');
 
     // Additional production checks
     if (process.env.NODE_ENV === 'production') {
@@ -95,30 +96,30 @@ async function bootstrap() {
     // Initialize database (migrations disabled for production safety)
     const pool = getPool();
     // await runDatabaseMigrations(); // DISABLED: Run migrations manually before deployment
-    log.info('✅ Database initialized (migrations skipped for production safety)');
+    log.info('âœ… Database initialized (migrations skipped for production safety)');
 
     // Initialize Redis integration (non-blocking)
     const redisStatus = await initializeRedisIntegration(pool);
-    log.info('✅ Redis integration initialized', {
+    log.info('âœ… Redis integration initialized', {
       mode: redisStatus.mode,
       success: redisStatus.success
     });
 
-    // إضافة Database Job Processor إذا كان Redis غير متاح
+    // Ø¥Ø¶Ø§ÙØ© Database Job Processor Ø¥Ø°Ø§ ÙƒØ§Ù† Redis ØºÙŠØ± Ù…ØªØ§Ø­
     if (redisStatus.mode !== 'active') {
       const { startDatabaseJobProcessor } = await import('./services/database-job-processor.js');
       startDatabaseJobProcessor();
-      log.info('✅ Database job processor started');
+      log.info('âœ… Database job processor started');
     }
 
     // Schedule maintenance tasks
     scheduleMaintenance(pool);
-    log.info('✅ Maintenance tasks scheduled');
+    log.info('âœ… Maintenance tasks scheduled');
 
     // Create Hono app
     const app = new Hono();
 
-    // Request ID لكل طلب
+    // Request ID Ù„ÙƒÙ„ Ø·Ù„Ø¨
     app.use('*', async (c, next) => {
   const requestId = randomUUID();
   c.header('X-Request-ID', requestId);
@@ -129,7 +130,7 @@ async function bootstrap() {
   return;
 });
 
-    // CORS محسّن لـ Render
+    // CORS Ù…Ø­Ø³Ù‘Ù† Ù„Ù€ Render
     app.use('*', async (c, next) => {
       const allowedOrigins = process.env.CORS_ORIGINS?.split(',') || ['*'];
       const origin = c.req.header('origin') || '';
@@ -167,9 +168,9 @@ async function bootstrap() {
     // Conditional Idempotency middleware loading
     if (redisStatus.success && redisStatus.mode === 'active') {
       app.use('/webhooks/*', createIdempotencyMiddleware({ ttlSeconds: 3600, keyPrefix: 'webhook' }));
-      log.info('✅ Idempotency middleware enabled');
+      log.info('âœ… Idempotency middleware enabled');
     } else {
-      log.info('⚠️ Idempotency middleware disabled - Redis not available');
+      log.info('âš ï¸ Idempotency middleware disabled - Redis not available');
     }
 
     // RLS (Row Level Security) middleware for data isolation
@@ -179,9 +180,12 @@ async function bootstrap() {
     const deps = { pool };
     
     registerWebhookRoutes(app, deps);
-    registerUtilityMessageRoutes(app);
+    
+    
+    registerMerchantAdminRoutes(app);
+    registerAdminRoutes(app);
 
-    // Prometheus Metrics (مفعّل فقط عند METRICS_ENABLED)
+    // Prometheus Metrics (Ù…ÙØ¹Ù‘Ù„ ÙÙ‚Ø· Ø¹Ù†Ø¯ METRICS_ENABLED)
     const metricsEnabled = process.env.METRICS_ENABLED === 'true';
     if (metricsEnabled && promClient) {
       const collectDefaultMetrics = promClient.collectDefaultMetrics;
@@ -194,7 +198,7 @@ async function bootstrap() {
         labelNames: ['method', 'route', 'status']
       });
       
-      // Middleware لقياس الوقت
+      // Middleware Ù„Ù‚ÙŠØ§Ø³ Ø§Ù„ÙˆÙ‚Øª
       app.use('*', async (c, next) => {
         const start = Date.now();
         await next();
@@ -254,7 +258,7 @@ async function bootstrap() {
 
     // Start health monitoring
     startHealth(2000);
-    log.info('✅ Health monitoring started');
+    log.info('âœ… Health monitoring started');
 
     // Start server
     const port = Number(process.env.PORT || 10000);
@@ -263,7 +267,7 @@ async function bootstrap() {
       fetch: app.fetch,
       port
     }, (info) => {
-      log.info(`🎉 AI Sales Platform ready on :${info.port}`);
+      log.info(`ðŸŽ‰ AI Sales Platform ready on :${info.port}`);
       
       // Record startup telemetry
       telemetry.trackEvent('service_started', {
@@ -275,7 +279,7 @@ async function bootstrap() {
 
     return app;
   } catch (error: any) {
-    log.error('❌ Bootstrap failed:', error);
+    log.error('âŒ Bootstrap failed:', error);
     process.exit(1);
   }
 }
@@ -292,43 +296,43 @@ async function gracefulShutdown(signal: string, exitCode: number = 0) {
   isShuttingDown = true;
   const startTime = Date.now();
   
-  log.info(`🛑 ${signal} received, initiating graceful shutdown...`);
+  log.info(`ðŸ›‘ ${signal} received, initiating graceful shutdown...`);
   
   try {
     // Set a timeout for shutdown operations
     const shutdownTimeout = setTimeout(() => {
-      log.error('❌ Shutdown timeout reached, forcing exit');
+      log.error('âŒ Shutdown timeout reached, forcing exit');
       process.exit(1);
     }, 30000); // 30 seconds timeout
     
     // Stop accepting new requests
-    log.info('📝 Stopping new request acceptance...');
+    log.info('ðŸ“ Stopping new request acceptance...');
     
     // Stop health monitoring
     try {
       const { stopHealth } = await import('./services/health-check.js');
       stopHealth();
-      log.info('✅ Health monitoring stopped');
+      log.info('âœ… Health monitoring stopped');
     } catch (error) {
-      log.warn('⚠️ Failed to stop health monitoring:', { error });
+      log.warn('âš ï¸ Failed to stop health monitoring:', { error });
     }
     
     // Close database connections
     try {
       const { closeDatabase } = await import('./startup/database.js');
       await closeDatabase();
-      log.info('✅ Database connections closed');
+      log.info('âœ… Database connections closed');
     } catch (error) {
-      log.warn('⚠️ Failed to close database connections:', { error });
+      log.warn('âš ï¸ Failed to close database connections:', { error });
     }
     
     // Close Redis connections
     try {
       const { closeRedisConnections } = await import('./startup/redis.js');
       await closeRedisConnections();
-      log.info('✅ Redis connections closed');
+      log.info('âœ… Redis connections closed');
     } catch (error) {
-      log.warn('⚠️ Failed to close Redis connections:', { error });
+      log.warn('âš ï¸ Failed to close Redis connections:', { error });
     }
     
     // Stop telemetry
@@ -338,48 +342,48 @@ async function gracefulShutdown(signal: string, exitCode: number = 0) {
         duration: Date.now() - startTime,
         timestamp: new Date().toISOString()
       });
-      log.info('✅ Telemetry recorded');
+      log.info('âœ… Telemetry recorded');
     } catch (error) {
-      log.warn('⚠️ Failed to record telemetry:', { error });
+      log.warn('âš ï¸ Failed to record telemetry:', { error });
     }
     
     clearTimeout(shutdownTimeout);
     
     const shutdownDuration = Date.now() - startTime;
-    log.info(`✅ Graceful shutdown completed in ${shutdownDuration}ms`);
+    log.info(`âœ… Graceful shutdown completed in ${shutdownDuration}ms`);
     
     process.exit(exitCode);
   } catch (error: any) {
-    log.error('❌ Error during shutdown:', error);
+    log.error('âŒ Error during shutdown:', error);
     process.exit(1);
   }
 }
 
 // Enhanced signal handlers
 process.on('SIGTERM', async () => {
-  log.info('📡 SIGTERM received from container orchestrator');
+  log.info('ðŸ“¡ SIGTERM received from container orchestrator');
   await gracefulShutdown('SIGTERM', 0);
 });
 
 process.on('SIGINT', async () => {
-  log.info('⌨️ SIGINT received (Ctrl+C)');
+  log.info('âŒ¨ï¸ SIGINT received (Ctrl+C)');
   await gracefulShutdown('SIGINT', 0);
 });
 
 // Handle uncaught exceptions
 process.on('uncaughtException', async (error) => {
-  log.error('❌ Uncaught Exception:', error);
+  log.error('âŒ Uncaught Exception:', error);
   await gracefulShutdown('uncaughtException', 1);
 });
 
 process.on('unhandledRejection', async (reason, promise) => {
-  log.error('❌ Unhandled Rejection:', { reason, promise });
+  log.error('âŒ Unhandled Rejection:', { reason, promise });
   await gracefulShutdown('unhandledRejection', 1);
 });
 
 // Additional signal handlers for different environments
 process.on('SIGUSR1', async () => {
-  log.info('📊 SIGUSR1 received (debug signal)');
+  log.info('ðŸ“Š SIGUSR1 received (debug signal)');
   // Don't shutdown, just log current state
   const { getHealthSnapshot } = await import('./services/health-check.js');
   const health = getHealthSnapshot();
@@ -387,7 +391,7 @@ process.on('SIGUSR1', async () => {
 });
 
 process.on('SIGUSR2', async () => {
-  log.info('🔄 SIGUSR2 received (reload signal)');
+  log.info('ðŸ”„ SIGUSR2 received (reload signal)');
   // Could implement hot reload here if needed
   log.info('Hot reload not implemented, ignoring SIGUSR2');
 });
@@ -396,3 +400,6 @@ process.on('SIGUSR2', async () => {
 const app = await bootstrap();
 
 export default app;
+
+
+

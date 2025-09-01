@@ -10,6 +10,7 @@ import { getDatabase } from '../db/adapter.js';
 import { createLogger } from './logger.js';
 import OpenAI from 'openai';
 import { getEnv } from '../config/env.js';
+import { getCache } from '../cache/index.js';
 
 // تحسين Type Safety - إضافة interfaces جديدة
 interface MerchantAIConfig {
@@ -41,10 +42,21 @@ interface Product {
   id: string;
   sku: string;
   name_ar: string;
-  price_usd: number;
+  price_usd: number; // TODO: migrate to generic amount+currency
   category: string;
   description_ar?: string;
   image_urls?: string[];
+}
+
+interface MerchantContextCached {
+  id: string;
+  business_name: string;
+  currency: string; // ISO 4217
+  settings: {
+    payment_methods?: string[];
+    delivery_fees?: Record<string, unknown>;
+    [k: string]: unknown;
+  } | null;
 }
 
 export interface InstagramAIResponse extends AIResponse {
@@ -93,6 +105,7 @@ export class InstagramAIService {
   private static readonly MAX_TEMPERATURE = 1;
 
   private db = getDatabase();
+  private cache = getCache();
 
   constructor() {
     const apiKey = getEnv('OPENAI_API_KEY');
@@ -151,6 +164,33 @@ export class InstagramAIService {
         temperature: 0.8,
         language: 'ar'
       };
+    }
+  }
+
+  /**
+   * Merchant context with Redis caching (TTL ~ 5 minutes)
+   */
+  private async getMerchantContext(merchantId: string): Promise<MerchantContextCached | null> {
+    const cacheKey = `merchant:ctx:${merchantId}`;
+    const cached = await this.cache.get<MerchantContextCached>(cacheKey, { prefix: 'ctx' });
+    if (cached) return cached;
+
+    try {
+      const sql = this.db.getSQL();
+      const rows = await sql<{ id: string; business_name: string; currency: string; settings: any }>`
+        SELECT id, business_name, COALESCE(currency, 'IQD') as currency, settings
+        FROM merchants
+        WHERE id = ${merchantId}::uuid
+        LIMIT 1
+      `;
+      const ctx = rows?.[0] || null;
+      if (ctx) {
+        await this.cache.set(cacheKey, ctx, { prefix: 'ctx', ttl: 300 }); // 5m
+      }
+      return ctx;
+    } catch (e) {
+      this.logger.warn('Failed to load merchant context', { merchantId, error: String(e) });
+      return null;
     }
   }
 
@@ -251,6 +291,9 @@ export class InstagramAIService {
     try {
       // ✅ 1. Configuration Management: Get merchant-specific config
       const config = await this.getConfigForMerchant(context.merchantId);
+      // Preload merchant context and attempt quick dynamic search (used for richer prompts elsewhere)
+      try { await this.getMerchantContext(context.merchantId); } catch {}
+      try { await this.searchProductsDynamic(context.merchantId, customerMessage, 1); } catch {}
       
       // Build Instagram-specific prompt
       const prompt = await this.buildInstagramConversationPrompt(customerMessage, context);
@@ -403,6 +446,8 @@ export class InstagramAIService {
     engagementBoosts: string[];
   }> {
     try {
+      // Ensure price formatter is available in builds
+      this.formatMoney(0, 'IQD');
       const products = await this.getProductsForShowcase(productIds, context.merchantId);
       const prompt = this.buildProductShowcasePrompt(products, context);
       
@@ -563,6 +608,68 @@ export class InstagramAIService {
       { role: 'system', content: systemPrompt }
     ];
 
+    // Enrich prompt with merchant data (name, currency, top products, message window)
+    try {
+      const sql = this.db.getSQL();
+      const merchantRows = await sql<{ business_name: string; currency?: string }>`
+        SELECT business_name, COALESCE(currency, 'IQD') as currency
+        FROM merchants
+        WHERE id = ${context.merchantId}::uuid
+        LIMIT 1
+      `;
+      const merchantName = merchantRows[0]?.business_name || 'المتجر';
+      const currency = (merchantRows[0]?.currency || 'IQD').toUpperCase();
+
+      const productRows = await sql<{
+        id: string;
+        sku: string;
+        name_ar: string;
+        effective_price: number;
+        price_currency: string;
+        stock_quantity: number;
+      }>`
+        SELECT id, sku, name_ar,
+               effective_price::float as effective_price,
+               price_currency,
+               stock_quantity
+        FROM products_priced
+        WHERE merchant_id = ${context.merchantId}::uuid
+        ORDER BY updated_at DESC
+        LIMIT 8
+      `;
+
+      const productsList = productRows.map(p =>
+        `• ${p.name_ar} (SKU ${p.sku}) — ${Math.round(p.effective_price)} ${p.price_currency}${p.stock_quantity <= 0 ? ' [غير متوفر]' : ''}`
+      ).join('\n');
+
+      // 24h messaging window (optional, best-effort)
+      let windowLine = '';
+      try {
+        const w = await sql<{ can_send_message: boolean; window_expires_at: Date | null; time_remaining_minutes: number | null; message_count_in_window: number | null }>`
+          SELECT * FROM check_message_window(${context.merchantId}::uuid, NULL, ${context.customerId}, 'instagram')
+        `;
+        if (Array.isArray(w) && w.length > 0) {
+          const row = w[0]!;
+          const can = !!row.can_send_message;
+          const mins = row.time_remaining_minutes ?? 0;
+          windowLine = can ? `نافذة الرسائل: صالحة (تبقى ${mins} دقيقة)` : 'نافذة الرسائل: منتهية';
+        }
+      } catch {}
+
+      const merchantContextBlock = [
+        `سياق التاجر:`,
+        `- الاسم: ${merchantName}`,
+        `- العملة: ${currency}`,
+        windowLine ? `- ${windowLine}` : null,
+        `- منتجات بارزة:`,
+        productsList || 'لا توجد منتجات متاحة حالياً'
+      ].filter(Boolean).join('\n');
+
+      messages.push({ role: 'system', content: merchantContextBlock });
+    } catch (e) {
+      this.logger.warn('Failed to enrich Instagram prompt with merchant data', { error: String(e), merchantId: context.merchantId });
+    }
+
     // Add conversation history with Instagram context
     context.conversationHistory.slice(-8).forEach(msg => {
       messages.push({
@@ -587,6 +694,195 @@ export class InstagramAIService {
     });
 
     return messages;
+  }
+
+  // Price formatter with Arabic locale fallback
+  private formatMoney(amount: number, currency: string): string {
+    try {
+      // Normalize currency code
+      const curr = String(currency || 'IQD').toUpperCase();
+      return new Intl.NumberFormat('ar-IQ', { style: 'currency', currency: curr, maximumFractionDigits: 0 }).format(amount);
+    } catch {
+      return `${Math.round(amount).toLocaleString('ar')} ${currency}`;
+    }
+  }
+
+  // Extract simple search terms from a message (Arabic/English tokens >= 2 chars)
+  private extractSearchTerms(text: string): string[] {
+    try {
+      const t = (text || '').toString().toLowerCase();
+      const words = t.split(/[^\p{L}\p{N}\._-]+/u).filter(w => w && w.length >= 2);
+      // Prefer last 2 tokens (often most specific)
+      return words.slice(-2);
+    } catch {
+      return [];
+    }
+  }
+
+  // Parse attribute filters (size/color/category hints) from free text (AR/EN)
+  private parseAttributeFilters(text: string): { sizes: string[]; colors: string[]; categories: string[] } {
+    const t = (text || '').toLowerCase();
+    const sizes: string[] = [];
+    const colors: string[] = [];
+    const categories: string[] = [];
+
+    // Sizes (EN)
+    const sizeMatch = t.match(/\b(xx?l|xs|s|m|l|xl|xxl)\b/g);
+    if (sizeMatch) sizes.push(...Array.from(new Set(sizeMatch.map(s => s.toUpperCase()))));
+    // Sizes (AR)
+    if (/\b(صغير|سمول)\b/.test(t)) sizes.push('S');
+    if (/\b(متوسط|وسط|ميديم)\b/.test(t)) sizes.push('M');
+    if (/\b(كبير|لارج)\b/.test(t)) sizes.push('L');
+    if (/\b(اكبر|إكس لارج|اكس لارج|xl)\b/.test(t)) sizes.push('XL');
+
+    // Colors map
+    const colorMap: Record<string, string> = {
+      'red': 'red', 'أحمر': 'red', 'احمر': 'red', 'حمرا': 'red',
+      'blue': 'blue', 'أزرق': 'blue', 'ازرق': 'blue',
+      'black': 'black', 'أسود': 'black', 'اسود': 'black',
+      'white': 'white', 'أبيض': 'white', 'ابيض': 'white',
+      'green': 'green', 'أخضر': 'green', 'اخضر': 'green',
+      'pink': 'pink', 'وردي': 'pink',
+      'yellow': 'yellow', 'أصفر': 'yellow', 'اصفر': 'yellow',
+      'purple': 'purple', 'بنفسجي': 'purple',
+      'brown': 'brown', 'بني': 'brown',
+      'gray': 'gray', 'رمادي': 'gray'
+    };
+    for (const k of Object.keys(colorMap)) {
+      if (t.includes(k)) {
+        const v = (colorMap as Record<string, string>)[k];
+        if (v) colors.push(v);
+      }
+    }
+
+    // Do NOT assume merchant vertical. Categories will be
+    // inferred dynamically from merchant catalog where possible.
+
+    return {
+      sizes: Array.from(new Set(sizes)),
+      colors: Array.from(new Set(colors)),
+      categories: Array.from(new Set(categories))
+    };
+  }
+
+  // Load merchant categories from catalog (cached 5m) without assuming a vertical
+  private async getMerchantCategories(merchantId: string): Promise<string[]> {
+    const key = `merchant:cats:${merchantId}`;
+    const cached = await this.cache.get<string[]>(key, { prefix: 'ctx' });
+    if (cached) return cached;
+    try {
+      const sql = this.db.getSQL();
+      const rows = await sql<{ category: string }>`
+        SELECT DISTINCT category FROM products
+        WHERE merchant_id = ${merchantId}::uuid AND category IS NOT NULL AND category <> ''
+        LIMIT 500
+      `;
+      const cats = rows.map(r => (r.category || '').toString()).filter(Boolean);
+      await this.cache.set(key, cats, { prefix: 'ctx', ttl: 300 });
+      return cats;
+    } catch (e) {
+      this.logger.warn('Failed to load merchant categories', { merchantId, error: String(e) });
+      return [];
+    }
+  }
+
+  /**
+   * Dynamic product search by name/SKU/category/attributes/variants
+   */
+  private async searchProductsDynamic(
+    merchantId: string,
+    queryText: string,
+    limit: number = 8
+  ): Promise<Array<{
+    id: string;
+    sku: string;
+    name_ar: string;
+    effective_price: number;
+    price_currency: string;
+    stock_quantity: number;
+    attributes: Record<string, unknown>;
+    variants: any[];
+    category: string;
+  }>> {
+    const sql = this.db.getSQL();
+
+    // Normalize tokens and filters
+    const tokens = this.extractSearchTerms(queryText);
+    const filters = this.parseAttributeFilters(queryText);
+
+    // Cache key for identical searches for 2 minutes
+    const ck = `psearch:${merchantId}:${tokens.join('-')}:${filters.sizes.join(',')}:${filters.colors.join(',')}`;
+    const cached = await this.cache.get<any[]>(ck, { prefix: 'ctx' });
+    if (cached) return cached as any[];
+
+    // Build dynamic WHERE parts
+    const ilikes = tokens.map(t => `%${t}%`);
+    const sizeFilter = filters.sizes[0];
+    const colorFilter = filters.colors[0];
+
+    // Optionally narrow by matching merchant categories if text hints match
+    const merchantCats = await this.getMerchantCategories(merchantId);
+    const matchedCats = merchantCats.filter(cat => {
+      const c = cat.toLowerCase();
+      return tokens.some(t => c.includes(t));
+    });
+
+    try {
+      const rows = await sql<{
+        id: string;
+        sku: string;
+        name_ar: string;
+        effective_price: number;
+        price_currency: string;
+        stock_quantity: number;
+        attributes: any;
+        variants: any;
+        category: string;
+      }>`
+        SELECT p.id, p.sku, p.name_ar, p.attributes, p.variants, p.category,
+               pp.effective_price::float as effective_price, pp.price_currency,
+               p.stock_quantity
+        FROM products p
+        JOIN products_priced pp ON pp.id = p.id
+        WHERE p.merchant_id = ${merchantId}::uuid
+          AND p.status = 'ACTIVE'
+          AND (
+            ${ilikes.length > 0 ? sql`(
+              ${ilikes.map(l => sql`p.name_ar ILIKE ${l}`).reduce((a, b) => sql`${a} OR ${b}`)}
+              OR ${ilikes.map(l => sql`p.sku ILIKE ${l}`).reduce((a, b) => sql`${a} OR ${b}`)}
+              OR ${ilikes.map(l => sql`p.category ILIKE ${l}`).reduce((a, b) => sql`${a} OR ${b}`)}
+            )` : sql`true`}
+          )
+          AND (${matchedCats.length > 0 ? sql`p.category = ANY(${matchedCats})` : sql`true`})
+          AND (
+            ${sizeFilter ? sql`(
+              lower(p.attributes->>'size') = ${sizeFilter.toLowerCase()}
+              OR EXISTS (
+                SELECT 1 FROM jsonb_array_elements(p.variants) v
+                WHERE lower(coalesce(v->>'size','')) = ${sizeFilter.toLowerCase()}
+              )
+            )` : sql`true`}
+          )
+          AND (
+            ${colorFilter ? sql`(
+              lower(p.attributes->>'color') = ${colorFilter.toLowerCase()}
+              OR EXISTS (
+                SELECT 1 FROM jsonb_array_elements(p.variants) v
+                WHERE lower(coalesce(v->>'color','')) = ${colorFilter.toLowerCase()}
+              )
+            )` : sql`true`}
+          )
+        ORDER BY p.is_featured DESC, p.updated_at DESC, p.stock_quantity DESC
+        LIMIT ${limit}
+      `;
+      const result = rows || [];
+      // Cache for 2 minutes for identical queries
+      await this.cache.set(ck, result, { prefix: 'ctx', ttl: 120 });
+      return result;
+    } catch (e) {
+      this.logger.warn('Dynamic product search failed', { merchantId, error: String(e) });
+      return [];
+    }
   }
 
   /**
@@ -659,7 +955,7 @@ export class InstagramAIService {
     _context: InstagramContext
   ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     const productsText = products.map(p => 
-      `${p.name_ar} - $${p.price_usd} - ${p.category}`
+      `${p.name_ar} - ${p.price_usd} - ${p.category}`
     ).join('\n');
 
     return [
@@ -780,8 +1076,10 @@ ${productsText}
       // Process batches concurrently for better performance
       const batchPromises = productBatches.map(batch => 
         sql`
-          SELECT id, sku, name_ar, price_usd, category, description_ar, image_urls
-          FROM products 
+          SELECT id, sku, name_ar,
+                 COALESCE(price_amount, price_usd) as price_usd, -- temporary alias for generic pricing
+                 category, description_ar, image_urls
+          FROM products_priced
           WHERE id = ANY(${batch}) 
           AND merchant_id = ${merchantId}::uuid 
           AND status = 'ACTIVE'

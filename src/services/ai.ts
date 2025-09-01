@@ -524,7 +524,7 @@ export class AIService {
     products: Product[]
   ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     const productsText = products.map(p => 
-      `ID: ${p.id}, SKU: ${p.sku}, اسم: ${p.name_ar}, سعر: $${p.price_usd}, فئة: ${p.category}`
+      `ID: ${p.id}, SKU: ${p.sku}, اسم: ${p.name_ar}, سعر: ${p.price_usd}, فئة: ${p.category}`
     ).join('\n');
 
     return [

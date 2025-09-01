@@ -114,7 +114,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       const { merchant_id, instagram_username, subscriber_id, event_type, data } = body;
 
       // 🛡️ PRODUCTION: Input validation and sanitization - use fallback for merchant_id
-      const finalMerchantId = (merchant_id || '').trim();
+      const fallbackMerchantId = getEnv('MERCHANT_ID') || 'merchant-default-001';
+      const finalMerchantId = merchant_id || fallbackMerchantId;
       
       if (!instagram_username || !finalMerchantId) {
         return c.json({ 
@@ -142,17 +143,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       });
 
       // 🔍 PROCESS MESSAGE: If this is a message from user, process with AI
-      // Set RLS merchant context for this request
-      try {
-        const { getDatabase } = await import('../db/adapter.js');
-        const db = getDatabase();
-        const sql = db.getSQL();
-        await sql`SELECT set_config('app.current_merchant_id', ${sanitizedMerchantId}::text, true)`;
-      } catch (ctxErr) {
-        log.error('Failed to set merchant context', ctxErr as Error);
-        return c.json({ ok: false, error: 'context_error' }, 503);
-      }
-
       if (event_type === 'message' && data?.text) {
         const messageText = String(data.text).trim();
         
@@ -473,4 +463,3 @@ const dumpPath = path.join(dir, first.f);
 
   log.info('Webhook routes registered successfully');
 }
-
