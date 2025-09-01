@@ -1,60 +1,51 @@
 /**
- * ===============================================
- * Global Error Handlers - Production Grade
- * 🔧 Stage 5: Enhanced DevOps error handling and monitoring
- * مُعالجات الأخطاء المركزية لمنع انهيار النظام
- * ===============================================
+ * Global Error Handlers - Production Grade (clean)
+ * Provides consistent handling for unhandled rejections/exceptions
+ * and a graceful shutdown utility used across the app.
  */
 
 import { setTimeout as delay } from 'node:timers/promises';
 import { teardownTimerManagement } from '../utils/timer-manager.js';
 import { logger } from '../services/logger.js';
 
-// Global error counters for monitoring
+// Error counters for simple telemetry
 let unhandledRejectionCount = 0;
 let uncaughtExceptionCount = 0;
 
-/**
- * Handle unhandled promise rejections
- * معالجة الوعود المرفوضة غير المُعالجة
- */
+// Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
   unhandledRejectionCount++;
-  
-  // Convert reason to proper Error object
-  const error = reason instanceof Error 
-    ? reason 
-    : new Error(`UnhandledRejection: ${String(reason || 'undefined reason')}`);
-  
+
+  const error = reason instanceof Error
+    ? reason
+    : new Error(`UnhandledRejection: ${String(reason ?? 'undefined reason')}`);
+
   console.error('[FATAL] unhandledRejection', {
     count: unhandledRejectionCount,
     error: error.message,
     stack: error.stack,
-    promise: promise?.constructor?.name || 'unknown',
+    promise: (promise as any)?.constructor?.name || 'unknown',
     timestamp: new Date().toISOString(),
     pid: process.pid
   });
-  
-  // In development, we might want to crash fast to catch issues
-  if (process.env.NODE_ENV === 'development') {
-    console.error('💥 Crashing in development mode to catch unhandled rejection');
+
+  // In development, crash fast to surface issues
+  if ((process.env.NODE_ENV || '').toLowerCase() === 'development') {
+    console.error('Crashing in development mode to catch unhandled rejection');
     process.exit(1);
   }
-  
-  // In production, log and continue with circuit breaker
+
+  // In production, allow a burst then exit for safety
   if (unhandledRejectionCount > 50) {
-    console.error('🚨 Too many unhandled rejections, shutting down for safety');
+    console.error('Too many unhandled rejections, shutting down for safety');
     process.exit(1);
   }
 });
 
-/**
- * Handle uncaught exceptions
- * معالجة الاستثناءات غير المُلتقطة
- */
+// Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
   uncaughtExceptionCount++;
-  
+
   console.error('[FATAL] uncaughtException', {
     count: uncaughtExceptionCount,
     error: err.message,
@@ -62,20 +53,12 @@ process.on('uncaughtException', (err) => {
     timestamp: new Date().toISOString(),
     pid: process.pid
   });
-  
-  // Uncaught exceptions are more serious - always exit
-  console.error('💥 Uncaught exception detected, shutting down gracefully...');
-  
-  // Give time for logs to flush
-  void delay(1000).then(() => {
-    process.exit(1);
-  });
+
+  console.error('Uncaught exception detected, shutting down gracefully...');
+  void delay(1000).then(() => process.exit(1));
 });
 
-/**
- * Handle process warnings
- * معالجة تحذيرات العملية
- */
+// Process warnings
 process.on('warning', (warning) => {
   console.warn('[WARNING]', {
     name: warning.name,
@@ -85,87 +68,63 @@ process.on('warning', (warning) => {
   });
 });
 
-/**
- * Handle multiple resolve/reject (debugging)
- * REMOVED: multipleResolves event is deprecated in Node 18+ and unreliable
- * Use single promise guards or AbortController patterns instead
- */
-
-/**
- * Graceful shutdown handler
- */
+// Graceful shutdown
 let shuttingDown = false;
 const shutdownController = new AbortController();
 
 export async function gracefulShutdown(signal: string, code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
-  
-  logger.info(`🔄 Graceful shutdown initiated by ${signal}...`);
-  
+
+  logger.info(`Graceful shutdown initiated by ${signal}...`);
+
   try {
     // Signal all operations to stop
     shutdownController.abort();
-    
-    // Signal queue workers to stop processing
-    try {
-      logger.info('⚠️ Queue manager shutdown temporarily disabled');
-    } catch (error) {
-      console.error('❌ Failed to stop queue processing:', error);
-    }
-    
-    // Close database connections
+
+    // Close database connections if available
     try {
       const { getDatabase } = await import('../db/adapter.js');
       const db = getDatabase();
       await db.close();
-      logger.info('✅ Database connections closed');
+      logger.info('Database connections closed');
     } catch (error) {
-      console.error('❌ Failed to close database:', error);
+      console.error('Failed to close database:', error);
     }
-    
-    // Close Redis connections
+
+    // Close Redis connections if available
     try {
       const { getRedisConnectionManager } = await import('../services/RedisConnectionManager.js');
       const redisManager = getRedisConnectionManager();
       await redisManager.closeAllConnections();
-      logger.info('✅ Redis connections closed');
+      logger.info('Redis connections closed');
     } catch (error) {
-      console.error('❌ Failed to close Redis connections:', error);
+      console.error('Failed to close Redis connections:', error);
     }
 
-      // Cancel all registered timers and restore globals
-      try {
-        teardownTimerManagement();
-        logger.info('✅ Timers cleared');
-      } catch (error) {
-        console.error('❌ Failed to clear timers:', error);
-      }
+    // Clear timers and restore globals
+    try {
+      teardownTimerManagement();
+      logger.info('Timers cleared');
+    } catch (error) {
+      console.error('Failed to clear timers:', error);
+    }
 
-    logger.info('✅ Graceful shutdown completed');
+    logger.info('Graceful shutdown completed');
   } catch (error) {
-    console.error('❌ Error during graceful shutdown:', error);
+    console.error('Error during graceful shutdown:', error);
   } finally {
     process.exit(code);
   }
 }
 
 // Register shutdown handlers
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
+process.on('SIGABRT', () => void gracefulShutdown('SIGABRT', 1));
 
-// Handle PM2 signals
-process.on('SIGABRT', () => gracefulShutdown('SIGABRT', 1));
-
-/**
- * Utility function to safely execute async operations
- * دالة مساعدة لتنفيذ العمليات غير المتزامنة بأمان
- */
-export async function safeAsync<T>(
-  operation: () => Promise<T>,
-  context: string,
-  fallback?: T
-): Promise<T | undefined> {
+// Utility wrappers
+export async function safeAsync<T>(operation: () => Promise<T>, context: string, fallback?: T): Promise<T | undefined> {
   try {
     return await operation();
   } catch (error) {
@@ -179,9 +138,6 @@ export async function safeAsync<T>(
   }
 }
 
-/**
- * Wrap error with additional context
- */
 export function wrapError(error: unknown, context: string): Error {
   if (error instanceof Error) {
     error.message = `${context}: ${error.message}`;
@@ -190,21 +146,12 @@ export function wrapError(error: unknown, context: string): Error {
   return new Error(`${context}: ${String(error)}`);
 }
 
-/**
- * Safe fire-and-forget for async operations
- * تنفيذ آمن للعمليات غير المتزامنة "اطلق وانس"
- */
-export function fireAndForget(
-  operation: () => Promise<void>,
-  context: string
-): void {
+export function fireAndForget(operation: () => Promise<void>, context: string): void {
   void safeAsync(operation, context);
 }
 
-// Export shutdown controller for other modules
 export { shutdownController };
 
-// Export error stats for monitoring
 export function getErrorStats() {
   return {
     unhandledRejectionCount,
@@ -215,4 +162,5 @@ export function getErrorStats() {
   };
 }
 
-logger.info('🛡️  Global error handlers initialized');
+logger.info('Global error handlers initialized');
+

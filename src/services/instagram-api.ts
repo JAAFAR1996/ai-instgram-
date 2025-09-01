@@ -21,7 +21,6 @@ import type {
 import type { DIContainer } from '../container/index.js';
 
 import type EncryptionService from './encryption.js';
-import type { MetaRateLimiter } from './meta-rate-limiter.js';
 import type Logger from './logger.js';
 export type { InstagramAPICredentials } from '../types/instagram.js';
 
@@ -102,10 +101,7 @@ function isInstagramProfile(data: unknown): data is InstagramProfile {
 
 export class InstagramAPIClient {
   private encryptionService!: EncryptionService;
-  // removed unused fields
-  private rateLimiter!: MetaRateLimiter;
   private logger: Logger;
-  // removed unused fields
 
   private credentials: InstagramAPICredentials | null = null;
   // removed unused fields
@@ -119,10 +115,7 @@ export class InstagramAPIClient {
   private async initializeDependencies(): Promise<void> {
     try {
       const { getEncryptionService } = await import('./encryption.js');
-      const { getMetaRateLimiter } = await import('./meta-rate-limiter.js');
-      
       this.encryptionService = getEncryptionService();
-      this.rateLimiter = getMetaRateLimiter();
     } catch (error: unknown) {
       this.logger.error('Failed to initialize InstagramAPIClient dependencies:', error);
       throw error;
@@ -166,29 +159,7 @@ export class InstagramAPIClient {
         code: 'MERCHANT_ID_MISSING'
       });
     }
-    const windowMs = 60_000;         // 1 دقيقة
-    const maxRequests = 90;          // حد لكل تاجر/دقيقة (عدّله كما يلزم)
-    const rateKey = `ig:${merchantId}:${method}:${path}`;
-
-    // ✅ فحص المعدّل قبل الإرسال
-    let check: { allowed: boolean; remaining: number; resetTime: number };
-    try {
-      check = await this.rateLimiter.checkRedisRateLimit(rateKey, windowMs, maxRequests);
-    } catch (error) {
-      this.logger.warn(
-        `⚠️ Redis rate limit check failed for ${rateKey}:`,
-        { err: error }
-      );
-      telemetry.recordRateLimitStoreFailure('instagram', path);
-      check = { allowed: true, remaining: maxRequests, resetTime: Date.now() + windowMs };
-    }
-    if (!check.allowed) {
-      throw Object.assign(new Error('RATE_LIMIT_EXCEEDED'), {
-        resetTime: check.resetTime,
-        remaining: check.remaining,
-        code: 'RATE_LIMIT_EXCEEDED'
-      });
-    }
+    // Rate limiting disabled for ManyChat flow
 
     const url = `${GRAPH_API_BASE_URL}${path}`;
     const controller = new AbortController();
@@ -892,8 +863,6 @@ export class InstagramAPICredentialsManager {
       `;
 
       this.logger.info(`✅ Instagram credentials removed for merchant: ${merchantId}`);
-      const { getInstagramStoriesManager } = await import('./instagram-stories-manager.js');
-      getInstagramStoriesManager().clearMerchantClient(merchantId);
       clearInstagramClient(merchantId);
     } catch (error) {
       this.logger.error('❌ Failed to remove Instagram credentials:', error);

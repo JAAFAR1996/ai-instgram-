@@ -7,7 +7,7 @@
 
 import { Pool } from 'pg';
 import { getLogger } from '../services/logger.js';
-import { getRedisIntegrationStatus, getQueueManager } from './redis.js';
+import { getRedisIntegrationStatus } from './redis.js';
 
 const log = getLogger({ component: 'maintenance-startup' });
 
@@ -18,16 +18,16 @@ export function scheduleMaintenance(pool: Pool): void {
   log.info('📅 Scheduling maintenance tasks...');
 
   try {
-    // Check if Redis/Queue integration is available
+    // Check if Redis integration is available
     const redisStatus = getRedisIntegrationStatus();
-    const queueManager = getQueueManager();
 
-    if (redisStatus?.success && queueManager) {
-      scheduleQueueMaintenanceTasks(queueManager);
+    if (redisStatus?.success) {
+      log.info('Redis available, enhanced maintenance enabled');
     } else {
-      log.warn('Queue manager not available, scheduling basic maintenance only');
-      scheduleBasicMaintenanceTasks(pool);
+      log.warn('Redis not available, scheduling basic maintenance only');
     }
+    
+    scheduleBasicMaintenanceTasks(pool);
 
     log.info('✅ Maintenance tasks scheduled successfully');
   } catch (error: any) {
@@ -35,55 +35,7 @@ export function scheduleMaintenance(pool: Pool): void {
   }
 }
 
-/**
- * Schedule maintenance tasks using the queue manager
- */
-function scheduleQueueMaintenanceTasks(queueManager: any): void {
-  const now = new Date();
-  
-  // Schedule daily cleanup at 2 AM
-  const cleanupTime = new Date(now);
-  cleanupTime.setHours(2, 0, 0, 0);
-  
-  // If it's already past 2 AM today, schedule for tomorrow
-  if (cleanupTime <= now) {
-    cleanupTime.setDate(cleanupTime.getDate() + 1);
-  }
-
-  // Schedule conversation cleanup
-  queueManager.addJob({
-    type: 'CONVERSATION_CLEANUP',
-    payload: { type: 'end_inactive_conversations', inactiveDays: 30 },
-    priority: 'low',
-    scheduledAt: cleanupTime
-  }).catch((error: any) => {
-    log.error('Failed to schedule conversation cleanup:', error);
-  });
-
-  // Schedule old message deletion (30 minutes after conversation cleanup)
-  queueManager.addJob({
-    type: 'CONVERSATION_CLEANUP',
-    payload: { type: 'delete_old_messages', days: 90 },
-    priority: 'low',
-    scheduledAt: new Date(cleanupTime.getTime() + 30 * 60 * 1000)
-  }).catch((error: any) => {
-    log.error('Failed to schedule message cleanup:', error);
-  });
-
-  // Schedule queue cleanup every 6 hours
-  const queueCleanupTime = new Date(now.getTime() + 6 * 60 * 60 * 1000);
-  
-  queueManager.addJob({
-    type: 'SYSTEM_MAINTENANCE',
-    payload: { type: 'cleanup_old_jobs', days: 7 },
-    priority: 'low',
-    scheduledAt: queueCleanupTime
-  }).catch((error: any) => {
-    log.error('Failed to schedule queue cleanup:', error);
-  });
-
-  log.info('Queue-based maintenance tasks scheduled');
-}
+// Queue-based maintenance disabled
 
 /**
  * Schedule basic maintenance tasks without queue manager

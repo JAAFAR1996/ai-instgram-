@@ -38,13 +38,9 @@ import { scheduleMaintenance } from './startup/maintenance.js';
 import { securityHeaders, rateLimiter } from './middleware/security.js';
 import { createIdempotencyMiddleware } from './middleware/idempotency.js';
 import rlsMiddleware from './middleware/rls-merchant-isolation.js';
-import { createInternalAuthMiddleware } from './middleware/internal-auth.js';
-
 // 7) Routes imports
 import { registerWebhookRoutes } from './routes/webhooks.js';
-import { registerAdminRoutes } from './routes/admin.js';
 import { registerUtilityMessageRoutes } from './routes/utility-messages.js';
-import { registerLegalRoutes } from './routes/legal.js';
 
 // 8) Health monitoring
 import { getHealthSnapshot, startHealth } from './services/health-check.js';
@@ -105,8 +101,7 @@ async function bootstrap() {
     const redisStatus = await initializeRedisIntegration(pool);
     log.info('✅ Redis integration initialized', {
       mode: redisStatus.mode,
-      success: redisStatus.success,
-      queueReady: !!redisStatus.queueManager
+      success: redisStatus.success
     });
 
     // إضافة Database Job Processor إذا كان Redis غير متاح
@@ -177,9 +172,6 @@ async function bootstrap() {
       log.info('⚠️ Idempotency middleware disabled - Redis not available');
     }
 
-    // Internal auth middleware for admin endpoints
-    app.use('/internal/*', createInternalAuthMiddleware());
-
     // RLS (Row Level Security) middleware for data isolation
     app.use('*', rlsMiddleware());
 
@@ -187,9 +179,7 @@ async function bootstrap() {
     const deps = { pool };
     
     registerWebhookRoutes(app, deps);
-    registerAdminRoutes(app, deps);
     registerUtilityMessageRoutes(app);
-    registerLegalRoutes(app);
 
     // Prometheus Metrics (مفعّل فقط عند METRICS_ENABLED)
     const metricsEnabled = process.env.METRICS_ENABLED === 'true';
@@ -267,7 +257,7 @@ async function bootstrap() {
     log.info('✅ Health monitoring started');
 
     // Start server
-    const port = Number(process.env.PORT || 3000);
+    const port = Number(process.env.PORT || 10000);
     
     serve({
       fetch: app.fetch,

@@ -1,165 +1,67 @@
 /**
- * ===============================================
- * Redis Startup Module
- * Handles Redis integration and queue initialization
- * ===============================================
+ * Lightweight Redis startup for Render deployment.
+ * Enables idempotency/rate-limit features when REDIS_URL is provided,
+ * without queue/worker dependencies.
  */
 
-import { Pool } from 'pg';
+import type { Pool } from 'pg';
 import { getLogger } from '../services/logger.js';
 import { getRedisConnectionManager } from '../services/RedisConnectionManager.js';
-import { ProductionQueueManager } from '../services/ProductionQueueManager.js';
-import { RedisEnvironment } from '../config/RedisConfigurationFactory.js';
 
 const log = getLogger({ component: 'redis-startup' });
-
-// Global instances (simplified)
-let queueManager: ProductionQueueManager | null = null;
-let initializationResult: RedisIntegrationResult | null = null;
 
 export interface RedisIntegrationResult {
   success: boolean;
   mode: 'active' | 'fallback' | 'disabled';
-  queueManager?: ProductionQueueManager;
   error?: string;
   reason?: string;
 }
 
-/**
- * Initialize Redis integration (simplified version)
- */
+let state: RedisIntegrationResult | null = null;
+
 export async function initializeRedisIntegration(_pool: Pool): Promise<RedisIntegrationResult> {
-  if (initializationResult) {
-    log.info('Redis integration already initialized, returning cached result');
-    return initializationResult;
+  if (state) return state;
+
+  const url = process.env.REDIS_URL || '';
+  const disabled = process.env.DISABLE_REDIS === 'true';
+
+  if (disabled || !url) {
+    state = { success: false, mode: 'disabled', reason: disabled ? 'disabled_by_flag' : 'no_redis_url' };
+    log.warn(disabled ? 'Redis disabled by flag' : 'REDIS_URL not set; Redis features disabled');
+    return state;
   }
 
-  const redisUrl = process.env.REDIS_URL;
-  const disableRedis = process.env.DISABLE_REDIS === 'true';
-  
-  if (!redisUrl || disableRedis) {
-    log.warn(disableRedis ? 'Redis disabled by DISABLE_REDIS flag' : 'REDIS_URL not configured, skipping Redis integration');
-    initializationResult = {
-      success: false,
-      mode: 'disabled',
-      reason: disableRedis ? 'disabled_by_flag' : 'no_redis_url',
-      error: disableRedis ? 'Redis disabled by DISABLE_REDIS environment variable' : 'REDIS_URL environment variable not set'
-    };
-    return initializationResult;
+  if (!url.startsWith('redis://') && !url.startsWith('rediss://')) {
+    state = { success: false, mode: 'disabled', reason: 'invalid_url', error: `Invalid REDIS_URL: ${url}` };
+    log.warn('Invalid REDIS_URL format');
+    return state;
   }
 
-  try {
-    log.info('🔄 Initializing Redis integration...');
-    
-    // التحقق من صحة Redis URL
-    if (!redisUrl.startsWith('redis://') && !redisUrl.startsWith('rediss://')) {
-      throw new Error(`Invalid Redis URL format: ${redisUrl}`);
-    }
-
-    // Skip direct Redis connection test to avoid startup errors
-    // Redis will be tested when actually needed
-    log.info('✅ Redis URL validated, skipping connection test');
-    
-    // Try to initialize queue manager
-    const { getPool } = await import('../db/index.js');
-    const environment = process.env.NODE_ENV === 'production' ? RedisEnvironment.PRODUCTION : RedisEnvironment.DEVELOPMENT;
-    const dbPool = getPool();
-    
-    // Create simple logger adapter for ProductionQueueManager
-    const queueLogger = {
-      info: (message: string, context?: Record<string, unknown>) => {
-        log.info(message, context);
-      },
-      warn: (message: string, context?: Record<string, unknown>) => {
-        log.warn(message, context);
-      },
-      error: (message: string, error?: Error, context?: Record<string, unknown>) => {
-        log.error(message, error, context);
-      },
-      debug: (message: string, context?: Record<string, unknown>) => {
-        log.debug?.(message, context);
-      }
-    };
-    
-    queueManager = new ProductionQueueManager(queueLogger, environment, dbPool);
-    const queueResult = await queueManager.initialize();
-    
-    if (queueResult.success) {
-      log.info('✅ Redis integration initialized successfully');
-      initializationResult = {
-        success: true,
-        mode: 'active',
-        queueManager: queueManager
-      };
-    } else {
-      log.warn('⚠️ Redis queue initialization failed, using fallback mode');
-      initializationResult = {
-        success: false,
-        mode: 'fallback',
-        error: queueResult.error || 'Queue initialization failed',
-        reason: 'queue_init_failed'
-      };
-    }
-
-    return initializationResult!;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    log.warn('⚠️ Redis integration initialization failed, continuing without Redis', { error: errorMessage });
-    
-    const errorResult: RedisIntegrationResult = {
-      success: false,
-      mode: 'disabled',
-      error: errorMessage,
-      reason: 'initialization_error'
-    };
-    
-    initializationResult = errorResult;
-    return errorResult;
-  }
+  // Consider Redis available for higher-level features; connection is on-demand
+  log.info('Redis integration enabled (lightweight)');
+  state = { success: true, mode: 'active' };
+  return state;
 }
 
-/**
- * Get the Redis connection manager (simplified)
- */
+export function getRedisIntegrationStatus(): RedisIntegrationResult | null {
+  return state;
+}
+
+export function isRedisHealthy(): boolean {
+  return state?.success === true && state.mode === 'active';
+}
+
 export function getRedisManager() {
   return getRedisConnectionManager();
 }
 
-/**
- * Get the current initialization result
- */
-export function getRedisIntegrationStatus(): RedisIntegrationResult | null {
-  return initializationResult;
-}
-
-/**
- * Check if Redis integration is healthy
- */
-export function isRedisHealthy(): boolean {
-  return initializationResult?.success === true && initializationResult.mode === 'active';
-}
-
-/**
- * Get queue manager if available (simplified)
- */
-export function getQueueManager() {
-  return queueManager;
-}
-
-/**
- * Cleanup Redis connections gracefully (simplified)
- */
 export async function closeRedisConnections(): Promise<void> {
   try {
-    if (queueManager) {
-      await queueManager.gracefulShutdown();
-    }
-    
-    const connectionManager = getRedisConnectionManager();
-    await connectionManager.closeAllConnections();
-    
+    const mgr = getRedisConnectionManager();
+    await mgr.closeAllConnections();
     log.info('Redis connections closed');
-  } catch (error: any) {
-    log.error('Error closing Redis connections:', error);
+  } catch (err) {
+    log.error('Error closing Redis connections:', err as Error);
   }
 }
+

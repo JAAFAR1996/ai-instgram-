@@ -5,8 +5,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM node:20-alpine
-USER node
+FROM node:20-alpine AS production
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/package*.json ./
@@ -14,5 +13,7 @@ RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/src/database/migrations ./src/database/migrations
 COPY legal ./legal
+RUN chown -R node:node /app
+USER node
 EXPOSE 10000
 CMD ["node", "--enable-source-maps", "dist/production-index.js"]

@@ -25,11 +25,13 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
-      - key: ENCRYPTION_KEY
+      - key: ENCRYPTION_KEY_HEX
         sync: false
       - key: JWT_SECRET
         sync: false
       - key: REDIS_URL
+        sync: false
+      - key: META_APP_ID
         sync: false
       - key: BASE_URL
         value: https://ai-instgram.onrender.com
