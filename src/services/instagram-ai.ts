@@ -126,7 +126,7 @@ export class InstagramAIService {
         return {
           aiModel: config?.model || 'gpt-4o-mini',
           maxTokens: config?.maxTokens || 600,
-          temperature: config?.temperature || 0.8,
+          temperature: (config?.temperature ?? 0.2),
           language: config?.language || 'ar'
         };
       }
@@ -138,8 +138,8 @@ export class InstagramAIService {
 
       return {
         aiModel: getEnv('OPENAI_MODEL') || 'gpt-4o-mini',
-        maxTokens,
-        temperature: 0.8,
+        maxTokens: Math.min(maxTokens, 180),
+        temperature: 0.2,
         language: 'ar'
       };
     } catch (error) {

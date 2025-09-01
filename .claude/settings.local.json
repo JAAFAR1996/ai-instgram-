@@ -20,7 +20,8 @@
       "WebSearch",
       "Bash(psql:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

@@ -140,15 +140,17 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           
           // Find or create conversation
           let conversationId: string;
+          let messageCount = 0;
           try {
             const existingConversations = await pool.query(`
-              SELECT id FROM conversations 
+              SELECT id, message_count FROM conversations 
               WHERE merchant_id = $1 AND customer_instagram = $2
               ORDER BY created_at DESC LIMIT 1
             `, [sanitizedMerchantId, sanitizedUsername]);
             
             if (existingConversations.rows.length > 0) {
               conversationId = existingConversations.rows[0].id;
+              messageCount = existingConversations.rows[0].message_count || 0;
             } else {
               const newConversation = await pool.query(`
                 INSERT INTO conversations (
@@ -159,6 +161,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
               `, [sanitizedMerchantId, sanitizedUsername]);
               
               conversationId = newConversation.rows[0].id;
+              messageCount = 0;
               log.info('✅ Created conversation for ManyChat', { conversationId, username: sanitizedUsername });
             }
           } catch (dbError) {
@@ -187,7 +190,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 merchantId: sanitizedMerchantId,
                 customerId: sanitizedUsername,
                 platform: 'instagram',
-                stage: 'GREETING',
+                stage: messageCount > 0 ? 'BROWSING' : 'GREETING',
                 cart: [],
                 preferences: {},
                 conversationHistory: []

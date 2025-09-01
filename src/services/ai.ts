@@ -267,11 +267,11 @@ export class AIService {
         () => this.openai.chat.completions.create({
           model: this.config.ai.model,
           messages: prompt,
-          temperature: this.config.ai.temperature,
-          max_tokens: this.config.ai.maxTokens,
+          temperature: Math.min(this.config.ai.temperature ?? 0.2, 0.4),
+          max_tokens: Math.min(this.config.ai.maxTokens ?? 180, 220),
           top_p: 0.9,
-          frequency_penalty: 0.1,
-          presence_penalty: 0.1,
+          presence_penalty: 0,
+          frequency_penalty: 0,
           // response_format: { type: 'json_object' },
         }),
         'openai.chat.completions'
@@ -453,46 +453,15 @@ export class AIService {
     customerMessage: string,
     context: ConversationContext
   ): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam[]> {
-    const systemPrompt = `أنت خبير مبيعات ماهر لمتجر موضة عراقي على انستغرام. تمتلك خبرة عميقة في:
-
-سياق العمل:
-- اسم المتجر: ${context.merchantSettings?.businessName || 'بوتيك الموضة'}
-- نوع المنتجات: ${context.merchantSettings?.businessCategory || 'ملابس وأزياء'}
-- المنتجات المتوفرة: ${await this.getProductsSummary(context.merchantId)}
-
-ملف العميل:
-- مرحلة المحادثة: ${context.stage}
-- عدد الطلبات السابقة: ${context.customerProfile?.previousOrders || 0}
-- متوسط قيمة الطلب: ${context.customerProfile?.averageOrderValue || 0}$
-
-خبراتك الأساسية:
-- خبرة الموضة: تعرف الترندات، التنسيق، جودة الأقمشة، المقاسات، تناسق الألوان
-- معرفة السوق العراقي: تفهم الأذواق المحلية، حساسية الأسعار، الاعتبارات الثقافية
-- علم نفس المبيعات: تقرأ نية العميل، تحدد نقاط الألم، تخلق الإلحاح بطريقة مناسبة
-- مطابقة المنتجات: تقترح قطع بناءً على احتياجات وأسلوب العميل المعبر عنه
-
-أسلوب التواصل:
-- استخدم اللهجة العراقية الطبيعية (تجنب الفصحى الرسمية)
-- تكيف مع شخصية العميل وطاقته وأسلوب تواصله
-- كن مساعد حقيقي، مش مضغوط
-- أظهر خبرتك من خلال معرفة المنتجات ذات الصلة
-- استخدم الإيموجي بشكل طبيعي عندما تحسن المحادثة
-
-النهج الاستراتيجي:
-- إذا سأل عن قطع معينة: اسأل عن التفاصيل (المقاس، الألوان المفضلة، الميزانية، المناسبة)
-- عند مناقشة الأسعار: قدم أسعار تنافسية بناءً على فئة القطعة والجودة
-- إذا لم تكن متأكد من التوفر: وعد بالتحقق والرد بسرعة
-- لأسئلة المقاسات: ساعد العميل ليجد المقاس المثالي
-- للنصائح الأسلوبية: قدم توصيات موضة حقيقية بناءً على تفضيلاته
-
-متطلبات الاستجابة:
-- اجب فقط باللهجة العراقية
-- اجعل كل رد فريد ومناسب للسياق
-- لا تستخدم قوالب أو عبارات مكررة
-- اعدل طول ردك حسب تعقيد سؤال العميل
-- ركز على كونك مفيد وبناء الثقة، مو بس تبيع
-
-سياق المحادثة الحالي: العميل قال للتو "${customerMessage}"`;
+    const systemPrompt = `أنت مساعد مبيعات لمتجر أزياء على إنستغرام.
+قواعد صارمة:
+- اللغة: عربية بسيطة بلهجة عراقية.
+- لا تحية عامة إلا في أول رسالة بالمحادثة فقط.
+- رد قصير جدًا (سطر واحد أو سطران كحد أقصى).
+- لا تكرر جملًا ولا تطيل.
+- لا تختلق أسعار/منتجات؛ عند النقص قل: "أحتاج أتأكد".
+- إيموجي واحد كحد أقصى.
+- أنهِ الرد دائمًا بسؤال متابعة واحد محدد يملأ أقرب خانة ناقصة (الفئة، المقاس، اللون، النوع).`;
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt }
@@ -509,7 +478,7 @@ export class AIService {
       });
     }
 
-    // Add current customer message with enhanced context
+    // Add current customer message with context
     messages.push({
       role: 'user',
       content: customerMessage
@@ -601,25 +570,6 @@ ${productsText}
   /**
    * Private: Get merchant products summary with caching
    */
-  private async getProductsSummary(merchantId: string): Promise<string> {
-    try {
-      const products = await this.db.query(`
-        SELECT category, COUNT(*)::int as count, AVG(price_usd)::float as avg_price
-        FROM products 
-        WHERE merchant_id = $1::uuid 
-        AND status = $2
-        GROUP BY category
-        LIMIT 5
-      `, [merchantId, 'ACTIVE']);
-
-      return (products as ProductSummary[]).map((p) =>
-        `${p.category}: ${p.count} منتج (متوسط السعر: ${Math.round(p.avg_price)})`
-      ).join(', ');
-    } catch (error: unknown) {
-      this.logger.error('Failed to get products summary', { merchantId, error });
-      return 'منتجات متنوعة';
-    }
-  }
 
   /**
    * Private: Get merchant products with caching
