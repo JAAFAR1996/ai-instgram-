@@ -86,11 +86,11 @@ async function main() {
       '042_create_audit_logs.sql',
       '061_create_quality_metrics.sql',
       '062_enable_rls_minimal.sql',
-      '063_message_windows_active_index.sql',
+      '063_message_windows_active_index.sql', '065_normalize_platform_case.sql', '066_fix_manychat_unique_conflict.sql', '067_add_instagram_business_account_id_to_credentials.sql', '068_create_merchant_service_status.sql',
       '053_manychat_integration.sql',
       '054_production_fixes.sql',
       '056_manychat_username_and_message_windows.sql',
-      '059_add_ai_config_to_merchants.sql',
+      '059_add_ai_config_to_merchants.sql', '064_create_job_spool.sql',
     ]);
     files = files.filter(f => essential.has(f));
 
@@ -241,6 +241,10 @@ main().catch(err => {
   console.error('Fatal error:', err?.message || String(err));
   process.exit(1);
 });
+
+
+
+
 
 
 

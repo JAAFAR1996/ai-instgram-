@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { createHmac } from 'node:crypto';
 import { getPool } from '../db/index.js';
 import { getEnv } from '../config/env.js';
+import { orchestrate } from '../services/smart-orchestrator.js';
 
 const log = getLogger({ component: 'webhooks-routes' });
 
@@ -81,7 +82,11 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       // 🔒 PRODUCTION: Bearer token authentication
       const authHeader = c.req.header('authorization');
       const expectedBearer = (getEnv('MANYCHAT_BEARER') || '').trim();
-      if (expectedBearer && !authHeader?.startsWith(`Bearer ${expectedBearer}`)) {
+      if (!expectedBearer) {
+        log.error('❌ MANYCHAT_BEARER not configured');
+        return c.json({ error: 'auth_not_configured' }, 401);
+      }
+      if (!authHeader?.startsWith(`Bearer ${expectedBearer}`)) {
         log.warn('❌ ManyChat webhook unauthorized', { hasAuth: !!authHeader });
         return c.json({ error: 'unauthorized' }, 401);
       }
@@ -117,6 +122,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       const finalMerchantId = (merchant_id || '').trim();
       
       const incomingUsername = (merchant_username ?? instagram_username) as string | undefined;
+      const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       if (!incomingUsername || !finalMerchantId) {
         return c.json({ 
           ok: false, 
@@ -126,6 +132,9 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
 
       const sanitizedUsername = String(incomingUsername).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
       const sanitizedMerchantId = String(finalMerchantId).trim();
+      if (!UUID_REGEX.test(sanitizedMerchantId)) {
+        return c.json({ ok: false, error: 'context_error' }, 503);
+      }
       
       if (!sanitizedUsername || sanitizedUsername.length < 2) {
         return c.json({ 
@@ -171,28 +180,32 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           
           // Find or create conversation
           let conversationId: string;
-          let messageCount = 0;
+          let sessionData: any = {};
           try {
             const existingConversations = await pool.query(`
-              SELECT id, message_count FROM conversations 
+              SELECT id, message_count, session_data FROM conversations 
               WHERE merchant_id = $1 AND customer_instagram = $2
               ORDER BY created_at DESC LIMIT 1
             `, [sanitizedMerchantId, sanitizedUsername]);
             
             if (existingConversations.rows.length > 0) {
               conversationId = existingConversations.rows[0].id;
-              messageCount = existingConversations.rows[0].message_count || 0;
+              // messageCount intentionally unused for orchestrator path
+              try {
+                sessionData = existingConversations.rows[0].session_data || {};
+                if (typeof sessionData === 'string') sessionData = JSON.parse(sessionData);
+              } catch {}
             } else {
               const newConversation = await pool.query(`
                 INSERT INTO conversations (
-                  merchant_id, customer_instagram, platform, conversation_stage, 
-                  session_data, message_count, created_at, updated_at
-                ) VALUES ($1, $2, 'instagram', 'GREETING', '{}', 0, NOW(), NOW())
+                  merchant_id, customer_instagram, platform, source_channel,
+                  conversation_stage, session_data, message_count, created_at, updated_at
+                ) VALUES ($1, $2, 'INSTAGRAM', 'manychat', 'GREETING', '{}', 0, NOW(), NOW())
                 RETURNING id
               `, [sanitizedMerchantId, sanitizedUsername]);
               
               conversationId = newConversation.rows[0].id;
-              messageCount = 0;
+              sessionData = {};
               log.info('✅ Created conversation for ManyChat', { conversationId, username: sanitizedUsername });
             }
           } catch (dbError) {
@@ -204,9 +217,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             });
           }
 
-          // Load last 20 messages as conversation history (oldest -> newest)
+          // Load last 100 messages as conversation history (oldest -> newest)
           let historyIds: string[] = [];
-          let conversationHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: Date }> = [];
           try {
             const historyResult = await pool.query(
               `SELECT id, content, direction, created_at
@@ -217,49 +229,48 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
               [conversationId]
             );
             historyIds = historyResult.rows.map((r: any) => r.id);
-            conversationHistory = historyResult.rows
-              .map((r: any) => ({
-                role: (r.direction === 'OUTGOING' ? 'assistant' : 'user') as 'user' | 'assistant',
-                content: r.content || '',
-                timestamp: r.created_at as Date,
-              }))
-              .reverse();
+            // conversationHistory not required for orchestrator path
           } catch (histErr) {
             log.warn('Failed to load conversation history, proceeding without it', { error: String(histErr) });
           }
 
           // Store incoming message
           await pool.query(`
-            INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, created_at)
-            VALUES ($1, $2, 'TEXT', 'INCOMING', 'instagram', NOW())
+            INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, created_at)
+            VALUES ($1, $2, 'TEXT', 'INCOMING', 'INSTAGRAM', 'manychat', NOW())
           `, [conversationId, messageText]);
 
           // 🤖 PRODUCTION: Generate AI response
           let aiResponse: string;
+          let aiIntent: string | undefined;
+          let aiConfidence: number | undefined;
+          let decisionPath: string[] = [];
+          let kbSource: { id: string; title: string } | undefined;
+          let sessionPatch: Record<string, unknown> | undefined;
+          let stage: 'AWARE' | 'BROWSE' | 'INTENT' | 'OBJECTION' | 'CLOSE' | undefined;
           try {
-            const { getAIService } = await import('../services/ai.js');
-            const aiService = await getAIService();
-            
-            const aiResult = await Promise.race([
-              aiService.generateResponse(messageText, {
-                merchantId: sanitizedMerchantId,
-                customerId: sanitizedUsername,
-                platform: 'instagram',
-                stage: messageCount > 0 ? 'BROWSING' : 'GREETING',
-                cart: [],
-                preferences: {},
-                conversationHistory,
-              }),
-              new Promise<never>((_, reject) => 
-                setTimeout(() => reject(new Error('AI timeout')), 8000)
-              )
+            const orchResult = await Promise.race([
+              orchestrate(sanitizedMerchantId, sanitizedUsername, messageText, { askAtMostOneFollowup: true, session: sessionData }),
+              new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 8000))
             ]);
-            
-            aiResponse = aiResult?.message;
+
+            aiResponse = orchResult.text;
+            aiIntent = orchResult.intent;
+            aiConfidence = orchResult.confidence;
+            decisionPath = orchResult.decision_path;
+            kbSource = orchResult.kb_source;
+            sessionPatch = orchResult.session_patch || undefined;
+            stage = orchResult.stage;
+
+            try {
+              if (decisionPath.some(d => String(d).startsWith('clarify='))) {
+                telemetry.trackEvent('followup_question', { platform: 'instagram', merchant_id: sanitizedMerchantId });
+              }
+            } catch {}
             
             // Validate AI response
             if (!aiResponse || aiResponse.trim().length === 0) {
-              log.warn('Empty AI response received', { aiResult });
+              log.warn('Empty AI response received', { orchResult });
               return c.json({
                 version: "v2",
                 messages: [{ type: "text", text: "تعذر توليد رد مناسب. جرّب رسالة أخرى." }],
@@ -279,10 +290,60 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           }
 
           // Store AI response
+          // Compute vault_hit based on existing session data presence
+          const vaultHit = Boolean((sessionData && (sessionData.category || sessionData.size || sessionData.color || sessionData.gender || sessionData.brand)));
+
           await pool.query(`
-            INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, created_at)
-            VALUES ($1, $2, 'TEXT', 'OUTGOING', 'instagram', NOW())
-          `, [conversationId, aiResponse]);
+            INSERT INTO message_logs (
+              conversation_id, content, message_type, direction, platform, source_channel,
+              ai_intent, ai_confidence, processing_time_ms, metadata, created_at
+            )
+            VALUES ($1, $2, 'TEXT', 'OUTGOING', 'INSTAGRAM', 'manychat', $3, $4, $5, $6, NOW())
+          `, [
+            conversationId,
+            aiResponse,
+            aiIntent ?? null,
+            typeof aiConfidence === 'number' ? aiConfidence : null,
+            Date.now() - processingStartTime,
+            JSON.stringify({ 
+              decision_path: decisionPath, 
+              kb_source: kbSource || null,
+              stage: stage || null,
+              sql_hit: decisionPath.includes('sql=hit'),
+              rag_used: decisionPath.includes('rag=hit'),
+              vault_hit: vaultHit
+            })
+          ]);
+
+          // Update session_data incrementally with sessionPatch (if provided)
+          try {
+            if (sessionPatch && Object.keys(sessionPatch).length > 0) {
+              await pool.query(
+                `UPDATE conversations SET session_data = COALESCE(session_data, '{}'::jsonb) || $1::jsonb, updated_at = NOW() WHERE id = $2`,
+                [JSON.stringify(sessionPatch), conversationId]
+              );
+            }
+          } catch (sessErr) {
+            log.warn('Failed to update session_data', { error: String(sessErr) });
+          }
+
+          // Update Customer Vault (per-merchant per-customer context)
+          try {
+            if (sessionPatch && Object.keys(sessionPatch).length > 0) {
+              const { upsertVault } = await import('../repos/customer-vault.ts');
+              const vaultPatch: Record<string, unknown> = {
+                ...(sessionPatch?.gender ? { gender: (sessionPatch as any).gender } : {}),
+                ...(sessionPatch?.size ? { size: (sessionPatch as any).size } : {}),
+                ...(sessionPatch?.color ? { color: (sessionPatch as any).color } : {}),
+                ...(sessionPatch?.category ? { category: (sessionPatch as any).category } : {}),
+                ...(typeof aiConfidence === 'number' ? { confidence: aiConfidence } : {}),
+                ...(stage ? { stage } : {})
+              };
+              await upsertVault(sanitizedMerchantId, sanitizedUsername, vaultPatch as any, conversationId, 30);
+            }
+          } catch (vaultErr) {
+            log.warn('Failed to update customer vault', { error: String(vaultErr) });
+          }
 
           // Update conversation stats
           await pool.query(`
@@ -294,7 +355,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           // Delete the consumed history messages (keep DB light as requested)
           try {
             if (historyIds.length > 0) {
-              await pool.query('DELETE FROM message_logs WHERE id = ANY($1::uuid[])', [historyIds]);
+              await pool.query('DELETE FROM message_logs WHERE conversation_id =  AND id IN (SELECT id FROM message_logs WHERE conversation_id =  ORDER BY created_at DESC OFFSET 100)', [historyIds]);
             }
           } catch (delErr) {
             log.warn('Failed to delete consumed history messages', { error: String(delErr), count: historyIds.length });
@@ -321,7 +382,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           // 📊 Record telemetry
           telemetry.recordMetaRequest('instagram', 'manychat_processed', 200, processingTime);
 
-          // 🎯 PRODUCTION: Return ManyChat-compatible response
+          // 🎯 PRODUCTION: Return ManyChat-compatible response (JSON v2 content only)
           return c.json({
             version: "v2",
             messages: [{ type: "text", text: aiResponse ?? "تعذر توليد رد." }],

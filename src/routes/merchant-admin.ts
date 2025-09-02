@@ -12,6 +12,7 @@ import { getLogger } from '../services/logger.js';
 import { getDatabase } from '../db/adapter.js';
 import { getCache } from '../cache/index.js';
 import { requireMerchantId } from '../middleware/rls-merchant-isolation.js';
+import { ingestText } from '../kb/ingest.js';
 
 const log = getLogger({ component: 'merchant-admin-routes' });
 
@@ -26,7 +27,16 @@ const AIConfigSchema = z.object({
   model: z.string().min(2).max(120).optional(),
   temperature: z.number().min(0).max(1).optional(),
   maxTokens: z.number().int().min(50).max(1000).optional(),
-  language: z.string().min(2).max(10).optional()
+  language: z.string().min(2).max(10).optional(),
+  // Merchant-driven NLP/Entity hints to avoid hardcoding
+  synonyms: z.record(z.array(z.string().min(1))).optional(),
+  categories: z.array(z.string().min(1)).optional(),
+  brands: z.array(z.string().min(1)).optional(),
+  colors: z.array(z.string().min(1)).optional(),
+  genders: z.array(z.string().min(1)).optional(),
+  sizeAliases: z.record(z.array(z.string().min(1))).optional(),
+  // Per-merchant custom entities (e.g., سيارات: موديل/سنة/وقود)
+  customEntities: z.record(z.array(z.string().min(1))).optional(),
 }).strict();
 
 const CurrencySchema = z.object({
@@ -150,7 +160,47 @@ export function registerMerchantAdminRoutes(app: Hono) {
       return c.json({ ok: false, error: 'internal_error' }, 500);
     }
   });
+
+  // ===============================================
+  // Knowledge Base Ingest (Text)
+  // ===============================================
+  const KBIngestSchema = z.object({
+    title: z.string().min(1).max(200),
+    text: z.string().min(1).max(200_000), // 200k chars safety limit
+    chunkTokens: z.number().int().min(300).max(1200).optional(),
+    overlapTokens: z.number().int().min(0).max(300).optional(),
+    tags: z.record(z.union([z.string(), z.boolean()])).optional()
+  });
+
+  app.post('/api/kb/ingest-text', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      const body = await c.req.json();
+      const parsed = KBIngestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json({ ok: false, error: 'validation_error', details: parsed.error.issues }, 400);
+      }
+
+      // Ensure RLS context is set for this request (defensive)
+      try {
+        await sql`SELECT set_merchant_context(${merchantId}::uuid)`;
+      } catch (ctxErr) {
+        log.warn('Failed to set merchant context for kb ingest', { error: String(ctxErr) });
+      }
+
+      const { title, text, chunkTokens, overlapTokens, tags } = parsed.data;
+      const result = await ingestText(merchantId, title, text, {
+        chunkTokens,
+        overlapTokens,
+        tags
+      });
+
+      return c.json({ ok: true, inserted: result.inserted });
+    } catch (error) {
+      log.error('KB ingest API failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
 }
 
 export default registerMerchantAdminRoutes;
-

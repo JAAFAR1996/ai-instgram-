@@ -142,12 +142,17 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
         port: parseInt(url.port) || 6379,
         ...(url.password && { password: url.password }),
         keyPrefix: this.getKeyPrefix(environment),
-        ...(isSecure && {
-          tls: {
-            rejectUnauthorized: false,
-            servername: url.hostname
-          }
-        })
+        ...(isSecure && (() => {
+          const strict = process.env.REDIS_SSL_STRICT === 'true';
+          const ca = process.env.REDIS_CA;
+          return {
+            tls: {
+              rejectUnauthorized: strict ? true : false,
+              ...(ca ? { ca } : {}),
+              servername: url.hostname
+            }
+          };
+        })())
       };
     } catch (error) {
       // في حالة URL غير صحيح، استخدم الإعدادات الافتراضية

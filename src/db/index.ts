@@ -41,16 +41,18 @@ function createPoolConfig(): PoolConfig {
   const isProduction = process.env.NODE_ENV === 'production';
   const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
   
-  // ULTRA-SIMPLIFIED SSL configuration for Render Postgres
+  // TLS configuration (strict when CA provided)
   let sslConfig: any = false;
-  if (config.database.ssl || isProduction || isRender) {
-    // Render PostgreSQL requires SSL but with minimal config
-    sslConfig = {
-      rejectUnauthorized: false,
-      // Remove all other SSL options to avoid Node.js internal assertions
+  const strict = process.env.DB_SSL_STRICT === 'true' || config.database.ssl === true || isProduction || isRender;
+  const ca = process.env.DB_SSL_CA;
+  if (strict) {
+    sslConfig = ca ? {
+      rejectUnauthorized: true,
+      ca
+    } : {
+      rejectUnauthorized: true
     };
-    
-    log.info('🔐 Using ultra-simplified SSL for Render PostgreSQL');
+    log.info('🔐 Using strict SSL for PostgreSQL', { strict, hasCA: !!ca });
   }
   
   // SIMPLIFIED pool configuration to avoid Node.js internal assertions
