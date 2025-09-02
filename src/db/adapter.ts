@@ -546,12 +546,11 @@ export class DatabaseAdapter implements IDatabase {
         }
       }
       
-      // Force pool recreation by importing and resetting
+      // Force pool recreation using exported reset API
       const dbModule = await import('./index.js');
-      
-      // Reset the global pool to force recreation
-      (dbModule as any).pool = null;
-      
+      if (typeof (dbModule as any).resetPool === 'function') {
+        (dbModule as any).resetPool();
+      }
       // Create new pool
       this.pool = dbModule.getPool();
       

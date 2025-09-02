@@ -41,18 +41,24 @@ function createPoolConfig(): PoolConfig {
   const isProduction = process.env.NODE_ENV === 'production';
   const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
   
-  // TLS configuration (strict when CA provided)
+  // TLS configuration
   let sslConfig: any = false;
-  const strict = process.env.DB_SSL_STRICT === 'true' || config.database.ssl === true || isProduction || isRender;
+  const dbUrl = config.database.url;
   const ca = process.env.DB_SSL_CA;
-  if (strict) {
-    sslConfig = ca ? {
-      rejectUnauthorized: true,
-      ca
-    } : {
-      rejectUnauthorized: true
-    };
-    log.info('🔐 Using strict SSL for PostgreSQL', { strict, hasCA: !!ca });
+  const sslModeRequire = (() => {
+    try { const u = new URL(dbUrl); return (u.searchParams.get('sslmode') || '').toLowerCase() === 'require'; } catch { return false; }
+  })();
+  const overrideRejectUnauth = process.env.DB_SSL_REJECT_UNAUTHORIZED === 'false' || sslModeRequire;
+  const strictEnv = process.env.DB_SSL_STRICT;
+  const defaultStrict = config.database.ssl === true || isProduction || isRender;
+  const strict = typeof strictEnv === 'string' ? (strictEnv === 'true') : defaultStrict;
+
+  if (overrideRejectUnauth) {
+    sslConfig = ca ? { rejectUnauthorized: false, ca } : { rejectUnauthorized: false };
+    log.warn('🔐 Using SSL with rejectUnauthorized=false for PostgreSQL', { reason: sslModeRequire ? 'sslmode=require' : 'env_override', hasCA: !!ca });
+  } else if (strict) {
+    sslConfig = ca ? { rejectUnauthorized: true, ca } : { rejectUnauthorized: true };
+    log.info('🔐 Using strict SSL for PostgreSQL', { strict: true, hasCA: !!ca });
   }
   
   // SIMPLIFIED pool configuration to avoid Node.js internal assertions
@@ -144,6 +150,19 @@ export function getPool(): Pool {
   }
 
   return pool;
+}
+
+/**
+ * Reset the global pool (for recovery scenarios)
+ */
+export function resetPool(): void {
+  try {
+    if (pool && !pool.ended) {
+      pool.end().catch(() => {});
+    }
+  } finally {
+    pool = null;
+  }
 }
 
 /**
