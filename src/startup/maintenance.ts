@@ -91,6 +91,25 @@ function scheduleBasicMaintenanceTasks(pool: Pool): void {
   }
 
   log.info('Basic maintenance timer scheduled (24h interval)');
+
+  // Schedule vault cleanup every 10 minutes
+  const vaultCleanupMs = 10 * 60 * 1000;
+  const vaultTimer = setInterval(async () => {
+    try {
+      const client = await pool.connect();
+      try {
+        const r = await client.query('SELECT public.cleanup_customer_vaults() as deleted');
+        const deleted = r.rows?.[0]?.deleted ?? 0;
+        log.info('🧹 Vaults cleanup executed', { deleted });
+      } finally {
+        client.release();
+      }
+    } catch (e) {
+      log.warn('Vaults cleanup failed', { error: String(e) });
+    }
+  }, vaultCleanupMs);
+  if (typeof vaultTimer?.unref === 'function') vaultTimer.unref();
+  log.info('Customer vaults cleanup timer scheduled (10m interval)');
 }
 
 /**

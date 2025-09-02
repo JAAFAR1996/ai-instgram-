@@ -174,4 +174,23 @@ export const telemetry = {
       diag.debug('telemetry.trackEvent failed', e as Error);
     }
   },
+
+  // KPI counters for AI outcomes
+  kpi: {
+    priceHit() {
+      try { counter('kpi_price_hit_total','Price hits from DB').add(1); } catch {}
+    },
+    priceMiss() {
+      try { counter('kpi_price_miss_total','Price misses suggest alternatives').add(1); } catch {}
+    },
+    followupAsked() {
+      try { counter('kpi_followup_total','Follow-up questions asked').add(1); } catch {}
+    },
+    managerHandoff() {
+      try { counter('kpi_manager_handoff_total','Manager handoffs due to missing price').add(1); } catch {}
+    },
+    altSuggested() {
+      try { counter('kpi_alt_suggest_total','Alternative suggestions made').add(1); } catch {}
+    }
+  },
 };

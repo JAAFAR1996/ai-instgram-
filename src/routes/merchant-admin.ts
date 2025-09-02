@@ -13,6 +13,8 @@ import { getDatabase } from '../db/adapter.js';
 import { getCache } from '../cache/index.js';
 import { requireMerchantId } from '../middleware/rls-merchant-isolation.js';
 import { ingestText } from '../kb/ingest.js';
+import MerchantCatalogService from '../services/catalog/merchant-catalog.service.js';
+import ConversationAnalytics from '../services/analytics/conversation-analytics.js';
 
 const log = getLogger({ component: 'merchant-admin-routes' });
 
@@ -198,6 +200,38 @@ export function registerMerchantAdminRoutes(app: Hono) {
       return c.json({ ok: true, inserted: result.inserted });
     } catch (error) {
       log.error('KB ingest API failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  // ===============================================
+  // Merchant Catalog Analysis
+  // ===============================================
+  app.get('/api/merchant/catalog', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      const svc = new MerchantCatalogService();
+      const profile = await svc.analyzeMerchantInventory(merchantId);
+      return c.json({ ok: true, catalog: profile });
+    } catch (error) {
+      log.error('Get merchant catalog failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  // ===============================================
+  // Merchant Analytics Dashboard (summary)
+  // ===============================================
+  app.get('/api/analytics/dashboard', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      const daysParam = c.req.query('days');
+      const days = daysParam ? Math.max(1, Math.min(90, parseInt(daysParam))) : 30;
+      const analytics = new ConversationAnalytics();
+      const dashboard = await analytics.generateMerchantDashboard(merchantId, { days });
+      return c.json({ ok: true, dashboard });
+    } catch (error) {
+      log.error('Get analytics dashboard failed', { error: String(error) });
       return c.json({ ok: false, error: 'internal_error' }, 500);
     }
   });

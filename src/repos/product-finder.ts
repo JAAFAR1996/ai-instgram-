@@ -85,6 +85,12 @@ export async function findProduct(
     if (entities.brand) w += 2;
     if ((entities.free?.length || 0) > 0) w += Math.min(entities.free!.length, 3);
     if (p.stock_quantity > 0) w += 1;
+    // Boost using custom entities (e.g., موديل/سنة)
+    if (entities.custom) {
+      // Each matched custom attribute adds +1 (cap at +3)
+      const customHits = Object.values(entities.custom).filter(Boolean).length;
+      w += Math.min(customHits, 3);
+    }
     return { p, w };
   }).sort((a, b) => b.w - a.w).map(x => x.p);
 
@@ -97,4 +103,3 @@ export async function findProduct(
 function icontains(a?: string | null, b?: string | null): boolean {
   return (a || '').toLowerCase().includes((b || '').toLowerCase());
 }
-

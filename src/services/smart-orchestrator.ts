@@ -1,6 +1,8 @@
 import { classifyAndExtract, type IntentResult } from '../nlp/intent.js';
 import { kbSearch } from '../kb/search.js';
 import { findProduct } from '../repos/product-finder.js';
+import MerchantCatalogService from './catalog/merchant-catalog.service.js';
+import ProductRecommendationEngine from './recommendation/product-recommendation.engine.js';
 import { getDatabase } from '../db/adapter.js';
 
 export interface OrchestratorOptions {
@@ -29,10 +31,10 @@ export async function orchestrate(
   const sql = db.getSQL();
 
   // Load merchant hints (ai_config)
-  const rows = await sql<{ ai_config: any; business_name: string; business_category: string | null; merchant_type: string | null; currency: string | null }>`
-    SELECT ai_config, business_name, business_category, merchant_type::text as merchant_type, currency FROM merchants WHERE id = ${merchantId}::uuid LIMIT 1
+  const rows = await sql<{ ai_config: any; business_name: string; business_category: string | null; merchant_type: string | null; currency: string | null; settings: any }>`
+    SELECT ai_config, business_name, business_category, merchant_type::text as merchant_type, currency, settings FROM merchants WHERE id = ${merchantId}::uuid LIMIT 1
   `;
-  const merchant = rows[0] || { ai_config: {}, business_name: 'متجرنا', business_category: null, merchant_type: 'other', currency: 'IQD' } as any;
+  const merchant = rows[0] || { ai_config: {}, business_name: 'متجرنا', business_category: null, merchant_type: 'other', currency: 'IQD', settings: {} } as any;
   const aiCfg = merchant.ai_config || {};
 
   const hints = {
@@ -168,6 +170,13 @@ export async function orchestrate(
     if (alts.length) {
       const formatted = alts.map(a => `${a.name_ar.split(' ').slice(0,3).join(' ')} ${Math.round(Number(a.final_price_iqd ?? a.base_price_iqd || 0)).toLocaleString('ar-IQ')} د.ع`).slice(0,3);
       if (formatted.length) text = `ماكو نفس المواصفات، الأقرب: ${formatted.join('، ')}. أي واحد يعجبك؟`;
+    } else {
+      try {
+        const catalog = await new MerchantCatalogService().analyzeMerchantInventory(merchantId);
+        const recs = await new ProductRecommendationEngine().generateRecommendations(messageText, [], catalog);
+        const names = recs.map(r => r.product.name_ar).slice(0,3);
+        if (names.length) text = `ماكو نفس المواصفات، الأقرب: ${names.join('، ')}. أي واحد يعجبك؟`;
+      } catch {}
     }
     return {
       text,

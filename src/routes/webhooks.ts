@@ -262,10 +262,41 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             sessionPatch = orchResult.session_patch || undefined;
             stage = orchResult.stage;
 
+            // If objection intent -> generate smarter counter response and record
+            if (aiIntent === 'OBJECTION') {
+              try {
+                const { IntelligentRejectionHandler } = await import('../services/rejection/intelligent-rejection-handler.js');
+                const handler = new IntelligentRejectionHandler();
+                const analysis = await handler.analyzeRejection(messageText, {
+                  merchantId: sanitizedMerchantId,
+                  customerId: sanitizedUsername,
+                  platform: 'instagram',
+                  stage: 'BROWSE',
+                  cart: [],
+                  preferences: {},
+                  conversationHistory: []
+                } as any);
+                aiResponse = await handler.generateCounterResponse(analysis);
+                await handler.recordRejection(sanitizedMerchantId, sanitizedUsername, conversationId, {
+                  type: analysis.rejectionType,
+                  reason: analysis.suggestedApproach,
+                  customerMessage: messageText,
+                  strategiesUsed: [analysis.suggestedApproach],
+                  context: { stage }
+                });
+              } catch (rejErr) {
+                log.warn('Rejection handling failed', { error: String(rejErr) });
+              }
+            }
+
             try {
               if (decisionPath.some(d => String(d).startsWith('clarify='))) {
                 telemetry.trackEvent('followup_question', { platform: 'instagram', merchant_id: sanitizedMerchantId });
+                telemetry.kpi.followupAsked();
               }
+              if (decisionPath.includes('sql=hit')) telemetry.kpi.priceHit();
+              if (decisionPath.includes('sql=miss')) telemetry.kpi.priceMiss();
+              if (decisionPath.includes('sql=hit_no_price')) telemetry.kpi.managerHandoff();
             } catch {}
             
             // Validate AI response
@@ -292,6 +323,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           // Store AI response
           // Compute vault_hit based on existing session data presence
           const vaultHit = Boolean((sessionData && (sessionData.category || sessionData.size || sessionData.color || sessionData.gender || sessionData.brand)));
+          if (decisionPath.includes('sql=miss')) { try { telemetry.kpi.altSuggested(); } catch {} }
 
           await pool.query(`
             INSERT INTO message_logs (
@@ -388,6 +420,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             messages: [{ type: "text", text: aiResponse ?? "تعذر توليد رد." }],
             set_attributes: { 
               ai_reply: aiResponse ?? "AI_ERROR",
+              intent: aiIntent ?? null,
               conversation_id: conversationId,
               processing_time: processingTime
             }
