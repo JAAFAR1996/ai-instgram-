@@ -318,7 +318,7 @@ export class InstagramAIService {
       const prompt = await this.buildInstagramConversationPrompt(customerMessage, context);
 
       // Call OpenAI with merchant-specific settings
-      const model = hasImages ? 'gpt-4o-mini' : config.aiModel;
+      const model = hasImages ? (getEnv('OPENAI_VISION_MODEL') || 'gpt-4o') : config.aiModel;
       const completion = await this.openai.chat.completions.create({
         model,
         messages: prompt,
@@ -729,12 +729,31 @@ export class InstagramAIService {
       messages.push({ role: 'user', content: messageWithContext });
     }
 
+    // Inject lightweight personalization profile into system context (best-effort)
+    try {
+      const { CustomerProfiler } = await import('./customer-profiler.js');
+      const profiler = new CustomerProfiler();
+      const profile = await profiler.personalizeResponses(context.merchantId, context.customerId);
+      const personalBlock = [
+        'سياق العميل:',
+        `- التصنيف: ${profile.tier}`,
+        profile.preferences.categories.length ? `- فئات مفضلة: ${profile.preferences.categories.slice(0,3).join(', ')}` : null,
+        profile.preferences.colors.length ? `- ألوان مفضلة: ${profile.preferences.colors.slice(0,3).join(', ')}` : null,
+        profile.preferences.brands.length ? `- علامات مفضلة: ${profile.preferences.brands.slice(0,3).join(', ')}` : null,
+        `- حساسية السعر: ${profile.preferences.priceSensitivity}`
+      ].filter(Boolean).join('\n');
+      messages.unshift({ role: 'system', content: personalBlock });
+    } catch (e) {
+      this.logger.debug('Personalization injection skipped', { error: String(e) });
+    }
+
     return messages;
   }
 
   // ===== Vision helpers =====
   private buildUserContentWithImages(text: string, images: ImageData[]): OpenAI.Chat.Completions.ChatCompletionMessageParam {
-    const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [];
+    type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+    const parts: ContentPart[] = [];
     const safeText = (text || '').trim();
     if (safeText) parts.push({ type: 'text', text: safeText });
     for (const img of (images || []).slice(0, 3)) {
@@ -742,7 +761,8 @@ export class InstagramAIService {
       if (url) parts.push({ type: 'image_url', image_url: { url } });
       if (img.caption) parts.push({ type: 'text', text: `تفاصيل الصورة: ${img.caption}` });
     }
-    return { role: 'user', content: parts as unknown as string } as OpenAI.Chat.Completions.ChatCompletionMessageParam;
+    // OpenAI Chat Completions supports multimodal content via array parts on supported models
+    return { role: 'user', content: parts as unknown as any };
   }
 
   private toDataUrlOrPass(img: ImageData): string | null {
@@ -754,8 +774,9 @@ export class InstagramAIService {
   private async classifyProductFromImages(images: ImageData[]): Promise<{ labels: string[]; attributes: Record<string, string> }> {
     const sys = 'أنت محلل بصري للمنتجات. أعد فقط JSON: {"labels": [..], "attributes": {"color?":"","category?":"","brand?":""}} دون شرح.';
     const user = this.buildUserContentWithImages('حلّل الصورة وحدد اللون/الفئة/العلامة ووسوم مختصرة.', images);
+    const visionModel = getEnv('OPENAI_VISION_MODEL') || 'gpt-4o';
     const completion = await this.openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: visionModel,
       messages: [ { role: 'system', content: sys }, user ],
       temperature: 0.1,
       max_tokens: 180,

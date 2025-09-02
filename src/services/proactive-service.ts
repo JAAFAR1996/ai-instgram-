@@ -329,22 +329,42 @@ export class ProactiveCustomerService {
     type: ProactiveMessage['type']
   ): Promise<boolean> {
     try {
-      // This would integrate with your messaging service
-      // For now, we'll just log and mark as sent
-      
       const sql = this.db.getSQL();
+      let delivered = false;
+      let manychatId: string | null = null;
+      let mcResult: { success: boolean; messageId?: string; error?: string } | null = null;
+
+      // Attempt ManyChat delivery (best-effort)
+      try {
+        const { getManychatIdByInstagramUsername } = await import('../repositories/manychat.repo.js');
+        const { ManyChatService } = await import('./manychat-api.js');
+        manychatId = await getManychatIdByInstagramUsername(merchantId, customerId);
+        if (manychatId) {
+          const mc = new ManyChatService();
+          const res = await mc.sendMessage(merchantId, manychatId, message, { messageTag: 'POST_PURCHASE_UPDATE' });
+          mcResult = { success: res.success };
+          if (res.messageId) mcResult.messageId = res.messageId;
+          if (res.error) mcResult.error = res.error;
+          delivered = res.success;
+        }
+      } catch (e) {
+        this.log.warn('ManyChat delivery attempt failed', { error: String(e), merchantId, customerId });
+      }
+
+      // Record the proactive message regardless
       await sql`
         INSERT INTO proactive_messages (
           merchant_id, customer_id, type, message, scheduled_at, 
           sent_at, status, context, priority, created_at
         ) VALUES (
           ${merchantId}::uuid, ${customerId}, ${type}, ${message}, 
-          NOW(), NOW(), 'SENT', '{}'::jsonb, 'HIGH', NOW()
+          NOW(), ${delivered ? 'NOW()' : null}, ${delivered ? 'SENT' : 'FAILED'},
+          ${JSON.stringify({ channel: manychatId ? 'manychat' : 'none', result: mcResult || undefined })}::jsonb,
+          'HIGH', NOW()
         )
       `;
 
-      // TODO: Integrate with ManyChat API or Instagram Direct API
-      this.log.info('Immediate message sent', { merchantId, customerId, type });
+      this.log.info('Immediate proactive message processed', { merchantId, customerId, type, delivered, manychatId });
       
       return true;
 
