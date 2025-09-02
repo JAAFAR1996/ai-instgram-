@@ -191,11 +191,11 @@ export function registerMerchantAdminRoutes(app: Hono) {
       }
 
       const { title, text, chunkTokens, overlapTokens, tags } = parsed.data;
-      const result = await ingestText(merchantId, title, text, {
-        chunkTokens,
-        overlapTokens,
-        tags
-      });
+      const opts: import('../kb/ingest.js').IngestOptions = {};
+      if (typeof chunkTokens === 'number') opts.chunkTokens = chunkTokens;
+      if (typeof overlapTokens === 'number') opts.overlapTokens = overlapTokens;
+      if (tags && typeof tags === 'object') opts.tags = tags;
+      const result = await ingestText(merchantId, title, text, opts);
 
       return c.json({ ok: true, inserted: result.inserted });
     } catch (error) {

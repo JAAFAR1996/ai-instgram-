@@ -62,24 +62,24 @@ export function classifyAndExtract(text: string, hints: MerchantNLPHints = {}): 
     const m = s.length, n = t.length;
     if (m === 0) return n; if (n === 0) return m;
     const d = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
-    for (let i = 0; i <= m; i++) d[i][0] = i;
-    for (let j = 0; j <= n; j++) d[0][j] = j;
+    for (let i = 0; i <= m; i++) d[i]![0] = i;
+    for (let j = 0; j <= n; j++) d[0]![j] = j;
     for (let i = 1; i <= m; i++) {
       for (let j = 1; j <= n; j++) {
         const cost = s[i - 1] === t[j - 1] ? 0 : 1;
-        d[i][j] = Math.min(
-          d[i - 1][j] + 1,
-          d[i][j - 1] + 1,
-          d[i - 1][j - 1] + cost
+        d[i]![j] = Math.min(
+          d[i - 1]![j]! + 1,
+          d[i]![j - 1]! + 1,
+          d[i - 1]![j - 1]! + cost
         );
       }
     }
-    return d[m][n];
+    return d[m]![n]!;
   };
 
   // size: numbers 20-60, S/M/L/XL/XXL
   const sizeMatch = normalized.match(/\b(\d{2})\b/);
-  if (sizeMatch) entities.size = sizeMatch[1] ?? null;
+  if (sizeMatch) { const cap = sizeMatch[1] || null; entities.size = cap; }
   const sizeAlpha = normalized.match(/\b(XXL|XL|XS|S|M|L|XXS)\b/i);
   if (!entities.size && sizeAlpha) entities.size = (sizeAlpha[1] || '').toUpperCase() || null;
   if (!entities.size) {
@@ -93,7 +93,7 @@ export function classifyAndExtract(text: string, hints: MerchantNLPHints = {}): 
   }
 
   // gender
-  const genders = hints.genders?.length ? hints.genders : DEFAULT_GENDERS;
+  const genders = Array.isArray(hints.genders) && hints.genders.length > 0 ? hints.genders : DEFAULT_GENDERS;
   for (const g of genders) {
     if (normalized.includes(normalizeArabic(g))) { entities.gender = g; break; }
   }
@@ -111,7 +111,7 @@ export function classifyAndExtract(text: string, hints: MerchantNLPHints = {}): 
   }
 
   // color
-  const colors = hints.colors?.length ? hints.colors : DEFAULT_COLORS;
+  const colors = Array.isArray(hints.colors) && hints.colors.length > 0 ? hints.colors : DEFAULT_COLORS;
   for (const c of colors) {
     if (normalized.includes(normalizeArabic(c))) { entities.color = c; break; }
   }
@@ -128,14 +128,14 @@ export function classifyAndExtract(text: string, hints: MerchantNLPHints = {}): 
   }
 
   // brand
-  if (hints.brands?.length) {
+  if (Array.isArray(hints.brands) && hints.brands.length > 0) {
     for (const b of hints.brands) {
       if (normalized.toLowerCase().includes(b.toLowerCase())) { entities.brand = b; break; }
     }
   }
 
   // category (use provided categories + synonyms fallback)
-  if (hints.categories?.length) {
+  if (Array.isArray(hints.categories) && hints.categories.length > 0) {
     for (const cat of hints.categories) {
       for (const form of searchForms) {
         if (form.includes(normalizeArabic(cat))) { entities.category = cat; break; }

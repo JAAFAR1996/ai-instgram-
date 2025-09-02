@@ -1,6 +1,7 @@
 import { classifyAndExtract, type IntentResult } from '../nlp/intent.js';
 import { kbSearch } from '../kb/search.js';
 import { findProduct } from '../repos/product-finder.js';
+import type { FinderEntities } from '../repos/product-finder.js';
 import MerchantCatalogService from './catalog/merchant-catalog.service.js';
 import ProductRecommendationEngine from './recommendation/product-recommendation.engine.js';
 import { getDatabase } from '../db/adapter.js';
@@ -40,10 +41,19 @@ export async function orchestrate(
   const rows = await sql<{ ai_config: any; business_name: string; business_category: string | null; merchant_type: string | null; currency: string | null; settings: any }>`
     SELECT ai_config, business_name, business_category, merchant_type::text as merchant_type, currency, settings FROM merchants WHERE id = ${merchantId}::uuid LIMIT 1
   `;
-  const merchant = rows[0] || { ai_config: {}, business_name: 'متجرنا', business_category: null, merchant_type: 'other', currency: 'IQD', settings: {} } as any;
+  const merchant: { ai_config: any; business_name: string; business_category: string | null; merchant_type: string | null; currency: string | null; settings: any } =
+    rows[0] ?? { ai_config: {}, business_name: 'متجرنا', business_category: null, merchant_type: 'other', currency: 'IQD', settings: {} };
   const aiCfg = merchant.ai_config || {};
 
-  const hints = {
+  const hints: {
+    synonyms: Record<string, string[]>;
+    categories: string[];
+    brands: string[];
+    colors: string[];
+    genders?: string[];
+    sizeAliases: Record<string, string[]>;
+    customEntities: Record<string, string[]>;
+  } = {
     synonyms: aiCfg?.synonyms || { 'جزمه': ['حذاء','بوت'] },
     categories: aiCfg?.categories || [],
     brands: aiCfg?.brands || [],
@@ -51,7 +61,7 @@ export async function orchestrate(
     genders: aiCfg?.genders || undefined,
     sizeAliases: aiCfg?.sizeAliases || {},
     customEntities: aiCfg?.customEntities || {},
-  } as any;
+  };
 
   // Dynamically derive categories from catalog if requested
   if (aiCfg?.categories_dynamic === true && (!Array.isArray(hints.categories) || hints.categories.length === 0)) {
@@ -66,13 +76,16 @@ export async function orchestrate(
   // Merge session memory into entity extraction (do not override explicit message extraction)
   const analysis = classifyAndExtract(messageText, hints);
   const session = options.session || {};
-  const sessionEntities = {
-    category: (session as any)?.category || undefined,
-    gender: (session as any)?.gender || undefined,
-    size: (session as any)?.size || undefined,
-    color: (session as any)?.color || undefined,
-    brand: (session as any)?.brand || undefined,
-  } as Partial<IntentResult['entities']>;
+  const readStr = (key: string): string | undefined => {
+    const v = (session as Record<string, unknown>)[key];
+    return typeof v === 'string' ? v : undefined;
+  };
+  const sessionEntities: Partial<IntentResult['entities']> = {};
+  const cat = readStr('category'); if (cat) sessionEntities.category = cat;
+  const gen = readStr('gender'); if (gen) sessionEntities.gender = gen;
+  const sz  = readStr('size'); if (sz) sessionEntities.size = sz;
+  const col = readStr('color'); if (col) sessionEntities.color = col;
+  const br  = readStr('brand'); if (br) sessionEntities.brand = br;
   analysis.entities = {
     ...sessionEntities,
     ...analysis.entities,
@@ -93,7 +106,7 @@ export async function orchestrate(
         merchantId,
         username,
         session: options.session || {},
-        nlp: { intent: analysis.intent, entities: analysis.entities as any, confidence: analysis.confidence },
+        nlp: { intent: analysis.intent, entities: analysis.entities as unknown as Record<string, unknown>, confidence: analysis.confidence },
         hints
       }, options.showThinking ?? true);
       thinkingChain = thinking.chain;
@@ -113,7 +126,7 @@ export async function orchestrate(
   if (analysis.intent === 'PRICE' || analysis.intent === 'INVENTORY') {
     // Check missing critical property
     const needsCategory = !analysis.entities.category;
-    const clarifyAttempts = Number((session as any)?.clarify_attempts?.category || 0);
+    const clarifyAttempts = Number((session as Record<string, unknown>)?.clarify_attempts && typeof (session as any).clarify_attempts?.category === 'number' ? (session as any).clarify_attempts.category : 0);
     if (needsCategory && options.askAtMostOneFollowup) {
       if (clarifyAttempts < 1) {
         const text = 'تريد شنو بالضبط؟ قميص، حذاء، بنطلون؟';
@@ -137,7 +150,7 @@ export async function orchestrate(
     }
 
     const q = messageText;
-    const res = await findProduct(merchantId, q, analysis.entities as any, hints.synonyms);
+    const res = await findProduct(merchantId, q, analysis.entities as unknown as FinderEntities, hints.synonyms);
     if (res.top) {
       const top = res.top!;
       if (top.stock_quantity <= 0) {
@@ -171,7 +184,7 @@ export async function orchestrate(
       const avail = top.stock_quantity > 0 ? 'متوفر' : 'غير متوفر حالياً';
       let extras: string[] = [];
       if (top.stock_quantity > 0 && top.stock_quantity <= 5) extras.push('باقي قليل');
-      if ((merchant.settings as any)?.deliveryToday === true) extras.push('التوصيل اليوم');
+      if ((merchant.settings as Record<string, unknown>)?.['deliveryToday'] === true) extras.push('التوصيل اليوم');
       const extra = extras.length ? `، ${extras.join('، ')}` : '';
       let text: string;
       if (priceIQD == null || isNaN(Number(priceIQD))) {
@@ -232,7 +245,9 @@ export async function orchestrate(
 
   // FAQ via KB search
   if (analysis.intent === 'FAQ') {
-    const hits = await kbSearch(merchantId, messageText, 3, { merchantType: merchant.merchant_type || undefined });
+    const kbOpts: { merchantType?: string; tags?: Record<string, string | boolean> } = {};
+    if (merchant.merchant_type) kbOpts.merchantType = merchant.merchant_type;
+    const hits = await kbSearch(merchantId, messageText, 3, kbOpts);
     if (hits.length > 0) {
       const top = hits[0]!;
       const snippet = top.chunk.trim().slice(0, 280);

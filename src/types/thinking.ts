@@ -17,7 +17,10 @@ export interface ThinkingStep<TInput = unknown, TResult = unknown> {
   endedAt?: string; // ISO timestamp
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
   reflections?: string[];
-  meta?: Record<string, unknown>;
+  meta?: Record<string, unknown> & {
+    exploreHypotheses?: string[];
+    query?: string;
+  };
 }
 
 export interface ThinkingChain {
@@ -51,4 +54,3 @@ export interface ExtendedThinkingContext {
   };
   hints?: Record<string, unknown>;
 }
-

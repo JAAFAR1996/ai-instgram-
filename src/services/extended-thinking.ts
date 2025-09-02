@@ -17,6 +17,10 @@ export class ExtendedThinkingService {
     await this.analyzeStep(explore, context);
 
     const evaluate = chain.steps.find(s => s.stage === 'EVALUATE')!;
+    try {
+      const exploreHyps = Array.isArray((explore.result as any)?.hypotheses) ? (explore.result as any).hypotheses as string[] : [];
+      (evaluate.meta ||= {})['exploreHypotheses'] = exploreHyps;
+    } catch {}
     await this.analyzeStep(evaluate, context);
 
     const decide = chain.steps.find(s => s.stage === 'DECIDE')!;
@@ -65,10 +69,9 @@ export class ExtendedThinkingService {
       }
       case 'EVALUATE': {
         // Simple evaluation: rank hypotheses by presence of keywords and nlp intent
-        // Pull last explore step
-        const prevExplore = (step as any)._prevExplore as ThinkingStep | undefined;
-        const prevRes = (prevExplore?.result as any) || {};
-        const hyps: string[] = Array.isArray(prevRes.hypotheses) ? prevRes.hypotheses as string[] : [];
+        const hyps: string[] = Array.isArray((step.meta as any)?.exploreHypotheses)
+          ? (step.meta as any).exploreHypotheses as string[]
+          : [];
         const ranked = hyps.map(h => ({ h, score: scoreHypothesis(h, q, context) }))
           .sort((a, b) => b.score - a.score);
         const best = ranked[0]?.h ?? hyps[0] ?? 'غير محدد';
@@ -127,10 +130,8 @@ export class ExtendedThinkingService {
 
     // Core stages
     addStep(chain, 'ANALYZE', 'تحليل السؤال', { query });
-    const s2 = addStep(chain, 'EXPLORE', 'استكشاف الفرضيات', { query });
-    const s3 = addStep(chain, 'EVALUATE', 'تقييم الخيارات', { query });
-    // link explore to evaluate for simple access
-    (s3 as any)._prevExplore = s2;
+    addStep(chain, 'EXPLORE', 'استكشاف الفرضيات', { query });
+    addStep(chain, 'EVALUATE', 'تقييم الخيارات', { query });
     addStep(chain, 'DECIDE', 'القرار');
 
     return chain;

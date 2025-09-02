@@ -20,8 +20,6 @@ export async function upsertVault(
   const db = getDatabase();
   const sql = db.getSQL();
 
-  const purgeAfter = sql`NOW() + (${ttlDays} || ' days')::interval` as unknown as string;
-
   await sql`
     INSERT INTO public.customer_vaults (merchant_id, customer_id, conversation_id, data, purge_after)
     VALUES (
@@ -54,4 +52,3 @@ export async function markPurchased(
     DO UPDATE SET status = 'purchased', purge_after = NOW() + interval '24 hours', updated_at = NOW()
   `;
 }
-

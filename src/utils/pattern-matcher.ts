@@ -1,6 +1,8 @@
 import type { SuccessPatterns } from '../types/learning.js';
 
-export function timeSlotFromDate(d: Date): 'morning'|'afternoon'|'evening'|'night' {
+type TimeSlot = 'morning'|'afternoon'|'evening'|'night';
+
+export function timeSlotFromDate(d: Date): TimeSlot {
   const h = d.getHours();
   if (h >= 6 && h < 12) return 'morning';
   if (h >= 12 && h < 17) return 'afternoon';
@@ -23,7 +25,7 @@ export function computeSuccessPatterns(
   merchantId: string,
   rows: Array<{ content: string; created_at: Date; processing_time_ms?: number; session_data?: any }>
 ): SuccessPatterns {
-  const slotMap = new Map<string, number>();
+  const slotMap = new Map<TimeSlot, number>();
   const phraseMap = new Map<string, number>();
   const prefMap = new Map<string, number>();
 
@@ -48,16 +50,20 @@ export function computeSuccessPatterns(
     }
   }
 
-  const slots = [...slotMap.entries()].map(([slot, count]) => ({ slot: slot as any, score: count }))
+  const slots = [...slotMap.entries()].map(([slot, count]) => ({ slot, score: count }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 4);
   const phrases = [...phraseMap.entries()].map(([phrase, score]) => ({ phrase, score }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 20);
-  const prefs = [...prefMap.entries()].map(([kv, score]) => {
-    const [key, value] = kv.split(':');
-    return { key, value, score };
-  }).sort((a, b) => b.score - a.score).slice(0, 20);
+  const prefEntries: { key: string; value: string; score: number }[] = [];
+  for (const [kv, score] of prefMap.entries()) {
+    const parts = kv.split(':');
+    const key = parts[0];
+    const value = parts[1];
+    if (key && value) prefEntries.push({ key, value, score });
+  }
+  const prefs = prefEntries.sort((a, b) => b.score - a.score).slice(0, 20);
 
   // Naive followup delay: derive from processing time when available
   const times = rows.map(r => r.processing_time_ms || 0).filter(n => n > 0);
@@ -66,11 +72,10 @@ export function computeSuccessPatterns(
 
   return {
     merchantId,
-    timeSlots: slots as any,
+    timeSlots: slots,
     topPhrases: phrases,
     followupDelaySec,
     preferenceSignals: prefs,
     sampleSize: rows.length,
   };
 }
-

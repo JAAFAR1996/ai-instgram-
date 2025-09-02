@@ -20,11 +20,12 @@ process.on('unhandledRejection', (reason, promise) => {
     ? reason
     : new Error(`UnhandledRejection: ${String(reason ?? 'undefined reason')}`);
 
+  const promiseName = (promise && (promise as object).constructor && (promise as object).constructor.name) ? (promise as object).constructor.name : 'unknown';
   console.error('[FATAL] unhandledRejection', {
     count: unhandledRejectionCount,
     error: error.message,
     stack: error.stack,
-    promise: (promise as any)?.constructor?.name || 'unknown',
+    promise: promiseName,
     timestamp: new Date().toISOString(),
     pid: process.pid
   });
@@ -163,4 +164,3 @@ export function getErrorStats() {
 }
 
 logger.info('Global error handlers initialized');
-

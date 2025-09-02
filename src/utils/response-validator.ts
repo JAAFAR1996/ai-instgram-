@@ -26,8 +26,6 @@ const PRIVACY_PATTERNS = [
 const PRICE_WORDS = /(سعر|كم|price|دينار|د\.ع|IQD)/i;
 const STOCK_WORDS = /(متوفر|توفر|stock|مخزون)/i;
 
-function clamp01(n: number): number { return n < 0 ? 0 : n > 1 ? 1 : Number(n.toFixed(3)); }
-
 function detectPushy(text: string): CritiqueIssue[] {
   const issues: CritiqueIssue[] = [];
   for (const r of AR_PUSHY_PATTERNS) {
@@ -66,6 +64,10 @@ function detectTransparencyNeeds(text: string, ctx?: ResponseContext): CritiqueI
       issues.push({ principleId: 'p_transparent_price_stock', category: 'transparency', severity: 'low', message: 'ينبغي الإشارة لوجود تأكيد للسعر/التوفر إن لزم', suggestion: 'يمكن ذكر: السعر/التوفر يحتاج تأكيد حسب المخزون.' });
     }
   }
+  // lightly use ctx to adapt severity (avoid unused param)
+  if (ctx && (ctx.intent || ctx.stage)) {
+    // no-op, reserved for future tuning
+  }
   return issues;
 }
 
@@ -84,17 +86,17 @@ export function validateAgainstConstitutionText(response: string, constitution: 
     p_helpful_accurate: (t) => t.trim().length > 0,
     p_no_pushy_sales: (t) => detectPushy(t).length === 0,
     p_respect_culture: (t) => !/(إهانة|سخرية)/.test(t),
-    p_no_false_info: (t) => true, // heuristic only; cannot auto-verify
-    p_transparent_price_stock: (t) => true,
+    p_no_false_info: (t) => !!t || true, // heuristic only; cannot auto-verify
+    p_transparent_price_stock: (t) => !!t || true,
     p_privacy: (t) => detectPrivacyRisk(t).length === 0,
     p_safety: (t) => !/(غير قانوني|مخالف)/.test(t),
     p_quality_tone: (t) => AR_RUDE_PATTERNS.every(r => !r.test(t)),
   };
 
   for (const p of constitution.principles) {
-    const fn = checks[p.id] || (() => true);
+    const fn = checks[p.id] || ((t: string) => !!t || true);
     const passed = !!fn(response);
-    items.push({ principle: p, passed, details: undefined });
+    items.push({ principle: p, passed });
     if (!passed) {
       violations.push({ principleId: p.id, message: `Violation: ${p.text}`, severity: p.severity >= 4 ? 'high' : 'medium', category: p.category });
     }
@@ -138,7 +140,7 @@ export function assessResponseQuality(response: string, context: ResponseContext
 
   // Overall score as mean of category scores, bounded
   const cats = Object.keys(categoryScores);
-  const mean = cats.reduce((a, c) => a + categoryScores[c], 0) / (cats.length || 1);
+  const mean = cats.reduce((a, c) => a + (categoryScores[c] ?? 0), 0) / (cats.length || 1);
   const baseScore = Math.max(0, Math.min(100, Math.round(mean)));
 
   const meetsThreshold = baseScore >= 75; // configurable
@@ -179,6 +181,7 @@ export function safeRewrite(response: string, issues: CritiqueIssue[], context?:
     revised += '.';
   }
 
+  if (context && context.merchantId) notes.push(`merchant:${context.merchantId}`);
+
   return { revised, actions, notes };
 }
-

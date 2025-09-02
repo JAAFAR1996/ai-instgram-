@@ -33,6 +33,7 @@ try { promClient = await import('prom-client'); } catch { /* prom-client not ava
 import { getPool } from './startup/database.js';
 import { initializeRedisIntegration } from './startup/redis.js';
 import { scheduleMaintenance } from './startup/maintenance.js';
+import { initializePredictiveServices } from './startup/predictive-services.js';
 
 // 6) Middleware imports
 import { securityHeaders, rateLimiter } from './middleware/security.js';
@@ -115,6 +116,10 @@ async function bootstrap() {
     // Schedule maintenance tasks
     scheduleMaintenance(pool);
     log.info('âœ… Maintenance tasks scheduled');
+
+    // Initialize predictive analytics services
+    await initializePredictiveServices();
+    log.info('âœ… Predictive analytics services initialized');
 
     // Create Hono app
     const app = new Hono();

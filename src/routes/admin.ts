@@ -11,6 +11,7 @@ import { getDatabase } from '../db/adapter.js';
 import { z } from 'zod';
 import { getCache } from '../cache/index.js';
 import * as jwt from 'jsonwebtoken';
+import { checkPredictiveServicesHealth, runManualPredictiveAnalytics } from '../startup/predictive-services.js';
 
 const log = getLogger({ component: 'admin-routes' });
 
@@ -303,6 +304,67 @@ document.getElementById('patchForm').addEventListener('submit', async (e) => {
       return c.json({ ok: true, currency });
     } catch (error) {
       log.error('Patch merchant currency failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  // Predictive Analytics Admin Endpoints
+  app.get('/admin/predictive/health', async (c) => {
+    try {
+      requireAdminAuth(c.req.raw);
+      const health = checkPredictiveServicesHealth();
+      return c.json({ 
+        ok: true, 
+        predictiveServices: health 
+      });
+    } catch (error) {
+      return c.json({ ok: false, error: 'unauthorized' }, 401);
+    }
+  });
+
+  app.post('/admin/predictive/run-manual', async (c) => {
+    try {
+      requireAdminAuth(c.req.raw);
+      log.info('Manual predictive analytics triggered by admin');
+      const results = await runManualPredictiveAnalytics();
+      return c.json({ 
+        ok: true, 
+        results 
+      });
+    } catch (error) {
+      log.error('Manual predictive analytics failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  app.get('/admin/predictive/insights/:merchantId', async (c) => {
+    try {
+      requireAdminAuth(c.req.raw);
+      const merchantId = c.req.param('merchantId');
+      const sql = getDatabase().getSQL();
+
+      // Get recent insights cache for this merchant
+      const insights = await sql<{ customer_id: string; insights: any; computed_at: Date }>`
+        SELECT customer_id, insights, computed_at
+        FROM customer_insights_cache
+        WHERE merchant_id = ${merchantId}::uuid
+          AND expires_at > NOW()
+        ORDER BY computed_at DESC
+        LIMIT 10
+      `;
+
+      return c.json({ 
+        ok: true, 
+        merchantId,
+        insights: insights.map(i => ({
+          customerId: i.customer_id,
+          data: i.insights,
+          computedAt: i.computed_at
+        }))
+      });
+
+    } catch (error) {
+      log.error('Failed to fetch predictive insights', { error: String(error) });
       return c.json({ ok: false, error: 'internal_error' }, 500);
     }
   });

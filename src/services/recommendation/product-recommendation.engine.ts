@@ -24,7 +24,6 @@ export class ProductRecommendationEngine {
       product: r.product,
       relevanceScore: r.relevanceScore,
       sellingPoints: this.generateSellingPoints(r.product),
-      priceJustification: undefined,
       urgencyFactors: this.generateUrgencyFactors(r.product)
     }));
     return recs.sort((a, b) => b.relevanceScore - a.relevanceScore).slice(0, 3);
@@ -49,4 +48,3 @@ export class ProductRecommendationEngine {
 }
 
 export default ProductRecommendationEngine;
-

@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { type ConversationContext, type AIResponse } from './ai.js';
+import { type ConversationContext, type AIResponse, type ImageData } from './ai.js';
 import { getDatabase } from '../db/adapter.js';
 import { createLogger } from './logger.js';
 import OpenAI from 'openai';
@@ -295,12 +295,32 @@ export class InstagramAIService {
       try { await this.getMerchantContext(context.merchantId); } catch {}
       try { await this.searchProductsDynamic(context.merchantId, customerMessage, 1); } catch {}
       
-      // Build Instagram-specific prompt
+      // Vision: if images present, pre-analyze for descriptors and candidate products
+      let visionDescriptors: { labels: string[]; attributes: Record<string, string> } | null = null;
+      let visionSimilar: Array<{ id: string; sku: string; name_ar: string; effective_price: number; price_currency: string; stock_quantity: number }> = [];
+      const hasImages = Array.isArray(context.imageData) && context.imageData.length > 0;
+      if (hasImages) {
+        try {
+          visionDescriptors = await this.classifyProductFromImages(context.imageData!);
+          const q = this.buildVisualQuery(visionDescriptors);
+          if (q) {
+            const found = await this.searchProductsDynamic(context.merchantId, q, 6);
+            visionSimilar = found.map(f => ({ id: f.id, sku: f.sku, name_ar: f.name_ar, effective_price: f.effective_price, price_currency: f.price_currency, stock_quantity: f.stock_quantity }));
+          }
+          // Auto-tag image metadata (best-effort)
+          await this.autoTagImage(context, visionDescriptors);
+        } catch (e) {
+          this.logger.warn('Vision pre-analysis failed', { error: String(e) });
+        }
+      }
+
+      // Build Instagram-specific prompt (with images if present)
       const prompt = await this.buildInstagramConversationPrompt(customerMessage, context);
 
       // Call OpenAI with merchant-specific settings
+      const model = hasImages ? 'gpt-4o-mini' : config.aiModel;
       const completion = await this.openai.chat.completions.create({
-        model: config.aiModel,
+        model,
         messages: prompt,
         temperature: this.clampTemperature(config.temperature),
         max_tokens: Math.min(config.maxTokens, InstagramAIService.MAX_TOKENS_HARD_CAP),
@@ -322,6 +342,20 @@ export class InstagramAIService {
         return this.getContextualFallback(context, 'AI_API_ERROR');
       }
       const aiResponse = parsed.data;
+      
+      // Attach visually similar products if we have them (best-effort)
+      if (hasImages && visionSimilar.length) {
+        try {
+          aiResponse.products = visionSimilar.slice(0, 3).map(p => ({
+            productId: p.id,
+            sku: p.sku,
+            name: p.name_ar,
+            price: Math.round(p.effective_price),
+            confidence: 0.7,
+            reason: 'مشابه بصرياً للصورة'
+          }));
+        } catch {}
+      }
       
       // Add metadata
       aiResponse.tokens = {
@@ -678,7 +712,7 @@ export class InstagramAIService {
       });
     });
 
-    // Add current customer message with context
+    // Add current customer message with context (+ vision parts)
     let messageWithContext = customerMessage;
     if (context.interactionType === 'story_reply') {
       messageWithContext = `[ردّ على ستوري] ${customerMessage}`;
@@ -688,12 +722,73 @@ export class InstagramAIService {
       messageWithContext = `[منشن في ستوري] ${customerMessage}`;
     }
 
-    messages.push({
-      role: 'user',
-      content: messageWithContext
-    });
+    const hasImages = Array.isArray(context.imageData) && context.imageData.length > 0;
+    if (hasImages) {
+      messages.push(this.buildUserContentWithImages(messageWithContext, context.imageData!));
+    } else {
+      messages.push({ role: 'user', content: messageWithContext });
+    }
 
     return messages;
+  }
+
+  // ===== Vision helpers =====
+  private buildUserContentWithImages(text: string, images: ImageData[]): OpenAI.Chat.Completions.ChatCompletionMessageParam {
+    const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [];
+    const safeText = (text || '').trim();
+    if (safeText) parts.push({ type: 'text', text: safeText });
+    for (const img of (images || []).slice(0, 3)) {
+      const url = this.toDataUrlOrPass(img);
+      if (url) parts.push({ type: 'image_url', image_url: { url } });
+      if (img.caption) parts.push({ type: 'text', text: `تفاصيل الصورة: ${img.caption}` });
+    }
+    return { role: 'user', content: parts as unknown as string } as OpenAI.Chat.Completions.ChatCompletionMessageParam;
+  }
+
+  private toDataUrlOrPass(img: ImageData): string | null {
+    if (img.base64 && img.mimeType) return `data:${img.mimeType};base64,${img.base64}`;
+    if (img.url && /^https?:\/\//i.test(img.url)) return img.url;
+    return null;
+  }
+
+  private async classifyProductFromImages(images: ImageData[]): Promise<{ labels: string[]; attributes: Record<string, string> }> {
+    const sys = 'أنت محلل بصري للمنتجات. أعد فقط JSON: {"labels": [..], "attributes": {"color?":"","category?":"","brand?":""}} دون شرح.';
+    const user = this.buildUserContentWithImages('حلّل الصورة وحدد اللون/الفئة/العلامة ووسوم مختصرة.', images);
+    const completion = await this.openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [ { role: 'system', content: sys }, user ],
+      temperature: 0.1,
+      max_tokens: 180,
+      response_format: { type: 'json_object' }
+    });
+    const raw = completion.choices?.[0]?.message?.content || '{}';
+    const parsed = this.parseJsonSafe<{ labels?: string[]; attributes?: Record<string, string> }>(raw);
+    if (!parsed.ok) return { labels: [], attributes: {} };
+    return { labels: parsed.data.labels || [], attributes: parsed.data.attributes || {} };
+  }
+
+  private buildVisualQuery(desc: { labels: string[]; attributes: Record<string, string> } | null): string {
+    if (!desc) return '';
+    const parts: string[] = [];
+    if (Array.isArray(desc.labels)) parts.push(...desc.labels.slice(0, 3));
+    for (const k of ['category','color','brand']) {
+      const v = desc.attributes?.[k];
+      if (typeof v === 'string' && v) parts.push(v);
+    }
+    return parts.filter(Boolean).join(' ');
+  }
+
+  private async autoTagImage(context: InstagramContext, desc: { labels: string[]; attributes: Record<string, string> } | null): Promise<void> {
+    if (!desc) return;
+    try {
+      const sql = this.db.getSQL();
+      await sql`
+        INSERT INTO message_image_metadata (merchant_id, customer_id, labels)
+        VALUES (${context.merchantId}::uuid, ${context.customerId}, ${JSON.stringify(desc)}::jsonb)
+      `;
+    } catch (e) {
+      this.logger.warn('autoTagImage failed', { error: String(e) });
+    }
   }
 
   // Price formatter with Arabic locale fallback

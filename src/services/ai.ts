@@ -44,6 +44,16 @@ export interface ProductRecommendation {
   reason: string;
 }
 
+export interface ImageData {
+  url?: string; // remote URL
+  base64?: string; // raw base64 without data URL prefix
+  mimeType?: string; // e.g., image/png, image/jpeg
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+  caption?: string;
+}
+
 export interface ConversationContext {
   merchantId: string;
   customerId: string;
@@ -54,6 +64,7 @@ export interface ConversationContext {
   conversationHistory: MessageHistory[];
   customerProfile?: CustomerProfile;
   merchantSettings?: MerchantSettings;
+  imageData?: ImageData[]; // Optional images attached to the current message
 }
 
 export interface MessageHistory {
@@ -255,7 +266,7 @@ export class AIService {
         return fallbackResponse;
       }
 
-      // Build conversation prompt
+      // Build conversation prompt (text + optional vision parts)
       const prompt = await this.buildConversationPrompt(customerMessage, context);
 
       // Call OpenAI API with timeout + retry
@@ -263,16 +274,17 @@ export class AIService {
       const timeout = this.config.ai.timeout || 30000;
       const timer = setTimeout(() => controller.abort(), timeout);
       
+      const useVision = Array.isArray(context.imageData) && context.imageData.length > 0;
+      const model = useVision ? (this.config.ai.visionModel || 'gpt-4o-mini') : this.config.ai.model;
       const completion = await this.withRetry(
         () => this.openai.chat.completions.create({
-          model: this.config.ai.model,
+          model,
           messages: prompt,
           temperature: Math.min(this.config.ai.temperature ?? 0.2, 0.4),
           max_tokens: Math.min(this.config.ai.maxTokens ?? 180, 220),
           top_p: 0.9,
           presence_penalty: 0,
           frequency_penalty: 0,
-          // response_format: { type: 'json_object' },
         }),
         'openai.chat.completions'
       ).finally(() => clearTimeout(timer));
@@ -453,38 +465,106 @@ export class AIService {
     customerMessage: string,
     context: ConversationContext
   ): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam[]> {
-    const systemPrompt = `أنت مساعد مبيعات لمتجر أزياء على إنستغرام.
+    // Persona by merchant type (fallbacks)
+    const persona = await this.getMerchantPersona(context.merchantId);
+    const memoryLine = this.buildMemoryLine(context.customerProfile);
+
+    const systemPrompt = `أنت مساعد مبيعات ذكي لمتجر ${persona.businessCategory || 'عام'}.
 قواعد صارمة:
 - اللغة: عربية بسيطة بلهجة عراقية.
-- لا تحية عامة إلا في أول رسالة بالمحادثة فقط.
-- رد قصير جدًا (سطر واحد أو سطران كحد أقصى).
-- لا تكرر جملًا ولا تطيل.
+- التزم بنبرة ${persona.tone || 'لطيفة ومهنية'}.
 - لا تختلق أسعار/منتجات؛ عند النقص قل: "أحتاج أتأكد".
-- إيموجي واحد كحد أقصى.
-- أنهِ الرد دائمًا بسؤال متابعة واحد محدد يملأ أقرب خانة ناقصة (الفئة، المقاس، اللون، النوع).`;
+- رد قصير جدًا (سطر واحد أو سطران).
+- لا تكرر جملًا.
+- اسأل سؤال متابعة واحد محدد يملأ أقرب خانة ناقصة (الفئة، المقاس، اللون، النوع).
+- إذا أرسل المستخدم صورة: حلّل باختصار ما يفيد الشراء (اللون/الموديل/العيوب).`;
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: 'system', content: systemPrompt }
+      { role: 'system', content: systemPrompt },
+      { role: 'system', content: `تفضيلات العميل: ${memoryLine}` }
     ];
 
-    // Add recent conversation history for context (last 6 messages)
-    const recentHistory = context.conversationHistory.slice(-6);
-    if (recentHistory.length > 0) {
-      recentHistory.forEach(msg => {
-        messages.push({
-          role: msg.role,
-          content: msg.content
-        });
-      });
+    // Add recent conversation history (last 6)
+    for (const msg of context.conversationHistory.slice(-6)) {
+      messages.push({ role: msg.role, content: msg.content });
     }
 
-    // Add current customer message with context
-    messages.push({
-      role: 'user',
-      content: customerMessage
-    });
+    // Build user content with optional images (vision parts)
+    const userContent = this.buildUserContentWithImages(customerMessage, context.imageData || []);
+    messages.push(userContent);
 
     return messages;
+  }
+
+  /** Build user content including image parts when provided */
+  private buildUserContentWithImages(
+    text: string,
+    images: ImageData[]
+  ): OpenAI.Chat.Completions.ChatCompletionMessageParam {
+    if (!images || images.length === 0) {
+      return { role: 'user', content: text };
+    }
+    const parts: Array<
+      | { type: 'text'; text: string }
+      | { type: 'image_url'; image_url: { url: string } }
+    > = [];
+    const safeText = (text || '').trim();
+    if (safeText) parts.push({ type: 'text', text: safeText });
+    for (const img of images.slice(0, 3)) {
+      const url = this.toDataUrlOrPass(img);
+      if (url) parts.push({ type: 'image_url', image_url: { url } });
+      if (img.caption) parts.push({ type: 'text', text: `تفاصيل الصورة: ${img.caption}` });
+    }
+    // Cast to SDK param (content as parts supported by gpt-4o)
+    return { role: 'user', content: parts as unknown as string } as OpenAI.Chat.Completions.ChatCompletionMessageParam;
+  }
+
+  /** Convert ImageData to a data URL if base64 present, otherwise return URL */
+  private toDataUrlOrPass(img: ImageData): string | null {
+    if (img.base64 && img.mimeType) {
+      return `data:${img.mimeType};base64,${img.base64}`;
+    }
+    if (img.url && /^https?:\/\//i.test(img.url)) return img.url;
+    return null;
+  }
+
+  /** Fetch merchant persona (tone/category) from DB */
+  private async getMerchantPersona(merchantId: string): Promise<{ tone: string; businessCategory: string }> {
+    try {
+      const rows = await this.db.query(
+        `SELECT COALESCE(business_category,'other') as business_category FROM merchants WHERE id = $1 LIMIT 1`,
+        [merchantId]
+      ) as Array<{ business_category: string }>;
+      const bc = (rows[0]?.business_category || 'other').toLowerCase();
+      const tone = bc === 'fashion' ? 'عصرية وودودة' : bc === 'electronics' ? 'احترافية وواضحة' : 'لطيفة ومهنية';
+      return { tone, businessCategory: bc };
+    } catch {
+      return { tone: 'لطيفة ومهنية', businessCategory: 'other' };
+    }
+  }
+
+  /** Build short memory context string */
+  private buildMemoryLine(profile?: CustomerProfile): string {
+    if (!profile) return 'غير متوفر';
+    const prefs = profile.preferredCategories?.slice(0, 3).join(', ');
+    const orders = profile.previousOrders;
+    return `طلبات سابقة: ${orders}, تفضيلات: ${prefs || 'غير محدد'}`;
+  }
+
+  /** Analyze images with a short, low-cost pass (optional utility) */
+  public async analyzeImages(images: ImageData[], hint?: string): Promise<string> {
+    if (!images || images.length === 0) return '';
+    const msg = this.buildUserContentWithImages(hint || 'حلّل الصورة باختصار مفيد للبيع.', images);
+    const completion = await this.openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: 'أنت محلل صور مختصر. اذكر اللون، النوع، وأي عيب واضح فقط.' },
+        msg
+      ],
+      temperature: 0.2,
+      max_tokens: 120,
+    });
+    return completion.choices?.[0]?.message?.content || '';
   }
 
   /**

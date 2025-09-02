@@ -1,7 +1,9 @@
 import { getDatabase } from '../../db/adapter.js';
 import { getCache } from '../../cache/index.js';
 
-export interface ProductRow {
+import type { DatabaseRow } from '../../types/db.js';
+
+export interface ProductRow extends DatabaseRow {
   id: string;
   sku: string;
   name_ar: string;
@@ -117,4 +119,3 @@ export class MerchantCatalogService {
 }
 
 export default MerchantCatalogService;
-

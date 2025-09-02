@@ -32,10 +32,10 @@ export class SelfLearningSystem {
 
     // Record event in message_logs metadata for audit and later mining
     try {
-      const meta = {
+      const meta: Record<string, unknown> = {
         event_type: 'conversation_outcome',
         outcome,
-      } as any;
+      };
       await sql`
         INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, ai_intent, ai_confidence, processing_time_ms, metadata, created_at)
         VALUES (${conversationId}::uuid, ${'[LEARNING] outcome recorded'}::text, 'TEXT', 'OUTGOING', 'instagram', 'manychat', NULL, NULL, 0, ${JSON.stringify(meta)}::jsonb, NOW())
@@ -63,12 +63,16 @@ export class SelfLearningSystem {
         AND ml.created_at BETWEEN ${from} AND ${to}
       LIMIT 5000
     `;
-    const patterns = computeSuccessPatterns(merchantId, rows.map(r => ({
-      content: r.content,
-      created_at: new Date(r.created_at),
-      processing_time_ms: r.processing_time_ms || undefined,
-      session_data: r.session_data || undefined,
-    })));
+    const mapped = rows.map(r => {
+      const obj: { content: string; created_at: Date; processing_time_ms?: number; session_data?: any } = {
+        content: r.content,
+        created_at: new Date(r.created_at),
+      };
+      if (typeof r.processing_time_ms === 'number') obj.processing_time_ms = r.processing_time_ms;
+      if (r.session_data != null) obj.session_data = r.session_data;
+      return obj;
+    });
+    const patterns = computeSuccessPatterns(merchantId, mapped);
     this.logger.info('Success patterns analyzed', { merchantId, sample: patterns.sampleSize });
     return patterns;
   }
@@ -105,6 +109,7 @@ export class SelfLearningSystem {
       adjustments['price_tone'] = preferences['price_sensitivity'] === 'high' ? 'highlight_discounts' : 'highlight_quality';
     }
     notes.push('Adapted response parameters based on provided preferences');
+    if (customerId) notes.push(`customer:${customerId}`);
     return { adjustments, notes };
   }
 }

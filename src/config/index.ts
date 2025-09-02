@@ -198,6 +198,7 @@ export function loadAndValidateEnvironment(): AppConfig {
     ai: {
       openaiApiKey: env.OPENAI_API_KEY!,
       model: env.OPENAI_MODEL || 'gpt-4o-mini',
+      visionModel: env.OPENAI_VISION_MODEL || 'gpt-4o-mini',
       maxTokens,
       temperature: parseFloat(env.OPENAI_TEMPERATURE || '0.7')
     },

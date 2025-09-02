@@ -15,6 +15,20 @@ import { getPool } from '../db/index.js';
 import { getEnv } from '../config/env.js';
 import { orchestrate } from '../services/smart-orchestrator.js';
 import ConstitutionalAI from '../services/constitutional-ai.js';
+import { getInstagramAIService } from '../services/instagram-ai.js';
+import type { ImageData } from '../services/ai.js';
+import type { ConversationContext } from '../services/ai.js';
+import type { ThinkingChain } from '../types/thinking.js';
+import type { AIInteractionMetric } from '../services/advanced-analytics.js';
+
+type ManyChatWebhookBody = {
+  merchant_id?: string;
+  instagram_username?: string;
+  merchant_username?: string;
+  subscriber_id?: string;
+  event_type?: string;
+  data?: { text?: string };
+};
 
 const log = getLogger({ component: 'webhooks-routes' });
 
@@ -116,8 +130,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           return c.json({ error: 'signature_error' }, 401);
         }
       }
-      const body = rawBody ? JSON.parse(rawBody) : {};
-      const { merchant_id, instagram_username, merchant_username, subscriber_id, event_type, data } = body as any;
+      const body: ManyChatWebhookBody = rawBody ? JSON.parse(rawBody) : {};
+      const { merchant_id, instagram_username, merchant_username, subscriber_id, event_type, data } = body;
 
       // 🛡️ PRODUCTION: Input validation and sanitization - use fallback for merchant_id
       const finalMerchantId = (merchant_id || '').trim();
@@ -164,8 +178,16 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         return c.json({ ok: false, error: 'context_error' }, 503);
       }
 
-      if (event_type === 'message' && data?.text) {
-        const messageText = String(data.text).trim();
+      // Normalize attachments (images)
+      const attachments = Array.isArray((data as any)?.attachments) ? (data as any).attachments : [];
+      const imageData: ImageData[] = attachments
+        .map((a: any) => a?.url || a?.payload?.url || a?.image_url || a?.src || null)
+        .filter((u: unknown): u is string => typeof u === 'string' && /^https?:\/\//i.test(u))
+        .map((url: string): ImageData => ({ url }));
+      const hasImages = imageData.length > 0;
+
+      if (event_type === 'message' && (data?.text || hasImages)) {
+        const messageText = String(data?.text || '').trim();
         
         if (messageText.length > 4000) {
           return c.json({
@@ -196,6 +218,15 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 sessionData = existingConversations.rows[0].session_data || {};
                 if (typeof sessionData === 'string') sessionData = JSON.parse(sessionData);
               } catch {}
+              // Merge with cached customer context (for faster recall)
+              try {
+                const { SmartCache } = await import('../services/smart-cache.js');
+                const sc = new SmartCache();
+                const cachedCtx = await sc.getCustomerContext(sanitizedMerchantId, sanitizedUsername);
+                if (cachedCtx && typeof cachedCtx === 'object') {
+                  sessionData = { ...cachedCtx, ...sessionData };
+                }
+              } catch {}
             } else {
               const newConversation = await pool.query(`
                 INSERT INTO conversations (
@@ -218,8 +249,9 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             });
           }
 
-          // Load last 100 messages as conversation history (oldest -> newest)
+          // Load recent messages as conversation history (oldest -> newest)
           let historyIds: string[] = [];
+          let preSessionPatch: Record<string, unknown> | undefined;
           try {
             const historyResult = await pool.query(
               `SELECT id, content, direction, created_at
@@ -229,17 +261,61 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                LIMIT 20`,
               [conversationId]
             );
-            historyIds = historyResult.rows.map((r: any) => r.id);
-            // conversationHistory not required for orchestrator path
+            historyIds = historyResult.rows.map((r: { id: string }) => r.id);
+            // Optimize long history into a short summary for sessionData (kept small for tokens)
+            try {
+              const msgs = historyResult.rows
+                .map((r: any) => ({
+                  role: r.direction === 'INCOMING' ? 'user' : 'assistant',
+                  content: String(r.content || ''),
+                  timestamp: r.created_at
+                }))
+                .reverse(); // oldest -> newest
+              const { ConversationManager } = await import('../services/conversation-manager.js');
+              const cm = new ConversationManager();
+              const opt = await cm.optimizeHistory(sanitizedMerchantId, sanitizedUsername, msgs as any, 6);
+              if (opt.sessionPatch && Object.keys(opt.sessionPatch).length) {
+                preSessionPatch = opt.sessionPatch;
+                sessionData = { ...(opt.sessionPatch || {}), ...(sessionData || {}) };
+              }
+            } catch {}
           } catch (histErr) {
             log.warn('Failed to load conversation history, proceeding without it', { error: String(histErr) });
           }
 
           // Store incoming message
-          await pool.query(`
-            INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, created_at)
-            VALUES ($1, $2, 'TEXT', 'INCOMING', 'instagram', 'manychat', NOW())
-          `, [conversationId, messageText]);
+          // Store incoming message and get id
+          let incomingMessageId: string | null = null;
+          try {
+            const ins = await pool.query(
+              `INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, created_at)
+               VALUES ($1, $2, $3, 'INCOMING', 'instagram', 'manychat', NOW()) RETURNING id`,
+              [conversationId, messageText || (hasImages ? 'IMAGE_MESSAGE' : ''), hasImages ? 'IMAGE' : 'TEXT']
+            );
+            incomingMessageId = ins.rows?.[0]?.id || null;
+          } catch (insErr) {
+            log.warn('Failed to insert incoming message with RETURNING id; retrying plain insert', { error: String(insErr) });
+            await pool.query(
+              `INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, created_at)
+               VALUES ($1, $2, 'TEXT', 'INCOMING', 'instagram', 'manychat', NOW())`,
+              [conversationId, messageText || (hasImages ? 'IMAGE_MESSAGE' : '')]
+            );
+          }
+
+          // Save image metadata (best-effort)
+          if (hasImages) {
+            for (const img of imageData) {
+              try {
+                await pool.query(
+                  `INSERT INTO message_image_metadata (merchant_id, customer_id, message_id, labels)
+                   VALUES ($1::uuid, $2, $3::uuid, $4::jsonb)`,
+                  [sanitizedMerchantId, sanitizedUsername, incomingMessageId, JSON.stringify({ url: img.url })]
+                );
+              } catch (imgErr) {
+                log.warn('Failed to persist image metadata', { error: String(imgErr) });
+              }
+            }
+          }
 
           // 🤖 PRODUCTION: Generate AI response
           let aiResponse: string;
@@ -249,36 +325,64 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           let kbSource: { id: string; title: string } | undefined;
           let sessionPatch: Record<string, unknown> | undefined;
           let stage: 'AWARE' | 'BROWSE' | 'INTENT' | 'OBJECTION' | 'CLOSE' | undefined;
-          let thinkingMeta: any | undefined;
+          let thinkingMeta: ThinkingChain | undefined;
+          let qualityScore: number | undefined;
+          let qualityImproved: boolean | undefined;
+          let qualityDelta: number | undefined;
           try {
-            const orchResult = await Promise.race([
-              orchestrate(sanitizedMerchantId, sanitizedUsername, messageText, { askAtMostOneFollowup: true, session: sessionData, showThinking: true }),
-              new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 8000))
-            ]);
-
-            aiResponse = orchResult.text;
-            aiIntent = orchResult.intent;
-            aiConfidence = orchResult.confidence;
-            decisionPath = orchResult.decision_path;
-            kbSource = orchResult.kb_source;
-            sessionPatch = orchResult.session_patch || undefined;
-            stage = orchResult.stage;
-            thinkingMeta = (orchResult as any)?.thinking_chain as any | undefined;
+            if (hasImages) {
+              // Route image messages through Instagram AI (vision-enabled)
+              const ig = getInstagramAIService();
+              const igCtx: import('../services/instagram-ai.js').InstagramContext = {
+                merchantId: sanitizedMerchantId,
+                customerId: sanitizedUsername,
+                platform: 'instagram',
+                stage: 'BROWSING',
+                cart: [],
+                preferences: {},
+                conversationHistory: [],
+                interactionType: 'dm',
+                imageData
+              };
+              const igResp = await ig.generateInstagramResponse(messageText, igCtx);
+              aiResponse = igResp.messageAr || igResp.message || 'تم تحليل الصورة.';
+              aiIntent = igResp.intent || 'IMAGE_INQUIRY';
+              aiConfidence = igResp.confidence || 0.7;
+              decisionPath = ['vision=used'];
+              stage = igResp.stage as any;
+            } else {
+              const orchResult = await Promise.race([
+                orchestrate(sanitizedMerchantId, sanitizedUsername, messageText, { askAtMostOneFollowup: true, session: sessionData, showThinking: true }),
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 8000))
+              ]);
+              aiResponse = orchResult.text;
+              aiIntent = orchResult.intent;
+              aiConfidence = orchResult.confidence;
+              decisionPath = orchResult.decision_path;
+              kbSource = orchResult.kb_source;
+              sessionPatch = orchResult.session_patch || undefined;
+              if (preSessionPatch && Object.keys(preSessionPatch).length) {
+                sessionPatch = { ...(preSessionPatch || {}), ...(sessionPatch || {}) } as any;
+              }
+              stage = orchResult.stage;
+              thinkingMeta = (orchResult as unknown as { thinking_chain?: ThinkingChain }).thinking_chain;
+            }
 
             // If objection intent -> generate smarter counter response and record
             if (aiIntent === 'OBJECTION') {
               try {
                 const { IntelligentRejectionHandler } = await import('../services/rejection/intelligent-rejection-handler.js');
                 const handler = new IntelligentRejectionHandler();
-                const analysis = await handler.analyzeRejection(messageText, {
+                const rejectionCtx: ConversationContext = {
                   merchantId: sanitizedMerchantId,
                   customerId: sanitizedUsername,
                   platform: 'instagram',
-                  stage: 'BROWSE',
+                  stage: 'BROWSING',
                   cart: [],
                   preferences: {},
                   conversationHistory: []
-                } as any);
+                };
+                const analysis = await handler.analyzeRejection(messageText, rejectionCtx);
                 aiResponse = await handler.generateCounterResponse(analysis);
                 await handler.recordRejection(sanitizedMerchantId, sanitizedUsername, conversationId, {
                   type: analysis.rejectionType,
@@ -304,7 +408,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             
             // Validate AI response
             if (!aiResponse || aiResponse.trim().length === 0) {
-              log.warn('Empty AI response received', { orchResult });
+              log.warn('Empty AI response received', { intent: aiIntent, decisionPath });
               return c.json({
                 version: "v2",
                 messages: [{ type: "text", text: "تعذر توليد رد مناسب. جرّب رسالة أخرى." }],
@@ -313,27 +417,26 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             }
 
             // Constitutional AI critique and improvement
-            let qualityScore: number | undefined;
-            let qualityImproved = false;
-            let qualityDelta: number | undefined;
             try {
               const consAI = new ConstitutionalAI();
-              const critique = await consAI.critiqueResponse(aiResponse, {
+              const ctxObj: import('../types/constitutional-ai.js').ResponseContext = {
                 merchantId: sanitizedMerchantId,
                 username: sanitizedUsername,
-                intent: aiIntent,
-                stage,
-                session: sessionData,
-                kbSourceTitle: kbSource?.title
-              });
+              };
+              if (aiIntent) ctxObj.intent = aiIntent;
+              if (stage) ctxObj.stage = stage;
+              if (sessionData) ctxObj.session = sessionData;
+              if (kbSource?.title) ctxObj.kbSourceTitle = kbSource.title as string;
+              const critique = await consAI.critiqueResponse(aiResponse, ctxObj);
               if (!critique.meetsThreshold) {
-                const { improved, record } = await consAI.improveResponse(aiResponse, critique, {
+                const improveCtx: import('../types/constitutional-ai.js').ResponseContext = {
                   merchantId: sanitizedMerchantId,
                   username: sanitizedUsername,
-                  intent: aiIntent,
-                  stage,
-                  session: sessionData,
-                });
+                };
+                if (aiIntent) improveCtx.intent = aiIntent;
+                if (stage) improveCtx.stage = stage;
+                if (sessionData) improveCtx.session = sessionData;
+                const { improved, record } = await consAI.improveResponse(aiResponse, critique, improveCtx);
                 qualityImproved = true;
                 qualityDelta = record.newScore - record.prevScore;
                 qualityScore = record.newScore;
@@ -344,16 +447,123 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             } catch (qErr) {
               log.warn('Constitutional AI improvement failed', { error: String(qErr) });
             }
+
+            // Response personalization (advanced profiling)
+            try {
+              const { CustomerProfiler } = await import('../services/customer-profiler.js');
+              const { ResponsePersonalizer } = await import('../services/response-personalizer.js');
+              const profiler = new CustomerProfiler();
+              const profile = await profiler.personalizeResponses(sanitizedMerchantId, sanitizedUsername);
+              const personalizer = new ResponsePersonalizer();
+              const personalized = await personalizer.personalizeResponses(aiResponse, {
+                merchantId: sanitizedMerchantId,
+                customerId: sanitizedUsername,
+                tier: profile.tier,
+                preferences: {
+                  categories: profile.preferences.categories,
+                  colors: profile.preferences.colors,
+                  sizes: profile.preferences.sizes,
+                  brands: profile.preferences.brands,
+                  priceSensitivity: profile.preferences.priceSensitivity,
+                },
+                queryHint: String(data?.text || '').slice(0, 80)
+              });
+              aiResponse = personalized.text;
+            } catch (pErr) {
+              log.warn('Response personalization failed', { error: String(pErr) });
+            }
+
+            // Cache common replies for frequently asked questions (short queries)
+            try {
+              const { SmartCache } = await import('../services/smart-cache.js');
+              const sc = new SmartCache();
+              await sc.maybeCacheCommonReply(sanitizedMerchantId, messageText, aiResponse, aiIntent);
+            } catch {}
+
+            // Predictive analytics and proactive service (Phase 4)
+            try {
+              const { PredictiveAnalyticsEngine } = await import('../services/predictive-analytics.js');
+              
+              const predictiveEngine = new PredictiveAnalyticsEngine();
+
+              // Run predictions in background (non-blocking)
+              Promise.all([
+                // Generate proactive actions based on current interaction
+                predictiveEngine.suggestProactiveActions(sanitizedMerchantId, sanitizedUsername).then(actions => {
+                  // Process high-priority actions immediately
+                  const urgentActions = actions.filter(a => a.priority === 'URGENT');
+                  if (urgentActions.length > 0) {
+                    log.info('Urgent proactive actions detected', { 
+                      merchantId: sanitizedMerchantId, 
+                      customerId: sanitizedUsername,
+                      actions: urgentActions.map(a => ({ type: a.type, priority: a.priority }))
+                    });
+                  }
+                }),
+
+                // Check for size issues if this conversation mentions products
+                messageText && (messageText.includes('مقاس') || messageText.includes('size') || messageText.includes('قياس')) 
+                  ? predictiveEngine.predictSizeIssues(sanitizedMerchantId, sanitizedUsername)
+                      .then(sizeRisk => {
+                        if (sizeRisk.riskLevel === 'HIGH') {
+                          log.warn('High size issue risk detected', { 
+                            merchantId: sanitizedMerchantId, 
+                            customerId: sanitizedUsername,
+                            risk: sizeRisk 
+                          });
+                          // Could trigger immediate size consultation
+                        }
+                      })
+                  : Promise.resolve(),
+
+                // Update customer interaction patterns for timing optimization
+                // This is handled automatically by database triggers, but we could enhance it here
+
+              ]).catch(predErr => {
+                log.warn('Predictive analytics failed', { error: String(predErr) });
+              });
+
+            } catch (predError) {
+              log.warn('Predictive analytics service failed', { error: String(predError) });
+            }
             
           } catch (aiError) {
             log.error('❌ AI service failed', { error: String(aiError) });
             
-            // لا ترجع محتوى بديل. أعطِ إشارة فشل واضحة للمراقبة
-            return c.json({
-              version: "v2",
-              messages: [{ type: "text", text: "تعذر توليد رد الآن. جرّب رسالة أقصر." }],
-              set_attributes: { ai_reply: "AI_ERROR", processing_time: Date.now() - processingStartTime }
-            });
+            // Enhanced fallback handling (Phase 6)
+            try {
+              const { ErrorFallbacksService } = await import('../services/error-fallbacks.js');
+              const fb = new ErrorFallbacksService();
+              const fr = await fb.buildFallback(sanitizedMerchantId, sanitizedUsername, messageText);
+              // Record minimal analytics for degraded path
+              try {
+                const { AdvancedAnalyticsService } = await import('../services/advanced-analytics.js');
+                const aas = new AdvancedAnalyticsService();
+                await aas.recordAIInteraction({
+                  merchantId: sanitizedMerchantId,
+                  customerId: sanitizedUsername,
+                  conversationId,
+                  model: 'fallback',
+                  intent: 'FALLBACK',
+                  latencyMs: Date.now() - processingStartTime,
+                  qualityScore: 0.6,
+                  improved: false,
+                });
+              } catch {}
+
+              return c.json({
+                version: "v2",
+                messages: [{ type: "text", text: fr.text }],
+                set_attributes: { ai_reply: "AI_FALLBACK", processing_time: Date.now() - processingStartTime }
+              });
+            } catch {
+              // Graceful degradation: static friendly message
+              return c.json({
+                version: "v2",
+                messages: [{ type: "text", text: "صار خلل بسيط عندي حالياً، ممكن تعيد صياغة طلبك بجملة قصيرة؟" }],
+                set_attributes: { ai_reply: "AI_ERROR", processing_time: Date.now() - processingStartTime }
+              });
+            }
           }
 
           // Store AI response
@@ -398,24 +608,61 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 `UPDATE conversations SET session_data = COALESCE(session_data, '{}'::jsonb) || $1::jsonb, updated_at = NOW() WHERE id = $2`,
                 [JSON.stringify(sessionPatch), conversationId]
               );
+              // Also update SmartCache customer context for fast access
+              try {
+                const { SmartCache } = await import('../services/smart-cache.js');
+                const sc = new SmartCache();
+                await sc.patchCustomerContext(sanitizedMerchantId, sanitizedUsername, sessionPatch as any);
+              } catch {}
             }
           } catch (sessErr) {
             log.warn('Failed to update session_data', { error: String(sessErr) });
           }
 
+          // Advanced analytics (Phase 6): record AI outcome
+          try {
+            const { AdvancedAnalyticsService } = await import('../services/advanced-analytics.js');
+            const aas = new AdvancedAnalyticsService();
+            let metrics: AIInteractionMetric = {
+              merchantId: sanitizedMerchantId,
+              customerId: sanitizedUsername,
+              conversationId,
+              model: 'orchestrator',
+              intent: String(aiIntent || ''),
+              latencyMs: Date.now() - processingStartTime,
+            };
+            if (typeof qualityScore === 'number') {
+              metrics = { ...metrics, qualityScore };
+            }
+            if (typeof qualityImproved === 'boolean') {
+              metrics = { ...metrics, improved: qualityImproved };
+            }
+            await aas.recordAIInteraction(metrics);
+          } catch {}
+
           // Update Customer Vault (per-merchant per-customer context)
           try {
             if (sessionPatch && Object.keys(sessionPatch).length > 0) {
-              const { upsertVault } = await import('../repos/customer-vault.ts');
-              const vaultPatch: Record<string, unknown> = {
-                ...(sessionPatch?.gender ? { gender: (sessionPatch as any).gender } : {}),
-                ...(sessionPatch?.size ? { size: (sessionPatch as any).size } : {}),
-                ...(sessionPatch?.color ? { color: (sessionPatch as any).color } : {}),
-                ...(sessionPatch?.category ? { category: (sessionPatch as any).category } : {}),
+              const { upsertVault } = await import('../repos/customer-vault.js');
+              type VaultPatchLocal = {
+                category?: string | null;
+                size?: string | null;
+                color?: string | null;
+                gender?: string | null;
+                brand?: string | null;
+                stage?: 'AWARE' | 'BROWSE' | 'INTENT' | 'OBJECTION' | 'CLOSE';
+                confidence?: number;
+              };
+              const sp = (sessionPatch || {}) as Record<string, unknown>;
+              const vaultPatch: VaultPatchLocal = {
+                ...(typeof sp.gender === 'string' ? { gender: sp.gender } : {}),
+                ...(typeof sp.size === 'string' ? { size: sp.size } : {}),
+                ...(typeof sp.color === 'string' ? { color: sp.color } : {}),
+                ...(typeof sp.category === 'string' ? { category: sp.category } : {}),
                 ...(typeof aiConfidence === 'number' ? { confidence: aiConfidence } : {}),
                 ...(stage ? { stage } : {})
               };
-              await upsertVault(sanitizedMerchantId, sanitizedUsername, vaultPatch as any, conversationId, 30);
+              await upsertVault(sanitizedMerchantId, sanitizedUsername, vaultPatch, conversationId, 30);
             }
           } catch (vaultErr) {
             log.warn('Failed to update customer vault', { error: String(vaultErr) });
@@ -462,17 +709,17 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             const learner = new SelfLearningSystem();
             const strategies: string[] = [];
             if (Array.isArray(decisionPath) && decisionPath.some(d => String(d).startsWith('thinking='))) strategies.push('extended-thinking');
-            if (typeof qualityImproved === 'boolean') strategies.push('constitutional-ai');
-            await learner.trackConversationOutcome(conversationId, {
+            if (typeof (qualityImproved as boolean | undefined) === 'boolean') strategies.push('constitutional-ai');
+            const baseOutcome: Partial<import('../types/learning.js').LearningOutcome> = {
               type: 'REPLY_SENT',
               converted: false,
-              satisfaction: undefined,
-              qualityScore: typeof qualityScore === 'number' ? qualityScore : undefined,
               strategiesUsed: strategies,
-              stage,
-              intent: aiIntent || undefined,
-              metadata: { has_kb: !!kbSource, steps: decisionPath?.length || 0 }
-            });
+              metadata: { has_kb: !!kbSource, steps: decisionPath?.length || 0 },
+            };
+            if (aiIntent) baseOutcome.intent = aiIntent;
+            if (stage) baseOutcome.stage = stage;
+            if (typeof qualityScore === 'number') baseOutcome.qualityScore = qualityScore;
+            await learner.trackConversationOutcome(conversationId, baseOutcome as import('../types/learning.js').LearningOutcome);
           } catch (learnErr) {
             log.warn('Learning analytics tracking failed', { error: String(learnErr) });
           }
@@ -692,5 +939,3 @@ const dumpPath = path.join(dir, first.f);
 
   log.info('Webhook routes registered successfully');
 }
-
-

@@ -17,6 +17,8 @@ export interface AIConfig {
   maxTokens: number;
   temperature: number;
   timeout?: number;
+  // Vision (GPT-4o) configuration
+  visionModel?: string;
   // Intent analysis configuration
   intentModel?: string;
   intentTemperature?: number;
