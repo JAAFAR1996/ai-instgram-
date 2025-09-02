@@ -47,10 +47,14 @@ export class ContinuousImprovementEngine {
       `;
       const map = new Map<string, { rate: number; trials: number }>();
       for (const r of rows) if (r.variant) map.set(r.variant, { rate: Number(r.success_rate || 0), trials: Number(r.trials || 0) });
+      // Handle edge cases
+      if (variants.length === 0) return '';
+      if (variants.length === 1) return variants[0]!;
+
       // Epsilon-greedy selection
       const epsilon = 0.1;
-      if (Math.random() < epsilon) return variants[Math.floor(Math.random() * variants.length)];
-      let best = variants[0];
+      if (Math.random() < epsilon) return variants[Math.floor(Math.random() * variants.length)]!;
+      let best = variants[0] ?? '';
       let bestRate = -1;
       for (const v of variants) {
         const rate = map.get(v)?.rate ?? 0.5; // default prior
@@ -59,7 +63,7 @@ export class ContinuousImprovementEngine {
       return best;
     } catch (e) {
       this.log.warn('runABTests failed', { error: String(e) });
-      return variants[Math.floor(Math.random() * variants.length)];
+      return variants.length ? (variants[Math.floor(Math.random() * variants.length)] ?? '') : '';
     }
   }
 
@@ -85,7 +89,10 @@ export class ContinuousImprovementEngine {
         VALUES ('SYSTEM_EVENT','AI_RESPONSE', ${strategyId}, ${JSON.stringify({ winner })}::jsonb, 'SUCCESS', NOW())
       `;
     }
-    return { winner: winner || undefined };
+    if (winner) {
+      return { winner };
+    }
+    return {};
   }
 
   /**
@@ -113,4 +120,3 @@ export class ContinuousImprovementEngine {
 }
 
 export default ContinuousImprovementEngine;
-

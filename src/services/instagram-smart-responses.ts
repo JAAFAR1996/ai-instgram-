@@ -40,25 +40,39 @@ export class InstagramSmartResponses {
     let recs: SmartReplyResult['recommendations'] = [];
     try {
       const results = await this.search.searchProducts(query, ctx.merchantId, { limit: 3 });
-      recs = results.map(r => ({
-        id: r.product.id,
-        sku: r.product.sku,
-        name: r.product.name_ar,
-        price: Number(r.product.sale_price_amount ?? r.product.price_amount ?? 0) || undefined
-      }));
+      recs = results.map(r => {
+        const priceRaw = r.product.sale_price_amount ?? r.product.price_amount;
+        const priceNum = Number(priceRaw);
+        const item: { id: string; sku: string; name: string; price?: number } = {
+          id: r.product.id,
+          sku: r.product.sku,
+          name: r.product.name_ar,
+        };
+        if (!Number.isNaN(priceNum) && priceNum > 0) {
+          item.price = priceNum;
+        }
+        return item;
+      });
     } catch (e) {
       this.log.debug('searchProducts failed', { error: String(e) });
     }
 
     // Personalize final tone
-    const personalized = await this.personalizer.personalizeResponses(base, {
+    const personalizeOpts: Parameters<ResponsePersonalizer['personalizeResponses']>[1] = {
       merchantId: ctx.merchantId,
       customerId: ctx.customerId,
       tier: 'NEW',
-      preferences: ctx.preferences
-    });
+    };
+    if (ctx.preferences) {
+      personalizeOpts.preferences = ctx.preferences;
+    }
+    const personalized = await this.personalizer.personalizeResponses(base, personalizeOpts);
 
-    return { text: personalized.text, recommendations: recs && recs.length ? recs : undefined };
+    const result: SmartReplyResult = { text: personalized.text };
+    if (recs && recs.length) {
+      result.recommendations = recs;
+    }
+    return result;
   }
 
   private toneByCategory(cat?: string): string {
@@ -71,4 +85,3 @@ export class InstagramSmartResponses {
 }
 
 export default InstagramSmartResponses;
-

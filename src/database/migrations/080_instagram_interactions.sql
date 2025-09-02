@@ -2,7 +2,7 @@
 
 -- Core table: story interactions
 CREATE TABLE IF NOT EXISTS public.instagram_story_interactions (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   merchant_id uuid NOT NULL REFERENCES public.merchants(id) ON DELETE CASCADE,
   customer_id text NOT NULL,
   story_id text,
@@ -43,4 +43,3 @@ CREATE POLICY isi_tenant_policy ON public.instagram_story_interactions
   FOR ALL USING (
     merchant_id = current_setting('app.current_merchant_id', true)::uuid
   );
-

@@ -318,7 +318,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           }
 
           // 🤖 PRODUCTION: Generate AI response
-          let aiResponse: string;
+          let aiResponse: string = '';
           let aiIntent: string | undefined;
           let aiConfidence: number | undefined;
           let decisionPath: string[] = [];

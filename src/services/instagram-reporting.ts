@@ -68,12 +68,16 @@ export class InstagramReportingService {
     // Optimal times summary
     const timing = await this.optimizer.generateTimingInsights(merchantId);
 
+    const personalization: DailyReport['personalization'] = {};
+    if (q[0]?.avg_q != null) personalization.avgQualityScore = Number(q[0].avg_q);
+    if (typeof q[0]?.improved === 'number') personalization.improvedCount = q[0].improved;
+
     const report: DailyReport = {
       date: dayStart.toISOString().slice(0, 10),
       windows,
       interactions: { incoming, outgoing, responsePairs },
       conversions: { orders, revenue, conversionRate },
-      personalization: { avgQualityScore: q[0]?.avg_q || undefined, improvedCount: q[0]?.improved },
+      personalization,
       optimalTimes: { bestPostingTimes: timing.bestPostingTimes.slice(0, 2), peakHours: timing.peakEngagementHours.slice(0, 3) }
     };
 
@@ -103,4 +107,3 @@ export class InstagramReportingService {
 }
 
 export default InstagramReportingService;
-

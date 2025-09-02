@@ -83,13 +83,15 @@ export class InstagramManyChatBridge {
       try {
         const { InstagramInteractionAnalyzer } = await import('./instagram-interaction-analyzer.js');
         const analyzer = new InstagramInteractionAnalyzer();
-        if (data.interactionType === 'story_reply' || data.interactionType === 'story_mention') {
-          await analyzer.analyzeStoryReply({
-            merchantId: data.merchantId,
-            customerId: data.customerId,
-            storyId: data.mediaContext?.mediaId,
-            content: data.message
-          });
+        if ((data.interactionType === 'story_reply' || data.interactionType === 'story_mention')) {
+          if (data.mediaContext?.mediaId) {
+            await analyzer.analyzeStoryReply({
+              merchantId: data.merchantId,
+              customerId: data.customerId,
+              storyId: data.mediaContext.mediaId,
+              content: data.message
+            });
+          }
         } else if (data.interactionType === 'dm') {
           await analyzer.categorizeDMIntent(data.message).catch(() => {});
         }
