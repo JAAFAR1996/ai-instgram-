@@ -16,7 +16,15 @@ const log = getLogger({ component: 'database-migration' });
  * Run database migrations using production-ready pattern
  */
 export async function runDatabaseMigrations(): Promise<void> {
-  const currentPool = getPool();
+  // Use direct connection for migrations to avoid environment validation
+  const { Pool } = await import('pg');
+  const currentPool = process.env.DATABASE_URL ? new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    max: 3,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 15000
+  }) : getPool();
   
   // Check for multiple migration directories
   const migrationDirs = [
@@ -99,6 +107,10 @@ export async function runDatabaseMigrations(): Promise<void> {
     throw error;
   } finally {
     client.release();
+    // Close pool if we created it directly (not using getPool)
+    if (process.env.DATABASE_URL && currentPool !== getPool()) {
+      await currentPool.end();
+    }
     }
   }
 
@@ -111,7 +123,15 @@ export async function getMigrationStatus(): Promise<{
     pending: number;
   migrations: any[];
 }> {
-  const currentPool = getPool();
+  // Use direct connection for migrations to avoid environment validation
+  const { Pool } = await import('pg');
+  const currentPool = process.env.DATABASE_URL ? new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    max: 3,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 15000
+  }) : getPool();
   const client = await currentPool.connect();
   
   try {
@@ -172,6 +192,10 @@ export async function getMigrationStatus(): Promise<{
     };
   } finally {
     client.release();
+    // Close pool if we created it directly (not using getPool)
+    if (process.env.DATABASE_URL && currentPool !== getPool()) {
+      await currentPool.end();
+    }
     }
   }
 
@@ -179,7 +203,15 @@ export async function getMigrationStatus(): Promise<{
  * Create migration tracking table
  */
 export async function createMigrationTable(): Promise<void> {
-  const currentPool = getPool();
+  // Use direct connection for migrations to avoid environment validation
+  const { Pool } = await import('pg');
+  const currentPool = process.env.DATABASE_URL ? new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    max: 3,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 15000
+  }) : getPool();
   const client = await currentPool.connect();
   
   try {
@@ -192,6 +224,10 @@ export async function createMigrationTable(): Promise<void> {
     log.info('✅ Migration tracking table created');
   } finally {
     client.release();
+    // Close pool if we created it directly (not using getPool)
+    if (process.env.DATABASE_URL && currentPool !== getPool()) {
+      await currentPool.end();
+    }
     }
   }
 
@@ -199,7 +235,15 @@ export async function createMigrationTable(): Promise<void> {
  * Rollback last migration
  */
 export async function rollbackMigration(): Promise<void> {
-  const currentPool = getPool();
+  // Use direct connection for migrations to avoid environment validation
+  const { Pool } = await import('pg');
+  const currentPool = process.env.DATABASE_URL ? new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    max: 3,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 15000
+  }) : getPool();
   const client = await currentPool.connect();
   
   try {
@@ -222,6 +266,10 @@ export async function rollbackMigration(): Promise<void> {
     log.info(`✅ Migration rolled back: ${lastMigration}`);
   } finally {
     client.release();
+    // Close pool if we created it directly (not using getPool)
+    if (process.env.DATABASE_URL && currentPool !== getPool()) {
+      await currentPool.end();
+    }
   }
 }
 

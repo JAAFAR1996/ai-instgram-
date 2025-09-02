@@ -79,6 +79,24 @@ export class InstagramManyChatBridge {
         useManyChat: options.useManyChat
       });
 
+      // Step 0.5: Analyze interaction for insights (best-effort, non-blocking)
+      try {
+        const { InstagramInteractionAnalyzer } = await import('./instagram-interaction-analyzer.js');
+        const analyzer = new InstagramInteractionAnalyzer();
+        if (data.interactionType === 'story_reply' || data.interactionType === 'story_mention') {
+          await analyzer.analyzeStoryReply({
+            merchantId: data.merchantId,
+            customerId: data.customerId,
+            storyId: data.mediaContext?.mediaId,
+            content: data.message
+          });
+        } else if (data.interactionType === 'dm') {
+          await analyzer.categorizeDMIntent(data.message).catch(() => {});
+        }
+      } catch (e) {
+        this.logger.debug('Interaction analysis skipped', { error: String(e) });
+      }
+
       // Step 1: Try ManyChat first if enabled
       if (options.useManyChat) {
         try {

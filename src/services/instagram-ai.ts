@@ -317,12 +317,27 @@ export class InstagramAIService {
       // Build Instagram-specific prompt (with images if present)
       const prompt = await this.buildInstagramConversationPrompt(customerMessage, context);
 
-      // Call OpenAI with merchant-specific settings
+      // Call OpenAI with merchant-specific settings + dynamic temperature
       const model = hasImages ? (getEnv('OPENAI_VISION_MODEL') || 'gpt-4o') : config.aiModel;
+      let temperature = this.clampTemperature(config.temperature);
+      try {
+        // Reduce temperature for at-risk customers or low engagement to improve clarity
+        const { InstagramInteractionAnalyzer } = await import('./instagram-interaction-analyzer.js');
+        const analyzer = new InstagramInteractionAnalyzer();
+        const engagement = await analyzer.calculateEngagementScore(context.merchantId, context.customerId);
+        if (engagement < 0.2) temperature = Math.min(temperature, 0.5);
+        try {
+          const { PredictiveAnalyticsEngine } = await import('./predictive-analytics.js');
+          const pae = new PredictiveAnalyticsEngine();
+          const churn = await pae.predictCustomerChurn(context.merchantId, context.customerId);
+          if (churn.riskLevel === 'HIGH') temperature = Math.min(temperature, 0.35);
+        } catch {}
+      } catch {}
+
       const completion = await this.openai.chat.completions.create({
         model,
         messages: prompt,
-        temperature: this.clampTemperature(config.temperature),
+        temperature,
         max_tokens: Math.min(config.maxTokens, InstagramAIService.MAX_TOKENS_HARD_CAP),
         top_p: 0.95,
         frequency_penalty: 0.2,
@@ -700,6 +715,26 @@ export class InstagramAIService {
       ].filter(Boolean).join('\n');
 
       messages.push({ role: 'system', content: merchantContextBlock });
+
+      // Add interaction analysis + risk/engagement context (best-effort)
+      try {
+        const { InstagramInteractionAnalyzer } = await import('./instagram-interaction-analyzer.js');
+        const { PredictiveAnalyticsEngine } = await import('./predictive-analytics.js');
+        const analyzer = new InstagramInteractionAnalyzer();
+        const dm = await analyzer.categorizeDMIntent(customerMessage);
+        const engagement = await analyzer.calculateEngagementScore(context.merchantId, context.customerId);
+        const pae = new PredictiveAnalyticsEngine();
+        const churn = await pae.predictCustomerChurn(context.merchantId, context.customerId);
+        const analysisBlock = [
+          'تحليل تفاعل العميل:',
+          `- نية مبدئية: ${dm.intent} (ثقة ${Math.round(dm.confidence * 100)}%)`,
+          `- درجة التفاعل: ${Math.round(engagement * 100)}/100`,
+          `- خطر مغادرة: ${churn.riskLevel}`
+        ].join('\n');
+        messages.unshift({ role: 'system', content: analysisBlock });
+      } catch (e) {
+        this.logger.debug('Interaction analysis injection skipped', { error: String(e) });
+      }
     } catch (e) {
       this.logger.warn('Failed to enrich Instagram prompt with merchant data', { error: String(e), merchantId: context.merchantId });
     }

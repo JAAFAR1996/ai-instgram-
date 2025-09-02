@@ -137,6 +137,25 @@ export class PredictiveSchedulerService {
           // Schedule high-priority alerts (count only here)
           totalPredictions += alerts.filter(a => a.priority === 'URGENT' || a.priority === 'HIGH').length;
 
+          // Timing insights & daily reporting (best-effort, non-blocking)
+          try {
+            const { default: InstagramTimingOptimizer } = await import('./instagram-timing-optimizer.js');
+            const { default: InstagramReportingService } = await import('./instagram-reporting.js');
+            const opt = new InstagramTimingOptimizer();
+            const rep = new InstagramReportingService();
+            const insights = await opt.generateTimingInsights(merchant_id);
+            const today = await rep.generateDailyReport(merchant_id);
+            this.log.info('Timing/report snapshot', {
+              merchantId: merchant_id,
+              bestSlot: insights.bestPostingTimes[0],
+              peakHour: insights.peakEngagementHours[0],
+              rr: today.windows.responseRate,
+              orders: today.conversions.orders
+            });
+          } catch (auxErr) {
+            this.log.debug('Timing/report skipped', { error: String(auxErr) });
+          }
+
           // Update customer insights cache for top customers
           await this.updateCustomerInsightsCache(merchant_id);
 

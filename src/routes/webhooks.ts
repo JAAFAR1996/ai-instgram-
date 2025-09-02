@@ -329,8 +329,27 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           let qualityScore: number | undefined;
           let qualityImproved: boolean | undefined;
           let qualityDelta: number | undefined;
+          let usedCache = false;
+
+          // Fast-path: use cached common reply for short, text-only queries
           try {
-            if (hasImages) {
+            const short = messageText && messageText.length <= 64 && !hasImages;
+            if (short) {
+              const { SmartCache } = await import('../services/smart-cache.js');
+              const sc = new SmartCache();
+              const cached = await sc.getCommonReply(sanitizedMerchantId, messageText);
+              if (cached && cached.text) {
+                aiResponse = cached.text;
+                aiIntent = 'CACHED_COMMON';
+                aiConfidence = 0.9;
+                decisionPath = ['cache=hit'];
+                usedCache = true;
+              }
+            }
+          } catch {}
+
+          try {
+            if (!usedCache && hasImages) {
               // Route image messages through Instagram AI (vision-enabled)
               const ig = getInstagramAIService();
               const igCtx: import('../services/instagram-ai.js').InstagramContext = {
@@ -350,7 +369,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
               aiConfidence = igResp.confidence || 0.7;
               decisionPath = ['vision=used'];
               stage = igResp.stage as any;
-            } else {
+            } else if (!usedCache) {
               const orchResult = await Promise.race([
                 orchestrate(sanitizedMerchantId, sanitizedUsername, messageText, { askAtMostOneFollowup: true, session: sessionData, showThinking: true }),
                 new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 8000))
@@ -469,6 +488,35 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 queryHint: String(data?.text || '').slice(0, 80)
               });
               aiResponse = personalized.text;
+
+              // Smart responses by business category (best-effort)
+              try {
+                const { MerchantCatalogService } = await import('../services/catalog/merchant-catalog.service.js');
+                const { InstagramSmartResponses } = await import('../services/instagram-smart-responses.js');
+                const catalog = new MerchantCatalogService();
+                const inv = await catalog.analyzeMerchantInventory(sanitizedMerchantId);
+                const topCat = inv.categories.sort((a,b) => b.count - a.count)[0]?.name || 'general';
+                const smart = new InstagramSmartResponses();
+                const smartReply = await smart.generateSmartReply({
+                  merchantId: sanitizedMerchantId,
+                  customerId: sanitizedUsername,
+                  businessCategory: topCat,
+                  interactionText: String(data?.text || '').slice(0, 120),
+                  preferences: {
+                    categories: profile.preferences.categories,
+                    colors: profile.preferences.colors,
+                    brands: profile.preferences.brands,
+                    priceSensitivity: profile.preferences.priceSensitivity,
+                  }
+                });
+                // Append product suggestions if available
+                if (smartReply.recommendations && smartReply.recommendations.length) {
+                  const lines = smartReply.recommendations.map(r => `• ${r.name}${typeof r.price === 'number' && r.price > 0 ? ` – ${r.price}` : ''}`).join('\n');
+                  aiResponse = `${aiResponse}\n\nاقتراحات تناسب ذوقك:\n${lines}`.trim();
+                }
+              } catch (sErr) {
+                log.debug('Smart responses skipped', { error: String(sErr) });
+              }
             } catch (pErr) {
               log.warn('Response personalization failed', { error: String(pErr) });
             }
