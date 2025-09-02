@@ -49,8 +49,9 @@ export const REQUIRED_ENV_VARS: Record<string, EnvVarRule> = {
   // AI/OpenAI
   'OPENAI_API_KEY': {
     required: true,
-    validator: (value: string) => value.startsWith('sk-') && value.length > 20,
-    error: 'OPENAI_API_KEY must start with "sk-" and be at least 20 characters'
+    // Accept modern OpenAI key formats: sk-..., sk-proj-..., sk-test-..., sk-live-...
+    validator: (value: string) => /^sk-(proj-|test-|live-)?[A-Za-z0-9-_]{20,}$/.test(value),
+    error: 'OPENAI_API_KEY must start with "sk-" (supports sk-proj-/sk-test-/sk-live-) and be sufficiently long'
   },
   
   // Security
