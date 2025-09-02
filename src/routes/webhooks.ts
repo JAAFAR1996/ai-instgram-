@@ -14,6 +14,7 @@ import { createHmac } from 'node:crypto';
 import { getPool } from '../db/index.js';
 import { getEnv } from '../config/env.js';
 import { orchestrate } from '../services/smart-orchestrator.js';
+import ConstitutionalAI from '../services/constitutional-ai.js';
 
 const log = getLogger({ component: 'webhooks-routes' });
 
@@ -200,7 +201,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 INSERT INTO conversations (
                   merchant_id, customer_instagram, platform, source_channel,
                   conversation_stage, session_data, message_count, created_at, updated_at
-                ) VALUES ($1, $2, 'INSTAGRAM', 'manychat', 'GREETING', '{}', 0, NOW(), NOW())
+                ) VALUES ($1, $2, 'instagram', 'manychat', 'GREETING', '{}', 0, NOW(), NOW())
                 RETURNING id
               `, [sanitizedMerchantId, sanitizedUsername]);
               
@@ -237,7 +238,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           // Store incoming message
           await pool.query(`
             INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, created_at)
-            VALUES ($1, $2, 'TEXT', 'INCOMING', 'INSTAGRAM', 'manychat', NOW())
+            VALUES ($1, $2, 'TEXT', 'INCOMING', 'instagram', 'manychat', NOW())
           `, [conversationId, messageText]);
 
           // 🤖 PRODUCTION: Generate AI response
@@ -248,9 +249,10 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           let kbSource: { id: string; title: string } | undefined;
           let sessionPatch: Record<string, unknown> | undefined;
           let stage: 'AWARE' | 'BROWSE' | 'INTENT' | 'OBJECTION' | 'CLOSE' | undefined;
+          let thinkingMeta: any | undefined;
           try {
             const orchResult = await Promise.race([
-              orchestrate(sanitizedMerchantId, sanitizedUsername, messageText, { askAtMostOneFollowup: true, session: sessionData }),
+              orchestrate(sanitizedMerchantId, sanitizedUsername, messageText, { askAtMostOneFollowup: true, session: sessionData, showThinking: true }),
               new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 8000))
             ]);
 
@@ -261,6 +263,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             kbSource = orchResult.kb_source;
             sessionPatch = orchResult.session_patch || undefined;
             stage = orchResult.stage;
+            thinkingMeta = (orchResult as any)?.thinking_chain as any | undefined;
 
             // If objection intent -> generate smarter counter response and record
             if (aiIntent === 'OBJECTION') {
@@ -308,6 +311,39 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 set_attributes: { ai_reply: "EMPTY_RESPONSE", processing_time: Date.now() - processingStartTime }
               });
             }
+
+            // Constitutional AI critique and improvement
+            let qualityScore: number | undefined;
+            let qualityImproved = false;
+            let qualityDelta: number | undefined;
+            try {
+              const consAI = new ConstitutionalAI();
+              const critique = await consAI.critiqueResponse(aiResponse, {
+                merchantId: sanitizedMerchantId,
+                username: sanitizedUsername,
+                intent: aiIntent,
+                stage,
+                session: sessionData,
+                kbSourceTitle: kbSource?.title
+              });
+              if (!critique.meetsThreshold) {
+                const { improved, record } = await consAI.improveResponse(aiResponse, critique, {
+                  merchantId: sanitizedMerchantId,
+                  username: sanitizedUsername,
+                  intent: aiIntent,
+                  stage,
+                  session: sessionData,
+                });
+                qualityImproved = true;
+                qualityDelta = record.newScore - record.prevScore;
+                qualityScore = record.newScore;
+                aiResponse = improved;
+              } else {
+                qualityScore = critique.score;
+              }
+            } catch (qErr) {
+              log.warn('Constitutional AI improvement failed', { error: String(qErr) });
+            }
             
           } catch (aiError) {
             log.error('❌ AI service failed', { error: String(aiError) });
@@ -330,7 +366,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
               conversation_id, content, message_type, direction, platform, source_channel,
               ai_intent, ai_confidence, processing_time_ms, metadata, created_at
             )
-            VALUES ($1, $2, 'TEXT', 'OUTGOING', 'INSTAGRAM', 'manychat', $3, $4, $5, $6, NOW())
+            VALUES ($1, $2, 'TEXT', 'OUTGOING', 'instagram', 'manychat', $3, $4, $5, $6, NOW())
           `, [
             conversationId,
             aiResponse,
@@ -343,7 +379,15 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
               stage: stage || null,
               sql_hit: decisionPath.includes('sql=hit'),
               rag_used: decisionPath.includes('rag=hit'),
-              vault_hit: vaultHit
+              vault_hit: vaultHit,
+              quality_score: typeof qualityScore === 'number' ? qualityScore : undefined,
+              quality_improved: qualityImproved,
+              quality_delta: typeof qualityDelta === 'number' ? qualityDelta : undefined,
+              thinking: thinkingMeta ? {
+                id: thinkingMeta.id,
+                steps_count: Array.isArray(thinkingMeta.steps) ? thinkingMeta.steps.length : 0,
+                overall_confidence: typeof thinkingMeta.overallConfidence === 'number' ? thinkingMeta.overallConfidence : undefined,
+              } : undefined
             })
           ]);
 
@@ -386,9 +430,18 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
 
           // Delete the consumed history messages (keep DB light as requested)
           try {
-            if (historyIds.length > 0) {
-              await pool.query('DELETE FROM message_logs WHERE conversation_id =  AND id IN (SELECT id FROM message_logs WHERE conversation_id =  ORDER BY created_at DESC OFFSET 100)', [historyIds]);
-            }
+            // Keep only the latest 100 messages per conversation
+            await pool.query(
+              `DELETE FROM message_logs 
+               WHERE conversation_id = $1 
+                 AND id IN (
+                   SELECT id FROM message_logs 
+                   WHERE conversation_id = $1 
+                   ORDER BY created_at DESC 
+                   OFFSET 100
+                 )`,
+              [conversationId]
+            );
           } catch (delErr) {
             log.warn('Failed to delete consumed history messages', { error: String(delErr), count: historyIds.length });
           }
@@ -403,6 +456,27 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             }
           }
 
+          // Learning: track interaction outcome (reply sent) with quality/thinking signals
+          try {
+            const { SelfLearningSystem } = await import('../services/learning-analytics.js');
+            const learner = new SelfLearningSystem();
+            const strategies: string[] = [];
+            if (Array.isArray(decisionPath) && decisionPath.some(d => String(d).startsWith('thinking='))) strategies.push('extended-thinking');
+            if (typeof qualityImproved === 'boolean') strategies.push('constitutional-ai');
+            await learner.trackConversationOutcome(conversationId, {
+              type: 'REPLY_SENT',
+              converted: false,
+              satisfaction: undefined,
+              qualityScore: typeof qualityScore === 'number' ? qualityScore : undefined,
+              strategiesUsed: strategies,
+              stage,
+              intent: aiIntent || undefined,
+              metadata: { has_kb: !!kbSource, steps: decisionPath?.length || 0 }
+            });
+          } catch (learnErr) {
+            log.warn('Learning analytics tracking failed', { error: String(learnErr) });
+          }
+
           const processingTime = Date.now() - processingStartTime;
           log.info('✅ ManyChat message processed successfully', {
             conversationId,
@@ -415,15 +489,32 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           telemetry.recordMetaRequest('instagram', 'manychat_processed', 200, processingTime);
 
           // 🎯 PRODUCTION: Return ManyChat-compatible response (JSON v2 content only)
-          return c.json({
-            version: "v2",
-            messages: [{ type: "text", text: aiResponse ?? "تعذر توليد رد." }],
-            set_attributes: { 
-              ai_reply: aiResponse ?? "AI_ERROR",
-              intent: aiIntent ?? null,
-              conversation_id: conversationId,
-              processing_time: processingTime
+          // Build ManyChat attributes with optional quality/thinking metadata
+          const attrs: Record<string, unknown> = {
+            ai_reply: aiResponse ?? 'AI_ERROR',
+            intent: aiIntent ?? null,
+            conversation_id: conversationId,
+            processing_time: processingTime,
+          };
+          try {
+            if (typeof qualityScore === 'number') attrs['quality_score'] = Math.round(qualityScore);
+            if (typeof qualityImproved === 'boolean') attrs['quality_improved'] = qualityImproved;
+            if (typeof qualityDelta === 'number') attrs['quality_delta'] = Math.round(qualityDelta);
+          } catch {}
+          try {
+            const t = thinkingMeta;
+            if (t) {
+              attrs['thinking_enabled'] = true;
+              attrs['thinking_steps'] = Array.isArray(t.steps) ? t.steps.length : 0;
+              if (typeof t.overallConfidence === 'number') attrs['thinking_confidence'] = Math.round((t.overallConfidence || 0) * 100);
+              if (typeof t.summary === 'string') attrs['thinking_summary'] = String(t.summary).slice(0, 240);
             }
+          } catch {}
+
+          return c.json({
+            version: 'v2',
+            messages: [{ type: 'text', text: aiResponse ?? 'تعذر توليد رد.' }],
+            set_attributes: attrs,
           });
 
         } catch (error) {

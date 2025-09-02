@@ -3,11 +3,23 @@ import fs from 'fs';
 import path from 'path';
 
 export async function runMigrations(pool: Pool) {
-  const dir = path.join(process.cwd(), 'migrations');
-  if (!fs.existsSync(dir)) return;
+  // Prefer repository migrations path, fallback to root ./migrations if exists
+  const candidates = [
+    path.join(process.cwd(), 'src', 'database', 'migrations'),
+    path.join(process.cwd(), 'migrations'),
+  ];
+  const dir = candidates.find(d => fs.existsSync(d));
+  if (!dir) return;
+
+  // Natural sort by numeric prefix (e.g., 001_, 015_, 074_)
   const files = fs.readdirSync(dir)
-    .filter(f => f.endsWith('.sql'))
-    .sort(); // 000_.. ثم 001_.. ثم 002_..
+    .filter(f => /^\d+_.*\.sql$/.test(f))
+    .sort((a, b) => {
+      const na = parseInt(a.split('_')[0] || '0', 10);
+      const nb = parseInt(b.split('_')[0] || '0', 10);
+      if (na !== nb) return na - nb;
+      return a.localeCompare(b);
+    });
 
   const client = await pool.connect();
   try {

@@ -4,10 +4,15 @@ import { findProduct } from '../repos/product-finder.js';
 import MerchantCatalogService from './catalog/merchant-catalog.service.js';
 import ProductRecommendationEngine from './recommendation/product-recommendation.engine.js';
 import { getDatabase } from '../db/adapter.js';
+import { shouldUseExtendedThinking } from '../utils/reasoning-chain.js';
+import ExtendedThinkingService from './extended-thinking.js';
+import type { ThinkingChain } from '../types/thinking.js';
 
 export interface OrchestratorOptions {
   askAtMostOneFollowup?: boolean;
   session?: Record<string, unknown> | null; // conversations.session_data
+  useExtendedThinking?: boolean; // force enable/disable extended thinking
+  showThinking?: boolean; // include thinking_chain in response
 }
 
 export interface OrchestratorResult {
@@ -19,6 +24,7 @@ export interface OrchestratorResult {
   kb_source?: { id: string; title: string };
   session_patch?: Record<string, unknown>;
   stage?: 'AWARE' | 'BROWSE' | 'INTENT' | 'OBJECTION' | 'CLOSE';
+  thinking_chain?: ThinkingChain;
 }
 
 export async function orchestrate(
@@ -73,10 +79,34 @@ export async function orchestrate(
   };
   const decision: string[] = [`intent=${analysis.intent}`, `confidence=${analysis.confidence.toFixed(2)}`];
 
+  // Optional extended thinking for complex queries
+  const useThinking = (options.useExtendedThinking ?? shouldUseExtendedThinking(messageText, { intent: analysis.intent, confidence: analysis.confidence })) === true;
+  let thinkingChain: ThinkingChain | undefined;
+  const withThinking = (res: OrchestratorResult): OrchestratorResult => {
+    if (!useThinking || !thinkingChain) return res;
+    return { ...res, thinking_chain: thinkingChain };
+  };
+  if (useThinking) {
+    try {
+      const thinkingService = new ExtendedThinkingService();
+      const thinking = await thinkingService.processWithThinking(messageText, {
+        merchantId,
+        username,
+        session: options.session || {},
+        nlp: { intent: analysis.intent, entities: analysis.entities as any, confidence: analysis.confidence },
+        hints
+      }, options.showThinking ?? true);
+      thinkingChain = thinking.chain;
+      decision.push('thinking=enabled');
+      decision.push(`thinking_steps=${thinking.chain.steps.length}`);
+      decision.push(`thinking_conf=${Math.round((thinking.chain.overallConfidence || 0) * 100)}`);
+    } catch {}
+  }
+
   // Small talk
   if (analysis.intent === 'SMALL_TALK') {
     const text = `هلا ${username}! شلونك؟ خلي أعرف شنو تبحث عنه اليوم 🌟`;
-    return { text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision };
+    return withThinking({ text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision });
   }
 
   // Pricing / Inventory via SQL
@@ -88,7 +118,7 @@ export async function orchestrate(
       if (clarifyAttempts < 1) {
         const text = 'تريد شنو بالضبط؟ قميص، حذاء، بنطلون؟';
         decision.push('clarify=category');
-        return {
+        return withThinking({
           text,
           intent: analysis.intent,
           confidence: analysis.confidence,
@@ -100,7 +130,7 @@ export async function orchestrate(
               category: clarifyAttempts + 1
             }
           }
-        };
+        });
       }
       // Max attempts reached → proceed with best approximate match
       decision.push('clarify=max_reached');
@@ -116,10 +146,13 @@ export async function orchestrate(
         const alts = res.alternatives;
         let altText = 'ماكو نفس المواصفات، تحب أشوف بدائل قريبة؟';
         if (alts.length) {
-          const formatted = alts.map(a => `${a.name_ar.split(' ').slice(0,3).join(' ')} ${Math.round(Number(a.final_price_iqd ?? a.base_price_iqd || 0)).toLocaleString('ar-IQ')} د.ع`).slice(0,3);
+          const formatted = alts.map(a => {
+            const price = (a.final_price_iqd ?? a.base_price_iqd) || 0;
+            return `${a.name_ar.split(' ').slice(0,3).join(' ')} ${Math.round(Number(price)).toLocaleString('ar-IQ')} د.ع`;
+          }).slice(0,3);
           if (formatted.length) altText = `ماكو نفس المواصفات، الأقرب: ${formatted.join('، ')}. أي واحد يعجبك؟`;
         }
-        return {
+        return withThinking({
           text: altText,
           intent: analysis.intent,
           confidence: analysis.confidence,
@@ -132,7 +165,7 @@ export async function orchestrate(
             ...(analysis.entities.color ? { color: analysis.entities.color } : {}),
             ...(analysis.entities.category ? { category: analysis.entities.category } : {})
           }
-        };
+        });
       }
       const priceIQD = top.final_price_iqd ?? top.base_price_iqd;
       const avail = top.stock_quantity > 0 ? 'متوفر' : 'غير متوفر حالياً';
@@ -148,7 +181,7 @@ export async function orchestrate(
         text = `سعر ${top.name_ar}${analysis.entities.size ? ` مقاس ${analysis.entities.size}` : ''} ${Math.round(Number(priceIQD)).toLocaleString('ar-IQ')} د.ع، ${avail}${extra}. نمشي بالطلب؟`;
         decision.push('sql=hit');
       }
-      return {
+      return withThinking({
         text,
         intent: analysis.intent,
         confidence: analysis.confidence,
@@ -162,13 +195,16 @@ export async function orchestrate(
           ...(analysis.entities.color ? { color: analysis.entities.color } : {}),
           ...(analysis.entities.category ? { category: analysis.entities.category } : {})
         }
-      };
+      });
     }
     decision.push('sql=miss');
     const alts = res.alternatives;
     let text = 'ماكو نفس المواصفات، تحب أشوف بدائل قريبة؟';
     if (alts.length) {
-      const formatted = alts.map(a => `${a.name_ar.split(' ').slice(0,3).join(' ')} ${Math.round(Number(a.final_price_iqd ?? a.base_price_iqd || 0)).toLocaleString('ar-IQ')} د.ع`).slice(0,3);
+      const formatted = alts.map(a => {
+        const price = (a.final_price_iqd ?? a.base_price_iqd) || 0;
+        return `${a.name_ar.split(' ').slice(0,3).join(' ')} ${Math.round(Number(price)).toLocaleString('ar-IQ')} د.ع`;
+      }).slice(0,3);
       if (formatted.length) text = `ماكو نفس المواصفات، الأقرب: ${formatted.join('، ')}. أي واحد يعجبك؟`;
     } else {
       try {
@@ -178,7 +214,7 @@ export async function orchestrate(
         if (names.length) text = `ماكو نفس المواصفات، الأقرب: ${names.join('، ')}. أي واحد يعجبك؟`;
       } catch {}
     }
-    return {
+    return withThinking({
       text,
       intent: analysis.intent,
       confidence: analysis.confidence,
@@ -191,7 +227,7 @@ export async function orchestrate(
         ...(analysis.entities.color ? { color: analysis.entities.color } : {}),
         ...(analysis.entities.category ? { category: analysis.entities.category } : {})
       }
-    };
+    });
   }
 
   // FAQ via KB search
@@ -202,7 +238,7 @@ export async function orchestrate(
       const snippet = top.chunk.trim().slice(0, 280);
       const text = `حسب سياسة «${top.title}»: ${snippet}${snippet.length >= 280 ? '…' : ''}`;
       decision.push('rag=hit');
-      return {
+      return withThinking({
         text,
         intent: analysis.intent,
         confidence: analysis.confidence,
@@ -211,23 +247,23 @@ export async function orchestrate(
         stage: 'BROWSE',
         kb_source: { id: top.id, title: top.title },
         session_patch: { last_kb_doc_id: top.id }
-      };
+      });
     }
     decision.push('rag=miss');
     const text = 'أحتاج أتأكد من السياسة. أرجعلك بالتفاصيل حالاً بعد المراجعة.';
-    return { text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision };
+    return withThinking({ text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision });
   }
 
   // OBJECTION handling
   if (analysis.intent === 'OBJECTION') {
     const text = 'أفهمك. عندي خيارات تناسب ميزانيتك. تفضل تحدد فئة أو سعر تقريبي؟';
     decision.push('objection=ack');
-    return { text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision, stage: 'OBJECTION' };
+    return withThinking({ text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision, stage: 'OBJECTION' });
   }
 
   // OTHER: short guidance
   const text = `أوكي! حتى أساعدك بسرعة، خبرني شنو المنتج والمقاس/اللون إذا تريده.`;
-  return {
+  return withThinking({
     text,
     intent: analysis.intent,
     confidence: analysis.confidence,
@@ -240,5 +276,5 @@ export async function orchestrate(
       ...(analysis.entities.color ? { color: analysis.entities.color } : {}),
       ...(analysis.entities.category ? { category: analysis.entities.category } : {})
     }
-  };
+  });
 }

@@ -1,4 +1,3 @@
-/* @ts-nocheck */
 /**
  * ===============================================
  * Message Window Service - WhatsApp 24h Enforcement
@@ -126,7 +125,7 @@ export class MessageWindowService {
         windowType: (window?.can_send_message ?? false) ? 'ACTIVE' : 'EXPIRED'
       };
     } catch (error) {
-      console.error('❌ Error checking message window:', error);
+      logger.error('❌ Error checking message window:', error);
       throw new Error('Failed to check message window status');
     }
   }
@@ -171,7 +170,7 @@ export class MessageWindowService {
         messageCount: updatedWindow.message_count_in_window
       };
     } catch (error) {
-      console.error('❌ Error updating message window:', error);
+      logger.error('❌ Error updating message window:', error);
       throw new Error('Failed to update message window');
     }
   }
@@ -210,7 +209,7 @@ export class MessageWindowService {
         windowType: isExpired ? 'EXPIRED' : 'ACTIVE'
       };
     } catch (error) {
-      console.error('❌ Error getting window status:', error);
+      logger.error('❌ Error getting window status:', error);
       throw new Error('Failed to get window status');
     }
   }
@@ -238,7 +237,7 @@ export class MessageWindowService {
         )
       `;
     } catch (error) {
-      console.error('❌ Error recording merchant response:', error);
+      logger.error('❌ Error recording merchant response:', error);
       throw new Error('Failed to record merchant response');
     }
   }
@@ -280,7 +279,7 @@ export class MessageWindowService {
         merchantResponseCount: ((window as unknown) as ActiveWindowRow)?.merchant_response_count ?? 0
       }));
     } catch (error) {
-      console.error('❌ Error getting active windows:', error);
+      logger.error('❌ Error getting active windows:', error);
       throw new Error('Failed to get active windows');
     }
   }
@@ -301,7 +300,7 @@ export class MessageWindowService {
       logger.info(`🧹 Cleaned up ${count} expired message windows`);
       return count;
     } catch (error) {
-      console.error('❌ Error cleaning up expired windows:', error);
+      logger.error('❌ Error cleaning up expired windows:', error);
       throw new Error('Failed to cleanup expired windows');
     }
   }
@@ -354,7 +353,7 @@ export class MessageWindowService {
         responseRate: Math.round(responseRate * 100) / 100
       };
     } catch (error) {
-      console.error('❌ Error getting window stats:', error);
+      logger.error('❌ Error getting window stats:', error);
       throw new Error('Failed to get window statistics');
     }
   }
@@ -394,7 +393,7 @@ export class MessageWindowService {
         minutesRemaining: Math.floor(((window as unknown) as ExpiringWindowRow)?.minutes_remaining ?? 0)
       }));
     } catch (error) {
-      console.error('❌ Error getting expiring windows:', error);
+      logger.error('❌ Error getting expiring windows:', error);
       throw new Error('Failed to get expiring windows');
     }
   }
@@ -422,7 +421,7 @@ export class MessageWindowService {
 
       return windows.length > 0 ? ((windows[0] as unknown) as MessageWindowRecord) : null;
     } catch (error) {
-      console.error('❌ Error getting existing window:', error);
+      logger.error('❌ Error getting existing window:', error);
       return null;
     }
   }

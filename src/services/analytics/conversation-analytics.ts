@@ -19,11 +19,13 @@ export class ConversationAnalytics {
         WHERE merchant_id = ${merchantId}::uuid AND created_at BETWEEN ${from} AND ${to}
       `,
       sql<{ category: string | null; inquiries: number }>`
-        SELECT category, COUNT(*)::int as inquiries
+        SELECT (c.session_data->>'category') as category,
+               COUNT(*)::int as inquiries
         FROM message_logs ml
         JOIN conversations c ON c.id = ml.conversation_id
-        WHERE c.merchant_id = ${merchantId}::uuid AND ml.created_at BETWEEN ${from} AND ${to}
-        GROUP BY category
+        WHERE c.merchant_id = ${merchantId}::uuid 
+          AND ml.created_at BETWEEN ${from} AND ${to}
+        GROUP BY 1
         ORDER BY inquiries DESC
         LIMIT 10
       `,
@@ -49,4 +51,3 @@ export class ConversationAnalytics {
 }
 
 export default ConversationAnalytics;
-

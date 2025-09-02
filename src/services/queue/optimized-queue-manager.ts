@@ -5,7 +5,7 @@ export class OptimizedQueueManager extends ProductionQueueManager {
     messages: T[],
     batchSize: number = 5
   ): Promise<Array<{ success: boolean; messageId: string; error?: string }>> {
-    const results: Array<{ success: boolean; messageId: string; error?: string }>> = [];
+    const results: Array<{ success: boolean; messageId: string; error?: string }> = [];
     for (let i = 0; i < messages.length; i += batchSize) {
       const batch = messages.slice(i, i + batchSize);
       const batchResults = await Promise.all(batch.map(async (m) => {
@@ -25,4 +25,3 @@ export class OptimizedQueueManager extends ProductionQueueManager {
 }
 
 export default OptimizedQueueManager;
-

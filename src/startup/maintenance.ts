@@ -50,18 +50,15 @@ function scheduleBasicMaintenanceTasks(pool: Pool): void {
       
       const client = await pool.connect();
       try {
-        // Clean up old inactive conversations (30+ days)
+        // Mark old conversations as ended (no messages for 30+ days)
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - 30);
-        
         const result = await client.query(`
           UPDATE conversations 
-          SET is_active = false, ended_at = NOW()
-          WHERE is_active = true 
-            AND (last_activity_at < $1 OR updated_at < $1)
-            AND ended_at IS NULL
+          SET ended_at = NOW(), updated_at = NOW()
+          WHERE ended_at IS NULL
+            AND last_message_at < $1
         `, [cutoffDate]);
-        
         log.info(`Ended ${result.rowCount} inactive conversations`);
         
         // Clean up old messages (90+ days)
