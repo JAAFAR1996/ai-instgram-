@@ -427,7 +427,8 @@ export class PredictiveAnalyticsEngine {
         WHERE direction IN ('INCOMING', 'OUTGOING')
         GROUP BY hour_slot, day_of_week
         HAVING COUNT(CASE WHEN direction = 'OUTGOING' THEN 1 END) > 0
-        ORDER BY responses::float / NULLIF(total_sent, 0) DESC
+        ORDER BY (COUNT(CASE WHEN direction = 'INCOMING' AND prev_direction = 'OUTGOING' THEN 1 END)::float)
+                 / NULLIF(COUNT(CASE WHEN direction = 'OUTGOING' THEN 1 END), 0) DESC
       `;
 
       if (responsePatterns.length === 0) {
