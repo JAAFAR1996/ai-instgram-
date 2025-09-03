@@ -135,9 +135,13 @@ async function runManualMigration() {
     } catch (error) {
       console.log('⚠️ Skipping order_item_id index (column may not exist yet)');
     }
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status);
-    `);
+    try {
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status);
+      `);
+    } catch (error) {
+      console.log('⚠️ Skipping returns status index (column may not exist yet)');
+    }
     console.log('✅ returns indexes created');
 
     // Step 7: Migrate existing order data to order_items
