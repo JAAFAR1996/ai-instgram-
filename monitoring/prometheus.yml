@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'ai-sales-platform'
+    static_configs:
+      - targets: ['api:10000']
+    metrics_path: /metrics
+

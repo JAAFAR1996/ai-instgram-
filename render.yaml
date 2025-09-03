@@ -6,6 +6,7 @@ services:
     branch: main
     buildCommand: npm ci && npm run build
     startCommand: node dist/production-index.js
+    postdeploy: node dist/database/migrate.js
     envVars:
       - key: NODE_ENV
         value: production

@@ -5,92 +5,81 @@
  * ===============================================
  */
 
-import { readdirSync, readFileSync } from 'fs';
+import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { getLogger } from '../services/logger.js';
 import { getPool } from '../db/index.js';
 
 const log = getLogger({ component: 'database-migration' });
 
-/**
- * Run database migrations using production-ready pattern
- */
-export async function runDatabaseMigrations(): Promise<void> {
-  // Use direct connection for migrations to avoid environment validation
-  const { Pool } = await import('pg');
-  const currentPool = process.env.DATABASE_URL ? new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    max: 3,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 15000
-  }) : getPool();
-  
-  // Check for multiple migration directories
-  const migrationDirs = [
+function resolveMigrationDir(): string | null {
+  const candidates = [
     join(process.cwd(), 'migrations'),
     join(process.cwd(), 'src/database/migrations'),
     join(process.cwd(), 'src/migrations')
   ];
-
-  let migrationDir: string | null = null;
-  for (const dir of migrationDirs) {
+  for (const dir of candidates) {
     try {
-      const fs = await import('fs');
-      if (fs.existsSync(dir)) {
-        migrationDir = dir;
-        break;
-      }
-    } catch {
-      // Directory doesn't exist
-    }
+      // Using dynamic import to avoid ESM/CJS interop pitfalls
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      
+      if (existsSync(dir)) return dir;
+    } catch {}
   }
+  return null;
+}
 
+/**
+ * Run database migrations using production-ready pattern
+ */
+export async function runDatabaseMigrations(): Promise<void> {
+  const { Pool } = await import('pg');
+  const directPool = process.env.DATABASE_URL
+    ? new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+        max: 3,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 15000
+      })
+    : getPool();
+
+  const migrationDir = resolveMigrationDir();
   if (!migrationDir) {
     log.warn('No migration directory found, skipping migrations');
-        return;
-      }
-
-  log.info(`Running migrations from: ${migrationDir}`);
+    return;
+  }
 
   const files = readdirSync(migrationDir)
     .filter(f => f.endsWith('.sql'))
-    .sort(); // Ensure chronological order
+    .sort();
 
   if (files.length === 0) {
     log.info('No migration files found');
     return;
   }
 
-  const client = await currentPool.connect();
+  const client = await (directPool as any).connect();
   try {
-    // Create migrations tracking table
     await client.query(`
       CREATE TABLE IF NOT EXISTS _migrations (
         name TEXT PRIMARY KEY,
         applied_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
+      )`);
 
     for (const file of files) {
-      // Check if migration already applied
-      const { rows } = await client.query(
-        'SELECT 1 FROM _migrations WHERE name = $1',
-        [file]
-      );
-      
+      const { rows } = await client.query('SELECT 1 FROM _migrations WHERE name = $1', [file]);
       if (rows.length > 0) {
         log.info(`⏭️  Migration already applied: ${file}`);
         continue;
       }
 
       const sql = readFileSync(join(migrationDir, file), 'utf8');
-      log.info(`🔄 Running migration: ${file}`);
-      
+      log.info(`🔧 Running migration: ${file}`);
+
       await client.query('BEGIN');
       try {
         await client.query(sql);
-        // Record migration as applied
         await client.query('INSERT INTO _migrations (name) VALUES ($1)', [file]);
         await client.query('COMMIT');
         log.info(`✅ Migration completed: ${file}`);
@@ -102,75 +91,46 @@ export async function runDatabaseMigrations(): Promise<void> {
     }
 
     log.info('✅ All migrations completed successfully');
-  } catch (error) {
-    log.error('❌ Migration process failed:', error);
-    throw error;
   } finally {
     client.release();
-    // Close pool if we created it directly (not using getPool)
-    if (process.env.DATABASE_URL && currentPool !== getPool()) {
-      await currentPool.end();
-    }
+    if (process.env.DATABASE_URL && typeof (directPool as any).end === 'function' && directPool !== getPool()) {
+      await (directPool as any).end();
     }
   }
+}
 
-  /**
-   * Get migration status
-   */
+/**
+ * Get migration status
+ */
 export async function getMigrationStatus(): Promise<{
-    total: number;
-    executed: number;
-    pending: number;
-  migrations: any[];
+  total: number;
+  executed: number;
+  pending: number;
+  migrations: { name: string; status: 'executed' | 'pending'; applied_at: string | null }[];
 }> {
-  // Use direct connection for migrations to avoid environment validation
   const { Pool } = await import('pg');
-  const currentPool = process.env.DATABASE_URL ? new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    max: 3,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 15000
-  }) : getPool();
-  const client = await currentPool.connect();
-  
+  const directPool = process.env.DATABASE_URL
+    ? new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+        max: 3,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 15000
+      })
+    : getPool();
+  const client = await (directPool as any).connect();
+
   try {
-    // Ensure migrations table exists
     await client.query(`
       CREATE TABLE IF NOT EXISTS _migrations (
         name TEXT PRIMARY KEY,
         applied_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
+      )`);
 
-    // Get migration directories
-    const migrationDirs = [
-      join(process.cwd(), 'migrations'),
-      join(process.cwd(), 'src/database/migrations'),
-      join(process.cwd(), 'src/migrations')
-    ];
+    const migrationDir = resolveMigrationDir();
+    if (!migrationDir) return { total: 0, executed: 0, pending: 0, migrations: [] };
 
-    let migrationDir: string | null = null;
-    for (const dir of migrationDirs) {
-      try {
-        const fs = await import('fs');
-        if (fs.existsSync(dir)) {
-          migrationDir = dir;
-          break;
-        }
-      } catch {
-        // Directory doesn't exist
-      }
-    }
-
-    if (!migrationDir) {
-      return { total: 0, executed: 0, pending: 0, migrations: [] };
-    }
-
-    const allFiles = readdirSync(migrationDir)
-      .filter(f => f.endsWith('.sql'))
-      .sort();
-
+    const allFiles = readdirSync(migrationDir).filter(f => f.endsWith('.sql')).sort();
     const { rows: executedMigrations } = await client.query(
       'SELECT name, applied_at FROM _migrations ORDER BY applied_at'
     );
@@ -179,7 +139,7 @@ export async function getMigrationStatus(): Promise<{
       const executed = executedMigrations.find((m: any) => m.name === file);
       return {
         name: file,
-        status: executed ? 'executed' : 'pending',
+        status: executed ? 'executed' as const : 'pending' as const,
         applied_at: executed?.applied_at || null
       };
     });
@@ -192,83 +152,71 @@ export async function getMigrationStatus(): Promise<{
     };
   } finally {
     client.release();
-    // Close pool if we created it directly (not using getPool)
-    if (process.env.DATABASE_URL && currentPool !== getPool()) {
-      await currentPool.end();
-    }
+    if (process.env.DATABASE_URL && typeof (directPool as any).end === 'function' && directPool !== getPool()) {
+      await (directPool as any).end();
     }
   }
+}
 
-  /**
+/**
  * Create migration tracking table
  */
 export async function createMigrationTable(): Promise<void> {
-  // Use direct connection for migrations to avoid environment validation
   const { Pool } = await import('pg');
-  const currentPool = process.env.DATABASE_URL ? new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    max: 3,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 15000
-  }) : getPool();
-  const client = await currentPool.connect();
-  
+  const directPool = process.env.DATABASE_URL
+    ? new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+        max: 3,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 15000
+      })
+    : getPool();
+  const client = await (directPool as any).connect();
   try {
     await client.query(`
       CREATE TABLE IF NOT EXISTS _migrations (
         name TEXT PRIMARY KEY,
         applied_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
+      )`);
     log.info('✅ Migration tracking table created');
   } finally {
     client.release();
-    // Close pool if we created it directly (not using getPool)
-    if (process.env.DATABASE_URL && currentPool !== getPool()) {
-      await currentPool.end();
-    }
+    if (process.env.DATABASE_URL && typeof (directPool as any).end === 'function' && directPool !== getPool()) {
+      await (directPool as any).end();
     }
   }
+}
 
-  /**
- * Rollback last migration
+/**
+ * Rollback last migration (metadata only)
  */
 export async function rollbackMigration(): Promise<void> {
-  // Use direct connection for migrations to avoid environment validation
   const { Pool } = await import('pg');
-  const currentPool = process.env.DATABASE_URL ? new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    max: 3,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 15000
-  }) : getPool();
-  const client = await currentPool.connect();
-  
+  const directPool = process.env.DATABASE_URL
+    ? new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+        max: 3,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 15000
+      })
+    : getPool();
+  const client = await (directPool as any).connect();
   try {
-    // Get last executed migration
-    const { rows } = await client.query(
-      'SELECT name FROM _migrations ORDER BY applied_at DESC LIMIT 1'
-    );
-    
+    const { rows } = await client.query('SELECT name FROM _migrations ORDER BY applied_at DESC LIMIT 1');
     if (rows.length === 0) {
       log.info('ℹ️ No migrations to rollback');
       return;
     }
-
     const lastMigration = rows[0].name;
-    log.info(`🔄 Rolling back migration: ${lastMigration}`);
-    
-    // Remove migration record
+    log.info(`🔧 Rolling back migration: ${lastMigration}`);
     await client.query('DELETE FROM _migrations WHERE name = $1', [lastMigration]);
-    
     log.info(`✅ Migration rolled back: ${lastMigration}`);
   } finally {
     client.release();
-    // Close pool if we created it directly (not using getPool)
-    if (process.env.DATABASE_URL && currentPool !== getPool()) {
-      await currentPool.end();
+    if (process.env.DATABASE_URL && typeof (directPool as any).end === 'function' && directPool !== getPool()) {
+      await (directPool as any).end();
     }
   }
 }
@@ -284,3 +232,5 @@ export default {
   createMigrationTable,
   rollbackMigration
 };
+
+

@@ -97,8 +97,8 @@ CREATE TABLE IF NOT EXISTS merchants (
             "outside_baghdad": 5
         },
         "auto_responses": {
-            "welcome_message": "Ø£Ù‡Ù„Ø§Ù‹ ÙˆØ³Ù‡Ù„Ø§Ù‹! ÙƒÙŠÙ Ø£Ù‚Ø¯Ø± Ø£Ø³Ø§Ø¹Ø¯ÙƒØŸ",
-            "outside_hours": "Ù†Ø¹ØªØ°Ø±ØŒ Ø§Ù„Ù…Ø­Ù„ Ù…ØºÙ„Ù‚ Ø­Ø§Ù„ÙŠØ§Ù‹. Ø£ÙˆÙ‚Ø§Øª Ø§Ù„Ø¹Ù…Ù„: 9 ØµØ¨Ø§Ø­Ø§Ù‹ - 10 Ù…Ø³Ø§Ø¡Ù‹"
+            "welcome_message": "أهلاً وسهلاً! كيف أقدر أساعدك؟",
+            "outside_hours": "نعتذر، المحل مغلق حالياً. أوقات العمل: 9 صباحاً - 10 مساءً"
         }
     }'::JSONB,
     
@@ -1662,17 +1662,17 @@ COMMENT ON TABLE compliance_logs IS 'Compliance tracking for Meta 2025 requireme
 -- Migration complete notification
 DO $$
 BEGIN
-    RAISE NOTICE 'âœ… Migration 013: Utility Messages & Enhanced OAuth Security (2025) completed successfully';
-    RAISE NOTICE 'ðŸ“Š Added tables: utility_message_templates, utility_message_logs, oauth_sessions, instagram_business_accounts, compliance_logs';
-    RAISE NOTICE 'ðŸ”’ Applied Row Level Security policies to all new tables';
-    RAISE NOTICE 'âš¡ Created indexes for optimal performance';
-    RAISE NOTICE 'ðŸŽ¯ Ready for Instagram Utility Messages and enhanced OAuth 2025 features';
+    RAISE NOTICE 'Migration 013 completed: Utility Messages & Enhanced OAuth Security (2025)';
+    RAISE NOTICE 'Added tables: utility_message_templates, utility_message_logs, oauth_sessions, instagram_business_accounts, compliance_logs';
+    RAISE NOTICE 'Applied Row Level Security policies to all new tables';
+    RAISE NOTICE 'Created indexes for optimal performance';
+    RAISE NOTICE 'Ready for Instagram Utility Messages and enhanced OAuth 2025 features';
 END $$;
 \r\nCOMMIT;\r\n-- ==== End: 013_add_utility_messages_tables.sql ====\r\n
 -- ==== Begin: 015_enable_rls.sql ====\r\nBEGIN;
 -- ===============================================
 -- Row Level Security (RLS) Migration - 2025 Standards
--- âœ… ØªÙØ¹ÙŠÙ„ Ø£Ù…Ø§Ù† Ù…ØªØ¹Ø¯Ø¯ Ø§Ù„Ù…Ø³ØªØ£Ø¬Ø±ÙŠÙ† ÙˆØ­Ù…Ø§ÙŠØ© Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª
+-- Enable multi-tenant security and data protection (RLS)
 -- ===============================================
 
 -- 1. Create RLS helper functions
@@ -1953,11 +1953,11 @@ $$ LANGUAGE plpgsql;
 -- 20. Add notices in logs
 DO $$
 BEGIN
-  RAISE NOTICE 'âœ… RLS policies enabled on all tenant tables';
-  RAISE NOTICE 'âœ… RLS helper functions created';
-  RAISE NOTICE 'âœ… Performance indexes created';
-  RAISE NOTICE 'âš ï¸  Remember to call set_merchant_context() before queries';
-  RAISE NOTICE 'ðŸ“š Use validate_rls_context() to check current context';
+  RAISE NOTICE 'RLS policies enabled on all tenant tables';
+  RAISE NOTICE 'RLS helper functions created';
+  RAISE NOTICE 'Performance indexes created';
+  RAISE NOTICE 'Remember to call set_merchant_context() before queries';
+  RAISE NOTICE 'Use validate_rls_context() to check current context';
 END $$;
 \r\nCOMMIT;\r\n-- ==== End: 015_enable_rls.sql ====\r\n
 -- ==== Begin: 016_webhook_status_normalization.sql ====\r\nBEGIN;
@@ -2097,7 +2097,7 @@ WHERE migration_id = '017';
 COMMIT;
 
 -- Log success
-\echo 'Migration 017: Platform case sensitivity fixed and Instagram support added âœ…'
+\echo 'Migration 017: Platform case sensitivity fixed and Instagram support added'
 \r\nCOMMIT;\r\n-- ==== End: 017_fix_platform_case_sensitivity.sql ====\r\n
 -- ==== Begin: 018_webhook_events_idempotency.sql ====\r\nBEGIN;
 -- Migration: Create webhook_events table for idempotency
@@ -2324,11 +2324,11 @@ COMMIT;
 -- Ø¥Ø´Ø¹Ø§Ø±Ø§Øª Ø§Ù„Ù†Ø¬Ø§Ø­
 DO $$
 BEGIN
-  RAISE NOTICE 'âœ… Migration 019: Merchant-Instagram mapping composite primary key implemented';
-  RAISE NOTICE 'ðŸ”‘ Composite PK: (merchant_id, instagram_page_id)';
-  RAISE NOTICE 'ðŸ”— Foreign Key: merchant_id -> merchants(id)';
-  RAISE NOTICE 'ðŸ”’ Row Level Security configured (if GUC available)';
-  RAISE NOTICE 'ðŸ“Š Indexes created for optimal performance';
+  RAISE NOTICE 'Migration 019: Merchant-Instagram mapping composite primary key implemented';
+  RAISE NOTICE 'Composite PK: (merchant_id, instagram_page_id)';
+  RAISE NOTICE 'Foreign Key: merchant_id -> merchants(id)';
+  RAISE NOTICE 'Row Level Security configured (if GUC available)';
+  RAISE NOTICE 'Indexes created for optimal performance';
 END $$;
 \r\nCOMMIT;\r\n-- ==== End: 019_merchant_instagram_mapping_composite_key.sql ====\r\n
 -- ==== Begin: 019a_create_merchant_credentials_minimal.sql ====\r\nBEGIN;
@@ -2633,11 +2633,11 @@ GRANT EXECUTE ON FUNCTION reset_security_context() TO ai_sales;
 -- 16. Log completion
 DO $$
 BEGIN
-  RAISE NOTICE 'âœ… Comprehensive RLS enhancement completed';
-  RAISE NOTICE 'âœ… All tenant tables now have RLS policies';
-  RAISE NOTICE 'âœ… Enhanced context management functions created';
-  RAISE NOTICE 'ðŸ“Š Run validate_all_rls_policies() to check coverage';
-  RAISE NOTICE 'ðŸ” Use monitor_rls_context() to monitor usage';
+  RAISE NOTICE 'Comprehensive RLS enhancement completed';
+  RAISE NOTICE 'All tenant tables now have RLS policies';
+  RAISE NOTICE 'Enhanced context management functions created';
+  RAISE NOTICE 'Run validate_all_rls_policies() to check coverage';
+  RAISE NOTICE 'Use monitor_rls_context() to monitor usage';
 END $$;
 
 -- Record this migration
@@ -3580,7 +3580,7 @@ COMMENT ON COLUMN audit_logs.new_values IS 'New values after change';
 COMMIT;
 
 -- Log success
-\echo 'Migration 042: Audit logs table created âœ…'
+\echo 'Migration 042: Audit logs table created'
 \r\nCOMMIT;\r\n-- ==== End: 042_create_audit_logs.sql ====\r\n
 -- ==== Begin: 053_manychat_integration.sql ====\r\nBEGIN;
 -- ===============================================
@@ -5198,7 +5198,7 @@ END $$;
 -- Seed ai_config for merchants that have NULL or missing synonyms
 UPDATE public.merchants
 SET ai_config = COALESCE(ai_config, '{}'::jsonb) || '{
-  "synonyms": {"Ø¬Ø²Ù…Ù‡": ["Ø­Ø°Ø§Ø¡","Ø¨ÙˆØª"], "Ø±Ø¬Ø§ÙŠ": ["Ø±Ø¬Ø§Ù„ÙŠ"]},
+  "synonyms": {"جزمه": ["حذاء","بوت"], "رجاي": ["رجالي"]},
   "categories": [],
   "colors": [],
   "genders": [],
@@ -5864,10 +5864,10 @@ COMMENT ON COLUMN products.brand IS 'Product brand for analytics';
 -- Migration completion notice
 DO $$
 BEGIN
-    RAISE NOTICE 'âœ… Migration 080: Fixed Predictive Analytics Schema Issues';
-    RAISE NOTICE 'ðŸ”§ Added missing columns: size, color, material, brand to products';
-    RAISE NOTICE 'ðŸ“Š Created tables: order_items, returns';
-    RAISE NOTICE 'âš¡ Migrated existing order data to order_items table';
-    RAISE NOTICE 'ðŸ”’ Applied RLS policies to new tables';
+    RAISE NOTICE 'Migration 080: Fixed Predictive Analytics Schema Issues';
+    RAISE NOTICE 'Added missing columns: size, color, material, brand to products';
+    RAISE NOTICE 'Created tables: order_items, returns';
+    RAISE NOTICE 'Migrated existing order data to order_items table';
+    RAISE NOTICE 'Applied RLS policies to new tables';
 END $$;
 \r\nCOMMIT;\r\n-- ==== End: 081_fix_predictive_analytics_schema.sql ====\r\n

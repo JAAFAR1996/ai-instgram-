@@ -561,7 +561,7 @@ export class AIService {
         { role: 'system', content: 'أنت محلل صور مختصر. اذكر اللون، النوع، وأي عيب واضح فقط.' },
         msg
       ],
-      temperature: 0.2,
+      temperature: 0.7,
       max_tokens: 120,
     });
     return completion.choices?.[0]?.message?.content || '';

@@ -814,7 +814,7 @@ export class InstagramAIService {
       model: visionModel,
       messages: [ { role: 'system', content: sys }, user ],
       temperature: 0.1,
-      max_tokens: 180,
+      max_tokens: 600,
       response_format: { type: 'json_object' }
     });
     const raw = completion.choices?.[0]?.message?.content || '{}';

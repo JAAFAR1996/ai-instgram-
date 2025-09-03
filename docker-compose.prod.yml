@@ -9,7 +9,7 @@ services:
       target: production
     container_name: ai-sales-api-prod
     ports:
-      - "3000:3000"
+      - "10000:10000"
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://ai_sales:${POSTGRES_PASSWORD}@postgres:5432/ai_sales_prod
@@ -89,41 +89,41 @@ services:
           memory: 4G
 
   # Redis Production
-     redis:
-     image: redis:7.2-alpine
-     container_name: ai-sales-redis-prod
-     ports:
-       - "6379:6379"
-     environment:
-       REDIS_PASSWORD: ${REDIS_PASSWORD}
-     command: |
-       redis-server
-       --requirepass ${REDIS_PASSWORD}
-       --appendonly yes
-       --appendfsync everysec
-       --maxmemory 2gb
-       --maxmemory-policy allkeys-lru
-       --save 900 1
-       --save 300 10
-       --save 60 10000
-       --tcp-keepalive 60
-       --timeout 300
-     volumes:
-       - redis_prod_data:/data
-       - ./config/redis-prod.conf:/etc/redis/redis.conf
-     healthcheck:
-       test: ["CMD", "redis-cli", "ping"]
-       interval: 10s
-       timeout: 3s
-       retries: 5
-     restart: unless-stopped
-     networks:
-       - ai-sales-network
-     deploy:
-       resources:
-         limits:
-           cpus: '1.0'
-           memory: 2G
+  redis:
+    image: redis:7.2-alpine
+    container_name: ai-sales-redis-prod
+    ports:
+      - "6379:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command: |
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --tcp-keepalive 60
+      --timeout 300
+    volumes:
+      - redis_prod_data:/data
+      - ./config/redis-prod.conf:/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ai-sales-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
 
   # Nginx Reverse Proxy
   nginx:

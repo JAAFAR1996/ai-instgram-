@@ -338,7 +338,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
               const { SmartCache } = await import('../services/smart-cache.js');
               const sc = new SmartCache();
               const cached = await sc.getCommonReply(sanitizedMerchantId, messageText);
-              if (cached && cached.text) {
+              if (cached && cached.text && typeof (cached as any).intent === 'string' && !['OTHER','SMALL_TALK'].includes(String((cached as any).intent).toUpperCase())) {
                 aiResponse = cached.text;
                 aiIntent = 'CACHED_COMMON';
                 aiConfidence = 0.9;
@@ -372,7 +372,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             } else if (!usedCache) {
               const orchResult = await Promise.race([
                 orchestrate(sanitizedMerchantId, sanitizedUsername, messageText, { askAtMostOneFollowup: true, session: sessionData, showThinking: true }),
-                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 8000))
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 30000))
               ]);
               aiResponse = orchResult.text;
               aiIntent = orchResult.intent;

@@ -122,6 +122,22 @@ export async function orchestrate(
     return withThinking({ text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision });
   }
 
+  // Generic OTHER response (non-sector-specific) before falling back further
+  if (analysis.intent === 'OTHER') {
+    const examples = Array.isArray(hints.categories) && hints.categories.length
+      ? ` (مثال: ${hints.categories.slice(0, 3).filter(Boolean).join(' / ')})`
+      : '';
+    const text = `أوكي! حتى أساعدك بسرعة، اكتب اسم المنتج أو الفئة${examples} والمواصفات المهمة (مثل اللون/القياس/السعة/الموديل) إذا موجود.`;
+    return withThinking({
+      text,
+      intent: analysis.intent,
+      confidence: analysis.confidence,
+      entities: analysis.entities,
+      decision_path: decision,
+      stage: 'AWARE'
+    });
+  }
+
   // Pricing / Inventory via SQL
   if (analysis.intent === 'PRICE' || analysis.intent === 'INVENTORY') {
     // Check missing critical property

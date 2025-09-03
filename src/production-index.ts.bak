@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ===============================================
  * Production Entry Point - AI Sales Platform
  * Modular, secure, and production-ready initialization
@@ -43,9 +43,6 @@ import rlsMiddleware from './middleware/rls-merchant-isolation.js';
 import { registerWebhookRoutes } from './routes/webhooks.js';
 import { registerMerchantAdminRoutes } from './routes/merchant-admin.js';
 import { registerAdminRoutes } from './routes/admin.js';
-import { registerUtilityMessageRoutes } from './routes/utility-messages.js';
-import fs from 'node:fs';
-import path from 'node:path';
 
 // 8) Health monitoring
 import { getHealthSnapshot, startHealth } from './services/health-check.js';
@@ -188,15 +185,10 @@ async function bootstrap() {
     const deps = { pool };
     
     registerWebhookRoutes(app, deps);
+    
+    
     registerMerchantAdminRoutes(app);
     registerAdminRoutes(app);
-    // Register utility messages routes
-    try {
-      registerUtilityMessageRoutes(app);
-      log.info('Utility message routes registered');
-    } catch (e) {
-      log.warn('Failed to register utility message routes', { error: String(e) });
-    }
 
     // Prometheus Metrics (enabled only when METRICS_ENABLED)
     const metricsEnabled = process.env.METRICS_ENABLED === 'true';
@@ -253,23 +245,6 @@ async function bootstrap() {
       const snapshot = getHealthSnapshot();
       return c.json(snapshot, snapshot.ready ? 200 : 503);
     });
-
-    // Serve simple legal pages (static files)
-    const legalDir = path.join(process.cwd(), 'legal');
-    const serveHtml = (file: string) => {
-      try {
-        const fp = path.join(legalDir, file);
-        if (fs.existsSync(fp)) {
-          const html = fs.readFileSync(fp, 'utf8');
-          return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-        }
-      } catch {}
-      return new Response('Not Found', { status: 404 });
-    };
-
-    app.get('/legal', () => serveHtml('index.html'));
-    app.get('/legal/privacy', () => serveHtml('privacy.html'));
-    app.get('/legal/deletion', () => serveHtml('deletion.html'));
 
     // Root endpoint
     app.get('/', (c) => {
@@ -430,4 +405,6 @@ process.on('SIGUSR2', async () => {
 const app = await bootstrap();
 
 export default app;
+
+
 
