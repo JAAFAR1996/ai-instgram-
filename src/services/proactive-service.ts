@@ -167,7 +167,7 @@ export class ProactiveCustomerService {
       }
 
       // Alert 3: Low stock for popular items
-      const lowStockItems = await sql<{ id: string; name_ar: string; stock_level: number; interested_customers: number }>`
+      const lowStockItems = await sql<{ id: string; name_ar: string; stock_quantity: number; interested_customers: number }>`
         WITH interested_customers AS (
           SELECT p.id, COUNT(DISTINCT c.customer_instagram) as customer_count
           FROM products p
@@ -178,14 +178,14 @@ export class ProactiveCustomerService {
             AND o.created_at >= NOW() - INTERVAL '60 days'
           GROUP BY p.id
         )
-        SELECT p.id, p.name_ar, p.stock_level, COALESCE(ic.customer_count, 0) as interested_customers
+        SELECT p.id, p.name_ar, p.stock_quantity, COALESCE(ic.customer_count, 0) as interested_customers
         FROM products p
         LEFT JOIN interested_customers ic ON ic.id = p.id
         WHERE p.merchant_id = ${merchantId}::uuid
-          AND p.stock_level <= 5
-          AND p.stock_level > 0
+          AND p.stock_quantity <= 5
+          AND p.stock_quantity > 0
           AND COALESCE(ic.customer_count, 0) > 2
-        ORDER BY interested_customers DESC, stock_level ASC
+        ORDER BY interested_customers DESC, stock_quantity ASC
         LIMIT 10
       `;
 
@@ -194,11 +194,11 @@ export class ProactiveCustomerService {
           merchantId,
           customerId: 'MERCHANT_ALERT', // Special identifier for merchant alerts
           type: 'RESTOCK_ALERT',
-          message: `المنتج "${item.name_ar}" أوشك على النفاد (${item.stock_level} قطع) - ${item.interested_customers} عميل مهتم`,
+          message: `المنتج "${item.name_ar}" أوشك على النفاد (${item.stock_quantity} قطع) - ${item.interested_customers} عميل مهتم`,
           scheduledAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
           status: 'PENDING',
-          context: { productId: item.id, stockLevel: item.stock_level, interestedCustomers: item.interested_customers },
-          priority: item.stock_level <= 2 ? 'URGENT' : 'HIGH',
+          context: { productId: item.id, stockLevel: item.stock_quantity, interestedCustomers: item.interested_customers },
+          priority: item.stock_quantity <= 2 ? 'URGENT' : 'HIGH',
         });
       }
 

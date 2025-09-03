@@ -355,13 +355,13 @@ export class PredictiveAnalyticsEngine {
       const profile = await this.profiler.personalizeResponses(merchantId, customerId);
       if (profile.preferences.categories.length > 0) {
         const sql = this.db.getSQL();
-        const lowStockItems = await sql<{ name_ar: string; stock_level: number; id: string }>`
-          SELECT name_ar, stock_level, id
+        const lowStockItems = await sql<{ name_ar: string; stock_quantity: number; id: string }>`
+          SELECT name_ar, stock_quantity, id
           FROM products
           WHERE merchant_id = ${merchantId}::uuid
             AND category = ANY(${profile.preferences.categories})
-            AND stock_level > 0 AND stock_level <= 3
-          ORDER BY stock_level ASC
+            AND stock_quantity > 0 AND stock_quantity <= 3
+          ORDER BY stock_quantity ASC
           LIMIT 3
         `;
 
@@ -369,8 +369,8 @@ export class PredictiveAnalyticsEngine {
           actions.push({
             type: 'RESTOCK_ALERT',
             priority: 'MEDIUM',
-            message: `المنتج "${item.name_ar}" أوشك على النفاد (${item.stock_level} قطع) - العميل ${customerId} مهتم بهذه الفئة`,
-            context: { productId: item.id, stockLevel: item.stock_level, customerId, merchantId },
+            message: `المنتج "${item.name_ar}" أوشك على النفاد (${item.stock_quantity} قطع) - العميل ${customerId} مهتم بهذه الفئة`,
+            context: { productId: item.id, stockLevel: item.stock_quantity, customerId, merchantId },
           });
         }
       }
