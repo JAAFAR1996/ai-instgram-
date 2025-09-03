@@ -116,7 +116,7 @@ export class PredictiveAnalyticsEngine {
       // If analyzing a specific product
       if (proposedProductId && proposedSize) {
         const productInfo = await sql<{ category: string; brand: string }>`
-          SELECT category, brand FROM products WHERE id = ${proposedProductId} LIMIT 1
+          SELECT category, brand FROM products WHERE id = ${proposedProductId}::uuid LIMIT 1
         `;
 
         const info = productInfo[0];
@@ -193,8 +193,8 @@ export class PredictiveAnalyticsEngine {
       }>`
         WITH recent_messages AS (
           SELECT COUNT(*) as msg_count,
-                 EXTRACT(EPOCH FROM (NOW() - MAX(created_at)))/86400 as last_msg_days,
-                 EXTRACT(EPOCH FROM (NOW() - MIN(created_at)))/86400 as msg_span_days
+                 EXTRACT(EPOCH FROM (NOW() - MAX(ml.created_at)))/86400 as last_msg_days,
+                 EXTRACT(EPOCH FROM (NOW() - MIN(ml.created_at)))/86400 as msg_span_days
           FROM message_logs ml
           JOIN conversations c ON c.id = ml.conversation_id
           WHERE c.merchant_id = ${merchantId}::uuid 
@@ -203,12 +203,12 @@ export class PredictiveAnalyticsEngine {
         ),
         recent_orders AS (
           SELECT COUNT(*) as order_count,
-                 EXTRACT(EPOCH FROM (NOW() - MAX(created_at)))/86400 as last_order_days,
-                 AVG(total_amount) as avg_amount
-          FROM orders
-          WHERE merchant_id = ${merchantId}::uuid 
-            AND customer_instagram = ${customerId}
-            AND created_at >= NOW() - INTERVAL '90 days'
+                 EXTRACT(EPOCH FROM (NOW() - MAX(o.created_at)))/86400 as last_order_days,
+                 AVG(o.total_amount) as avg_amount
+          FROM orders o
+          WHERE o.merchant_id = ${merchantId}::uuid 
+            AND o.customer_instagram = ${customerId}
+            AND o.created_at >= NOW() - INTERVAL '90 days'
         ),
         engagement_trend AS (
           SELECT COUNT(*) as recent_msgs

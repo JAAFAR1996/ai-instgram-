@@ -70,20 +70,24 @@ export class SmartProductSearch {
   }
 
   async fuzzySearch(query: string, merchantId: string, options: SearchOptions = {}): Promise<SearchResult[]> {
-    const sql = this.db.getSQL();
     const limit = options.limit || 5;
     const expansions = normalizeForSearch(query).slice(0, 5);
-    const rows = await sql<ProductSearchRow>`
+    if (expansions.length === 0) return [];
+
+    // Build patterns safely for ILIKE ANY($2)
+    const patterns = expansions.map(e => `%${e}%`);
+    const sql = `
       SELECT p.*
       FROM products p
-      WHERE p.merchant_id = ${merchantId}::uuid AND p.status = 'ACTIVE' AND (
-        ${expansions.length > 0
-          ? expansions.map(e => sql`(p.name_ar ILIKE ${'%' + e + '%'} OR p.sku ILIKE ${'%' + e + '%'} OR p.category ILIKE ${'%' + e + '%'})`).reduce((a,b) => sql`${a} OR ${b}`)
-          : sql`false`}
+      WHERE p.merchant_id = $1::uuid AND p.status = 'ACTIVE' AND (
+        p.name_ar ILIKE ANY($2::text[])
+        OR p.sku ILIKE ANY($2::text[])
+        OR p.category ILIKE ANY($2::text[])
       )
       ORDER BY p.is_featured DESC, p.updated_at DESC
-      LIMIT ${limit}
+      LIMIT $3
     `;
+    const rows = await this.db.query<ProductSearchRow>(sql, [merchantId, patterns, limit]);
     return rows.map(r => ({ product: r, relevanceScore: 50, matchType: 'fuzzy' }));
   }
 }
