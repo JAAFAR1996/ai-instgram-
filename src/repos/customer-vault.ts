@@ -27,7 +27,7 @@ export async function upsertVault(
       ${customerId},
       ${conversationId || null},
       ${JSON.stringify(patch)}::jsonb,
-      ${sql.unsafe('NOW() + ($1 || \" days\")::interval', [ttlDays])}
+      NOW() + (${ttlDays} || ' days')::interval
     )
     ON CONFLICT (merchant_id, customer_id)
     DO UPDATE SET 
