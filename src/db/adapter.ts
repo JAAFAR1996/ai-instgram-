@@ -8,7 +8,7 @@
 import { getPool } from './index.js';
 import { type Sql, type SqlFunction } from './sql-template.js';
 export type { DBRow } from '../types/instagram.js';
-import { buildSqlCompat } from '../infrastructure/db/sql-compat.js';
+import { buildSqlCompat, toQuery, buildSqlCompatFromClient } from '../infrastructure/db/sql-compat.js';
 import { DatabaseError } from '../types/database.js';
 import { getLogger } from '../services/logger.js';
 import type { Pool, PoolClient } from 'pg';
@@ -113,14 +113,15 @@ export class DatabaseAdapter implements IDatabase {
     ...params: unknown[]
   ): Promise<T[]> => {
       const startTime = Date.now();
-      const sql = strings.reduce((acc, str, i) => acc + str + (params[i] !== undefined ? `$${i + 1}` : ''), '');
+      const compiled = toQuery(strings, params);
+      const sql = compiled.text;
       
       try {
         const result = await baseSql<T>(strings, ...params);
         const duration = Date.now() - startTime;
         
               // Log performance metrics
-      this.logQueryMetrics(sql, (params as unknown[]) || [], duration, result.length);
+      this.logQueryMetrics(sql, (compiled.values as unknown[]) || [], duration, result.length);
         
         // Log slow queries
         if (duration > 1000) {
@@ -142,6 +143,12 @@ export class DatabaseAdapter implements IDatabase {
         throw error;
       }
     };
+
+    // Proxy composition helpers for compatibility
+    (enhancedSql as any).unsafe = (baseSql as any).unsafe;
+    (enhancedSql as any).join = (baseSql as any).join;
+    (enhancedSql as any).commit = (baseSql as any).commit;
+    (enhancedSql as any).rollback = (baseSql as any).rollback;
 
     // Add transaction support to SQL function
     enhancedSql.transaction = async <T>(
@@ -314,14 +321,15 @@ export class DatabaseAdapter implements IDatabase {
         clientId: (client as ExtendedPoolClient).processID || 'unknown'
       });
 
-      // Set transaction options
+      // Explicitly begin transaction and set options
+      await client.query('BEGIN');
       await client.query(`SET TRANSACTION ISOLATION LEVEL ${isolationLevel}`);
       if (readOnly) {
         await client.query('SET TRANSACTION READ ONLY');
       }
 
       // Create SQL function bound to this client
-      const clientSql = buildSqlCompat(this.pool);
+      const clientSql = buildSqlCompatFromClient(client);
       
       // Execute transaction with timeout
       const transactionPromise = fn(clientSql);
