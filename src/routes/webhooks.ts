@@ -576,7 +576,24 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             }
             
           } catch (aiError) {
-            log.error('❌ AI service failed', { error: String(aiError) });
+            log.error('❌ AI service failed - attempting retry', { error: String(aiError), attempt: 1 });
+            
+            // Retry AI service once before fallback
+            try {
+              const retryResult = await orchSrv.generatePlatformResponse(messageText, context, 'instagram');
+              log.info('✅ AI retry succeeded', { processingTime: Date.now() - processingStartTime });
+              
+              return c.json({
+                version: "v2",
+                messages: [{ type: "text", text: retryResult.response.message || "شكراً لرسالتك!" }],
+                set_attributes: { 
+                  ai_reply: retryResult.response.message || "RETRY_SUCCESS", 
+                  processing_time: Date.now() - processingStartTime 
+                }
+              });
+            } catch (retryError) {
+              log.error('❌ AI retry also failed', { error: String(retryError), attempt: 2 });
+            }
             
             // Enhanced fallback handling (Phase 6)
             try {

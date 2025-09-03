@@ -280,8 +280,8 @@ export class AIService {
         () => this.openai.chat.completions.create({
           model,
           messages: prompt,
-          temperature: Math.min(this.config.ai.temperature ?? 0.2, 0.4),
-          max_tokens: Math.min(this.config.ai.maxTokens ?? 180, 220),
+          temperature: Math.min(this.config.ai.temperature ?? 0.8, 1.0),
+          max_tokens: Math.min(this.config.ai.maxTokens ?? 500, 800),
           top_p: 0.9,
           presence_penalty: 0,
           frequency_penalty: 0,
