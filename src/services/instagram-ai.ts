@@ -1002,9 +1002,9 @@ export class InstagramAIService {
               ${ilikes.map(l => sql`p.name_ar ILIKE ${l}`).reduce((a, b) => sql`${a} OR ${b}`)}
               OR ${ilikes.map(l => sql`p.sku ILIKE ${l}`).reduce((a, b) => sql`${a} OR ${b}`)}
               OR ${ilikes.map(l => sql`p.category ILIKE ${l}`).reduce((a, b) => sql`${a} OR ${b}`)}
-            )` : sql`true`}
+            )` : sql`TRUE`}
           )
-          AND (${matchedCats.length > 0 ? sql`p.category = ANY(${matchedCats})` : sql`true`})
+          AND (${matchedCats.length > 0 ? sql`p.category = ANY(${matchedCats})` : sql`TRUE`})
           AND (
             ${sizeFilter ? sql`(
               lower(p.attributes->>'size') = ${sizeFilter.toLowerCase()}
@@ -1012,7 +1012,7 @@ export class InstagramAIService {
                 SELECT 1 FROM jsonb_array_elements(p.variants) v
                 WHERE lower(coalesce(v->>'size','')) = ${sizeFilter.toLowerCase()}
               )
-            )` : sql`true`}
+            )` : sql`TRUE`}
           )
           AND (
             ${colorFilter ? sql`(
@@ -1021,7 +1021,7 @@ export class InstagramAIService {
                 SELECT 1 FROM jsonb_array_elements(p.variants) v
                 WHERE lower(coalesce(v->>'color','')) = ${colorFilter.toLowerCase()}
               )
-            )` : sql`true`}
+            )` : sql`TRUE`}
           )
         ORDER BY p.is_featured DESC, p.updated_at DESC, p.stock_quantity DESC
         LIMIT ${limit}

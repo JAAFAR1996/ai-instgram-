@@ -59,9 +59,9 @@ export async function findProduct(
       AND (
         ${expansions.length > 0
           ? expansions.map(e => sql`(pep.name_ar ILIKE ${'%' + e + '%'} OR pep.category ILIKE ${'%' + e + '%'} OR pep.sku ILIKE ${'%' + e + '%'})`).reduce((a, b) => sql`${a} OR ${b}`)
-          : sql`true`}
+          : sql`TRUE`}
       )
-      AND (${entities.category ? sql`pep.category ILIKE ${'%' + entities.category + '%'}` : sql`true`})
+      AND (${entities.category ? sql`pep.category ILIKE ${'%' + entities.category + '%'}` : sql`TRUE`})
     ORDER BY pep.stock_quantity DESC, pep.final_price_iqd ASC NULLS LAST, pep.name_ar ASC
     LIMIT 10
   `;

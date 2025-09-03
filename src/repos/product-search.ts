@@ -76,9 +76,9 @@ export async function searchProduct(
       AND (
         ${expansions.length > 0
           ? expansions.map(e => sql`(p.name_ar ILIKE ${'%' + e + '%'} OR p.category ILIKE ${'%' + e + '%'} OR p.sku ILIKE ${'%' + e + '%'})`).reduce((a, b) => sql`${a} OR ${b}`)
-          : sql`true`}
+          : sql`TRUE`}
       )
-      AND (${entities.category ? sql`p.category ILIKE ${'%' + entities.category + '%'}` : sql`true`})
+      AND (${entities.category ? sql`p.category ILIKE ${'%' + entities.category + '%'}` : sql`TRUE`})
   `;
 
   // Rank with heuristics: category > size > color > brand > free tokens
