@@ -580,14 +580,19 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             
             // Retry AI service once before fallback
             try {
-              const retryResult = await orchSrv.generatePlatformResponse(messageText, context, 'instagram');
+              const retryResult = await orchestrate(
+                sanitizedMerchantId,
+                sanitizedUsername,
+                messageText,
+                { askAtMostOneFollowup: true, session: sessionData, showThinking: false }
+              );
               log.info('✅ AI retry succeeded', { processingTime: Date.now() - processingStartTime });
               
               return c.json({
                 version: "v2",
-                messages: [{ type: "text", text: retryResult.response.message || "شكراً لرسالتك!" }],
+                messages: [{ type: "text", text: retryResult.text || "شكراً لرسالتك!" }],
                 set_attributes: { 
-                  ai_reply: retryResult.response.message || "RETRY_SUCCESS", 
+                  ai_reply: retryResult.text || "RETRY_SUCCESS", 
                   processing_time: Date.now() - processingStartTime 
                 }
               });
