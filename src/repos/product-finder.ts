@@ -37,10 +37,10 @@ export async function findProduct(
 
   // Ensure RLS context presents and matches
   const ctx = await sql<{ merchant_id: string }>`SELECT current_setting('app.current_merchant_id', true) as merchant_id`;
-  const mid = (ctx[0]?.merchant_id || '').trim();
+  const mid = (ctx[0]?.merchant_id ?? '').trim();
   if (!mid || mid !== merchantId) throw new Error('security_context_missing');
 
-  const expansions = normalizeForSearch(queryText || '', synonyms).filter(Boolean).slice(0, 6);
+  const expansions = normalizeForSearch(queryText ?? '', synonyms).filter(Boolean).slice(0, 6);
 
   const rows = await sql<{
     id: string;
@@ -83,7 +83,8 @@ export async function findProduct(
     if (entities.size) w += 3;
     if (entities.color) w += 2;
     if (entities.brand) w += 2;
-    if ((entities.free?.length || 0) > 0) w += Math.min(entities.free!.length, 3);
+  const freeLen = entities.free?.length ?? 0;
+  if (freeLen > 0) w += Math.min(freeLen, 3);
     if (p.stock_quantity > 0) w += 1;
     // Boost using custom entities (e.g., موديل/سنة)
     if (entities.custom) {
@@ -95,11 +96,11 @@ export async function findProduct(
   }).sort((a, b) => b.w - a.w).map(x => x.p);
 
   return {
-    top: ranked[0] || null,
+    top: ranked[0] ?? null,
     alternatives: ranked.slice(1, 4)
   };
 }
 
 function icontains(a?: string | null, b?: string | null): boolean {
-  return (a || '').toLowerCase().includes((b || '').toLowerCase());
+  return (a ?? '').toLowerCase().includes((b ?? '').toLowerCase());
 }

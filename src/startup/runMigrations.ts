@@ -52,7 +52,7 @@ export async function runMigrations(pool: Pool) {
       await client.query('COMMIT');
       console.log('✅ Migration done:', f);
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     await client.query('ROLLBACK');
     console.error('⚠️ Migration failed (non-fatal):', e.message);
   } finally {

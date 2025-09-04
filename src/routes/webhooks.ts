@@ -13,16 +13,32 @@ import { z } from 'zod';
 import { createHmac } from 'node:crypto';
 import { getPool } from '../db/index.js';
 import { getEnv } from '../config/env.js';
-import type { ImageData } from '../services/ai.js';
+import type { ConversationMsg } from '../services/conversation-manager.js';
+import { MCEvent as MCEventSchema, type MCEvent as MCEventType } from '../types/manychat.js';
+import { ProductionQueueManager } from '../services/ProductionQueueManager.js';
+import { RedisEnvironment } from '../config/RedisConfigurationFactory.js';
 
-type ManyChatWebhookBody = {
-  merchant_id?: string;
-  instagram_username?: string;
-  merchant_username?: string;
-  subscriber_id?: string;
-  event_type?: string;
-  data?: { text?: string };
-};
+// Zod schema for ManyChat webhook validation
+const ManyChatAttachmentSchema = z.object({
+  url: z.string().url().optional(),
+  payload: z.object({ url: z.string().url().optional() }).optional(),
+  image_url: z.string().url().optional(),
+  src: z.string().url().optional()
+}).passthrough();
+
+const ManyChatWebhookSchema = z.object({
+  merchant_id: z.string().uuid().optional(),
+  instagram_username: z.string().optional(),
+  merchant_username: z.string().optional(),
+  subscriber_id: z.string().optional(),
+  event_type: z.string().optional(),
+  data: z.object({
+    text: z.string().optional(),
+    attachments: z.array(ManyChatAttachmentSchema).optional()
+  }).optional()
+}).passthrough();
+
+type ManyChatWebhookBody = z.infer<typeof ManyChatWebhookSchema>;
 
 const log = getLogger({ component: 'webhooks-routes' });
 
@@ -64,7 +80,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         return c.text('Bad Request', 400);
       }
 
-      const expectedToken = (getEnv('IG_VERIFY_TOKEN') || '').trim();
+      const expectedToken = (getEnv('IG_VERIFY_TOKEN') ?? '').trim();
       if (!expectedToken || token !== expectedToken) {
         log.warn('Instagram webhook verification failed - invalid token', { 
           providedToken: token,
@@ -94,7 +110,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
     try {
       // 🔒 PRODUCTION: Bearer token authentication
       const authHeader = c.req.header('authorization');
-      const expectedBearer = (getEnv('MANYCHAT_BEARER') || '').trim();
+      const expectedBearer = (getEnv('MANYCHAT_BEARER') ?? '').trim();
       if (!expectedBearer) {
         log.error('❌ MANYCHAT_BEARER not configured');
         return c.json({ error: 'auth_not_configured' }, 401);
@@ -110,7 +126,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       const rawBody = await c.req.text();
       // HMAC verification when secret provided
       const signature = c.req.header('x-hub-signature-256') || c.req.header('x-signature-256') || c.req.header('x-signature') || c.req.header('signature');
-      const webhookSecret = (getEnv('MANYCHAT_WEBHOOK_SECRET') || '').trim();
+      const webhookSecret = (getEnv('MANYCHAT_WEBHOOK_SECRET') ?? '').trim();
       if (webhookSecret) {
         if (!signature) {
           log.warn('ManyChat webhook: signature missing while secret configured');
@@ -132,11 +148,35 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           return c.json({ error: 'signature_error' }, 401);
         }
       }
-      const body: ManyChatWebhookBody = rawBody ? JSON.parse(rawBody) : {};
+      let body: ManyChatWebhookBody;
+      try {
+        const parsedBody = rawBody ? JSON.parse(rawBody) : {};
+        const validation = ManyChatWebhookSchema.safeParse(parsedBody);
+        
+        if (!validation.success) {
+          log.warn('ManyChat webhook validation failed', {
+            errors: validation.error.errors,
+            rawBodyLength: rawBody?.length || 0
+          });
+          return c.json({ 
+            ok: false, 
+            error: 'invalid_payload_structure',
+            details: validation.error.errors
+          }, 400);
+        }
+        
+        body = validation.data;
+      } catch (parseErr) {
+        log.error('ManyChat webhook JSON parse error', {
+          error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+          rawBodyLength: rawBody?.length || 0
+        });
+        return c.json({ ok: false, error: 'invalid_json' }, 400);
+      }
       const { merchant_id, instagram_username, merchant_username, subscriber_id, event_type, data } = body;
 
       // 🛡️ PRODUCTION: Input validation and sanitization - use fallback for merchant_id
-      const finalMerchantId = (merchant_id || '').trim();
+      const finalMerchantId = (merchant_id ?? '').trim();
       
       const incomingUsername = (merchant_username ?? instagram_username) as string | undefined;
       const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -181,16 +221,16 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         return c.json({ ok: false, error: 'context_error' }, 503);
       }
 
-      // Normalize attachments (images)
-      const attachments = Array.isArray((data as any)?.attachments) ? (data as any).attachments : [];
-      const imageData: ImageData[] = attachments
-        .map((a: any) => a?.url || a?.payload?.url || a?.image_url || a?.src || null)
-        .filter((u: unknown): u is string => typeof u === 'string' && /^https?:\/\//i.test(u))
-        .map((url: string): ImageData => ({ url }));
-      const hasImages = imageData.length > 0;
+      // Normalize attachments (images) strictly to URL list
+      const attachments = Array.isArray(data?.attachments) ? data.attachments : [];
+      const images: Array<{ url: string }> = attachments
+        .map((attachment) => attachment.url || attachment.payload?.url || attachment.image_url || attachment.src || null)
+        .filter((u): u is string => typeof u === 'string' && /^https?:\/\//i.test(u))
+        .map((url) => ({ url }));
+      const hasImages = images.length > 0;
 
       if (event_type === 'message' && (data?.text || hasImages)) {
-        const messageText = String(data?.text || '').trim();
+        const messageText = String(data?.text ?? '').trim();
         
         if (messageText.length > 4000) {
           return c.json({
@@ -209,13 +249,13 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           
           // Find or create conversation
           let conversationId: string;
-          let sessionData: any = {};
+          let sessionData: Record<string, unknown> = {};
           try {
-            const existingConversations = await pool.query(`
+            const existingConversations = await withRetry(() => pool.query(`
               SELECT id, message_count, session_data FROM conversations 
               WHERE merchant_id = $1 AND customer_instagram = $2
               ORDER BY created_at DESC LIMIT 1
-            `, [sanitizedMerchantId, sanitizedUsername]);
+            `, [sanitizedMerchantId, sanitizedUsername]), 'db_select_conversation', { logger: log, payload: { merchantId: sanitizedMerchantId, username: sanitizedUsername } });
             
             if (existingConversations.rows.length > 0) {
               conversationId = existingConversations.rows[0].id;
@@ -234,13 +274,13 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 }
               } catch {}
             } else {
-              const newConversation = await pool.query(`
+              const newConversation = await withRetry(() => pool.query(`
                 INSERT INTO conversations (
                   merchant_id, customer_instagram, platform, source_channel,
                   conversation_stage, session_data, message_count, created_at, updated_at
                 ) VALUES ($1, $2, 'instagram', 'manychat', 'GREETING', '{}', 0, NOW(), NOW())
                 RETURNING id
-              `, [sanitizedMerchantId, sanitizedUsername]);
+              `, [sanitizedMerchantId, sanitizedUsername]), 'db_insert_conversation', { logger: log, payload: { merchantId: sanitizedMerchantId, username: sanitizedUsername } });
               
               conversationId = newConversation.rows[0].id;
               sessionData = {};
@@ -270,16 +310,16 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             historyIds = historyResult.rows.map((r: { id: string }) => r.id);
             // Optimize long history into a short summary for sessionData (kept small for tokens)
             try {
-              const msgs = historyResult.rows
-                .map((r: any) => ({
-                  role: r.direction === 'INCOMING' ? 'user' : 'assistant',
-                  content: String(r.content || ''),
-                  timestamp: r.created_at
+              const msgs: ConversationMsg[] = historyResult.rows
+                .map((r: { direction: string; content: unknown; created_at: Date | string }) => ({
+                  role: r.direction === 'INCOMING' ? 'user' as const : 'assistant' as const,
+                  content: String(r.content ?? ''),
+                  timestamp: r.created_at,
                 }))
                 .reverse(); // oldest -> newest
               const { ConversationManager } = await import('../services/conversation-manager.js');
               const cm = new ConversationManager();
-              const opt = await cm.optimizeHistory(sanitizedMerchantId, sanitizedUsername, msgs as any, 6);
+              const opt = await cm.optimizeHistory(sanitizedMerchantId, sanitizedUsername, msgs, 6);
               if (opt.sessionPatch && Object.keys(opt.sessionPatch).length) {
                 preSessionPatch = opt.sessionPatch;
                 sessionData = { ...(opt.sessionPatch || {}), ...(sessionData || {}) };
@@ -293,19 +333,19 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           // Store incoming message and get id
           let incomingMessageId: string | null = null;
           try {
-            const ins = await pool.query(
+            const ins = await withRetry(() => pool.query(
               `INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, created_at)
                VALUES ($1, $2, $3, 'INCOMING', 'instagram', 'manychat', NOW()) RETURNING id`,
               [conversationId, messageText || (hasImages ? 'IMAGE_MESSAGE' : ''), hasImages ? 'IMAGE' : 'TEXT']
-            );
-            incomingMessageId = ins.rows?.[0]?.id || null;
+            ), 'db_insert_message', { logger: log, payload: { conversationId } });
+            incomingMessageId = ins.rows?.[0]?.id ?? null;
           } catch (insErr) {
             log.warn('Failed to insert incoming message with RETURNING id; retrying plain insert', { error: String(insErr) });
-            await pool.query(
+            await withRetry(() => pool.query(
               `INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, created_at)
                VALUES ($1, $2, 'TEXT', 'INCOMING', 'instagram', 'manychat', NOW())`,
               [conversationId, messageText || (hasImages ? 'IMAGE_MESSAGE' : '')]
-            );
+            ), 'db_insert_message_fallback', { logger: log, payload: { conversationId } });
           }
 
           // ⚡ SKIP image metadata in webhook - moved to queue processing
@@ -329,14 +369,24 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             const eventId = `manychat_${Date.now()}_${sanitizedMerchantId.slice(-8)}_${Math.random().toString(36).slice(2, 8)}`;
 
             // Enqueue all heavy processing
+            // Build minimal MCEvent and validate
+            const mcEventCandidate = {
+              merchantId: sanitizedMerchantId,
+              customerId: subscriber_id || sanitizedUsername,
+              username: sanitizedUsername,
+              text: messageText,
+              images,
+            } satisfies MCEventType;
+            const mcEvent = MCEventSchema.parse(mcEventCandidate);
+
             const queueResult = await queueManager.addManyChatJob(
               eventId,
-              sanitizedMerchantId,
-              sanitizedUsername,
+              mcEvent.merchantId,
+              mcEvent.username,
               conversationId,
               incomingMessageId,
-              messageText,
-              imageData,
+              mcEvent.text,
+              mcEvent.images,
               sessionData,
               'high' // priority based on real-time user interaction
             );
@@ -492,7 +542,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
 if (!first) throw new Error('No webhook files found to dump');
 const dumpPath = path.join(dir, first.f);
         const raw = await fs.promises.readFile(dumpPath);
-        const exp = createHmac('sha256', (getEnv('META_APP_SECRET') || '').trim())
+        const exp = createHmac('sha256', (getEnv('META_APP_SECRET') ?? '').trim())
           .update(raw)
           .digest('hex');
 
@@ -509,15 +559,15 @@ const dumpPath = path.join(dir, first.f);
     app.get('/internal/prod/debug/last-dump-hash', async (c) => {
       try {
         // Require strong bearer token and optional IP allowlist
-        const auth = c.req.header('authorization') || '';
-        const expected = (getEnv('PROD_DEBUG_BEARER') || '').trim();
+        const auth = c.req.header('authorization') ?? '';
+        const expected = (getEnv('PROD_DEBUG_BEARER') ?? '').trim();
         if (!expected || !auth.startsWith(`Bearer ${expected}`)) {
           log.warn('Prod debug unauthorized');
           return c.text('unauthorized', 401);
         }
 
-        const allowedIps = (getEnv('PROD_DEBUG_ALLOWED_IPS') || '').split(',').map(s => s.trim()).filter(Boolean);
-        const remoteIp = (c.req.header('x-forwarded-for') || '').split(',')[0]?.trim() || c.req.header('cf-connecting-ip') || '';
+        const allowedIps = (getEnv('PROD_DEBUG_ALLOWED_IPS') ?? '').split(',').map(s => s.trim()).filter(Boolean);
+        const remoteIp = (c.req.header('x-forwarded-for') ?? '').split(',')[0]?.trim() || c.req.header('cf-connecting-ip') ?? '';
         if (allowedIps.length && remoteIp && !allowedIps.includes(remoteIp)) {
           log.warn('Prod debug IP not allowed', { remoteIp });
           return c.text('forbidden', 403);
@@ -539,7 +589,7 @@ const dumpPath = path.join(dir, first.f);
         const first = sorted[0]!;
         const dumpPath = path.join(dir, first.f);
         const raw = await fs.promises.readFile(dumpPath);
-        const exp = createHmac('sha256', (getEnv('META_APP_SECRET') || '').trim())
+        const exp = createHmac('sha256', (getEnv('META_APP_SECRET') ?? '').trim())
           .update(raw)
           .digest('hex');
         return c.text(`sha256=${exp}`);
@@ -638,3 +688,4 @@ const dumpPath = path.join(dir, first.f);
 
   log.info('Webhook routes registered successfully');
 }
+

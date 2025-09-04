@@ -24,7 +24,7 @@ export class ErrorFallbacksService {
     customerId: string,
     originalUserText: string
   ): Promise<FallbackResult> {
-    const text = (originalUserText || '').trim();
+    const text = (originalUserText ?? '').trim();
     try {
       // Read cached context to improve decisions (use value to avoid unused param)
       await this.cache.getCustomerContext(merchantId, customerId);

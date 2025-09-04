@@ -163,8 +163,8 @@ export class CrossPlatformConversationManager {
         const profile: PlatformProfile = {
           platform: platform as Platform,
           identifier: platform === 'whatsapp' 
-            ? platformConversations[0]?.customer_phone || ''
-            : platformConversations[0]?.customer_instagram || '',
+            ? platformConversations[0]?.customer_phone ?? ''
+            : platformConversations[0]?.customer_instagram ?? '',
           conversationCount: platformConversations.length,
           messageCount: totalMessages,
           averageResponseTime: Math.round(Number.isFinite(avgResponseTime) ? (avgResponseTime || 0) : 0),
@@ -192,10 +192,10 @@ export class CrossPlatformConversationManager {
       const tags = await this.generateCustomerTags(conversations, platformProfiles);
 
       const unifiedProfile: UnifiedCustomerProfile = {
-        customerId: identifier.phone || identifier.instagram || '',
+        customerId: identifier.phone || identifier.instagram ?? '',
         masterCustomerId,
-        whatsappNumber: identifier.phone || '',
-        instagramUsername: identifier.instagram || '',
+        whatsappNumber: identifier.phone ?? '',
+        instagramUsername: identifier.instagram ?? '',
         name: conversations[0]?.customer_name ?? '',
         preferredPlatform,
         totalInteractions,
@@ -356,7 +356,7 @@ export class CrossPlatformConversationManager {
       if (conversations.length <= 1) {
         return {
           success: true,
-          mergedConversationId: conversations[0]?.id || '',
+          mergedConversationId: conversations[0]?.id ?? '',
           sourceConversationIds: [],
           contextTransferred: true,
           conflictsResolved: 0,
@@ -365,8 +365,8 @@ export class CrossPlatformConversationManager {
       }
 
       // Select primary conversation based on strategy
-      const primaryConversation = this.selectPrimaryConversation(conversations as unknown as ConversationRow[], mergeStrategy);
-      const secondaryConversations = conversations.filter(c => c.id !== primaryConversation.id) as unknown as ConversationRow[];
+      const primaryConversation = this.selectPrimaryConversation(conversations as ConversationRow[], mergeStrategy);
+      const secondaryConversations = conversations.filter(c => c.id !== primaryConversation.id) as ConversationRow[];
 
       // Merge contexts
       const mergedContext = await this.mergeConversationContexts(
@@ -616,7 +616,7 @@ export class CrossPlatformConversationManager {
     contexts.forEach((ctx, index) => {
       // تطبيع آمن لعناصر السلة بغض النظر عن النوع القادم
       const rawCart: unknown =
-        (ctx as unknown as { cart?: unknown }).cart ?? [];
+        (ctx as { cart?: unknown }).cart ?? [];
       const items: unknown[] = Array.isArray(rawCart) ? rawCart : [];
       items.forEach((it) => {
         const c = it as Partial<CartItem>;
@@ -726,7 +726,7 @@ export class CrossPlatformConversationManager {
       LIMIT 1
     `);
 
-          return (conversations as ConversationRow[])[0] || null;
+          return (conversations as ConversationRow[])[0] ?? null;
   }
 
   private async createOrUpdateTargetConversation(
@@ -880,7 +880,7 @@ export class CrossPlatformConversationManager {
     // إزالة العناصر المكررة في السلة بناءً على (productId + platform)
     const seen = new Set<string>();
     mergedContext.cart = (mergedContext.cart ?? []).filter((it) => {
-      const key = `${(it as { productId?: string; id?: string }).productId || (it as { id?: string }).id}-${(it as { platform?: string }).platform || ''}`;
+      const key = `${(it as { productId?: string; id?: string }).productId || (it as { id?: string }).id}-${(it as { platform?: string }).platform ?? ''}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -1060,3 +1060,4 @@ export function getCrossPlatformConversationManager(): CrossPlatformConversation
 export default CrossPlatformConversationManager;
 
 // Using imported types from conversations.ts
+

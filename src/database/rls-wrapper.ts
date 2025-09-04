@@ -159,7 +159,7 @@ export class RLSDatabase {
         hasMerchantContext: Boolean(r.has_merchant_context),
         ...(r.merchant_id ? { merchantId: String(r.merchant_id) } : {}),
         isAdmin: Boolean(r.is_admin),
-        contextAgeSeconds: Number(r.context_age_seconds) || 0,
+        contextAgeSeconds: Number(r.context_age_seconds) ?? 0,
         isValid: Boolean(r.has_merchant_context || r.is_admin)
       };
 
@@ -234,7 +234,7 @@ export class RLSDatabase {
           await trx`SELECT set_admin_context(${this.currentContext.isAdmin})`;
         }
 
-        return await callback(trx as unknown as Sql);
+        return await callback(trx as Sql);
       }) as T;
     } catch (error) {
       // Restore original context on failure
@@ -312,10 +312,10 @@ export class RLSDatabase {
       `;
       
       return {
-        activeContexts: Number(stats[0]?.merchant_contexts || 0) + Number(stats[0]?.admin_contexts || 0),
-        merchantQueries: Number(stats[0]?.merchant_contexts || 0),
-        adminQueries: Number(stats[0]?.admin_contexts || 0),
-        failedContexts: Number(stats[0]?.failed_contexts || 0)
+        activeContexts: Number(stats[0]?.merchant_contexts ?? 0) + Number(stats[0]?.admin_contexts ?? 0),
+        merchantQueries: Number(stats[0]?.merchant_contexts ?? 0),
+        adminQueries: Number(stats[0]?.admin_contexts ?? 0),
+        failedContexts: Number(stats[0]?.failed_contexts ?? 0)
       };
     } catch (error) {
       log.error('❌ Failed to get RLS stats:', error);

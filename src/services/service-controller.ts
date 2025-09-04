@@ -143,7 +143,7 @@ export class ServiceController {
 
       const services: Record<string, ServiceStatus> = {};
       
-      result.forEach((row: any) => {
+      result.forEach((row: { service_name: string; enabled: boolean; last_toggled: Date; toggled_by: string; reason?: string }) => {
         services[row.service_name] = {
           enabled: row.enabled,
           lastToggled: row.last_toggled,
@@ -234,7 +234,7 @@ export class ServiceController {
       for (const service of instagramServices) {
         await this.toggleService({
           merchantId,
-          service: service as any,
+          service: service as import('../types/service-control.js').ServiceName,
           enabled: true,
           toggledBy,
           reason: 'Instagram setup completion'
@@ -270,7 +270,7 @@ export class ServiceController {
       for (const service of allServices) {
         await this.toggleService({
           merchantId,
-          service: service as any,
+          service: service as import('../types/service-control.js').ServiceName,
           enabled: false,
           toggledBy,
           reason
@@ -306,7 +306,7 @@ export class ServiceController {
         WHERE mss.merchant_id = ${merchantId}::uuid
       `;
 
-      return healthData.map((row: any) => {
+      return healthData.map((row: { service_name: string; enabled: boolean; last_toggled: Date; error_count: number; last_check: Date }) => {
         const uptime = Date.now() - new Date(row.last_toggled).getTime();
         let status: ServiceHealth['status'] = 'healthy';
 
@@ -341,7 +341,7 @@ export class ServiceController {
     merchantId: string,
     service: string,
     error: Error,
-    context?: any
+    context?: Record<string, unknown>
   ): Promise<void> {
     try {
       await this.sql`
@@ -370,7 +370,7 @@ export class ServiceController {
       if (errorCount > 50) {
         await this.toggleService({
           merchantId,
-          service: service as any,
+          service: service as import('../types/service-control.js').ServiceName,
           enabled: false,
           reason: `Auto-disabled: ${errorCount} errors in last hour`,
           toggledBy: 'system'

@@ -28,7 +28,7 @@ export function chunkText(
   const chunkChars = approxTokenToChars(opts.chunkTokens ?? 700);
   const overlapChars = approxTokenToChars(opts.overlapTokens ?? 80);
 
-  const src = (text || '').replace(/\s+$/,'').replace(/^\s+/,'');
+  const src = (text ?? '').replace(/\s+$/,'').replace(/^\s+/,'');
   if (!src) return [];
   if (src.length <= chunkChars) return [src];
 
@@ -85,7 +85,7 @@ export async function ingestText(
     const row = await sql<{ merchant_type: string }>`
       SELECT merchant_type::text FROM public.merchants WHERE id = ${merchantId}::uuid LIMIT 1
     `;
-    merchantType = row[0]?.merchant_type || null;
+    merchantType = row[0]?.merchant_type ?? null;
   } catch {}
 
   const chunks = chunkText(text, opts);

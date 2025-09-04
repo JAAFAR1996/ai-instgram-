@@ -1,8 +1,6 @@
 import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
-import { resourceFromAttributes } from '@opentelemetry/resources';
-import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import type { AppConfig } from '../config/index.js';
 
 let _inited = false;
@@ -15,36 +13,24 @@ export async function initTelemetry(_config?: AppConfig): Promise<void> {
   const diagLevel = process.env.NODE_ENV === 'development' ? DiagLogLevel.DEBUG : DiagLogLevel.ERROR;
   diag.setLogger(new DiagConsoleLogger(), diagLevel);
   
-  // Create resource with service information
-  const resource = new Resource({
-    [SemanticResourceAttributes.SERVICE_NAME]: 'ai-sales-platform',
-    [SemanticResourceAttributes.SERVICE_VERSION]: process.env.npm_package_version || '1.0.0',
-    [SemanticResourceAttributes.SERVICE_NAMESPACE]: 'production',
-    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: process.env.NODE_ENV || 'development',
-    [SemanticResourceAttributes.SERVICE_INSTANCE_ID]: process.env.HOSTNAME || 'unknown',
-  });
-
   // Check if metrics are enabled
   const metricsEnabled = process.env.METRICS_ENABLED === 'true';
   
   if (metricsEnabled) {
     // Configure Prometheus exporter
     const prometheusExporter = new PrometheusExporter({
-      port: parseInt(process.env.PROMETHEUS_PORT || '9090'),
+      port: parseInt(process.env.PROMETHEUS_PORT ?? '9090'),
       endpoint: '/metrics',
       prefix: 'ai_sales_',
     });
 
     // Initialize meter provider with Prometheus exporter
-    meterProvider = new MeterProvider({ 
-      resource,
-      readers: [prometheusExporter],
-    });
+    meterProvider = new MeterProvider({ readers: [prometheusExporter] });
     
     diag.info('✅ Telemetry initialized with Prometheus exporter');
   } else {
     // Initialize basic meter provider for development
-    meterProvider = new MeterProvider({ resource });
+    meterProvider = new MeterProvider();
     diag.debug('🔧 Telemetry initialized in development mode (metrics disabled)');
   }
   
@@ -173,7 +159,7 @@ export const telemetry = {
   // Business metrics
   recordConversation(platform: 'instagram'|'whatsapp', stage: string, merchantId?: string) {
     try {
-      counter('conversations_total','Conversations created').add(1,{ platform, stage, merchant_id: merchantId || 'unknown' });
+      counter('conversations_total','Conversations created').add(1,{ platform, stage, merchant_id: merchantId ?? 'unknown' });
     } catch (e) {
       diag.debug('telemetry.recordConversation failed', e as Error);
     }
@@ -214,4 +200,8 @@ export const telemetry = {
       try { counter('kpi_alt_suggest_total','Alternative suggestions made').add(1); } catch {}
     }
   },
+  // Expose helpers for modules that call telemetry.counter/histogram/gauge directly
+  counter,
+  histogram,
+  gauge,
 };

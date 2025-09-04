@@ -20,7 +20,7 @@ import { REQUIRED_ENV_VARS, validateRuntimeConfig } from './validators.js';
 const configConsole = {
   info: (message: string) => {
     const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
-    const env = process.env.NODE_ENV || 'development';
+    const env = process.env.NODE_ENV ?? 'development';
     
     if (env === 'production' || isRender) {
       console.log(JSON.stringify({
@@ -149,7 +149,7 @@ export function loadAndValidateEnvironment(): AppConfig {
     ];
 
     for (const check of insecureDefaults) {
-      const value = env[check.key]?.toLowerCase() || '';
+      const value = env[check.key]?.toLowerCase() ?? '';
       if (check.patterns.some(pattern => value.includes(pattern))) {
         errors.push(`${check.key} appears to contain insecure default values in production`);
       }
@@ -168,9 +168,9 @@ export function loadAndValidateEnvironment(): AppConfig {
   }
 
   // Parse and return configuration with proper numeric validation
-  const maxTokens = Number(env.OPENAI_MAX_TOKENS || '500');
-  const rateLimitWindow = Number(env.RATE_LIMIT_WINDOW || '900000');
-  const rateLimitMax = Number(env.RATE_LIMIT_MAX || '100');
+  const maxTokens = Number(env.OPENAI_MAX_TOKENS ?? '500');
+  const rateLimitWindow = Number(env.RATE_LIMIT_WINDOW ?? '900000');
+  const rateLimitMax = Number(env.RATE_LIMIT_MAX ?? '100');
   
   if (!Number.isFinite(maxTokens) || maxTokens <= 0) {
     throw new EnvironmentValidationError(['OPENAI_MAX_TOKENS must be a positive number']);
@@ -183,11 +183,11 @@ export function loadAndValidateEnvironment(): AppConfig {
   }
 
   const config: AppConfig = {
-    environment: (env.NODE_ENV as EnvMode) || 'development',
+    environment: (env.NODE_ENV as EnvMode) ?? 'development',
     port,
-    baseUrl: env.BASE_URL!,
-    internalApiKey: env.INTERNAL_API_KEY!,
-    logLevel: (env.LOG_LEVEL?.toLowerCase() as LogLevel) || 'info',
+    baseUrl: getEnvVar('BASE_URL'),
+    internalApiKey: getEnvVar('INTERNAL_API_KEY'),
+    logLevel: (env.LOG_LEVEL?.toLowerCase() as LogLevel) ?? 'info',
     
     // Optional business configuration
     ...(env.IG_PAGE_ID && { pageId: env.IG_PAGE_ID }),
@@ -196,20 +196,20 @@ export function loadAndValidateEnvironment(): AppConfig {
     database: parseDatabaseConfig(getEnvVar('DATABASE_URL')),
     
     ai: {
-      openaiApiKey: env.OPENAI_API_KEY!,
-      model: env.OPENAI_MODEL || 'gpt-4o-mini',
-      visionModel: env.OPENAI_VISION_MODEL || 'gpt-4o-mini',
+      openaiApiKey: getEnvVar('OPENAI_API_KEY'),
+      model: env.OPENAI_MODEL ?? 'gpt-4o-mini',
+      visionModel: env.OPENAI_VISION_MODEL ?? 'gpt-4o-mini',
       maxTokens,
-      temperature: parseFloat(env.OPENAI_TEMPERATURE || '0.7')
+      temperature: parseFloat(env.OPENAI_TEMPERATURE ?? '0.7')
     },
     
     instagram: {
-      appId: env.IG_APP_ID!,
-      appSecret: env.IG_APP_SECRET!,
-      metaAppSecret: (env.META_APP_SECRET || '').trim(),
-      verifyToken: env.IG_VERIFY_TOKEN!,
-      redirectUri: env.REDIRECT_URI!,
-      apiVersion: env.GRAPH_API_VERSION || 'v23.0'
+      appId: getEnvVar('IG_APP_ID'),
+      appSecret: getEnvVar('IG_APP_SECRET'),
+      metaAppSecret: (env.META_APP_SECRET ?? '').trim(),
+      verifyToken: getEnvVar('IG_VERIFY_TOKEN'),
+      redirectUri: getEnvVar('REDIRECT_URI'),
+      apiVersion: env.GRAPH_API_VERSION ?? 'v23.0'
     },
 
     redis: {
@@ -217,17 +217,17 @@ export function loadAndValidateEnvironment(): AppConfig {
     },
 
     security: {
-      encryptionKey: env.ENCRYPTION_KEY!,
-      jwtSecret: env.JWT_SECRET!,
-      corsOrigins: env.CORS_ORIGINS!.split(',').map(o => o.trim()),
+      encryptionKey: getEnvVar('ENCRYPTION_KEY'),
+      jwtSecret: getEnvVar('JWT_SECRET'),
+      corsOrigins: (process.env.CORS_ORIGINS ?? '').split(',').filter(Boolean).map(o => o.trim()),
       rateLimitWindow,
       rateLimitMax,
-      trustedRedirectDomains: env.TRUSTED_REDIRECT_DOMAINS ? env.TRUSTED_REDIRECT_DOMAINS.split(',') : []
+      trustedRedirectDomains: env.TRUSTED_REDIRECT_DOMAINS?.split(',') ?? []
     },
 
     meta: {
-      version: env.APP_VERSION || '1.0.0',
-      environment: (env.NODE_ENV as 'development' | 'staging' | 'production') || 'development'
+      version: env.APP_VERSION ?? '1.0.0',
+      environment: (env.NODE_ENV as 'development' | 'staging' | 'production') ?? 'development'
     }
   };
 
@@ -251,7 +251,7 @@ function parseDatabaseConfig(databaseUrl: string): DatabaseConfig {
       ssl = false;
     }
     
-    const maxConnections = Number(process.env.DB_MAX_CONNECTIONS || '20');
+    const maxConnections = Number(process.env.DB_MAX_CONNECTIONS ?? '20');
     if (!Number.isFinite(maxConnections) || maxConnections <= 0) {
       throw new Error('DB_MAX_CONNECTIONS must be a positive number');
     }

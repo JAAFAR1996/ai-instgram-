@@ -77,17 +77,17 @@ export class InstagramManyChatBridge {
       try {
         const { getInstagramHashtagMonitor } = await import('./instagram-hashtag-monitor.js');
         const monitor = getInstagramHashtagMonitor();
-        const mid = 'mc:' + data.merchantId + ':' + data.customerId + ':' + createHash('sha1').update(String(data.message || '') + ':' + data.interactionType).digest('hex').slice(0, 16);
+        const mid = 'mc:' + data.merchantId + ':' + data.customerId + ':' + createHash('sha1').update(String(data.message ?? '') + ':' + data.interactionType).digest('hex').slice(0, 16);
         const src = (data.interactionType === 'comment' ? 'comment' : (data.interactionType.startsWith('story') ? 'story' : 'dm')) as 'dm'|'comment'|'story';
         monitor.processInboundText({
           merchantId: data.merchantId,
           messageId: mid,
           userId: data.customerId,
           source: src,
-          content: data.message || ''
+          content: data.message ?? ''
         }).then(r => {
           this.logger.debug('Hashtag monitor snapshot', { h: r.hashtags.length, m: r.mentions.length, s: r.sentiment, opp: r.opportunitiesCreated });
-        }).catch(() => {});
+        }).catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
       } catch (e) {
         this.logger.debug('Hashtag monitor skipped', { error: String(e) });
       }
@@ -112,16 +112,16 @@ export class InstagramManyChatBridge {
             });
           }
           // Update engagement + behavior
-          analyzer.updateSubscriberEngagementForUsername(data.merchantId, data.customerId).catch(() => {});
-          analyzer.trackUserBehavior(data.merchantId, data.customerId, 'story').catch(() => {});
+          analyzer.updateSubscriberEngagementForUsername(data.merchantId, data.customerId).catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
+          analyzer.trackUserBehavior(data.merchantId, data.customerId, 'story').catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
         } else if (data.interactionType === 'dm') {
-          await analyzer.categorizeDMIntent(data.message).catch(() => {});
-          analyzer.updateSubscriberEngagementForUsername(data.merchantId, data.customerId).catch(() => {});
-          analyzer.trackUserBehavior(data.merchantId, data.customerId, 'dm').catch(() => {});
+          await analyzer.categorizeDMIntent(data.message).catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
+          analyzer.updateSubscriberEngagementForUsername(data.merchantId, data.customerId).catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
+          analyzer.trackUserBehavior(data.merchantId, data.customerId, 'dm').catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
         } else if (data.interactionType === 'comment') {
-          analyzer.analyzeCommentSentiment(data.merchantId, data.customerId, data.message).catch(() => {});
-          analyzer.updateSubscriberEngagementForUsername(data.merchantId, data.customerId).catch(() => {});
-          analyzer.trackUserBehavior(data.merchantId, data.customerId, 'comment').catch(() => {});
+          analyzer.analyzeCommentSentiment(data.merchantId, data.customerId, data.message).catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
+          analyzer.updateSubscriberEngagementForUsername(data.merchantId, data.customerId).catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
+          analyzer.trackUserBehavior(data.merchantId, data.customerId, 'comment').catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
         }
       } catch (e) {
         this.logger.debug('Interaction analysis skipped', { error: String(e) });
@@ -135,7 +135,7 @@ export class InstagramManyChatBridge {
             return {
               success: true,
               platform: 'manychat',
-              messageId: manyChatResult.messageId || undefined,
+              messageId: manyChatResult.messageId ?? undefined,
               timestamp: new Date(),
               processingTime: Date.now() - startTime,
               metadata: {
@@ -260,7 +260,7 @@ export class InstagramManyChatBridge {
       
     } catch (error) {
       // Check if subscriber not found - fallback to local AI
-      if (error && typeof error === 'object' && (error as any).code === 'SUBSCRIBER_NOT_FOUND') {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'SUBSCRIBER_NOT_FOUND') {
         this.logger.info('🔄 ManyChat subscriber not found, falling back to local AI', {
           merchantId: data.merchantId,
           customerId: data.customerId
@@ -403,7 +403,7 @@ export class InstagramManyChatBridge {
     merchantId: string, 
     username: string, 
     message: string, 
-    options?: any
+    options?: unknown
   ): Promise<ManyChatResponse & { mcId?: string }> {
     // 🛡️ ARCHITECTURE GUARD: Validate username-only operation
     guardManyChatOperation(merchantId, username, 'sendToManyChat');
@@ -434,8 +434,8 @@ export class InstagramManyChatBridge {
         });
         
         // Cannot proceed with ManyChat - throw error to trigger fallback
-        const error = new Error('Instagram subscriber not found in ManyChat - user must opt-in first');
-        (error as any).code = 'SUBSCRIBER_NOT_FOUND';
+        const error = new Error('Instagram subscriber not found in ManyChat - user must opt-in first') as Error & { code: string };
+        error.code = 'SUBSCRIBER_NOT_FOUND';
         throw error;
       }
     }
@@ -473,8 +473,8 @@ export class InstagramManyChatBridge {
             return await this.manyChatService.sendText(merchantId, found.subscriber_id, message, { tag: options?.messageTag });
           } else {
             // Still no subscriber - throw error to trigger fallback
-            const fallbackError = new Error('Instagram subscriber still not found in ManyChat after resync');
-            (fallbackError as any).code = 'SUBSCRIBER_NOT_FOUND';
+            const fallbackError = new Error('Instagram subscriber still not found in ManyChat after resync') as Error & { code: string };
+            fallbackError.code = 'SUBSCRIBER_NOT_FOUND';
             throw fallbackError;
           }
             
@@ -499,7 +499,7 @@ export class InstagramManyChatBridge {
   /**
    * Check if error indicates "Subscriber does not exist"
    */
-  private isSubscriberDoesNotExist(error: any): boolean {
+  private isSubscriberDoesNotExist(error: unknown): boolean {
     if (!error || !(error instanceof Error)) return false;
     
     const errorMsg = error.message.toLowerCase();
@@ -642,7 +642,7 @@ export class InstagramManyChatBridge {
         return false; // No previous interactions
       }
 
-      const lastInteractionTime = new Date((lastInteraction[0] as any).created_at);
+      const lastInteractionTime = new Date((lastInteraction[0] as unknown).created_at);
       const now = new Date();
       const hoursDiff = (now.getTime() - lastInteractionTime.getTime()) / (1000 * 60 * 60);
 
@@ -727,7 +727,7 @@ export class InstagramManyChatBridge {
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           data.merchantId,
-          (manyChatResult as any).mcId || data.customerId,
+          (manyChatResult as unknown).mcId || data.customerId,
           manyChatResult.messageId,
           'send_message',
           manyChatResult.success ? 'success' : 'failed',
@@ -751,7 +751,7 @@ export class InstagramManyChatBridge {
    */
   private async logLocalAIInteraction(
     data: BridgeMessageData,
-    sendResult: any,
+    sendResult: unknown,
     aiResponse: string
   ): Promise<void> {
     try {
@@ -786,7 +786,7 @@ export class InstagramManyChatBridge {
    */
   private async logFallbackInteraction(
     data: BridgeMessageData,
-    sendResult: any,
+    sendResult: unknown,
     fallbackResponse: string
   ): Promise<void> {
     try {
@@ -826,7 +826,7 @@ export class InstagramManyChatBridge {
    */
   public async getHealthStatus(): Promise<{
     status: 'healthy' | 'degraded' | 'unhealthy';
-    manyChat: any;
+    manyChat: unknown;
     localAI: boolean;
     instagram: boolean;
   }> {

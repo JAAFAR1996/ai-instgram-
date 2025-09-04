@@ -62,7 +62,7 @@ export class CacheService {
         this.stats.misses++;
         return null;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.stats.errors++;
       log.warn('Cache get failed, falling back to null', {
         key: fullKey,
@@ -100,7 +100,7 @@ export class CacheService {
         });
         return false;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.stats.errors++;
       log.warn('Cache set failed', {
         key: fullKey,
@@ -131,7 +131,7 @@ export class CacheService {
       } else {
         return false;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.stats.errors++;
       log.warn('Cache delete failed', {
         key: fullKey,
@@ -157,7 +157,7 @@ export class CacheService {
       );
 
       return result.ok && result.result !== undefined ? result.result : false;
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.stats.errors++;
       log.warn('Cache exists check failed', {
         key: fullKey,
@@ -191,7 +191,7 @@ export class CacheService {
         this.stats.misses += keys.length;
         return keys.map(() => null);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.stats.errors++;
       log.warn('Cache mget failed', {
         keys: fullKeys,
@@ -230,7 +230,7 @@ export class CacheService {
       } else {
         return false;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.stats.errors++;
       log.warn('Cache mset failed', {
         count: entries.length,
@@ -305,7 +305,7 @@ export class TemplateCache extends CacheService {
     return this.get(`template:${merchantId}:${templateId}`, { prefix: 'templates' });
   }
 
-  async setTemplate(merchantId: string, templateId: string, template: any): Promise<boolean> {
+  async setTemplate(merchantId: string, templateId: string, template: Record<string, unknown>): Promise<boolean> {
     return this.set(`template:${merchantId}:${templateId}`, template, { prefix: 'templates' });
   }
 
@@ -323,7 +323,7 @@ export class SessionCache extends CacheService {
     return this.get(`session:${sessionId}`, { prefix: 'sessions' });
   }
 
-  async setSession(sessionId: string, sessionData: any): Promise<boolean> {
+  async setSession(sessionId: string, sessionData: Record<string, unknown>): Promise<boolean> {
     return this.set(`session:${sessionId}`, sessionData, { prefix: 'sessions' });
   }
 

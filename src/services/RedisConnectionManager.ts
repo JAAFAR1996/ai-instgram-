@@ -55,7 +55,7 @@ export class RedisConnectionManager {
   constructor(
     private redisUrl: string,
     private environment: Environment,
-    private logger?: any,
+    private logger?: { info?: Function; warn?: Function; error?: Function },
     poolConfig?: Partial<ConnectionPoolConfig>
   ) {
     this.configFactory = new ProductionRedisConfigurationFactory();
@@ -384,7 +384,7 @@ export class RedisConnectionManager {
       const connection = await this.getConnection(usageType);
       const result = await callback(connection);
       return { ok: true, result };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // تجنب الاستدعاء المتكرر للـ error handler
       let errorMessage = 'Unknown error occurred';
       
@@ -474,7 +474,17 @@ export class RedisConnectionManager {
       this.closeConnection(usageType)
     );
     
-    await Promise.allSettled(closePromises);
+    const results = await Promise.allSettled(closePromises);
+    
+    // Log any connection close failures
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0) {
+      this.logger.warn('Some Redis connections failed to close cleanly', {
+        totalConnections: closePromises.length,
+        failures: failures.length,
+        errors: failures.map(f => String(f.reason))
+      });
+    }
     
     // ✅ إصلاح مشكلة clearInterval
     if (this.healthCheckInterval) {
@@ -555,7 +565,7 @@ export class RedisConnectionManager {
             });
           }
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         info.status = 'error';
         info.healthScore = 0;
         info.lastError = error.message;

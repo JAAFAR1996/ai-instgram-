@@ -35,8 +35,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
       ms,
       new Error(`${label} timeout`)
     );
-    p.then(guardResolve(resolve, reject, () => clearTimeout(timer)))
-     .catch(guardReject(resolve, reject, () => clearTimeout(timer)));
+    p.then(guardResolve(resolve, reject, () => clearTimeout(timer))).catch(guardReject(resolve, reject, () => clearTimeout(timer)));
   });
 }
 import { RedisUsageType, RedisEnvironment } from '../config/RedisConfigurationFactory.js';
@@ -55,6 +54,7 @@ import { getInstagramClient } from './instagram-api.js';
 import { getInstagramMessageSender } from './instagram-message-sender.js';
 import { getEnv } from '../config/env.js';
 import type { InstagramContext } from './instagram-ai.js';
+import { getInstagramAIService } from './instagram-ai.js';
 
 // removed unused type
 
@@ -174,7 +174,7 @@ export class ProductionQueueManager {
     private queueName: string = 'ai-sales-production'
   ) {
     this.connectionManager = new RedisConnectionManager(
-      process.env.REDIS_URL || '',
+      process.env.REDIS_URL ?? '',
       environment,
       logger
     );
@@ -388,7 +388,7 @@ export class ProductionQueueManager {
             payload,
             priority: 'normal',
             metadata: { addedAt: Date.now(), source: 'webhook' }
-          } as unknown as QueueJob);
+          });
           
           const duration = Date.now() - startTime;
           this.logger.info(`✅ ${webhookWorkerId} - ويب هوك مكتمل بنجاح`, {
@@ -434,7 +434,8 @@ export class ProductionQueueManager {
       this.queueName,
       async (job: Job) => {
         if (job.name !== 'process-webhook') return;
-        return webhookProcessor(job as unknown as { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> });
+        const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: (err: Error, retry: boolean) => job.moveToFailed(err, retry) };
+        return webhookProcessor(adapted);
       },
       { connection, concurrency: 5 }
     );
@@ -512,7 +513,8 @@ export class ProductionQueueManager {
       this.queueName,
       async (job: Job) => {
         if (job.name !== 'ai-response') return;
-        return aiProcessor(job as unknown as { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> });
+        const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: (err: Error, retry: boolean) => job.moveToFailed(err, retry) };
+        return aiProcessor(adapted);
       },
       { connection, concurrency: 3 }
     );
@@ -595,8 +597,8 @@ export class ProductionQueueManager {
         this.logger.info('💬 [MANYCHAT-WORKER-START] معالج ManyChat استقبل job!', { 
           jobId: job.id, 
           jobName: job.name,
-          merchantId: data.merchantId,
-          username: data.username 
+          merchantId: (typeof (data as Record<string, unknown>).merchantId === "string" ? (data as Record<string, unknown>).merchantId as string : undefined),
+          username: (typeof (data as Record<string, unknown>).username === "string" ? (data as Record<string, unknown>).username as string : undefined) 
         });
         
         clearTimeout(workerInitTimeout);
@@ -669,7 +671,8 @@ export class ProductionQueueManager {
       this.queueName,
       async (job: Job) => {
         if (job.name !== 'manychat-processing') return;
-        return manyChatProcessor(job as unknown as { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> });
+        const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: (err: Error, retry: boolean) => job.moveToFailed(err, retry) };
+        return manyChatProcessor(adapted);
       },
       { connection, concurrency: 4 } // 4 concurrent ManyChat jobs
     );
@@ -690,7 +693,11 @@ export class ProductionQueueManager {
       setTimeout(async () => {
         try {
           this.logger.info('🔍 [BULL-TEST] اختبار إضافة job تجريبي فوري...');
-          const testJob = await this.queue!.add('test-notification', { test: true }, {
+          if (!this.queue) {
+            this.logger.warn('Queue not initialized for test job');
+            return;
+          }
+          const testJob = await this.queue.add('test-notification', { test: true }, {
             priority: 1,
             delay: 0,
             attempts: 1
@@ -806,7 +813,7 @@ export class ProductionQueueManager {
                 jobId: job.id,
                 jobName: job.name,
                 dataKeys: Object.keys(job.data || {}),
-                jobState: (job as any).opts?.delay ? 'delayed' : 'waiting'
+                jobState: job.opts?.delay ? 'delayed' : 'waiting'
               });
               
               // 🔍 فحص Job data integrity أولاً
@@ -818,11 +825,10 @@ export class ProductionQueueManager {
               }
               
               // 🔍 فحص إذا كان Job delayed بدلاً من waiting
-              const jobWithAttempts = job as unknown as JobWithAttempts;
-              if (jobWithAttempts.opts?.delay && jobWithAttempts.opts.delay > 0) {
+              if (job.opts?.delay && job.opts.delay > 0) {
                 this.logger.warn('⏰ [MANUAL-PROCESSING] Job delayed - تخطي', { 
                   jobId: job.id, 
-                  delay: jobWithAttempts.opts?.delay 
+                  delay: job.opts?.delay 
                 });
                 continue;
               }
@@ -891,7 +897,7 @@ export class ProductionQueueManager {
       } catch (error) {
         if (
           error instanceof ReplyError &&
-          (error as any).message?.toLowerCase().includes('max requests limit exceeded')
+          (error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()).includes('max requests limit exceeded')
         ) {
           this.logger.warn(
             '⚠️ [MANUAL-POLLING] تجاوز الحد الأقصى لعدد طلبات Upstash - إيقاف التحقق اليدوي'
@@ -1007,13 +1013,19 @@ export class ProductionQueueManager {
         priority
       });
 
-      const job = await this.queue.add('process-webhook', jobData, {
-        priority: priorityValue,
-        delay: 0, // 🚀 إزالة كل delay - Upstash لا يدعم delayed jobs بشكل صحيح
-        removeOnComplete: priority === 'urgent' ? 200 : 100,
-        removeOnFail: priority === 'urgent' ? 100 : 50,
-        attempts: priority === 'urgent' ? 5 : 3
-      });
+        const qRef = this.queue;
+        if (!qRef) { return { success: false, error: 'Ù…Ø¯ÙŠØ± Ø§Ù„Ø·ÙˆØ§Ø¨ÙŠØ± ØºÙŠØ± Ù…Ù‡ÙŠØ£' }; }
+        const job = await withRetry(
+          () => qRef.add('process-webhook', jobData, {
+            priority: priorityValue,
+            delay: 0, // إزالة أي تأخير
+            removeOnComplete: priority === 'urgent' ? 200 : 100,
+            removeOnFail: priority === 'urgent' ? 100 : 50,
+            attempts: priority === 'urgent' ? 5 : 3
+          }),
+          'queue_add_process_webhook',
+          { logger: this.logger, payload: { eventId, merchantId, platform } }
+        );
 
       this.logger.info('✅ [ADD-JOB] تم إضافة webhook job بنجاح', {
         jobId: job.id,
@@ -1081,11 +1093,17 @@ export class ProductionQueueManager {
         }
       };
 
-      const job = await this.queue.add('ai-response', jobData, {
-        priority: this.getPriorityValue(priority),
-        delay: 0, // 🚀 إزالة delay - Upstash لا يدعم delayed jobs
-        attempts: 2 // محاولتان فقط للذكاء الاصطناعي
-      });
+        const qRef = this.queue;
+        if (!qRef) { return { success: false, error: 'Ù…Ø¯ÙŠØ± Ø§Ù„Ø·ÙˆØ§Ø¨ÙŠØ± ØºÙŠØ± Ù…Ù‡ÙŠØ£' }; }
+        const job = await withRetry(
+          () => qRef.add('ai-response', jobData, {
+            priority: this.getPriorityValue(priority),
+            delay: 0,
+            attempts: 2
+          }),
+          'queue_add_ai_response',
+          { logger: this.logger, payload: { conversationId, merchantId, platform } }
+        );
 
       return { success: true, jobId: String(job.id ?? '') };
 
@@ -1149,14 +1167,20 @@ export class ProductionQueueManager {
       // 📊 Queue Metrics: Record job enqueue
       telemetry.recordQueueOperation(this.queueName, 'add', 1);
 
-      const job = await this.queue.add('manychat-processing', jobData, {
-        priority: priorityValue,
-        delay: 0,
-        removeOnComplete: priority === 'urgent' ? 200 : 100,
-        removeOnFail: priority === 'urgent' ? 100 : 50,
-        attempts: priority === 'urgent' ? 3 : 2,
-        backoff: { type: 'exponential', delay: 2000 }
-      });
+      const qRef = this.queue;
+      if (!qRef) { return { success: false, error: 'Ù…Ø¯ÙŠØ± Ø§Ù„Ø·ÙˆØ§Ø¨ÙŠØ± ØºÙŠØ± Ù…Ù‡ÙŠØ£' }; }
+      const job = await withRetry(
+        () => qRef.add('manychat-processing', jobData, {
+          priority: priorityValue,
+          delay: 0,
+          removeOnComplete: priority === 'urgent' ? 200 : 100,
+          removeOnFail: priority === 'urgent' ? 100 : 50,
+          attempts: priority === 'urgent' ? 3 : 2,
+          backoff: { type: 'exponential', delay: 2000 }
+        }),
+        'queue_add_manychat',
+        { logger: this.logger, payload: { eventId, merchantId, username } }
+      );
 
       this.logger.info('✅ [ADD-MANYCHAT-JOB] تم إضافة ManyChat job بنجاح', {
         jobId: job.id,
@@ -1526,14 +1550,14 @@ export class ProductionQueueManager {
       const aiContext = await this.buildAdvancedAIContext(
         jobData,
         // مرّر الكائنات كما هي، مع تحويل history إلى JSON-plain فقط
-        (conversation as unknown as Record<string, unknown>),
-        (merchant as unknown as Record<string, unknown>),
+        JSON.parse(JSON.stringify(conversation)) as Record<string, unknown>,
+        JSON.parse(JSON.stringify(merchant)) as Record<string, unknown>,
         (messageHistory.map(m => JSON.parse(JSON.stringify(m))) as Array<Record<string, unknown>>)
       );
 
       const aiResponse = await this.aiOrchestrator.generatePlatformResponse(
         jobData.message as string,
-        (aiContext as unknown as InstagramContext),
+        (aiContext as InstagramContext),
         'instagram' // تثبيت على instagram حالياً
       );
 
@@ -1601,7 +1625,7 @@ export class ProductionQueueManager {
         stage: aiResponse.response.stage
       });
 
-      return result as unknown as Record<string, unknown>;
+      return result as Record<string, unknown>;
 
     } catch (error) {
       const duration = Date.now() - startTime;
@@ -1818,7 +1842,7 @@ export class ProductionQueueManager {
   async getQueueHealth(): Promise<{
     healthy: boolean;
     stats: QueueStats;
-    redisHealth: any;
+    redisHealth: { connected: boolean; responseTime: number; metrics: Record<string, unknown> } | null;
     workerStatus: {
       isProcessing: boolean;
       delayedJobs: number;
@@ -1958,15 +1982,19 @@ export class ProductionQueueManager {
         // انتظار إكمال المهام الجارية مع timeout
         await withTimeout(this.waitForActiveJobs(), timeoutMs, 'queue shutdown');
 
-        await this.queue!.close();
-        this.queue = null;
+        if (this.queue) {
+          await this.queue.close();
+          this.queue = null;
+        }
 
         this.logger.info('✅ تم إغلاق الطابور بأمان');
 
       } catch (error) {
         this.logger.warn({ err: error }, 'فشل في الانتظار لإكمال المهام، إغلاق قسري');
-        await this.queue!.close();
-        this.queue = null;
+        if (this.queue) {
+          await this.queue.close();
+          this.queue = null;
+        }
       }
     }
 
@@ -1979,12 +2007,14 @@ export class ProductionQueueManager {
   private async waitForActiveJobs(): Promise<void> {
     if (!this.queue) return;
 
-    let activeJobs = await this.queue!.getActive();
+    const q = this.queue;
+    if (!q) return;
+    let activeJobs = await q.getActive();
     
     while (activeJobs.length > 0) {
       this.logger.info(`انتظار إكمال ${activeJobs.length} مهام جارية...`);
       await new Promise(resolve => setTimeout(resolve, 1000));
-      activeJobs = await this.queue!.getActive();
+      activeJobs = await q.getActive();
     }
   }
 
@@ -2006,8 +2036,13 @@ export class ProductionQueueManager {
       customerId: jobData.customerId,
       platform: jobData.platform || 'instagram',
       stage: conversation.conversationStage,
-      cart: (conversation.sessionData as any)?.cart || [],
-      preferences: (conversation.sessionData as any)?.preferences || {},
+      cart: Array.isArray((conversation.sessionData as { cart?: unknown[] } | undefined)?.cart)
+        ? ((conversation.sessionData as { cart?: unknown[] }).cart as unknown[])
+        : [],
+      preferences: ((): Record<string, unknown> => {
+        const pref = (conversation.sessionData as { preferences?: unknown } | undefined)?.preferences;
+        return pref && typeof pref === 'object' ? (pref as Record<string, unknown>) : {};
+      })(),
       conversationHistory: messageHistory.map((msg) => ({
         role: (msg as { direction: string }).direction === 'INCOMING' ? 'user' : 'assistant',
         content: (msg as { content: string }).content,
@@ -2018,10 +2053,21 @@ export class ProductionQueueManager {
       merchantSettings: {
         businessName: merchant.businessName,
         businessCategory: merchant.businessCategory,
-        workingHours: (merchant.settings as any)?.workingHours || {},
-        paymentMethods: (merchant.settings as any)?.paymentMethods || [],
-        deliveryFees: (merchant.settings as any)?.deliveryFees || {},
-        autoResponses: (merchant.settings as any)?.autoResponses || {}
+        workingHours: ((): Record<string, unknown> => {
+          const s = (merchant.settings as { workingHours?: unknown } | undefined)?.workingHours;
+          return s && typeof s === 'object' ? (s as Record<string, unknown>) : {};
+        })(),
+        paymentMethods: Array.isArray((merchant.settings as { paymentMethods?: unknown[] } | undefined)?.paymentMethods)
+          ? ((merchant.settings as { paymentMethods?: unknown[] }).paymentMethods as string[])
+          : [],
+        deliveryFees: ((): Record<string, unknown> => {
+          const s = (merchant.settings as { deliveryFees?: unknown } | undefined)?.deliveryFees;
+          return s && typeof s === 'object' ? (s as Record<string, unknown>) : {};
+        })(),
+        autoResponses: ((): Record<string, unknown> => {
+          const s = (merchant.settings as { autoResponses?: unknown } | undefined)?.autoResponses;
+          return s && typeof s === 'object' ? (s as Record<string, unknown>) : {};
+        })()
       }
     };
 
@@ -2338,13 +2384,13 @@ export class ProductionQueueManager {
         const { SmartCache } = await import('../services/smart-cache.js');
         const sc = new SmartCache();
         const cached = await sc.getCommonReply(jobData.merchantId, jobData.messageText);
-        if (cached?.text && (cached as any).intent && !['OTHER','SMALL_TALK'].includes(String((cached as any).intent).toUpperCase())) {
+        if (cached?.text && (cached as { intent?: string }).intent && !['OTHER','SMALL_TALK'].includes(String((cached as { intent?: string }).intent).toUpperCase())) {
           aiResponse = cached.text;
           aiIntent = 'CACHED_COMMON';
           aiConfidence = 0.9;
           decisionPath = ['cache=hit'];
           usedCache = true;
-          this.logger.info('🎯 [CACHE-HIT] استخدم رد محفوظ', { merchantId: jobData.merchantId, intent: (cached as any).intent });
+          this.logger.info('🎯 [CACHE-HIT] استخدم رد محفوظ', { merchantId: jobData.merchantId, intent: (cached as { intent?: string }).intent });
         }
       }
     } catch (cacheErr) {
@@ -2460,7 +2506,12 @@ export class ProductionQueueManager {
             decisionPath.push(`image_analysis=${imageAnalysisResults.length}`, 
               `ocr=${Boolean(combinedOCRText)}`, 
               `products=${productMatches.length}`);
-            stage = igResp.stage as any;
+            if (
+              igResp.stage === 'AWARE' || igResp.stage === 'BROWSE' || igResp.stage === 'INTENT' ||
+              igResp.stage === 'OBJECTION' || igResp.stage === 'CLOSE'
+            ) {
+              stage = igResp.stage;
+            }
             
             // Store enhanced analysis for future reference
             sessionPatch = {
@@ -2497,7 +2548,12 @@ export class ProductionQueueManager {
             aiIntent = igResp.intent || 'IMAGE_INQUIRY';
             aiConfidence = igResp.confidence || 0.7;
             decisionPath.push('vision=fallback');
-            stage = igResp.stage as any;
+            if (
+              igResp.stage === 'AWARE' || igResp.stage === 'BROWSE' || igResp.stage === 'INTENT' ||
+              igResp.stage === 'OBJECTION' || igResp.stage === 'CLOSE'
+            ) {
+              stage = igResp.stage;
+            }
           }
         } else {
           // معالجة النص بـ Orchestrator
@@ -2514,7 +2570,7 @@ export class ProductionQueueManager {
           aiIntent = orchResult.intent;
           aiConfidence = orchResult.confidence;
           decisionPath = orchResult.decision_path || [];
-          sessionPatch = orchResult.session_patch || undefined;
+          sessionPatch = orchResult.session_patch ?? undefined;
           stage = orchResult.stage;
         }
       } catch (aiErr) {
@@ -2621,7 +2677,7 @@ export class ProductionQueueManager {
       const { PredictiveAnalyticsEngine } = await import('../services/predictive-analytics.js');
       const predictiveEngine = new PredictiveAnalyticsEngine();
       // تشغيل غير متزامن
-      predictiveEngine.runPredictions(jobData.merchantId, jobData.username).catch(() => {});
+      predictiveEngine.runPredictions(jobData.merchantId, jobData.username).catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
     } catch {}
 
     return {
@@ -2739,3 +2795,7 @@ export class ProductionQueueManager {
 }
 
 export default ProductionQueueManager;
+
+
+
+

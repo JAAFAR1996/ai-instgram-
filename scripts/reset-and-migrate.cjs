@@ -233,7 +233,7 @@ async function main() {
     console.log('Verified tables present:');
     for (const r of rows) console.log('  -', r.table_name);
   } finally {
-    await client.end().catch(() => {});
+    await client.end().catch((err) => { console.error('cleanup failed', err); });
   }
 }
 

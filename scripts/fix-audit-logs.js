@@ -20,7 +20,7 @@ async function main() {
     await client.query('COMMIT');
     console.log('✅ audit_logs columns ensured');
   } catch (e) {
-    await client.query('ROLLBACK').catch(()=>{});
+    await client.query('ROLLBACK').catch((err) => { console.error('ROLLBACK failed', err); });
     console.error('❌ Failed to adjust audit_logs:', e?.message || String(e));
     process.exit(1);
   } finally {

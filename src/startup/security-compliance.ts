@@ -18,7 +18,7 @@ export function initializeSecurityCompliance(): void {
     try {
       const report = await runStartupValidation();
       const overall = report.overallSuccess ? 'SUCCESS' : 'FAILURE';
-      await svc.logEvent(null, 'RUNTIME_SECURITY_VALIDATION', overall as any, {
+      await svc.logEvent(null, 'RUNTIME_SECURITY_VALIDATION', overall as Record<string, unknown>, {
         overallSuccess: report.overallSuccess,
         criticalErrors: report.criticalErrors,
         totalDurationMs: report.totalDuration
@@ -51,4 +51,3 @@ export function stopSecurityCompliance(): void {
   timers = [];
   started = false;
 }
-

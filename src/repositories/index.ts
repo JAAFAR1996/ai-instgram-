@@ -171,10 +171,10 @@ export class RepositoryService {
    * Get combined statistics from all repositories
    */
   public async getCombinedStats(merchantId?: string): Promise<{
-    merchants: any;
-    conversations: any;
-    messages: any;
-    credentials: any;
+    merchants: unknown;
+    conversations: unknown;
+    messages: unknown;
+    credentials: unknown;
     timestamp: Date;
   }> {
     const [merchantStats, conversationStats, messageStats] = await Promise.all([

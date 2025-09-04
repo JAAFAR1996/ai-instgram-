@@ -115,7 +115,7 @@ process.on('unhandledRejection', (reason, promise) => {
   });
 
   // In development, crash fast to surface issues
-  if ((process.env.NODE_ENV || '').toLowerCase() === 'development') {
+  if ((process.env.NODE_ENV ?? '').toLowerCase() === 'development') {
     console.error('Crashing in development mode to catch unhandled rejection');
     process.exit(1);
   }
@@ -162,7 +162,7 @@ process.on('warning', (warning) => {
     timestamp: new Date().toISOString()
   });
   // Opportunistic recovery on critical warnings
-  const msg = (warning?.message || '').toLowerCase();
+  const msg = (warning?.message ?? '').toLowerCase();
   if (/fswatch|memory leak|eventemitter leak/.test(msg)) {
     attemptSystemRecovery('warning', warning.message).catch((e) => {
       logger.error('attemptSystemRecovery failed (warning)', { err: e instanceof Error ? e : new Error(String(e)) });

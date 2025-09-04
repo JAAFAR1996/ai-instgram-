@@ -120,14 +120,14 @@ export class ConversationRepository {
       ? sql<ConversationRow>`
           SELECT * FROM conversations 
           WHERE merchant_id = ${data.merchantId}::uuid 
-            AND customer_phone = ${data.customerWhatsapp || null}
+            AND customer_phone = ${data.customerWhatsapp ?? null}
             AND platform = ${data.platform}
           LIMIT 1
         `
       : sql<ConversationRow>`
           SELECT * FROM conversations 
           WHERE merchant_id = ${data.merchantId}::uuid 
-            AND customer_instagram = ${data.customerInstagram || null}
+            AND customer_instagram = ${data.customerInstagram ?? null}
             AND platform = ${data.platform}
           LIMIT 1
         `;
@@ -154,9 +154,9 @@ export class ConversationRepository {
           last_message_at
         ) VALUES (
           ${data.merchantId}::uuid,
-          ${data.customerWhatsapp || null},
-          ${data.customerInstagram || null},
-          ${data.customerName || null},
+          ${data.customerWhatsapp ?? null},
+          ${data.customerInstagram ?? null},
+          ${data.customerName ?? null},
           ${data.platform},
           ${data.conversationStage || 'GREETING'},
           ${JSON.stringify(data.sessionData || {})},
@@ -174,7 +174,7 @@ export class ConversationRepository {
         ? await sql<ConversationRow>`
             SELECT * FROM conversations
             WHERE merchant_id = ${data.merchantId}::uuid
-              AND customer_phone = ${data.customerWhatsapp || null}
+              AND customer_phone = ${data.customerWhatsapp ?? null}
               AND platform = ${data.platform}
             ORDER BY last_message_at DESC
             LIMIT 1
@@ -182,7 +182,7 @@ export class ConversationRepository {
         : await sql<ConversationRow>`
             SELECT * FROM conversations
             WHERE merchant_id = ${data.merchantId}::uuid
-              AND customer_instagram = ${data.customerInstagram || null}
+              AND customer_instagram = ${data.customerInstagram ?? null}
               AND platform = ${data.platform}
             ORDER BY last_message_at DESC
             LIMIT 1
@@ -252,7 +252,7 @@ export class ConversationRepository {
    */
   async update(id: string, data: UpdateConversationRequest): Promise<Conversation | null> {
     const updateFields: string[] = [];
-    const updateValues: any[] = [];
+    const updateValues: unknown[] = [];
     let paramIndex = 1;
 
     if (data.conversationStage !== undefined) {
@@ -317,7 +317,7 @@ export class ConversationRepository {
    */
   async findMany(filters: ConversationFilters = {}): Promise<Conversation[]> {
     const whereConditions: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     let paramIndex = 1;
 
     if (filters.merchantId) {
@@ -385,7 +385,7 @@ export class ConversationRepository {
    */
   async getStats(merchantId?: string, dateFrom?: Date, dateTo?: Date): Promise<ConversationStats> {
     const whereConditions: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     let paramIndex = 1;
 
     if (merchantId) {
@@ -472,7 +472,7 @@ export class ConversationRepository {
    */
   async count(filters: ConversationFilters = {}): Promise<number> {
     const whereConditions: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     let paramIndex = 1;
 
     if (filters.merchantId) {

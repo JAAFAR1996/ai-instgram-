@@ -6,9 +6,9 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]) {
   return { text, params: values };
 }
 
-export async function querySql<T extends Record<string, any> = Record<string, any>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]> {
+export async function querySql<T extends Record<string, unknown> = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]> {
   const { text, params } = sql(strings, ...values);
   const pool = getPool();
-  const res = await pool.query<T>(text, params as any[]);
+  const res = await pool.query<T>(text, params as unknown[]);
   return res.rows as T[];
 }

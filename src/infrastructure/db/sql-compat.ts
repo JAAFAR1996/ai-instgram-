@@ -12,7 +12,7 @@ export type SqlFragment = {
 };
 
 function isFragment(value: unknown): value is SqlFragment {
-  return typeof value === 'object' && value !== null && (value as any)[SQL_FRAGMENT_SYMBOL] === true;
+  return typeof value === 'object' && value !== null && (value as { [SQL_FRAGMENT_SYMBOL]?: true })[SQL_FRAGMENT_SYMBOL] === true;
 }
 
 function asFragment(text: string, values: unknown[] = []): SqlFragment {
@@ -107,9 +107,6 @@ function createThenableQuery<T extends DatabaseRow = DatabaseRow>(
 ): Promise<T[]> & SqlFragment {
   const { text, values: params } = toQuery(strings, values);
   const fragment = asFragment(text, params) as Promise<T[]> & SqlFragment;
-  // Attach then to make it awaitable
-  (fragment as any).then = (onFulfilled: any, onRejected: any) =>
-    exec(text, params).then(onFulfilled, onRejected);
   return fragment;
 }
 
@@ -124,11 +121,11 @@ export function buildSqlCompat(pool: Pool): SqlFunction {
 
   const createThenableFragment = <T extends DatabaseRow = DatabaseRow>(text: string, params: unknown[]): Promise<T[]> & SqlFragment => {
     const frag = asFragment(text, params) as Promise<T[]> & SqlFragment;
-    (frag as any).then = (onFulfilled: any, onRejected: any) => exec<T>(text, params).then(onFulfilled, onRejected);
+    const _t = frag as Promise<T[]> & SqlFragment & { then?: (onFulfilled: (value: T[]) => unknown, onRejected?: (reason: unknown) => unknown) => unknown }; _t.then = (onFulfilled, onRejected?) => exec<T>(text, params).then(onFulfilled).catch(onRejected ?? ((err) => { throw err; }));
     return frag;
   };
 
-  const unsafe = ((stringsOrText: TemplateStringsArray | string, ...vals: unknown[]): any => {
+  const unsafe = ((stringsOrText: TemplateStringsArray | string, ...vals: unknown[]) => {
     if (typeof stringsOrText === 'string') {
       const params = (vals[0] as unknown[]) || [];
       return createThenableFragment(stringsOrText, params);
@@ -181,11 +178,11 @@ export function buildSqlCompatFromClient(client: PoolClient): SqlFunction {
 
   const createThenableFragment2 = <T extends DatabaseRow = DatabaseRow>(text: string, params: unknown[]): Promise<T[]> & SqlFragment => {
     const frag = asFragment(text, params) as Promise<T[]> & SqlFragment;
-    (frag as any).then = (onFulfilled: any, onRejected: any) => exec<T>(text, params).then(onFulfilled, onRejected);
+    const _t = frag as Promise<T[]> & SqlFragment & { then?: (onFulfilled: (value: T[]) => unknown, onRejected?: (reason: unknown) => unknown) => unknown }; _t.then = (onFulfilled, onRejected?) => exec<T>(text, params).then(onFulfilled).catch(onRejected ?? ((err) => { throw err; }));
     return frag;
   };
 
-  const unsafe = ((stringsOrText: TemplateStringsArray | string, ...vals: unknown[]): any => {
+  const unsafe = ((stringsOrText: TemplateStringsArray | string, ...vals: unknown[]) => {
     if (typeof stringsOrText === 'string') {
       const params = (vals[0] as unknown[]) || [];
       return createThenableFragment2(stringsOrText, params);
@@ -217,3 +214,4 @@ export function buildSqlCompatFromClient(client: PoolClient): SqlFunction {
 
   return core;
 }
+

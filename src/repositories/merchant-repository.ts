@@ -151,13 +151,13 @@ export class MerchantRepository {
       ) VALUES (
         ${data.businessName},
         ${data.businessCategory},
-        ${data.businessDescription || null},
+        ${data.businessDescription ?? null},
         ${data.contactEmail},
-        ${data.contactPhone || null},
-        ${data.subscriptionTier || 'FREE'},
-        ${data.monthlyMessageLimit || this.getDefaultMessageLimit(data.subscriptionTier || 'FREE')},
-        ${JSON.stringify(data.settings || {})},
-        ${data.businessAccountId || null}
+        ${data.contactPhone ?? null},
+        ${data.subscriptionTier ?? 'FREE'},
+        ${data.monthlyMessageLimit ?? this.getDefaultMessageLimit(data.subscriptionTier ?? 'FREE')},
+        ${JSON.stringify(data.settings ?? {})},
+        ${data.businessAccountId ?? null}
       )
       RETURNING *
     `;
@@ -319,8 +319,8 @@ export class MerchantRepository {
         throw new Error('Merchant account is not active');
       }
 
-      const currentUsage = parseInt(merchant.monthly_messages_used) || 0;
-      const limit = parseInt(merchant.monthly_message_limit) || 0;
+      const currentUsage = parseInt(merchant.monthly_messages_used) ?? 0;
+      const limit = parseInt(merchant.monthly_message_limit) ?? 0;
       
       if (currentUsage + count > limit) {
         throw new Error(`Message limit exceeded: ${currentUsage + count} > ${limit}`);
@@ -573,7 +573,7 @@ export class MerchantRepository {
     }
 
     const whereClause = conditions.length
-      ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
+      ? sql`WHERE ${conditions.slice(1).reduce((acc, cond) => sql`${acc} AND ${cond}`, conditions[0]! as SqlFragment)}`
       : sql``;
 
     const rows = await sql<CountRow>`

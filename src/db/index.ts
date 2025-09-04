@@ -42,11 +42,11 @@ function createPoolConfig(): PoolConfig {
   const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
   
   // TLS configuration
-  let sslConfig: any = false;
+  let sslConfig: boolean | { rejectUnauthorized?: boolean } = false;
   const dbUrl = config.database.url;
   const ca = process.env.DB_SSL_CA;
   const sslModeRequire = (() => {
-    try { const u = new URL(dbUrl); return (u.searchParams.get('sslmode') || '').toLowerCase() === 'require'; } catch { return false; }
+    try { const u = new URL(dbUrl); return (u.searchParams.get('sslmode') ?? '').toLowerCase() === 'require'; } catch { return false; }
   })();
   const overrideRejectUnauth = process.env.DB_SSL_REJECT_UNAUTHORIZED === 'false' || sslModeRequire;
   const strictEnv = process.env.DB_SSL_STRICT;
@@ -114,7 +114,7 @@ export function getPool(): Pool {
         log.error('Database pool error:', {
           error: err.message,
           code: dbError.code,
-          poolEnded: pool?.ended || false
+          poolEnded: pool?.ended ?? false
         });
         
         // FIXED: Do NOT call pool.end() automatically on errors
@@ -158,7 +158,7 @@ export function getPool(): Pool {
 export function resetPool(): void {
   try {
     if (pool && !pool.ended) {
-      pool.end().catch(() => {});
+      pool.end().catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
     }
   } finally {
     pool = null;
@@ -484,7 +484,7 @@ function isDeadlockError(error: unknown): boolean {
     'tuple concurrently updated'
   ];
   
-  const hasDeadlockCode = deadlockCodes.includes(pgError.code || '');
+  const hasDeadlockCode = deadlockCodes.includes(pgError.code ?? '');
   const hasDeadlockMessage = pgError.message && 
     deadlockMessages.some(msg => pgError.message.toLowerCase().includes(msg));
   

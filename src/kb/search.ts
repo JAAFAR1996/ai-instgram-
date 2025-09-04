@@ -21,7 +21,7 @@ export async function kbSearch(
   // Guard: enforce RLS context presence and match
   try {
     const ctx = await sql<{ merchant_id: string }>`SELECT current_setting('app.current_merchant_id', true) as merchant_id`;
-    const mid = (ctx[0]?.merchant_id || '').trim();
+    const mid = (ctx[0]?.merchant_id ?? '').trim();
     if (!mid || mid !== merchantId) {
       throw new Error('RLS context mismatch or not set');
     }

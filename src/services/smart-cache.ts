@@ -91,10 +91,10 @@ export class SmartCache {
 
   async maybeCacheCommonReply(merchantId: string, originalUserText: string, aiResponse: string, aiIntent?: string): Promise<void> {
     // Only cache for relatively short, repetitive queries
-    const text = (originalUserText || '').trim();
+    const text = (originalUserText ?? '').trim();
     if (text.length === 0) return;
     // Skip caching generic guidance or small talk to avoid repetitive replies
-    const intent = (aiIntent || '').toUpperCase();
+    const intent = (aiIntent ?? '').toUpperCase();
     if (intent === 'OTHER' || intent === 'SMALL_TALK') return;
     const lower = text.toLowerCase();
     const looksGeneric = /(سعر|كم|policy|سياسة|ارجاع|استرجاع|return|refund|التوصيل|الشحن|الموقع|location|hours|مواعيد|delivery)/.test(lower);

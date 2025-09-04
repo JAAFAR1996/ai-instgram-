@@ -24,7 +24,7 @@ export class IntelligentRejectionHandler {
   private db = getDatabase();
 
   async analyzeRejection(customerMessage: string, _ctx: ConversationContext): Promise<RejectionAnalysis> {
-    const msg = (customerMessage || '').toLowerCase();
+    const msg = (customerMessage ?? '').toLowerCase();
     const isPrice = /(غالي|سعر|خصم|رخيص|مرتفع)/.test(msg);
     const isQuality = /(جودة|تقليد|مزيف|خايس)/.test(msg);
     const isTiming = /(بعدين|مو هسه|مو الآن|لاحقاً)/.test(msg);

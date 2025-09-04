@@ -16,11 +16,14 @@ import type { Platform } from '../types/database.js';
 import { getRedisConnectionManager } from '../services/RedisConnectionManager.js';
 import { RedisUsageType } from '../config/RedisConfigurationFactory.js';
 import { getConfig } from '../config/index.js';
+import { getLogger } from '../services/logger.js';
 
 const clean = (v?: string | null) =>
   (v ?? '').replace(/[\r\n]/g, '').trim();
 
 const config = getConfig();
+const log = getLogger({ component: 'security-middleware' });
+const extractLogCtx = (c?: Context) => ({ requestId: c?.req?.header('x-request-id') ?? undefined, merchantId: c?.req?.header('x-merchant-id') ?? undefined });
 let redisClient: Redis | null = null;
 
 async function getRedisClient(): Promise<Redis | null> {
@@ -30,7 +33,7 @@ async function getRedisClient(): Promise<Redis | null> {
     try {
       redisClient = await getRedisConnectionManager().getConnection(RedisUsageType.CACHING);
     } catch (error) {
-      console.warn('Redis not available, using memory fallback');
+      log.warn('Redis not available, using memory fallback', extractLogCtx());
       return null;
     }
   }
@@ -38,8 +41,8 @@ async function getRedisClient(): Promise<Redis | null> {
 }
 
 // Rate limiter configurations
-const DEFAULT_RATE_LIMIT = parseInt(process.env.RATE_LIMIT_MAX || '100');
-const DEFAULT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000');
+const DEFAULT_RATE_LIMIT = parseInt(process.env.RATE_LIMIT_MAX ?? '100');
+const DEFAULT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? '60000');
 
 type RateLimiter = {
   consume: (key: string) => Promise<unknown>;
@@ -111,12 +114,12 @@ export function getClientIP(forwarded?: string): string | undefined {
 export function rateLimitMiddleware(limiterType: string = 'general') {
   return async (c: Context, next: Next): Promise<Response | void> => {
     const limiter = await getRateLimiter(limiterType);
-    const key = getClientIP(c.req.header('x-forwarded-for')) || 'unknown';
+    const key = getClientIP(c.req.header('x-forwarded-for')) ?? 'unknown';
     
     try {
       await limiter.consume(key);
       return await next();
-    } catch (rej) {
+    } catch (rej: unknown) {
       const res = rej as RateLimiterRes;
       const secs = Math.round((res?.msBeforeNext ?? 0) / 1000) || 1;
       
@@ -141,7 +144,7 @@ export function rateLimitMiddleware(limiterType: string = 'general') {
  */
 export function merchantRateLimitMiddleware() {
   return async (c: Context, next: Next): Promise<Response | void> => {
-    const merchantId = c.get('merchantId') || c.req.query('merchantId');
+    const merchantId = c.get('merchantId') ?? c.req.query('merchantId');
     
     if (!merchantId) {
       return c.json({
@@ -156,8 +159,9 @@ export function merchantRateLimitMiddleware() {
     try {
       await limiter.consume(key);
       return await next();
-    } catch (rejRes: any) {
-      const secs = Math.round(rejRes.msBeforeNext / 1000) || 1;
+    } catch (rejRes: unknown) {
+      const res = rejRes as RateLimiterRes;
+      const secs = Math.round(((res?.msBeforeNext ?? 0) as number) / 1000) || 1;
       
       return c.json({
         error: 'Merchant rate limit exceeded',
@@ -174,12 +178,12 @@ export function merchantRateLimitMiddleware() {
  */
 export function windowEnforcementMiddleware() {
   return async (c: Context, next: Next): Promise<Response | void> => {
-    const merchantId = c.get('merchantId') || c.req.query('merchantId');
-    const platform = (c.req.query('platform') || 'instagram') as Platform;
+    const merchantId = c.get('merchantId') ?? c.req.query('merchantId');
+    const platform = (c.req.query('platform') ?? 'instagram') as Platform;
     
     const body = await c.req.json().catch(() => ({}));
-    const customerPhone = body.customer_phone || c.req.query('customer_phone');
-    const customerInstagram = body.customer_instagram || c.req.query('customer_instagram');
+    const customerPhone = body.customer_phone ?? c.req.query('customer_phone');
+    const customerInstagram = body.customer_instagram ?? c.req.query('customer_instagram');
     
     if (!merchantId) {
       return c.json({
@@ -221,7 +225,7 @@ export function windowEnforcementMiddleware() {
       
       return await next();
     } catch (error) {
-      console.error('❌ Window enforcement error:', error);
+      log.error('Window enforcement error', { ...extractLogCtx(c), err: error as unknown })
       return c.json({
         error: 'Window check failed',
         code: 'WINDOW_CHECK_ERROR'
@@ -235,13 +239,13 @@ export function windowEnforcementMiddleware() {
  */
 export function messagingRateLimitMiddleware() {
   return async (c: Context, next: Next): Promise<Response | void> => {
-    const merchantId = c.get('merchantId') || c.req.query('merchantId');
+    const merchantId = c.get('merchantId') ?? c.req.query('merchantId');
     
     const body = await c.req.json().catch(() => ({}));
-    const customerPhone = body.customer_phone || c.req.query('customer_phone');
-    const customerInstagram = body.customer_instagram || c.req.query('customer_instagram');
+    const customerPhone = body.customer_phone ?? c.req.query('customer_phone');
+    const customerInstagram = body.customer_instagram ?? c.req.query('customer_instagram');
     
-    const customerId = customerPhone || customerInstagram;
+    const customerId = customerPhone ?? customerInstagram;
     
     if (!customerId) {
       return c.json({
@@ -256,7 +260,7 @@ export function messagingRateLimitMiddleware() {
     try {
       await limiter.consume(key);
       return await next();
-    } catch (rej) {
+    } catch (rej: unknown) {
       const res = rej as RateLimiterRes;
       const secs = Math.round((res?.msBeforeNext ?? 0) / 1000) || 1;
       
@@ -276,8 +280,8 @@ export function messagingRateLimitMiddleware() {
 export function securityContextMiddleware() {
   return async (c: Context, next: Next) => {
     const traceId = generateTraceId();
-    const ipAddress = getClientIP(c.req.header('x-forwarded-for')) || 'unknown';
-    const userAgent = c.req.header('user-agent') || 'unknown';
+    const ipAddress = getClientIP(c.req.header('x-forwarded-for')) ?? 'unknown';
+    const userAgent = c.req.header('user-agent') ?? 'unknown';
     const startTime = Date.now();
     
     const securityContext: SecurityContext = {
@@ -333,7 +337,7 @@ export function auditLogMiddleware() {
           memory_usage_mb,
           success
         ) VALUES (
-          ${merchantId || null}::uuid,
+          ${merchantId ?? null}::uuid,
           ${`${c.req.method}_${c.req.path}`},
           'API_REQUEST',
           ${JSON.stringify({
@@ -358,7 +362,7 @@ export function auditLogMiddleware() {
         )
       `;
     } catch (error) {
-      console.error('❌ Audit logging failed:', error);
+      log.error('Audit logging failed', { ...extractLogCtx(c), err: error as unknown });
       // Don't fail the request if audit logging fails
     }
   };
@@ -369,7 +373,7 @@ export function auditLogMiddleware() {
  */
 export function webhookSignatureMiddleware(secretKey: string) {
   return async (c: Context, next: Next): Promise<Response | void> => {
-    const signature = c.req.header('X-Hub-Signature-256') || c.req.header('X-Signature');
+    const signature = c.req.header('X-Hub-Signature-256') ?? c.req.header('X-Signature');
     
     if (!signature) {
       return c.json({
@@ -433,7 +437,7 @@ export function webhookSignatureMiddleware(secretKey: string) {
 
       return await next();
     } catch (error) {
-      console.error('❌ Webhook signature verification failed:', error);
+      log.error('Webhook signature verification failed', { ...extractLogCtx(c), err: error as unknown });
       return c.json({
         error: 'Signature verification failed',
         code: 'SIGNATURE_VERIFICATION_ERROR'
@@ -524,7 +528,7 @@ export function requestValidationMiddleware() {
     }
     
     // Validate request size (10MB limit)
-    const contentLength = parseInt(c.req.header('content-length') || '0');
+    const contentLength = parseInt(c.req.header('content-length') ?? '0');
     if (contentLength > 10 * 1024 * 1024) {
       return c.json({
         error: 'Request too large',
@@ -544,3 +548,8 @@ export const rateLimiter = rateLimitMiddleware();
 export {
   rateLimiters
 };
+
+
+
+
+

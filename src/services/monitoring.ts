@@ -14,6 +14,7 @@ import { getLogger } from './logger.js';
 import { telemetry } from './telemetry.js';
 import { must } from '../utils/safety.js';
 import { getRedisMonitor } from './redis-monitoring.js';
+import type { Redis } from 'ioredis';
 
 const logger = getLogger({ component: 'MonitoringService' });
 
@@ -136,7 +137,7 @@ export class MonitoringService {
   /**
    * Set Redis connection for monitoring
    */
-  public setRedisConnection(redisConnection: any): void {
+  public setRedisConnection(redisConnection: Redis): void {
     this.redisMonitor.setRedisConnection(redisConnection);
   }
 
@@ -167,7 +168,7 @@ export class MonitoringService {
       telemetry.trackEvent('quality_check_completed', {
         platform: 'whatsapp',
         status,
-        quality_rating: metrics.qualityRating || 0
+        quality_rating: metrics.qualityRating ?? 0
       });
       
       return {
@@ -207,7 +208,7 @@ export class MonitoringService {
       telemetry.trackEvent('quality_check_completed', {
         platform: 'instagram',
         status,
-        quality_rating: metrics.qualityRating || 0
+        quality_rating: metrics.qualityRating ?? 0
       });
       
       return {
@@ -245,7 +246,7 @@ export class MonitoringService {
           success,
           error_message
         ) VALUES (
-          ${metrics.merchantId || null}::uuid,
+          ${metrics.merchantId ?? null}::uuid,
           'PERFORMANCE_METRIC',
           'API_ENDPOINT',
           ${JSON.stringify({
@@ -256,7 +257,7 @@ export class MonitoringService {
           })},
           ${metrics.responseTime},
           ${metrics.statusCode < 400},
-          ${metrics.errorMessage || null}
+          ${metrics.errorMessage ?? null}
         )
       `;
 
@@ -551,11 +552,11 @@ export class MonitoringService {
       const connectionResult = connections[0];
       
       const metrics = {
-        averageResponseTime: Math.round(result?.avg_response_time || 0),
-        errorRate: Math.round((result?.error_rate || 0) * 100) / 100,
-        throughput: Math.round((result?.total_requests || 0) / 5), // requests per minute
-        activeConnections: parseInt(connectionResult?.active_connections || '0'),
-        memoryUsage: Math.round((result?.avg_memory_usage || 0) * 100) / 100
+        averageResponseTime: Math.round(result?.avg_response_time ?? 0),
+        errorRate: Math.round((result?.error_rate ?? 0) * 100) / 100,
+        throughput: Math.round((result?.total_requests ?? 0) / 5), // requests per minute
+        activeConnections: parseInt(connectionResult?.active_connections ?? '0'),
+        memoryUsage: Math.round((result?.avg_memory_usage ?? 0) * 100) / 100
       };
 
       // Record system metrics to telemetry
@@ -619,14 +620,14 @@ export class MonitoringService {
       const qualityRating = Math.min(messagingQualityScore * 1.1, 1); // Boost slightly
       
       return {
-        messagesSent24h: result?.messages_sent_24h || 0,
-        messagesDelivered24h: result?.messages_delivered_24h || 0,
-        messagesRead24h: result?.messages_read_24h || 0,
-        userInitiatedConversations24h: result?.user_initiated_conversations_24h || 0,
-        businessInitiatedConversations24h: result?.business_initiated_conversations_24h || 0,
+        messagesSent24h: result?.messages_sent_24h ?? 0,
+        messagesDelivered24h: result?.messages_delivered_24h ?? 0,
+        messagesRead24h: result?.messages_read_24h ?? 0,
+        userInitiatedConversations24h: result?.user_initiated_conversations_24h ?? 0,
+        businessInitiatedConversations24h: result?.business_initiated_conversations_24h ?? 0,
         blockRate24h: 0, // Would need external API data
         reportRate24h: 0, // Would need external API data
-        avgResponseTimeMinutes: result?.avg_response_time_minutes || 0,
+        avgResponseTimeMinutes: result?.avg_response_time_minutes ?? 0,
         responseRate24h: Math.min(responseRate, 1),
         templateViolations24h: 0, // Would track separately
         policyViolations24h: 0, // Would track separately
@@ -647,7 +648,7 @@ export class MonitoringService {
    * Private: Determine quality status based on metrics
    */
   private determineQualityStatus(metrics: CalculatedQualityMetrics): QualityStatus {
-    const qualityRating = metrics.qualityRating || 0;
+    const qualityRating = metrics.qualityRating ?? 0;
     
     if (qualityRating >= 0.9) return 'EXCELLENT';
     if (qualityRating >= 0.8) return 'GOOD';
@@ -880,7 +881,7 @@ export function createPerformanceMiddleware(monitoringService: MonitoringService
     res.end = function(...args: unknown[]) {
       const responseTime = Date.now() - startTime;
       const metrics: PerformanceMetrics = {
-        endpoint: req.path || req.url || 'unknown',
+        endpoint: req.path ?? req.url ?? 'unknown',
         method: req.method,
         responseTime,
         statusCode: res.statusCode,

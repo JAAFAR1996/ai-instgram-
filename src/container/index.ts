@@ -221,7 +221,7 @@ export class DIContainer {
  * Service decorator for automatic registration
  */
 export function Service(name?: string) {
-  return function <T extends { new (...args: any[]): {} }>(constructor: T) {
+  return function <T extends { new (...args: unknown[]): object }>(constructor: T) {
     const serviceName = name || constructor.name;
     const container = DIContainer.getInstance();
     
@@ -239,9 +239,13 @@ export function Service(name?: string) {
 export function Inject(token: string) {
   return function (target: unknown, _propertyKey: string | symbol | undefined, parameterIndex: number) {
     // Store metadata for dependency injection
-    const existingTokens = (Reflect as any).getMetadata?.('inject-tokens', target) || [];
-    existingTokens[parameterIndex] = token;
-    (Reflect as any).defineMetadata?.('inject-tokens', existingTokens, target);
+    const R = Reflect as Record<string, unknown>;
+    const getMeta = typeof R.getMetadata === 'function' ? (R.getMetadata as (k: string, t: unknown) => unknown) : undefined;
+    const setMeta = typeof R.defineMetadata === 'function' ? (R.defineMetadata as (k: string, v: unknown, t: unknown) => void) : undefined;
+    const existing = (getMeta?.('inject-tokens', target) as unknown) as unknown[] | undefined;
+    const tokens = Array.isArray(existing) ? existing.slice() : [];
+    tokens[parameterIndex] = token;
+    setMeta?.('inject-tokens', tokens, target);
   };
 }
 

@@ -91,8 +91,8 @@ export class CredentialsRepository {
           ${merchantId}::uuid,
           ${encryptedJson},
           ${identifier},
-          ${metadata?.expiresAt || null},
-          ${metadata?.createdIp || null},
+          ${metadata?.expiresAt ?? null},
+          ${metadata?.createdIp ?? null},
           1
         )
         ON CONFLICT (merchant_id) 
@@ -117,8 +117,8 @@ export class CredentialsRepository {
           ${merchantId}::uuid,
           ${encryptedJson},
           ${identifier},
-          ${metadata?.expiresAt || null},
-          ${metadata?.createdIp || null},
+          ${metadata?.expiresAt ?? null},
+          ${metadata?.createdIp ?? null},
           1
         )
         ON CONFLICT (merchant_id) 
@@ -147,7 +147,7 @@ export class CredentialsRepository {
     } else {
       rows = await sql`SELECT instagram_token_encrypted as token_encrypted FROM merchant_credentials WHERE merchant_id = ${merchantId}::uuid`;
     }
-    const row = rows[0] as unknown as TokenRow | undefined;
+    const row = rows[0] as TokenRow | undefined;
 
     if (!row?.token_encrypted) {
       return null;
@@ -257,7 +257,7 @@ export class CredentialsRepository {
       UPDATE merchant_credentials 
       SET 
         last_access_at = NOW(),
-        last_access_ip = ${ip || null},
+        last_access_ip = ${ip ?? null},
         updated_at = NOW()
       WHERE merchant_id = ${merchantId}::uuid
     `;

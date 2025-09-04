@@ -20,20 +20,26 @@ export class ExtendedThinkingService {
     const chain = await this.generateThinkingChain(query, context, showThinking);
 
     // ANALYZE → EXPLORE → EVALUATE → DECIDE
-    const analyze = chain.steps.find(s => s.stage === 'ANALYZE')!;
+    const analyze = chain.steps.find(s => s.stage === 'ANALYZE');
+    if (!analyze) throw new Error('ANALYZE step not found in thinking chain');
     await this.analyzeStep(analyze, context);
 
-    const explore = chain.steps.find(s => s.stage === 'EXPLORE')!;
+    const explore = chain.steps.find(s => s.stage === 'EXPLORE');
+    if (!explore) throw new Error('EXPLORE step not found in thinking chain');
     await this.analyzeStep(explore, context);
 
-    const evaluate = chain.steps.find(s => s.stage === 'EVALUATE')!;
+    const evaluate = chain.steps.find(s => s.stage === 'EVALUATE');
+    if (!evaluate) throw new Error('EVALUATE step not found in thinking chain');
     try {
-      const exploreHyps = Array.isArray((explore.result as any)?.hypotheses) ? (explore.result as any).hypotheses as string[] : [];
+      const exr = explore.result as Record<string, unknown> | undefined;
+      const hyp = exr?.hypotheses as unknown;
+      const exploreHyps = Array.isArray(hyp) ? (hyp as string[]) : [];
       (evaluate.meta ||= {})['exploreHypotheses'] = exploreHyps;
     } catch {}
     await this.analyzeStep(evaluate, context);
 
-    const decide = chain.steps.find(s => s.stage === 'DECIDE')!;
+    const decide = chain.steps.find(s => s.stage === 'DECIDE');
+    if (!decide) throw new Error('DECIDE step not found in thinking chain');
     await this.analyzeStep(decide, context);
 
     await this.validateReasoning(chain);
@@ -97,8 +103,10 @@ export class ExtendedThinkingService {
       }
       case 'EVALUATE': {
         // Simple evaluation: rank hypotheses by presence of keywords and nlp intent
-        const hyps: string[] = Array.isArray((step.meta as any)?.exploreHypotheses)
-          ? (step.meta as any).exploreHypotheses as string[]
+        const m = step.meta as Record<string, unknown> | undefined;
+        const eh = m?.exploreHypotheses as unknown;
+        const hyps: string[] = Array.isArray(eh)
+          ? (eh as string[])
           : [];
         const ranked = hyps.map(h => ({ h, score: scoreHypothesis(h, q, context) }))
           .sort((a, b) => b.score - a.score);
@@ -174,7 +182,7 @@ export class ExtendedThinkingService {
 }
 
 function extractKeywords(q: string): string[] {
-  return (q || '')
+  return (q ?? '')
     .toLowerCase()
     .replace(/[\p{P}\p{S}]+/gu, ' ')
     .split(/\s+/)
@@ -190,7 +198,7 @@ function detectLang(q: string): string {
 }
 
 function scoreHypothesis(h: string, q: string, context: ExtendedThinkingContext): number {
-  const ql = (q || '').toLowerCase();
+  const ql = (q ?? '').toLowerCase();
   let score = 0.5;
   if (/تسعير|price|سعر|كم/.test(h + ' ' + ql)) score += 0.2;
   if (/سياسة|policy|refund|ارجاع|استرجاع|return/.test(h + ' ' + ql)) score += 0.15;

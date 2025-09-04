@@ -56,7 +56,7 @@ async function run() {
     await client.query('COMMIT');
     console.log(`✅ Updated merchant ${idRow.id} category => ${category}`);
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch((err) => { console.error('ROLLBACK failed', err); });
     console.error('❌ Update failed:', err?.message || String(err));
     process.exit(1);
   } finally {

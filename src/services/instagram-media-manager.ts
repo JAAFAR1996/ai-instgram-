@@ -10,7 +10,7 @@ import { getLogger } from './logger.js';
 import { telemetry } from './telemetry.js';
 import type { MediaContent } from '../types/social.js';
 import { getAIService } from './ai.js';
-import ImageAnalysisService from './image-analysis.js';
+import ImageAnalysisService, { type ImageAnalysisResult, type ImageLabel } from './image-analysis.js';
 
 /**
  * Media message interface for incoming/outgoing media
@@ -296,16 +296,16 @@ export class InstagramMediaManager {
   /**
    * Generate image description from analysis
    */
-  private generateImageDescription(analysis: any): string {
+  private generateImageDescription(analysis: ImageAnalysisResult): string {
     const elements = [];
     
     if (analysis.labels?.length > 0) {
-      const topLabels = analysis.labels.slice(0, 3).map((l: any) => l.name).join(', ');
+      const topLabels = analysis.labels.slice(0, 3).map((l: ImageLabel) => l.name).join(', ');
       elements.push(`يحتوي على: ${topLabels}`);
     }
 
     if (analysis.objects?.length > 0) {
-      const objects = analysis.objects.slice(0, 2).map((o: any) => o.name).join(', ');
+      const objects = analysis.objects.slice(0, 2).map((o) => o.name).join(', ');
       elements.push(`الكائنات: ${objects}`);
     }
 
@@ -319,8 +319,8 @@ export class InstagramMediaManager {
   /**
    * Detect if this is a product inquiry
    */
-  private detectProductInquiry(analysis: any, textContent?: string): boolean {
-    const text = (textContent || analysis.ocrText || '').toLowerCase();
+  private detectProductInquiry(analysis: ImageAnalysisResult, textContent?: string): boolean {
+    const text = (textContent || analysis.ocrText ?? '').toLowerCase();
     const productKeywords = /سعر|كم|price|cost|اشتري|buy|منتج|product/;
     
     const hasProductKeywords = productKeywords.test(text);
@@ -333,7 +333,7 @@ export class InstagramMediaManager {
   /**
    * Generate suggested response based on analysis
    */
-  private async generateSuggestedResponse(analysis: any, merchantId: string): Promise<{
+  private async generateSuggestedResponse(analysis: ImageAnalysisResult, merchantId: string): Promise<{
     type: 'text' | 'media' | 'product_catalog';
     content: string;
     mediaUrl?: string;
@@ -342,7 +342,7 @@ export class InstagramMediaManager {
     
     // If product matches found, suggest catalog
     if (analysis.productMatches?.length > 0) {
-      const productIds = analysis.productMatches.slice(0, 3).map((m: any) => m.productId);
+      const productIds = analysis.productMatches.slice(0, 3).map((m) => m.productId);
       return {
         type: 'product_catalog',
         content: 'وجدت منتجات مشابهة لصورتك! شاهد هذه الخيارات:',
@@ -379,7 +379,7 @@ export class InstagramMediaManager {
    * Analyze sentiment from text content
    */
   private analyzeSentiment(ocrText?: string, messageText?: string): 'positive' | 'neutral' | 'negative' {
-    const text = (ocrText + ' ' + (messageText || '')).toLowerCase();
+    const text = (ocrText + ' ' + (messageText ?? '')).toLowerCase();
     
     const positive = /(شكرا|حلو|جميل|😍|❤️|👍|🔥|ممتاز|رائع)/.test(text);
     const negative = /(سيء|رديء|خايس|ما|مو|👎|😡|💔|بطيء)/.test(text);
@@ -390,7 +390,7 @@ export class InstagramMediaManager {
   /**
    * Calculate marketing value based on analysis
    */
-  private calculateMarketingValue(analysis: any): 'high' | 'medium' | 'low' {
+  private calculateMarketingValue(analysis: ImageAnalysisResult): 'high' | 'medium' | 'low' {
     let score = 0;
     
     // Product-related content gets high value
@@ -408,7 +408,7 @@ export class InstagramMediaManager {
   /**
    * Generate automatic tags
    */
-  private generateAutoTags(analysis: any): string[] {
+  private generateAutoTags(analysis: ImageAnalysisResult): string[] {
     const tags = new Set<string>();
     
     // Add content type tags
@@ -420,7 +420,7 @@ export class InstagramMediaManager {
     }
     
     // Add top labels as tags
-    analysis.labels?.slice(0, 5).forEach((label: any) => {
+    analysis.labels?.slice(0, 5).forEach((label: ImageLabel) => {
       if (label.confidence > 0.7) {
         tags.add(label.name);
       }
@@ -440,7 +440,7 @@ export class InstagramMediaManager {
   private getFallbackAnalysis(media: MediaContent, textContent?: string): MediaAnalysisResult {
     return {
       description: `${media.type} محتوى - ${media.metadata?.originalFileName || 'ملف مرفوع'}`,
-      isProductInquiry: /سعر|كم|price|منتج/.test(textContent || ''),
+      isProductInquiry: /سعر|كم|price|منتج/.test(textContent ?? ''),
       suggestedResponse: {
         type: 'text',
         content: textContent ? 
@@ -481,7 +481,7 @@ export class InstagramMediaManager {
           ${media.metadata?.dimensions?.height || 0},
           ${media.metadata?.fileSize || 0},
           ${`hash_${Date.now()}`},
-          ${analysis.extractedText || null},
+          ${analysis.extractedText ?? null},
           ${JSON.stringify({
             objects: analysis.detectedObjects,
             colors: analysis.colors,

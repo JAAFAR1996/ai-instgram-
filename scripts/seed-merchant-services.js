@@ -27,7 +27,7 @@ async function main() {
     await client.query('COMMIT');
     console.log('✅ Seeded merchant service status for:', MERCHANT_ID, SERVICES);
   } catch (e) {
-    await client.query('ROLLBACK').catch(()=>{});
+    await client.query('ROLLBACK').catch((err) => { console.error('ROLLBACK failed', err); });
     console.error('❌ Failed to seed merchant services:', e?.message || String(e));
     process.exit(1);
   } finally {

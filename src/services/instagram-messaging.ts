@@ -46,7 +46,7 @@ export class InstagramMessagingService {
     recipientId: string
   ): InstagramMessageResponse {
     return {
-      messageId: result.messageId || '',
+      messageId: result.messageId ?? '',
       recipientId,
       success: result.success,
       error: result.error

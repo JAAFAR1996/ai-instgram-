@@ -75,15 +75,15 @@ export async function createTemplate(
   const row = rows[0];
   if (!row) throw new Error('Template not found');
   return {
-    id: row!.id,
-    merchantId: row!.merchant_id,
-    name: row!.name,
-    type: row!.type as UtilityMessageType,
-    content: row!.content,
-    variables: row!.variables,
-    approved: row!.approved,
-    createdAt: row!.created_at,
-    updatedAt: row!.updated_at
+    id: row.id,
+    merchantId: row.merchant_id,
+    name: row.name,
+    type: row.type as UtilityMessageType,
+    content: row.content,
+    variables: row.variables,
+    approved: row.approved,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }
 
@@ -151,7 +151,7 @@ export async function listTemplates(
   const { type, approved, limit = 50, offset = 0 } = options;
   
   const whereConditions = ['merchant_id = $1::uuid'];
-  const params: any[] = [merchantId];
+  const params: unknown[] = [merchantId];
   let paramIndex = 2;
   
   if (type) {
@@ -215,7 +215,7 @@ export async function updateTemplate(
   }
 ): Promise<Template | null> {
   const updateFields: string[] = [];
-  const params: any[] = [];
+  const params: unknown[] = [];
   let paramIndex = 1;
 
   if (updates.name !== undefined) {

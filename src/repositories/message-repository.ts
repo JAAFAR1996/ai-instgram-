@@ -179,13 +179,13 @@ export class MessageRepository {
         ${data.platform},
         ${data.messageType},
         ${data.content},
-        ${data.mediaUrl || null},
-        ${data.platformMessageId || null},
-        ${data.aiProcessed || false},
-        ${data.deliveryStatus || 'PENDING'},
-        ${data.aiConfidence || null},
-        ${data.aiIntent || null},
-        ${data.processingTimeMs || null},
+        ${data.mediaUrl ?? null},
+        ${data.platformMessageId ?? null},
+        ${data.aiProcessed ?? false},
+        ${data.deliveryStatus ?? 'PENDING'},
+        ${data.aiConfidence ?? null},
+        ${data.aiIntent ?? null},
+        ${data.processingTimeMs ?? null},
         ${data.mediaMetadata ? JSON.stringify(data.mediaMetadata) : null}
       )
       RETURNING *
@@ -219,7 +219,7 @@ export class MessageRepository {
   async update(id: string, data: UpdateMessageRequest): Promise<Message | null> {
     const sql: Sql = this.db.getSQL();
     const fields: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     let i = 1;
 
     if (data.deliveryStatus !== undefined) { fields.push(`delivery_status = $${i++}`); params.push(data.deliveryStatus); }
@@ -245,7 +245,7 @@ export class MessageRepository {
   async findMany(filters: MessageFilters = {}): Promise<Message[]> {
     const sql: Sql = this.db.getSQL();
     const where: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     let i = 1;
 
     if (filters.conversationId) { where.push(`conversation_id = $${i++}::uuid`); params.push(filters.conversationId); }
@@ -373,7 +373,7 @@ export class MessageRepository {
   ): Promise<MessageStats> {
     const sql: Sql = this.db.getSQL();
     const where: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     let i = 1;
     if (conversationId) { where.push(`conversation_id = $${i++}::uuid`); params.push(conversationId); }
     if (dateFrom)       { where.push(`created_at >= $${i++}`);           params.push(dateFrom); }
@@ -413,8 +413,8 @@ export class MessageRepository {
         stats.total = parseInt(row.total);
         stats.incoming = parseInt(row.incoming);
         stats.outgoing = parseInt(row.outgoing);
-        stats.avgProcessingTime = parseFloat(row.avg_processing_time) || 0;
-        stats.avgAiConfidence = parseFloat(row.avg_ai_confidence) || 0;
+        stats.avgProcessingTime = parseFloat(row.avg_processing_time) ?? 0;
+        stats.avgAiConfidence = parseFloat(row.avg_ai_confidence) ?? 0;
       } else if (row.platform && !row.message_type && !row.delivery_status) {
         // Platform totals
         stats.byPlatform[row.platform] = parseInt(row.total);
@@ -473,7 +473,7 @@ export class MessageRepository {
   async count(filters: MessageFilters = {}): Promise<number> {
     const sql: Sql = this.db.getSQL();
     const where: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     let i = 1;
     if (filters.conversationId) { where.push(`conversation_id = $${i++}::uuid`); params.push(filters.conversationId); }
     if (filters.direction)      { where.push(`direction = $${i++}`);             params.push(filters.direction); }

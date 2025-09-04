@@ -28,7 +28,11 @@ module.exports = tseslint.config(
       }],
       'prefer-const': 'error',
       'no-var': 'error',
-      'no-undef': 'off'
+      'no-undef': 'off',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-unsafe-assignment': 'error',
+      '@typescript-eslint/no-unsafe-member-access': 'error',
+      'no-empty': ['error', { allowEmptyCatch: false }]
     }
   },
 

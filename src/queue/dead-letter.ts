@@ -7,6 +7,7 @@
 
 import { getLogger } from '../services/logger.js';
 import { withTimeout } from '../utils/timeout.js';
+import { telemetry } from '../services/telemetry.js';
 import { randomUUID } from 'crypto';
 
 export interface DeadLetterItem {
@@ -105,6 +106,17 @@ export function pushDLQ(item: Partial<DeadLetterItem> & { reason: string; payloa
       eventId: dlqItem.eventId
     });
   }
+}
+
+// Convenience enqueue function for retry-exhausted operations
+export function enqueueDLQ(
+  reason: string,
+  payload?: unknown,
+  severity: DeadLetterItem['severity'] = 'high',
+  category: DeadLetterItem['category'] = 'other'
+) {
+  pushDLQ({ reason, payload, severity, category });
+  try { telemetry.counter('dlq_enqueued_total', 'DLQ enqueued items').add(1, { reason, category }); } catch {}
 }
 
 /**
@@ -245,7 +257,7 @@ export async function processRetryableItems(
   for (let i = 0; i < retryableItems.length; i += BATCH_SIZE) {
     const batch = retryableItems.slice(i, i + BATCH_SIZE);
     
-    await Promise.allSettled(batch.map(async (item) => {
+    const results = await Promise.allSettled(batch.map(async (item) => {
       const startTime = Date.now();
       
       try {
@@ -330,7 +342,7 @@ export async function processRetryableItems(
           });
         }
         retried++;
-      } catch (error: any) {
+      } catch (error) {
         const processingTime = Date.now() - startTime;
         
         // Enhanced error logging with context
@@ -341,9 +353,9 @@ export async function processRetryableItems(
           category: item.category,
           severity: item.severity,
           processingTime,
-          errorName: error?.name || 'UnknownError',
-          errorMessage: error?.message || 'Unknown error occurred',
-          errorStack: error?.stack,
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          errorMessage: error instanceof Error ? error.message : 'Unknown error occurred',
+          errorStack: error instanceof Error ? error.stack : undefined,
           merchantId: item.merchantId,
           traceId: item.traceId,
           correlationId: item.correlationId
@@ -353,9 +365,9 @@ export async function processRetryableItems(
         
         // Update item with error information
         item.error = {
-          name: error?.name || 'RetryHandlerError',
-          message: error?.message || 'Retry handler failed',
-          stack: error?.stack
+          name: error instanceof Error ? error.name : 'RetryHandlerError',
+          message: error instanceof Error ? error.message : 'Retry handler failed',
+          stack: error instanceof Error ? error.stack : undefined
         };
         
         // Increment retry count even on handler error
@@ -375,6 +387,16 @@ export async function processRetryableItems(
         retried++;
       }
     }));
+
+    // Check for failures in this batch
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0) {
+      logger.warn('DLQ batch processing failures', {
+        batchSize: batch.length,
+        failures: failures.length,
+        reasons: failures.map(f => f.status === 'rejected' ? String(f.reason) : 'Unknown')
+      });
+    }
     
     // Small delay between batches to prevent overwhelming
     if (i + BATCH_SIZE < retryableItems.length) {
@@ -558,12 +580,12 @@ setInterval(async () => {
     if (retryResult.retried > 0) {
       logger.info('DLQ auto-retry cycle completed', retryResult);
     }
-  } catch (error: any) {
+  } catch (error) {
     logger.error('DLQ auto-retry interval failed', {
       error: {
-        name: error?.name || 'UnknownError',
-        message: error?.message || 'Auto-retry interval error',
-        stack: error?.stack
+        name: error instanceof Error ? error.name : 'UnknownError',
+        message: error instanceof Error ? error.message : 'Auto-retry interval error',
+        stack: error instanceof Error ? error.stack : undefined
       },
       timestamp: new Date().toISOString(),
       queueSize: dlq.length

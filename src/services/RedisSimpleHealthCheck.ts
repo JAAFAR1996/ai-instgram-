@@ -60,7 +60,7 @@ export async function performHealthCheck(connection: Redis): Promise<SimpleHealt
       success: true,
       latency
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       success: false,
       error: error.message

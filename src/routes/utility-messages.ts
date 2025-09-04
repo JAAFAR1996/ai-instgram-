@@ -104,7 +104,7 @@ export function registerUtilityMessageRoutes(app: Hono): void {
           timestamp: result.timestamp.toISOString()
         }, 400);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       log.error('Send utility message error:', error);
       return c.json({
         success: false,
@@ -159,7 +159,7 @@ export function registerUtilityMessageRoutes(app: Hono): void {
         status: 'created',
         timestamp: new Date().toISOString()
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       log.error('Create template error:', error);
       return c.json({
         success: false,
@@ -196,7 +196,7 @@ export function registerUtilityMessageRoutes(app: Hono): void {
         count: templates.length,
         timestamp: new Date().toISOString()
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       log.error('Get templates error:', error);
       return c.json({
         success: false,
@@ -222,8 +222,8 @@ export function registerUtilityMessageRoutes(app: Hono): void {
       }
 
       const { merchantId } = merchantIdValidation.data;
-      const limit = parseInt(c.req.query('limit') || '50');
-      const offset = parseInt(c.req.query('offset') || '0');
+      const limit = parseInt(c.req.query('limit') ?? '50');
+      const offset = parseInt(c.req.query('offset') ?? '0');
 
       // Get message history using real service  
       const utilityService = new UtilityMessagesService();
@@ -236,7 +236,7 @@ export function registerUtilityMessageRoutes(app: Hono): void {
         hasMore: messages.length === limit,
         timestamp: new Date().toISOString()
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       log.error('Get message history error:', error);
       return c.json({
         success: false,
@@ -261,7 +261,7 @@ export function registerUtilityMessageRoutes(app: Hono): void {
         },
         timestamp: new Date().toISOString()
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       log.error('Utility messages health check error:', error);
       return c.json({
         status: 'degraded',

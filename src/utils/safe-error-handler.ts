@@ -29,7 +29,7 @@ export function createSafeErrorHandler(component: string) {
         component,
         timestamp,
         errorType: typeof error,
-        hasStack: !!(error as any)?.stack
+        hasStack: error instanceof Error && !!error.stack
       };
 
       return {
@@ -81,12 +81,12 @@ export function createEnhancedErrorHandler(component: string, options: {
         component,
         timestamp,
         errorType: typeof error,
-        hasStack: !!(error as any)?.stack
+        hasStack: error instanceof Error && !!error.stack
       };
 
       // Layer 4: Stack trace (optional)
-      if (includeStackTrace && (error as any)?.stack) {
-        safeContext.stackTrace = (error as any).stack;
+      if (includeStackTrace && error instanceof Error && error.stack) {
+        safeContext.stackTrace = error.stack;
       }
 
       // Layer 5: Memory information (optional)

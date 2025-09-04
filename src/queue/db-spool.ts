@@ -13,7 +13,7 @@ export interface SpooledJob {
   id: string;
   jobId: string;
   jobType: string;
-  jobData: any;
+  jobData: unknown;
   priority: 'low' | 'normal' | 'high' | 'urgent';
   merchantId: string;
   scheduledAt: Date;
@@ -24,7 +24,7 @@ export interface SpooledJob {
 export interface SpoolJobRequest {
   jobId: string;
   jobType: string;
-  jobData: any;
+  jobData: unknown;
   priority?: 'low' | 'normal' | 'high' | 'urgent';
   merchantId: string;
   scheduledAt?: Date;
@@ -156,7 +156,7 @@ export class DatabaseJobSpool {
 
       return jobs;
     } finally {
-      await sql`SELECT set_config('app.admin_mode', 'false', true)`.catch(() => {});
+      await sql`SELECT set_config('app.admin_mode', 'false', true)`.catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
     }
   }
 
@@ -196,7 +196,7 @@ export class DatabaseJobSpool {
         `
       ]);
 
-      const totalRow = totalResult[0] as unknown as StatsRow | undefined;
+      const totalRow = totalResult[0] as StatsRow | undefined;
       const stats = {
         total: totalRow?.total ?? 0,
         pending: totalRow?.pending ?? 0, 
@@ -205,17 +205,17 @@ export class DatabaseJobSpool {
         byType: {} as Record<string, number>
       };
 
-      priorityResult.forEach((row: any) => {
-        stats.byPriority[row.priority] = parseInt(row.count);
+      priorityResult.forEach((row: { priority: string; count: string | number }) => {
+        stats.byPriority[row.priority] = parseInt(String(row.count));
       });
 
-      typeResult.forEach((row: any) => {
-        stats.byType[row.job_type] = parseInt(row.count);
+      typeResult.forEach((row: { job_type: string; count: string | number }) => {
+        stats.byType[row.job_type] = parseInt(String(row.count));
       });
 
       return stats;
     } finally {
-      await sql`SELECT set_config('app.admin_mode', 'false', true)`.catch(() => {});
+      await sql`SELECT set_config('app.admin_mode', 'false', true)`.catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
     }
   }
 
@@ -236,7 +236,7 @@ export class DatabaseJobSpool {
         AND processed_at < ${cutoffTime}
       `;
 
-      const deletedCount = (result as any).count || 0;
+      const deletedCount = (result as { count?: number }).count || 0;
       
       if (deletedCount > 0) {
         this.logger.info('Cleaned up processed spool jobs', {
@@ -247,7 +247,7 @@ export class DatabaseJobSpool {
 
       return deletedCount;
     } finally {
-      await sql`SELECT set_config('app.admin_mode', 'false', true)`.catch(() => {});
+      await sql`SELECT set_config('app.admin_mode', 'false', true)`.catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
     }
   }
 
@@ -262,7 +262,7 @@ export class DatabaseJobSpool {
       AND merchant_id = ${merchantId}
     `;
 
-    return ((result as any).count || 0) > 0;
+    return ((result as { count?: number }).count || 0) > 0;
   }
 
   /**
@@ -276,8 +276,18 @@ export class DatabaseJobSpool {
     return stats.pending > 50;
   }
 
-  private mapSpooledJob(row: any): SpooledJob {
-    let jobData: any;
+  private mapSpooledJob(row: {
+    id: string;
+    job_id: string;
+    job_type: string;
+    job_data: string | object;
+    priority: 'low' | 'normal' | 'high' | 'urgent';
+    merchant_id: string;
+    scheduled_at: string | Date;
+    created_at: string | Date;
+    processed_at?: string | Date;
+  }): SpooledJob {
+    let jobData: unknown;
     try {
       if (typeof row.job_data === 'string') {
         if (!row.job_data.trim()) {
@@ -289,13 +299,14 @@ export class DatabaseJobSpool {
       }
       
       // Additional validation for webhook jobs
-      if (row.job_type === 'WEBHOOK_PROCESSING' && jobData) {
-        if (!jobData.payload) {
+      if (row.job_type === 'WEBHOOK_PROCESSING' && jobData && typeof jobData === 'object' && jobData !== null) {
+        const webhookData = jobData as Record<string, unknown>;
+        if (!webhookData.payload) {
           this.logger.error('Webhook job missing payload', {
             jobId: row.job_id,
-            jobDataKeys: Object.keys(jobData),
+            jobDataKeys: Object.keys(webhookData),
             jobDataType: typeof jobData,
-            rawJobData: typeof row.job_data === 'string' ? row.job_data.substring(0, 200) : row.job_data
+            rawJobData: typeof row.job_data === 'string' ? row.job_data.substring(0, 200) : JSON.stringify(row.job_data)
           });
         }
       }

@@ -138,7 +138,7 @@ export class InstagramAIService {
     }
     this.openai = new OpenAI({
       apiKey: apiKey ?? 'DEGRADED',
-      timeout: Number.isFinite(parseInt(getEnv('OPENAI_TIMEOUT') || '', 10))
+      timeout: Number.isFinite(parseInt(getEnv('OPENAI_TIMEOUT') ?? '', 10))
         ? parseInt(getEnv('OPENAI_TIMEOUT')!, 10)
         : InstagramAIService.DEFAULT_TIMEOUT_MS,
     });
@@ -175,12 +175,12 @@ export class InstagramAIService {
     // Visual query for product lookup
     try {
       const baseQ = this.buildVisualQuery(descriptors);
-      const hint = (textHint || '').toString().trim();
+      const hint = (textHint ?? '').toString().trim();
       const q = [baseQ, hint].filter(Boolean).join(' ');
       if (q) {
         const found = await this.searchProductsDynamic(merchantId, q, 6);
         candidates.push(
-          ...found.map((f: any) => ({
+          ...found.map((f: { id: string; sku: string; name_ar: string; effective_price: number; price_currency: string; stock_quantity: number }) => ({
             id: f.id, sku: f.sku, name_ar: f.name_ar,
             effective_price: f.effective_price, price_currency: f.price_currency, stock_quantity: f.stock_quantity
           }))
@@ -285,13 +285,13 @@ export class InstagramAIService {
 
     try {
       const sql = this.db.getSQL();
-      const rows = await sql<{ id: string; business_name: string; currency: string; settings: any }>`
+      const rows = await sql<{ id: string; business_name: string; currency: string; settings: Record<string, unknown> | null }>`
         SELECT id, business_name, COALESCE(currency, 'IQD') as currency, settings
         FROM merchants
         WHERE id = ${merchantId}::uuid
         LIMIT 1
       `;
-      const ctx = rows?.[0] || null;
+      const ctx = rows?.[0] ?? null;
       if (ctx) {
         await this.cache.set(cacheKey, ctx, { prefix: 'ctx', ttl: 300 }); // 5m
       }
@@ -454,7 +454,7 @@ export class InstagramAIService {
       });
 
       const responseTime = Date.now() - startTime;
-      const response = completion.choices?.[0]?.message?.content || '';
+      const response = completion.choices?.[0]?.message?.content ?? '';
       if (!response) {
         throw new Error('No response from OpenAI for Instagram');
       }
@@ -897,7 +897,7 @@ export class InstagramAIService {
   private buildUserContentWithImages(text: string, images: ImageData[]): OpenAI.Chat.Completions.ChatCompletionMessageParam {
     type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
     const parts: ContentPart[] = [];
-    const safeText = (text || '').trim();
+    const safeText = (text ?? '').trim();
     if (safeText) parts.push({ type: 'text', text: safeText });
     for (const img of (images || []).slice(0, 3)) {
       const url = this.toDataUrlOrPass(img);
@@ -905,7 +905,7 @@ export class InstagramAIService {
       if (img.caption) parts.push({ type: 'text', text: `تفاصيل الصورة: ${img.caption}` });
     }
     // OpenAI Chat Completions supports multimodal content via array parts on supported models
-    return { role: 'user', content: parts as unknown as any };
+    return { role: 'user', content: parts as OpenAI.Chat.Completions.ChatCompletionMessageParam['content'] };
   }
 
   private toDataUrlOrPass(img: ImageData): string | null {
@@ -969,7 +969,7 @@ export class InstagramAIService {
   // Extract simple search terms from a message (Arabic/English tokens >= 2 chars)
   private extractSearchTerms(text: string): string[] {
     try {
-      const t = (text || '').toString().toLowerCase();
+      const t = (text ?? '').toString().toLowerCase();
       const words = t.split(/[^\p{L}\p{N}\._-]+/u).filter(w => w && w.length >= 2);
       // Prefer last 2 tokens (often most specific)
       return words.slice(-2);
@@ -980,7 +980,7 @@ export class InstagramAIService {
 
   // Parse attribute filters (size/color/category hints) from free text (AR/EN)
   private parseAttributeFilters(text: string): { sizes: string[]; colors: string[]; categories: string[] } {
-    const t = (text || '').toLowerCase();
+    const t = (text ?? '').toLowerCase();
     const sizes: string[] = [];
     const colors: string[] = [];
     const categories: string[] = [];
@@ -1036,7 +1036,7 @@ export class InstagramAIService {
         WHERE merchant_id = ${merchantId}::uuid AND category IS NOT NULL AND category <> ''
         LIMIT 500
       `;
-      const cats = rows.map(r => (r.category || '').toString()).filter(Boolean);
+      const cats = rows.map(r => (r.category ?? '').toString()).filter(Boolean);
       await this.cache.set(key, cats, { prefix: 'ctx', ttl: 300 });
       return cats;
     } catch (e) {
@@ -1060,7 +1060,7 @@ export class InstagramAIService {
     price_currency: string;
     stock_quantity: number;
     attributes: Record<string, unknown>;
-    variants: any[];
+    variants: Array<Record<string, unknown>>;
     category: string;
   }>> {
     const sql = this.db.getSQL();
@@ -1071,8 +1071,8 @@ export class InstagramAIService {
 
     // Cache key for identical searches for 2 minutes
     const ck = `psearch:${merchantId}:${tokens.join('-')}:${filters.sizes.join(',')}:${filters.colors.join(',')}`;
-    const cached = await this.cache.get<any[]>(ck, { prefix: 'ctx' });
-    if (cached) return cached as any[];
+    const cached = await this.cache.get<Array<Record<string, unknown>>>(ck, { prefix: 'ctx' });
+    if (cached) return cached as Array<Record<string, unknown>>;
 
     // Build dynamic WHERE parts
     const ilikes = tokens.map(t => `%${t}%`);
@@ -1094,8 +1094,8 @@ export class InstagramAIService {
         effective_price: number;
         price_currency: string;
         stock_quantity: number;
-        attributes: any;
-        variants: any;
+        attributes: Record<string, unknown>;
+        variants: Record<string, unknown>;
         category: string;
       }>`
         SELECT p.id, p.sku, p.name_ar, p.attributes, p.variants, p.category,
@@ -1347,7 +1347,7 @@ ${productsText}
       );
       
       const batchResults = await Promise.all(batchPromises);
-      batchResults.forEach(batch => allProducts.push(...(batch as unknown as Product[])));
+      batchResults.forEach(batch => allProducts.push(...(batch as Product[])));
       
       return allProducts;
     } catch (error) {

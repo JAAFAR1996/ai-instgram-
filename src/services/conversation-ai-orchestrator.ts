@@ -183,7 +183,7 @@ export class ConversationAIOrchestrator {
           const thinking = await thinkingService.processWithThinking(customerMessage, {
             merchantId: context.merchantId,
             username: context.customerId,
-            session: (context as any).session || {},
+            session: (context as { session?: Record<string, unknown> } | undefined)?.session ?? {} || {},
             nlp: undefined,
             hints: {}
           }, false);
@@ -248,7 +248,7 @@ export class ConversationAIOrchestrator {
 
       // 3) Intelligent rejection handling even if not strictly OBJECTION
       try {
-        const msg = (customerMessage || '').toLowerCase();
+        const msg = (customerMessage ?? '').toLowerCase();
         const looksRejection = /(غالي|ما اريد|مو حلو|رديء|خايس|مو الآن|بعدين)/.test(msg);
         if (looksRejection) {
           const rej = new IntelligentRejectionHandler();
@@ -264,7 +264,7 @@ export class ConversationAIOrchestrator {
       // 4) Light self-learning adaptation
       try {
         const sl = new SelfLearningSystem();
-        const prefs = (context as any)?.preferences || {};
+        const prefs = (context as { preferences?: Record<string, unknown> } | undefined)?.preferences || {};
         const adj = await sl.adaptToCustomerPreferences(context.customerId, prefs);
         if (adj.notes?.length) adaptations.push({ type: 'tone', originalValue: 'base', adaptedValue: 'personalized', reason: adj.notes.join('; ').slice(0, 80) });
       } catch {}

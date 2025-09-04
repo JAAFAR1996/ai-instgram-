@@ -653,7 +653,7 @@ export class Logger {
     }
 
     if (error && typeof error === 'object') {
-      const errorObj = error as any;
+      const errorObj = error as Record<string, unknown>;
       let message = 'Unknown error';
       
       // محاولة استخراج message بطرق مختلفة
@@ -875,8 +875,8 @@ export class Logger {
         if (match.includes('.')) {
           const parts = match.split('.');
           if (parts.length >= 3) {
-            const firstPart = parts[0] || '';
-            const lastPart = parts[parts.length - 1] || '';
+            const firstPart = parts[0] ?? '';
+            const lastPart = parts[parts.length - 1] ?? '';
             return `${firstPart.slice(0, 10)}...${lastPart.slice(-10)}`;
           }
         }
@@ -913,7 +913,7 @@ export class Logger {
           // Likely a token or ID
           return this.maskString(part);
         }
-        return part || '';
+        return part ?? '';
       });
       urlObj.pathname = redactedPath.join('/');
       

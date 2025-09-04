@@ -192,7 +192,7 @@ export function verifyHMACRaw(payload: Buffer, signature: string, secret: string
  * exceeds `maxBytes` (default 1MB), the reader is cancelled and an
  * HTTP 413 error is thrown.
  */
-export async function readRawBody(c: any, maxBytes = 1024 * 1024): Promise<Buffer> {
+export async function readRawBody(c: { req: { raw: { body?: ReadableStream } }; throw?: (status: number, message: string) => never }, maxBytes = 1024 * 1024): Promise<Buffer> {
   const r = c.req.raw.body;
   if (!r) return Buffer.alloc(0);
   const reader = r.getReader();
@@ -308,7 +308,12 @@ export class EncryptionService {
    */
   public shouldRotateKey(): boolean {
     const now = new Date();
-    const daysSinceRotation = (now.getTime() - this.keyRotationConfig.lastRotationDate!.getTime()) / (1000 * 60 * 60 * 24);
+    const lastRotation = this.keyRotationConfig.lastRotationDate;
+    if (!lastRotation) {
+      this.logger.warn('No last rotation date found, assuming key rotation needed');
+      return true;
+    }
+    const daysSinceRotation = (now.getTime() - lastRotation.getTime()) / (1000 * 60 * 60 * 24);
     return daysSinceRotation >= this.keyRotationConfig.rotationIntervalDays;
   }
 
@@ -323,14 +328,27 @@ export class EncryptionService {
     lastRotation: Date;
   } {
     const now = new Date();
-    const daysSinceRotation = (now.getTime() - this.keyRotationConfig.lastRotationDate!.getTime()) / (1000 * 60 * 60 * 24);
+    const lastRotation = this.keyRotationConfig.lastRotationDate;
+    
+    if (!lastRotation) {
+      this.logger.warn('No last rotation date found for key rotation status');
+      return {
+        shouldRotate: true,
+        daysSinceRotation: Infinity,
+        rotationInterval: this.keyRotationConfig.rotationIntervalDays,
+        keyVersion: this.keyVersion,
+        lastRotation: new Date(0) // Unix epoch as fallback
+      };
+    }
+    
+    const daysSinceRotation = (now.getTime() - lastRotation.getTime()) / (1000 * 60 * 60 * 24);
     
     return {
       shouldRotate: daysSinceRotation >= this.keyRotationConfig.rotationIntervalDays,
       daysSinceRotation: Math.floor(daysSinceRotation),
       rotationInterval: this.keyRotationConfig.rotationIntervalDays,
       keyVersion: this.keyVersion,
-      lastRotation: this.keyRotationConfig.lastRotationDate!
+      lastRotation: lastRotation
     };
   }
 

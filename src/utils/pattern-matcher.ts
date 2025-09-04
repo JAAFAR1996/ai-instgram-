@@ -11,7 +11,7 @@ export function timeSlotFromDate(d: Date): TimeSlot {
 }
 
 export function extractPhrases(text: string): string[] {
-  const t = (text || '').toLowerCase().replace(/[\p{P}\p{S}]+/gu, ' ');
+  const t = (text ?? '').toLowerCase().replace(/[\p{P}\p{S}]+/gu, ' ');
   const words = t.split(/\s+/).filter(Boolean);
   const phrases: string[] = [];
   for (let i = 0; i < words.length - 1; i++) {
@@ -23,7 +23,7 @@ export function extractPhrases(text: string): string[] {
 
 export function computeSuccessPatterns(
   merchantId: string,
-  rows: Array<{ content: string; created_at: Date; processing_time_ms?: number; session_data?: any }>
+  rows: Array<{ content: string; created_at: Date; processing_time_ms?: number; session_data?: Record<string, unknown> }>
 ): SuccessPatterns {
   const slotMap = new Map<TimeSlot, number>();
   const phraseMap = new Map<string, number>();
@@ -35,7 +35,7 @@ export function computeSuccessPatterns(
     slotMap.set(slot, (slotMap.get(slot) || 0) + 1);
 
     // Phrases
-    for (const ph of extractPhrases(r.content || '')) {
+    for (const ph of extractPhrases(r.content ?? '')) {
       phraseMap.set(ph, (phraseMap.get(ph) || 0) + 1);
     }
 
@@ -79,3 +79,4 @@ export function computeSuccessPatterns(
     sampleSize: rows.length,
   };
 }
+

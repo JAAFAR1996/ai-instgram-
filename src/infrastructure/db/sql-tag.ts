@@ -25,7 +25,7 @@ export function buildSQLTag(pool: Pool): SQLTag {
     ...values: ReadonlyArray<SqlParam>
   ): Promise<T[]> => {
     const { text, values: params } = compileTemplate(strings, values);
-    const { rows } = await pool.query<T>(text, params as any[]);
+    const { rows } = await pool.query<T>(text, params as unknown[]);
     return rows;
   };
 }

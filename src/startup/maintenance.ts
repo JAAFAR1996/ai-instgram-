@@ -30,7 +30,7 @@ export function scheduleMaintenance(pool: Pool): void {
     scheduleBasicMaintenanceTasks(pool);
 
     log.info('✅ Maintenance tasks scheduled successfully');
-  } catch (error: any) {
+  } catch (error: unknown) {
     log.error('❌ Failed to schedule maintenance tasks:', error);
   }
 }
@@ -77,7 +77,7 @@ function scheduleBasicMaintenanceTasks(pool: Pool): void {
       }
       
       log.info('✅ Basic maintenance completed');
-    } catch (error: any) {
+    } catch (error: unknown) {
       log.error('❌ Basic maintenance failed:', error);
     }
   }, cleanupInterval);
@@ -145,7 +145,7 @@ export async function performMaintenanceCheck(pool: Pool): Promise<void> {
     }
     
     log.info('✅ Maintenance check completed');
-  } catch (error: any) {
+  } catch (error: unknown) {
     log.error('❌ Maintenance check failed:', error);
   }
 }

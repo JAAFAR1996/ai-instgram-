@@ -25,6 +25,8 @@ export interface SuccessPatterns {
   followupDelaySec: number; // recommended
   preferenceSignals: { key: string; value: string; score: number }[];
   sampleSize: number;
+  // Optional intent-based statistics when available
+  intentSuccess?: Record<string, any>;
 }
 
 export interface StrategyUpdate {
@@ -36,4 +38,3 @@ export interface StrategyUpdate {
     followupDelaySec: number;
   };
 }
-

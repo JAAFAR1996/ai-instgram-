@@ -52,7 +52,7 @@ export class SelfLearningSystem {
     const from = new Date(Date.now() - days * 86400000);
     const to = new Date();
     // Fetch successful conversation outgoing messages
-    const rows = await sql<{ content: string; created_at: Date; processing_time_ms: number | null; session_data: any }>`
+  const rows = await sql<{ content: string; created_at: Date; processing_time_ms: number | null; session_data: Record<string, unknown> | null }>`
       SELECT ml.content, ml.created_at, ml.processing_time_ms,
              c.session_data
       FROM message_logs ml
@@ -64,7 +64,7 @@ export class SelfLearningSystem {
       LIMIT 5000
     `;
     const mapped = rows.map(r => {
-      const obj: { content: string; created_at: Date; processing_time_ms?: number; session_data?: any } = {
+  const obj: { content: string; created_at: Date; processing_time_ms?: number; session_data?: Record<string, unknown> } = {
         content: r.content,
         created_at: new Date(r.created_at),
       };

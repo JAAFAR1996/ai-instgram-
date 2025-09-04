@@ -4,7 +4,7 @@
     "module": "ESNext",
     "target": "ES2022",
     "lib": ["ES2022"],
-    "strict": false,
+    "strict": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
     "noUncheckedIndexedAccess": true,

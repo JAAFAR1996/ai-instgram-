@@ -44,7 +44,7 @@ export interface UtilityMessageResult {
 
 export class UtilityMessagesService {
 
-  private logger!: any;
+  private logger!: { info: (message: string, ...args: unknown[]) => void; error: (message: string, ...args: unknown[]) => void; warn: (message: string, ...args: unknown[]) => void; };
   private messageSender = getInstagramMessageSender();
 
   constructor(container?: DIContainer) {
@@ -114,7 +114,7 @@ export class UtilityMessagesService {
       } else {
         return {
           success: false,
-          error: result.error || 'Failed to send utility message',
+          error: result.error ?? 'Failed to send utility message',
           timestamp: new Date()
         };
       }
@@ -189,7 +189,7 @@ export class UtilityMessagesService {
    */
   private interpolateTemplate(template: string, variables: Record<string, string>): string {
     return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-      return variables[key] || match;
+      return variables[key] ?? match;
     });
   }
 
@@ -261,7 +261,7 @@ export class UtilityMessagesService {
       }
     };
 
-    return defaultTemplates[templateId] || null;
+    return defaultTemplates[templateId] ?? null;
   }
 
   /**
@@ -282,7 +282,7 @@ export class UtilityMessagesService {
         INSERT INTO utility_message_logs (
           merchant_id, recipient_id, template_id, message_id, sent_at, created_at
         ) VALUES (
-          ${merchantId}, ${recipientId}, ${templateId}, ${messageId || null}, NOW(), NOW()
+          ${merchantId}, ${recipientId}, ${templateId}, ${messageId ?? null}, NOW(), NOW()
         )
       `;
       
@@ -290,7 +290,7 @@ export class UtilityMessagesService {
         merchantId,
         recipientId,
         templateId,
-        messageId: messageId || '',
+        messageId: messageId ?? '',
         timestamp: new Date().toISOString()
       });
     } catch (error) {
@@ -306,7 +306,7 @@ export class UtilityMessagesService {
         merchantId,
         recipientId,
         templateId,
-        messageId: messageId || '',
+        messageId: messageId ?? '',
         timestamp: new Date().toISOString()
       });
     }
@@ -482,7 +482,7 @@ export class UtilityMessagesService {
         event: 'getMessageHistory'
       });
       
-      return result || [];
+      return result ?? [];
     } catch (error) {
       this.logger.error('Failed to get message history', error, { merchantId });
       return [];

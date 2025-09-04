@@ -10,8 +10,12 @@ export class OptimizedQueueManager extends ProductionQueueManager {
       const batch = messages.slice(i, i + batchSize);
       const batchResults = await Promise.all(batch.map(async (m) => {
         try {
-          // @ts-ignore invoke base processing if available
-          const r = await this.processMessage(m as any);
+          // Check if processMessage method exists and is callable
+          if ('processMessage' in this && typeof this.processMessage === 'function') {
+            await (this.processMessage as (message: T) => Promise<unknown>)(m);
+          } else {
+            throw new Error('processMessage method not available in base class');
+          }
           return { success: true, messageId: m.id };
         } catch (e) {
           return { success: false, messageId: m.id, error: (e as Error).message };

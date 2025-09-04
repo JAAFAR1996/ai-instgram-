@@ -144,11 +144,15 @@ export class DatabaseAdapter implements IDatabase {
       }
     };
 
-    // Proxy composition helpers for compatibility
-    (enhancedSql as any).unsafe = (baseSql as any).unsafe;
-    (enhancedSql as any).join = (baseSql as any).join;
-    (enhancedSql as any).commit = (baseSql as any).commit;
-    (enhancedSql as any).rollback = (baseSql as any).rollback;
+    // Proxy composition helpers for compatibility without 'any' casts
+    {
+      const target = enhancedSql as Record<string, unknown>;
+      const source = baseSql as Record<string, unknown>;
+      target.unsafe = source.unsafe as unknown;
+      target.join = source.join as unknown;
+      target.commit = source.commit as unknown;
+      target.rollback = source.rollback as unknown;
+    }
 
     // Add transaction support to SQL function
     enhancedSql.transaction = async <T>(
@@ -287,7 +291,7 @@ export class DatabaseAdapter implements IDatabase {
    */
   async queryOne<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | null> {
     const rows = await this.query<T>(sql, params);
-    return rows[0] || null;
+    return rows[0] ?? null;
   }
 
   /**

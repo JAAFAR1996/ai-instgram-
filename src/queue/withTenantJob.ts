@@ -23,16 +23,16 @@ export function withTenantJob<T>(
   fn: (job: Job, token?: string) => Promise<T>
 ) {
   return async (job: Job, token?: string): Promise<T | void> => {
-    const jobWithMethods = job as unknown as JobWithMethods;
-    const data: unknown = jobWithMethods.data ?? jobWithMethods.payload;
+    const jobWithMethods = job as Job & Partial<JobWithMethods>;
+    const data: unknown = (jobWithMethods as { data?: unknown; payload?: unknown }).data ?? (jobWithMethods as { data?: unknown; payload?: unknown }).payload;
     const parsed = JobSchema.safeParse(data);
 
     // Enhanced logging for job validation
     const jobInfo = {
-      jobId: jobWithMethods.id || 'unknown',
-      jobName: jobWithMethods.name || 'unknown',
-      attemptsMade: jobWithMethods.attemptsMade || 0,
-      maxAttempts: jobWithMethods.opts?.attempts || 3
+      jobId: jobWithMethods.id ?? 'unknown',
+      jobName: jobWithMethods.name ?? 'unknown',
+      attemptsMade: jobWithMethods.attemptsMade ?? 0,
+      maxAttempts: jobWithMethods.opts?.attempts ?? 3
     };
 
     if (!parsed.success) {
@@ -53,11 +53,11 @@ export function withTenantJob<T>(
           logger.warn('Cannot move job to failed state - moveToFailed method not available', jobInfo);
           throw validationError; // Throw error to ensure job doesn't succeed silently
         }
-      } catch (moveToFailedError: any) {
+      } catch (moveToFailedError) {
         logger.error('Failed to move job to failed state', {
           ...jobInfo,
           originalError: validationError.message,
-          moveToFailedError: moveToFailedError?.message || 'Unknown error'
+          moveToFailedError: moveToFailedError instanceof Error ? moveToFailedError.message : String(moveToFailedError)
         });
         throw validationError; // Re-throw original error
       }
@@ -88,14 +88,14 @@ export function withTenantJob<T>(
       });
       
       return result;
-    } catch (contextError: any) {
+    } catch (contextError) {
       logger.warn('Failed to establish merchant context, attempting without context', {
         ...jobInfo,
         merchantId,
         contextError: {
-          name: contextError?.name || 'UnknownError',
-          message: contextError?.message || 'Context establishment failed',
-          stack: contextError?.stack
+          name: contextError instanceof Error ? contextError.name : 'UnknownError',
+          message: contextError instanceof Error ? contextError.message : 'Context establishment failed',
+          stack: contextError instanceof Error ? contextError.stack : undefined
         }
       });
       
@@ -106,19 +106,19 @@ export function withTenantJob<T>(
         logger.warn('Job completed without tenant context (fallback mode)', {
           ...jobInfo,
           merchantId,
-          fallbackReason: contextError?.message || 'Context establishment failed'
+          fallbackReason: contextError instanceof Error ? contextError.message : 'Context establishment failed'
         });
         
         return result;
-      } catch (jobError: any) {
+      } catch (jobError) {
         logger.error('Job failed in both context and fallback modes', {
           ...jobInfo,
           merchantId,
-          contextError: contextError?.message,
+          contextError: contextError instanceof Error ? contextError.message : String(contextError),
           jobError: {
-            name: jobError?.name || 'UnknownError',
-            message: jobError?.message || 'Job execution failed',
-            stack: jobError?.stack
+            name: jobError instanceof Error ? jobError.name : 'UnknownError',
+            message: jobError instanceof Error ? jobError.message : 'Job execution failed',
+            stack: jobError instanceof Error ? jobError.stack : undefined
           }
         });
         

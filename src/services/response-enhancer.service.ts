@@ -82,7 +82,7 @@ export class ResponseEnhancerService {
     try {
       // 1. Get merchant success patterns
       const patterns = await this.getMerchantPatterns(context.merchantId);
-      reasoningChain.push(`Loaded patterns: ${patterns ? Object.keys(patterns.intentSuccess).length : 0} intents`);
+      reasoningChain.push(`Loaded patterns: ${patterns ? patterns.topPhrases.length : 0} top phrases`);
 
       if (!patterns) {
         reasoningChain.push('No patterns available - using baseline response');
@@ -91,7 +91,7 @@ export class ResponseEnhancerService {
 
       // 2. Apply Time-of-Day Optimization
       if (context.timeOfDay !== undefined) {
-        const timeResult = this.applyTimeOptimization(enhancedResponse, patterns, context.timeOfDay);
+        const timeResult = this.applyTimeOptimizationSafe(enhancedResponse, patterns, context.timeOfDay);
         if (timeResult.enhanced) {
           enhancedResponse = timeResult.response;
           appliedPatterns.push('time_optimized');
@@ -101,7 +101,10 @@ export class ResponseEnhancerService {
       }
 
       // 3. Apply Intent-Specific Patterns
-      if (context.aiIntent && patterns.intentSuccess[context.aiIntent]) {
+      if (context.aiIntent) {
+        const ps = patterns as Record<string, unknown>;
+        const is = ps.intentSuccess as Record<string, unknown> | undefined;
+        if (is && Object.prototype.hasOwnProperty.call(is, String(context.aiIntent))) {
         const intentResult = this.applyIntentPatterns(
           enhancedResponse, 
           patterns, 
@@ -109,11 +112,12 @@ export class ResponseEnhancerService {
           context
         );
         
-        if (intentResult.enhanced) {
-          enhancedResponse = intentResult.response;
-          appliedPatterns.push(`intent_${context.aiIntent.toLowerCase()}`);
-          confidenceBoost += intentResult.boost;
-          reasoningChain.push(`Intent patterns applied: ${context.aiIntent} (boost: +${intentResult.boost.toFixed(2)})`);
+          if (intentResult.enhanced) {
+            enhancedResponse = intentResult.response;
+            appliedPatterns.push(`intent_${context.aiIntent.toLowerCase()}`);
+            confidenceBoost += intentResult.boost;
+            reasoningChain.push(`Intent patterns applied: ${context.aiIntent} (boost: +${intentResult.boost.toFixed(2)})`);
+          }
         }
       }
 
@@ -242,6 +246,44 @@ export class ResponseEnhancerService {
     };
   }
 
+  // Safe version aligned with SuccessPatterns shape
+  private applyTimeOptimizationSafe(
+    response: string,
+    patterns: SuccessPatterns,
+    currentHour: number
+  ): { enhanced: boolean; response: string } {
+    const slotForHour = (h: number): 'morning'|'afternoon'|'evening'|'night' =>
+      h >= 6 && h < 12 ? 'morning' : h >= 12 && h < 17 ? 'afternoon' : h >= 17 && h < 22 ? 'evening' : 'night';
+
+    if (!patterns.timeSlots || patterns.timeSlots.length === 0) {
+      return { enhanced: false, response };
+    }
+
+    const currentSlot = slotForHour(currentHour);
+    const top = [...patterns.timeSlots].sort((a, b) => b.score - a.score)[0];
+    if (!top || top.slot !== currentSlot) {
+      return { enhanced: false, response };
+    }
+
+    let optimizedResponse = response;
+    if (currentHour >= 6 && currentHour < 12) {
+      if (!response.includes('صباح') && !response.includes('morning')) {
+        optimizedResponse = `صباح الخير! ${response}`;
+      }
+    } else if (currentHour >= 12 && currentHour < 17) {
+      optimizedResponse = response.replace(/!+/g, '.');
+    } else if (currentHour >= 17 && currentHour < 24) {
+      if (!response.includes('مساء') && !response.includes('evening')) {
+        optimizedResponse = `مساء الخير! ${response}`;
+      }
+    }
+
+    return {
+      enhanced: optimizedResponse !== response,
+      response: optimizedResponse,
+    };
+  }
+
   /**
    * Apply intent-specific successful patterns
    */
@@ -252,7 +294,7 @@ export class ResponseEnhancerService {
     context: ResponseEnhancementContext
   ): { enhanced: boolean; response: string; boost: number } {
     
-    const intentData = patterns.intentSuccess[intent];
+    const is = (patterns as Record<string, unknown>).intentSuccess as Record<string, unknown> | undefined; const intentData = is ? (is[String(intent)] as { avgScore?: number }) : undefined;
     if (!intentData || intentData.avgScore < 0.6) {
       return { enhanced: false, response, boost: 0 };
     }
@@ -483,7 +525,7 @@ export class ResponseEnhancerService {
     }
 
     // Intent match bonus
-    if (context.aiIntent && patterns.intentSuccess[context.aiIntent]?.avgScore > 0.7) {
+    if (context.aiIntent) { const is2 = (patterns as Record<string, unknown>).intentSuccess as Record<string, unknown> | undefined; const d = is2 ? (is2[String(context.aiIntent)] as { avgScore?: number }) : undefined; if ((d?.avgScore ?? 0) > 0.7) {
       qualityScore += 0.15;
     }
 
@@ -585,7 +627,7 @@ export class ResponseEnhancerService {
     patterns: string[],
     boost: number,
     reasoning: string[],
-    metadata: any
+    metadata: Record<string, unknown>
   ): EnhancedResponseData {
     
     return {
@@ -596,10 +638,10 @@ export class ResponseEnhancerService {
       reasoningChain: reasoning,
       metadata: {
         patternsUsed: patterns.length,
-        timeOptimized: metadata.timeOptimized || false,
-        phraseIntegrated: metadata.phraseIntegrated || false,
-        intentOptimized: metadata.intentOptimized || false,
-        qualityPrediction: metadata.qualityPrediction || 0.5
+        timeOptimized: metadata.timeOptimized ?? false,
+        phraseIntegrated: metadata.phraseIntegrated ?? false,
+        intentOptimized: metadata.intentOptimized ?? false,
+        qualityPrediction: metadata.qualityPrediction ?? 0.5
       }
     };
   }

@@ -84,7 +84,7 @@ export class ManyChatAPIError extends Error {
         detailedMessage += ` | API Message: ${apiError.message}`;
       }
       if (apiError.details?.messages && apiError.details.messages.length > 0) {
-        const detailMessages = apiError.details.messages.map((m: any) => m.message).join(', ');
+        const detailMessages = apiError.details.messages.map((m: { message: string }) => m.message).join(', ');
         detailedMessage += ` | Details: ${detailMessages}`;
       }
     }
@@ -556,7 +556,7 @@ export class ManyChatService {
       const data = await response.json();
 
       if (!response.ok) {
-        const errorData = data as any;
+        const errorData = (data as Record<string, unknown>);
         throw new ManyChatAPIError(
           `HTTP ${response.status}: ${errorData.error || 'Unknown error'}`,
           response.status,
@@ -650,7 +650,7 @@ export class ManyChatService {
    */
   public async getHealthStatus(): Promise<{
     status: 'healthy' | 'degraded' | 'unhealthy';
-    circuitBreaker: any;
+    circuitBreaker: { isOpen?: () => boolean } | undefined;
     rateLimit: { current: number; limit: number };
   }> {
     const circuitBreakerStats = this.circuitBreaker.getStats();

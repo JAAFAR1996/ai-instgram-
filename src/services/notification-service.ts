@@ -10,7 +10,7 @@ const logger = getLogger({ component: 'NotificationService' });
 export interface NotificationPayload {
   type: string;
   recipient: string;
-  content: any;
+  content: Record<string, unknown>;
 }
 
 export interface NotificationResult {

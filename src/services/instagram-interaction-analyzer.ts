@@ -33,7 +33,7 @@ export class InstagramInteractionAnalyzer {
           gen_random_uuid(),
           ${input.merchantId}::uuid,
           ${input.customerId},
-          ${input.storyId || null},
+          ${input.storyId ?? null},
           ${type},
           ${input.content},
           NOW() + INTERVAL '24 hours',
@@ -51,7 +51,7 @@ export class InstagramInteractionAnalyzer {
    * Categorize a DM message intent with lightweight heuristics
    */
   async categorizeDMIntent(message: string, _userHistory?: unknown): Promise<{ intent: 'QUESTION'|'PRAISE'|'PRICE'|'RETURN'|'GENERAL'; confidence: number }>{
-    const text = (message || '').toLowerCase();
+    const text = (message ?? '').toLowerCase();
     if (/سعر|كم|price|cost|ثمن/.test(text)) return { intent: 'PRICE', confidence: 0.8 };
     if (/ارجاع|استرجاع|return|refund/.test(text)) return { intent: 'RETURN', confidence: 0.75 };
     if (/شكرا|يعطيك|ممتاز|حلو/.test(text)) return { intent: 'PRAISE', confidence: 0.6 };
@@ -63,7 +63,7 @@ export class InstagramInteractionAnalyzer {
    * Analyze comment sentiment and record in message_logs metadata if conversation exists
    */
   async analyzeCommentSentiment(merchantId: string, username: string, comment: string): Promise<{ sentiment: 'positive'|'neutral'|'negative'; saved: boolean }>{
-    const text = (comment || '').toLowerCase();
+    const text = (comment ?? '').toLowerCase();
     const positive = /(شكرا|حلو|جميل|😍|❤️|👍|🔥|ممتاز)/.test(text);
     const negative = /(سيء|رديء|خايس|ما|مو|👎|😡|💔|بطيء)/.test(text);
     const sentiment: 'positive'|'neutral'|'negative' = positive ? 'positive' : negative ? 'negative' : 'neutral';
@@ -131,7 +131,7 @@ export class InstagramInteractionAnalyzer {
         )
         SELECT (SELECT c FROM d) AS dms, (SELECT c FROM cm) AS comments, (SELECT c FROM si) AS stories
       `;
-      const r = rows[0] || { dms: 0, comments: 0, stories: 0 } as any;
+      const r = rows[0] || { dms: 0, comments: 0, stories: 0 };
       const score = Math.max(0, Math.min(100, (r.dms * 3) + (r.comments * 4) + (r.stories * 2)));
 
       await sql`
@@ -210,7 +210,7 @@ export class InstagramInteractionAnalyzer {
   }
 
   private classifyStoryReply(content: string): StoryInteractionType {
-    const text = (content || '').toLowerCase();
+    const text = (content ?? '').toLowerCase();
     if (/سعر|كم|price|cost|ثمن/.test(text)) return 'question';
     if (/😍|❤️|👍|🔥|⭐/.test(content)) return 'emoji';
     return 'reply';

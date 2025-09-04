@@ -1,0 +1,471 @@
+{
+  "root": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform",
+  "scanned_extensions": [
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mts",
+    ".cts"
+  ],
+  "excluded_dirs": [
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "coverage",
+    ".next",
+    "out"
+  ],
+  "totals": {
+    "falsyOrOther": 175,
+    "typeAny": 112,
+    "asAny": 96,
+    "asUnknownAs": 12,
+    "thenSecondArg": 4,
+    "allSettled": 3,
+    "tsIgnore": 0,
+    "tsExpectError": 0,
+    "tsNoCheck": 0,
+    "istanbulIgnore": 0,
+    "c8Ignore": 0,
+    "nonNullAssert": 0,
+    "emptyCatchBlock": 0,
+    "catchIgnoreComment": 0,
+    "catchNoopArrow": 0,
+    "catchToNullish": 0,
+    "catchBoolean": 0,
+    "voidPrefixCall": 0,
+    "falsyOrStringNullUndef": 0,
+    "processHandlers": 0,
+    "eslintDisable": 0
+  },
+  "files_count": 90,
+  "top_files": [
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\ProductionQueueManager.ts",
+      "total": 18
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-ai.ts",
+      "total": 17
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-media-manager.ts",
+      "total": 16
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\smart-orchestrator.ts",
+      "total": 16
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\tests\\src\\tests\\instagram-ai.test.ts",
+      "total": 16
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\ai.ts",
+      "total": 14
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\monitoring.ts",
+      "total": 14
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\image-analysis.ts",
+      "total": 11
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\db\\adapter.ts",
+      "total": 10
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\db\\index.ts",
+      "total": 10
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\redis-monitoring.ts",
+      "total": 10
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\response-enhancer.service.ts",
+      "total": 9
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repositories\\merchant-repository.ts",
+      "total": 8
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-manychat-bridge.ts",
+      "total": 8
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\tests\\src\\tests\\CircuitBreaker.test.ts",
+      "total": 8
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\database\\rls-wrapper.ts",
+      "total": 7
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repositories\\conversation-repository.ts",
+      "total": 7
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repositories\\message-repository.ts",
+      "total": 7
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\advanced-analytics.ts",
+      "total": 7
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\conversation-ai-orchestrator.ts",
+      "total": 7
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\cross-platform-conversation-manager.ts",
+      "total": 7
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\message-enhancement.service.ts",
+      "total": 7
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\routes\\webhooks.ts",
+      "total": 6
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\service-controller.ts",
+      "total": 6
+    },
+    {
+      "file": "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\queue\\dead-letter.ts",
+      "total": 5
+    }
+  ],
+  "per_file": {
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\boot\\error-handlers.ts": {
+      "falsyOrOther": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\cache\\index.ts": {
+      "typeAny": 4
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\container\\index.ts": {
+      "typeAny": 1,
+      "asAny": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\database\\migrate.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\database\\rls-wrapper.ts": {
+      "asUnknownAs": 1,
+      "falsyOrOther": 6
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\db\\adapter.ts": {
+      "asAny": 10
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\db\\index.ts": {
+      "typeAny": 1,
+      "falsyOrOther": 9
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\infrastructure\\db\\sql-compat.ts": {
+      "thenSecondArg": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\infrastructure\\db\\sql-tag.ts": {
+      "asAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\isolation\\context.ts": {
+      "asAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\middleware\\idempotency.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\middleware\\rls-merchant-isolation.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\queue\\db-spool.ts": {
+      "asUnknownAs": 1,
+      "falsyOrOther": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\queue\\dead-letter.ts": {
+      "falsyOrOther": 4,
+      "allSettled": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\queue\\withTenantJob.ts": {
+      "asUnknownAs": 1,
+      "falsyOrOther": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repos\\message.repo.ts": {
+      "typeAny": 3,
+      "asAny": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repos\\product-finder.ts": {
+      "falsyOrOther": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repos\\product-search.ts": {
+      "typeAny": 1,
+      "falsyOrOther": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repos\\template.repo.ts": {
+      "typeAny": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repos\\unit-of-work.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repositories\\conversation-repository.ts": {
+      "typeAny": 4,
+      "falsyOrOther": 3
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repositories\\credentials-repository.ts": {
+      "asUnknownAs": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repositories\\index.ts": {
+      "typeAny": 4,
+      "falsyOrOther": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repositories\\merchant-repository.ts": {
+      "asAny": 4,
+      "falsyOrOther": 4
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repositories\\message-repository.ts": {
+      "typeAny": 4,
+      "falsyOrOther": 3
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\repositories\\product-repository.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\routes\\admin.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\routes\\image-search.ts": {
+      "falsyOrOther": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\routes\\merchant-admin.ts": {
+      "typeAny": 1,
+      "asAny": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\routes\\message-analytics.ts": {
+      "typeAny": 2,
+      "falsyOrOther": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\routes\\utility-messages.ts": {
+      "typeAny": 5
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\routes\\webhooks.ts": {
+      "typeAny": 2,
+      "asAny": 1,
+      "falsyOrOther": 3
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\advanced-analytics.ts": {
+      "falsyOrOther": 7
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\ai.ts": {
+      "typeAny": 2,
+      "asUnknownAs": 1,
+      "falsyOrOther": 11
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\analytics\\conversation-analytics.ts": {
+      "falsyOrOther": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\catalog\\merchant-catalog.service.ts": {
+      "falsyOrOther": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\compliance.ts": {
+      "falsyOrOther": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\confidence-router.service.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\conversation-ai-orchestrator.ts": {
+      "asAny": 2,
+      "falsyOrOther": 5
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\cross-platform-conversation-manager.ts": {
+      "asUnknownAs": 3,
+      "falsyOrOther": 4
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\customer-memory.ts": {
+      "asAny": 2,
+      "falsyOrOther": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\customer-profiler.ts": {
+      "falsyOrOther": 5
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\database-job-processor.ts": {
+      "typeAny": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\extended-thinking.ts": {
+      "asAny": 4
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\image-analysis.ts": {
+      "typeAny": 5,
+      "falsyOrOther": 6
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-ai.ts": {
+      "typeAny": 5,
+      "asAny": 2,
+      "asUnknownAs": 2,
+      "falsyOrOther": 8
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-continuous-improvement.ts": {
+      "falsyOrOther": 3
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-hashtag-monitor.ts": {
+      "typeAny": 1,
+      "asAny": 2,
+      "falsyOrOther": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-interaction-analyzer.ts": {
+      "asAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-manychat-bridge.ts": {
+      "typeAny": 5,
+      "asAny": 2,
+      "thenSecondArg": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-media-manager.ts": {
+      "typeAny": 9,
+      "falsyOrOther": 7
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-message-sender.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-reporting.ts": {
+      "falsyOrOther": 5
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-timing-optimizer.ts": {
+      "falsyOrOther": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\instagram-webhook.ts": {
+      "falsyOrOther": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\learning-analytics.ts": {
+      "typeAny": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\logger.ts": {
+      "asAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\manychat-api.ts": {
+      "typeAny": 2,
+      "asAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\message-enhancement.service.ts": {
+      "typeAny": 1,
+      "asAny": 4,
+      "falsyOrOther": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\monitoring.ts": {
+      "typeAny": 1,
+      "falsyOrOther": 13
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\notification-service.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\predictive-analytics.ts": {
+      "falsyOrOther": 5
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\predictive-scheduler.ts": {
+      "allSettled": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\proactive-service.ts": {
+      "falsyOrOther": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\ProductionQueueManager.ts": {
+      "asAny": 8,
+      "thenSecondArg": 1,
+      "falsyOrOther": 9
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\recommendation\\product-recommendation.engine.ts": {
+      "typeAny": 3,
+      "falsyOrOther": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\redis-monitoring.ts": {
+      "falsyOrOther": 10
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\RedisConnectionManager.ts": {
+      "typeAny": 3,
+      "allSettled": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\RedisSimpleHealthCheck.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\response-enhancer.service.ts": {
+      "typeAny": 1,
+      "asAny": 4,
+      "falsyOrOther": 4
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\search\\smart-product-search.ts": {
+      "asAny": 1,
+      "falsyOrOther": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\service-controller.ts": {
+      "typeAny": 3,
+      "asAny": 3
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\smart-cache.ts": {
+      "falsyOrOther": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\smart-orchestrator.ts": {
+      "typeAny": 6,
+      "asAny": 5,
+      "asUnknownAs": 2,
+      "falsyOrOther": 3
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\services\\utility-messages.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\startup\\maintenance.ts": {
+      "typeAny": 3
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\startup\\migrate.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\startup\\runMigrations.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\startup\\security-compliance.ts": {
+      "asAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\startup\\validation.ts": {
+      "typeAny": 1,
+      "asAny": 1,
+      "falsyOrOther": 2
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\utils\\pattern-matcher.ts": {
+      "typeAny": 1,
+      "falsyOrOther": 4
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\src\\utils\\reasoning-chain.ts": {
+      "asAny": 1,
+      "falsyOrOther": 3
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\test\\setup.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\tests\\src\\tests\\ai.test.ts": {
+      "asAny": 4
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\tests\\src\\tests\\CircuitBreaker.test.ts": {
+      "typeAny": 3,
+      "asAny": 5
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\tests\\src\\tests\\encryption.test.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\tests\\src\\tests\\instagram-ai.test.ts": {
+      "asAny": 16
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\tests\\src\\tests\\instagram-api.test.ts": {
+      "typeAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\tests\\src\\tests\\rls-wrapper.test.ts": {
+      "asAny": 1
+    },
+    "C:\\Users\\jaafa\\Desktop\\New folder (8)\\ai-sales-platform\\tests\\src\\tests\\telemetry.test.ts": {
+      "typeAny": 3,
+      "asAny": 2
+    }
+  },
+  "timestamp": "2025-09-04T12:12:13.099Z",
+  "note": "processHandlers يُحتسب فقط إذا لم نجد process.exit(non-zero) في الملف نفسه. falsyOr* ترصد استخدام || لفولباكات صامتة."
+}

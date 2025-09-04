@@ -30,7 +30,7 @@ export function addStep<TIn = unknown>(chain: ThinkingChain, stage: ReasoningSta
     startedAt: new Date().toISOString(),
     status: 'in_progress',
   };
-  if (typeof input !== 'undefined') (step as any).input = input;
+  if (typeof input !== 'undefined' && step && typeof step === 'object') (step as Record<string, unknown>).input = input as unknown;
   chain.steps.push(step);
   chain.status = 'in_progress';
   return step;
@@ -65,12 +65,12 @@ export function computeChainConfidence(chain: ThinkingChain): number {
   let den = 0;
   for (const s of chain.steps) {
     const w = weights[s.stage] ?? 1;
-    num += w * (s.confidence || 0);
+    num += w * (s.confidence ?? 0);
     den += w;
   }
   const base = den > 0 ? num / den : 0;
   // Slight penalty if any step is low confidence (<0.4)
-  const hasLow = chain.steps.some(s => (s.confidence || 0) < 0.4);
+  const hasLow = chain.steps.some(s => (s.confidence ?? 0) < 0.4);
   const adjusted = hasLow ? base * 0.9 : base;
   return clamp01(adjusted);
 }
@@ -84,7 +84,7 @@ export function selfReflect(chain: ThinkingChain): void {
   const decide = chain.steps.find(s => s.stage === 'DECIDE');
 
   if (analyze && explore && decide) {
-    const q = String(chain.query || '').toLowerCase();
+    const q = String(chain.query ?? '').toLowerCase();
     const askedForPrice = /\b(price|سعر|كم|فلوس)\b/.test(q);
     const decideMentionsPrice = String(decide.result ?? '').includes('سعر');
     if (askedForPrice && !decideMentionsPrice) {
@@ -97,7 +97,7 @@ export function selfReflect(chain: ThinkingChain): void {
   // Attach reflections to the evaluate or decide step
   const target = evaluate || decide;
   if (target) {
-    target.reflections = [...(target.reflections || []), ...reflections];
+    target.reflections = [...(target.reflections ?? []), ...reflections];
   }
 
   chain.overallConfidence = computeChainConfidence(chain);
@@ -112,7 +112,7 @@ export function summarizeChain(chain: ThinkingChain): string {
   const parts: string[] = [];
   for (const s of chain.steps) {
     const label = s.label || s.stage;
-    const conf = Math.round((s.confidence || 0) * 100);
+    const conf = Math.round((s.confidence ?? 0) * 100);
     const snippet = String(s.result ?? '').trim().slice(0, 120).replace(/\s+/g, ' ');
     parts.push(`${label} (${conf}%): ${snippet}`);
   }
@@ -120,12 +120,12 @@ export function summarizeChain(chain: ThinkingChain): string {
 }
 
 export function shouldUseExtendedThinking(query: string, nlp?: { intent?: string; confidence?: number }): boolean {
-  const q = (query || '').toLowerCase();
+  const q = (query ?? '').toLowerCase();
   const long = q.length > 100; // enable for moderately long queries too
   const hasWhyOrHow = /(ليش|كيف|شنو|policy|سياسة|استرجاع|إرجاع|return|refund|why|how|طريقة|مشكلة|ضمان|رسوم|توصيل|جدول|مقاس)/.test(q);
   const hasQuestion = q.includes('?') || /^(ليش|كيف|شنو|هل|لو|ممكن)/.test(q.trim());
   const lowNlp = (nlp?.confidence ?? 1) < 0.6;
-  const intent = (nlp?.intent || '').toUpperCase();
+  const intent = (nlp?.intent ?? '').toUpperCase();
   const intentComplex = intent === 'OTHER' || intent === 'FAQ' || intent === 'OBJECTION';
   return long || hasWhyOrHow || hasQuestion || lowNlp || intentComplex;
 }

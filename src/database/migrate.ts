@@ -20,9 +20,6 @@ function resolveMigrationDir(): string | null {
   ];
   for (const dir of candidates) {
     try {
-      // Using dynamic import to avoid ESM/CJS interop pitfalls
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      
       if (existsSync(dir)) return dir;
     } catch {}
   }
@@ -59,7 +56,7 @@ export async function runDatabaseMigrations(): Promise<void> {
     return;
   }
 
-  const client = await (directPool as any).connect();
+  const client = await directPool.connect();
   try {
     await client.query(`
       CREATE TABLE IF NOT EXISTS _migrations (
@@ -93,8 +90,8 @@ export async function runDatabaseMigrations(): Promise<void> {
     log.info('✅ All migrations completed successfully');
   } finally {
     client.release();
-    if (process.env.DATABASE_URL && typeof (directPool as any).end === 'function' && directPool !== getPool()) {
-      await (directPool as any).end();
+    if (process.env.DATABASE_URL && typeof directPool.end === 'function' && directPool !== getPool()) {
+      await directPool.end();
     }
   }
 }
@@ -118,7 +115,7 @@ export async function getMigrationStatus(): Promise<{
         connectionTimeoutMillis: 15000
       })
     : getPool();
-  const client = await (directPool as any).connect();
+  const client = await directPool.connect();
 
   try {
     await client.query(`
@@ -136,11 +133,11 @@ export async function getMigrationStatus(): Promise<{
     );
 
     const migrations = allFiles.map(file => {
-      const executed = executedMigrations.find((m: any) => m.name === file);
+      const executed = executedMigrations.find((m: { name: string }) => m.name === file);
       return {
         name: file,
         status: executed ? 'executed' as const : 'pending' as const,
-        applied_at: executed?.applied_at || null
+        applied_at: executed?.applied_at ?? null
       };
     });
 
@@ -152,8 +149,8 @@ export async function getMigrationStatus(): Promise<{
     };
   } finally {
     client.release();
-    if (process.env.DATABASE_URL && typeof (directPool as any).end === 'function' && directPool !== getPool()) {
-      await (directPool as any).end();
+    if (process.env.DATABASE_URL && typeof directPool.end === 'function' && directPool !== getPool()) {
+      await directPool.end();
     }
   }
 }
@@ -172,7 +169,7 @@ export async function createMigrationTable(): Promise<void> {
         connectionTimeoutMillis: 15000
       })
     : getPool();
-  const client = await (directPool as any).connect();
+  const client = await directPool.connect();
   try {
     await client.query(`
       CREATE TABLE IF NOT EXISTS _migrations (
@@ -182,8 +179,8 @@ export async function createMigrationTable(): Promise<void> {
     log.info('✅ Migration tracking table created');
   } finally {
     client.release();
-    if (process.env.DATABASE_URL && typeof (directPool as any).end === 'function' && directPool !== getPool()) {
-      await (directPool as any).end();
+    if (process.env.DATABASE_URL && typeof directPool.end === 'function' && directPool !== getPool()) {
+      await directPool.end();
     }
   }
 }
@@ -202,7 +199,7 @@ export async function rollbackMigration(): Promise<void> {
         connectionTimeoutMillis: 15000
       })
     : getPool();
-  const client = await (directPool as any).connect();
+  const client = await directPool.connect();
   try {
     const { rows } = await client.query('SELECT name FROM _migrations ORDER BY applied_at DESC LIMIT 1');
     if (rows.length === 0) {
@@ -215,8 +212,8 @@ export async function rollbackMigration(): Promise<void> {
     log.info(`✅ Migration rolled back: ${lastMigration}`);
   } finally {
     client.release();
-    if (process.env.DATABASE_URL && typeof (directPool as any).end === 'function' && directPool !== getPool()) {
-      await (directPool as any).end();
+    if (process.env.DATABASE_URL && typeof directPool.end === 'function' && directPool !== getPool()) {
+      await directPool.end();
     }
   }
 }

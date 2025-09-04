@@ -16,12 +16,12 @@ import { checkPredictiveServicesHealth, runManualPredictiveAnalytics } from '../
 const log = getLogger({ component: 'admin-routes' });
 
 function requireAdminAuth(req: Request): void {
-  const auth = req.headers.get('authorization') || '';
+  const auth = req.headers.get('authorization') ?? '';
   if (!auth.startsWith('Basic ')) throw new Error('Unauthorized');
   const creds = Buffer.from(auth.slice(6), 'base64').toString('utf8');
   const [user, pass] = creds.split(':');
   const ADMIN_USER = process.env.ADMIN_USER || 'admin';
-  const ADMIN_PASS = process.env.ADMIN_PASS || '';
+  const ADMIN_PASS = process.env.ADMIN_PASS ?? '';
   if (!ADMIN_PASS) throw new Error('Admin not configured');
   if (user !== ADMIN_USER || pass !== ADMIN_PASS) throw new Error('Unauthorized');
 }
@@ -222,7 +222,7 @@ document.getElementById('patchForm').addEventListener('submit', async (e) => {
         INSERT INTO merchants (
           business_name, business_category, whatsapp_number, instagram_username, email, currency, settings, last_activity_at
         ) VALUES (
-          ${d.business_name}, ${d.business_category}, ${d.whatsapp_number}, ${d.instagram_username || null}, ${d.email || null}, ${d.currency?.toUpperCase() || 'IQD'}, ${JSON.stringify(d.settings || {})}::jsonb, NOW()
+          ${d.business_name}, ${d.business_category}, ${d.whatsapp_number}, ${d.instagram_username ?? null}, ${d.email ?? null}, ${d.currency?.toUpperCase() || 'IQD'}, ${JSON.stringify(d.settings || {})}::jsonb, NOW()
         )
         ON CONFLICT (whatsapp_number) DO UPDATE SET business_name = EXCLUDED.business_name
         RETURNING id
@@ -344,7 +344,7 @@ document.getElementById('patchForm').addEventListener('submit', async (e) => {
       const sql = getDatabase().getSQL();
 
       // Get recent insights cache for this merchant
-      const insights = await sql<{ customer_id: string; insights: any; computed_at: Date }>`
+      const insights = await sql<{ customer_id: string; insights: Record<string, unknown>; computed_at: Date }>`
         SELECT customer_id, insights, computed_at
         FROM customer_insights_cache
         WHERE merchant_id = ${merchantId}::uuid
@@ -371,4 +371,3 @@ document.getElementById('patchForm').addEventListener('submit', async (e) => {
 }
 
 export default registerAdminRoutes;
-

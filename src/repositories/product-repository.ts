@@ -29,14 +29,14 @@ export async function getTopProductsByMerchant(
     LIMIT ${limit}
   `;
 
-  return rows.map((r: any) => ({
+  return rows.map((r: { id: string; sku: string; name_ar: string; price_usd: number; category: string; description_ar?: string; image_urls: string[] }) => ({
     id: String(r.id),
     sku: String(r.sku),
     name_ar: String(r.name_ar),
     category: r.category ?? null,
     price_amount: Number(r.price_amount),
     sale_price_amount: r.sale_price_amount != null ? Number(r.sale_price_amount) : null,
-    price_currency: String(r.price_currency || 'USD').toUpperCase(),
+    price_currency: String(r.price_currency ?? 'USD').toUpperCase(),
     stock_quantity: Number(r.stock_quantity)
   }));
 }

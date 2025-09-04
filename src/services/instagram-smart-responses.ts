@@ -76,7 +76,7 @@ export class InstagramSmartResponses {
   }
 
   private toneByCategory(cat?: string): string {
-    const c = (cat || '').toLowerCase();
+    const c = (cat ?? '').toLowerCase();
     if (c.includes('fashion') || c.includes('ملابس') || c.includes('أزياء')) return 'ستايلك يهمنا ✨';
     if (c.includes('electronics') || c.includes('الكترونيات') || c.includes('تقنية')) return 'نجهّز لك الخيارات التقنية الأفضل ⚡';
     if (c.includes('food') || c.includes('مطعم') || c.includes('طعام')) return 'جاهزين لذوقك 👨‍🍳';

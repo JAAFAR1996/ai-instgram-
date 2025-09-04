@@ -384,13 +384,11 @@ export class ConfidenceRouterService {
    * Execute thinking route
    */
   private async executeThinkingRoute(context: ConfidenceRoutingContext): Promise<any> {
-    return await this.thinkingService.processWithExtendedThinking({
-      messageId: context.messageId,
-      merchantId: context.merchantId,
-      customerMessage: context.customerMessage,
-      currentResponse: context.currentResponse,
-      confidence: context.aiConfidence
-    });
+    return await this.thinkingService.processWithThinking(
+      context.customerMessage,
+      { merchantId: context.merchantId, nlp: { intent: context.aiIntent, confidence: context.aiConfidence } },
+      false
+    );
   }
 
   /**
@@ -412,8 +410,7 @@ export class ConfidenceRouterService {
     // 1. First try constitutional AI improvement
     try {
       const critiqueResult = await this.constitutionalAI.critiqueResponse(currentResponse, {
-        merchantId: context.merchantId,
-        platform: context.platform
+        merchantId: context.merchantId
       });
 
       if (critiqueResult.score < 0.7) {
@@ -521,7 +518,7 @@ export class ConfidenceRouterService {
   /**
    * Determine fallback route
    */
-  private determineFallbackRoute(route: RoutingDecision['route']): RoutingDecision['route'] | undefined {
+  private determineFallbackRoute(route: RoutingDecision['route']): 'direct' | 'enhance' | undefined {
     switch (route) {
       case 'think': return 'enhance';
       case 'hybrid': return 'enhance';

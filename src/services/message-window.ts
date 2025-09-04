@@ -99,8 +99,8 @@ export class MessageWindowService {
       const result = await sql<MessageWindowRow>`
         SELECT * FROM check_message_window(
           ${merchantId}::uuid,
-          ${customer.phone || null},
-          ${customer.instagram || null},
+          ${customer.phone ?? null},
+          ${customer.instagram ?? null},
           ${customer.platform}
         )
       `;
@@ -149,10 +149,10 @@ export class MessageWindowService {
       await sql`
         SELECT update_message_window(
           ${merchantId}::uuid,
-          ${customer.phone || null},
-          ${customer.instagram || null},
+          ${customer.phone ?? null},
+          ${customer.instagram ?? null},
           ${customer.platform},
-          ${messageId || null}::uuid
+          ${messageId ?? null}::uuid
         )
       `;
 
@@ -232,8 +232,8 @@ export class MessageWindowService {
         WHERE merchant_id = ${merchantId}::uuid
         AND platform = ${customer.platform}
         AND (
-          (customer_phone = ${customer.phone || null} AND customer_phone IS NOT NULL) OR
-          (customer_instagram = ${customer.instagram || null} AND customer_instagram IS NOT NULL)
+          (customer_phone = ${customer.phone ?? null} AND customer_phone IS NOT NULL) OR
+          (customer_instagram = ${customer.instagram ?? null} AND customer_instagram IS NOT NULL)
         )
       `;
     } catch (error) {
@@ -414,8 +414,8 @@ export class MessageWindowService {
         WHERE merchant_id = ${merchantId}::uuid
         AND platform = ${customer.platform}
         AND (
-          (customer_phone = ${customer.phone || null} AND customer_phone IS NOT NULL) OR
-          (customer_instagram = ${customer.instagram || null} AND customer_instagram IS NOT NULL)
+          (customer_phone = ${customer.phone ?? null} AND customer_phone IS NOT NULL) OR
+          (customer_instagram = ${customer.instagram ?? null} AND customer_instagram IS NOT NULL)
         )
       `;
 

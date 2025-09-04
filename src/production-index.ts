@@ -152,11 +152,11 @@ async function bootstrap() {
 
     // CORS optimized for Render
     app.use('*', async (c, next) => {
-      const allowedOrigins = process.env.CORS_ORIGINS?.split(',') || ['*'];
-      const origin = c.req.header('origin') || '';
+      const allowedOrigins = process.env.CORS_ORIGINS?.split(',') ?? ['*'];
+      const origin = c.req.header('origin') ?? '';
       
       if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-        c.header('Access-Control-Allow-Origin', origin || '*');
+        c.header('Access-Control-Allow-Origin', origin ?? '*');
         c.header('Access-Control-Allow-Credentials', 'true');
         c.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
         c.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Merchant-Id,X-Request-Id');
@@ -256,31 +256,66 @@ async function bootstrap() {
       });
       
       app.get('/metrics', async (c) => {
-        const metrics = await promClient!.register.metrics();
-        return c.text(metrics, 200, {
-          'Content-Type': promClient!.register.contentType
-        });
+        if (!promClient) {
+          return c.json({ error: 'Metrics not available - prom-client not loaded' }, 503);
+        }
+        
+        try {
+          const metrics = await promClient.register.metrics();
+          return c.text(metrics, 200, {
+            'Content-Type': promClient.register.contentType
+          });
+        } catch (error) {
+          log.error('Failed to retrieve metrics', { error: error instanceof Error ? error.message : String(error) });
+          return c.json({ error: 'Failed to retrieve metrics' }, 500);
+        }
       });
     }
 
     // Health endpoints (accessible without auth)
     app.get('/health', async (c) => {
       const snapshot = getHealthSnapshot();
-      return c.json(snapshot, snapshot.ready ? 200 : 503);
+      if (snapshot.ready && snapshot.status === 'ok') {
+        return c.json({ status: 'ok' }, 200);
+      }
+      const reasons: string[] = [];
+      try {
+        const d = snapshot.details;
+        if (!d.redis.ok) reasons.push(d.redis.error ? `redis:${d.redis.error}` : 'redis');
+        if (!d.database.ok) reasons.push(d.database.error ? `db:${d.database.error}` : 'database');
+        if (!d.memory.ok) reasons.push('memory');
+        if (d.manychat && !d.manychat.ok) reasons.push(d.manychat.error ? `manychat:${d.manychat.error}` : 'manychat');
+      } catch {}
+      return c.json({ status: 'degraded', reasons }, 503);
     });
 
     app.get('/ready', async (c) => {
       const snapshot = getHealthSnapshot();
-      const isReady = snapshot.ready && snapshot.status !== 'degraded';
-      return c.json({
-        ready: isReady,
-        timestamp: new Date().toISOString()
-      }, isReady ? 200 : 503);
+      if (snapshot.ready && snapshot.status === 'ok') {
+        return c.json({ status: 'ok' }, 200);
+      }
+      const reasons: string[] = [];
+      try {
+        const d = snapshot.details;
+        if (!d.database.ok) reasons.push(d.database.error ? `db:${d.database.error}` : 'database');
+      } catch {}
+      return c.json({ status: 'degraded', reasons }, 503);
     });
 
     app.get('/healthz', async (c) => {
       const snapshot = getHealthSnapshot();
-      return c.json(snapshot, snapshot.ready ? 200 : 503);
+      if (snapshot.ready && snapshot.status === 'ok') {
+        return c.json({ status: 'ok' }, 200);
+      }
+      const reasons: string[] = [];
+      try {
+        const d = snapshot.details;
+        if (!d.redis.ok) reasons.push(d.redis.error ? `redis:${d.redis.error}` : 'redis');
+        if (!d.database.ok) reasons.push(d.database.error ? `db:${d.database.error}` : 'database');
+        if (!d.memory.ok) reasons.push('memory');
+        if (d.manychat && !d.manychat.ok) reasons.push(d.manychat.error ? `manychat:${d.manychat.error}` : 'manychat');
+      } catch {}
+      return c.json({ status: 'degraded', reasons }, 503);
     });
 
     // Serve simple legal pages (static files)
@@ -320,7 +355,7 @@ async function bootstrap() {
     log.info('Health monitoring started');
 
     // Start server
-    const port = Number(process.env.PORT || 10000);
+    const port = Number(process.env.PORT ?? 10000);
     
     serve({
       fetch: app.fetch,
@@ -337,8 +372,11 @@ async function bootstrap() {
     });
 
     return app;
-  } catch (error: any) {
-    log.error('Bootstrap failed:', error);
+  } catch (error) {
+    log.error('Bootstrap failed:', { 
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     process.exit(1);
   }
 }
@@ -412,8 +450,11 @@ async function gracefulShutdown(signal: string, exitCode: number = 0) {
     log.info(`Graceful shutdown completed in ${shutdownDuration}ms`);
     
     process.exit(exitCode);
-  } catch (error: any) {
-    log.error('Error during shutdown:', error);
+  } catch (error) {
+    log.error('Error during shutdown:', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     process.exit(1);
   }
 }

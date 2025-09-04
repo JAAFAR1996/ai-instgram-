@@ -46,7 +46,7 @@ export class CustomerMemoryService {
     try {
       await sql`
         INSERT INTO customer_behavior_history (merchant_id, customer_id, event_type, product_id, metadata, created_at)
-        VALUES (${merchantId}::uuid, ${customerId}, ${rec.type}, ${rec.productId || null}, ${JSON.stringify(rec.metadata || {})}::jsonb, NOW())
+        VALUES (${merchantId}::uuid, ${customerId}, ${rec.type}, ${rec.productId ?? null}, ${JSON.stringify(rec.metadata || {})}::jsonb, NOW())
       `;
     } catch (e) {
       this.log.warn('recordBehavior failed', { error: String(e) });
@@ -68,10 +68,10 @@ export class CustomerMemoryService {
 
       const previousOrders = orders[0]?.cnt || 0;
       const averageOrderValue = Number(orders[0]?.aov || 0);
-      const preferredCategories = Array.isArray((prefs[0]?.data as any)?.preferredCategories)
-        ? ((prefs[0]?.data as any).preferredCategories as string[])
+      const preferredCategories = Array.isArray((prefs[0]?.data as Record<string, unknown> | undefined)?.preferredCategories)
+        ? ((prefs[0]?.data as { preferredCategories?: string[] } | undefined)?.preferredCategories as string[])
         : [];
-      const lastInteraction = prefs[0]?.updated_at || null;
+      const lastInteraction = prefs[0]?.updated_at ?? null;
 
       return { previousOrders, averageOrderValue, preferredCategories, lastInteraction };
     } catch (e) {

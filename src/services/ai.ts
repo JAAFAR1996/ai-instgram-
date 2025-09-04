@@ -192,7 +192,7 @@ export class AIService {
 
   /** Mask PII (phones/IG handles) before logging */
   private maskPII(text: string): string {
-    return (text || '')
+    return (text ?? '')
       .replace(/\b(\+?\d[\d\s-]{6,})\b/g, '***redacted-phone***')
       .replace(/@[\w.\-]{3,}/g, '@***redacted***')
       .slice(0, 500);
@@ -589,7 +589,7 @@ export class AIService {
       | { type: 'text'; text: string }
       | { type: 'image_url'; image_url: { url: string } }
     > = [];
-    const safeText = (text || '').trim();
+    const safeText = (text ?? '').trim();
     if (safeText) parts.push({ type: 'text', text: safeText });
     for (const img of images.slice(0, 3)) {
       const url = this.toDataUrlOrPass(img);
@@ -597,7 +597,7 @@ export class AIService {
       if (img.caption) parts.push({ type: 'text', text: `تفاصيل الصورة: ${img.caption}` });
     }
     // Cast to SDK param (content as parts supported by gpt-4o)
-    return { role: 'user', content: parts as unknown as string } as OpenAI.Chat.Completions.ChatCompletionMessageParam;
+    return { role: 'user', content: parts as OpenAI.Chat.Completions.ChatCompletionMessageParam['content'] } as OpenAI.Chat.Completions.ChatCompletionMessageParam;
   }
 
   /** Convert ImageData to a data URL if base64 present, otherwise return URL */
@@ -621,16 +621,20 @@ export class AIService {
   }
 
   // Format product list for inclusion in system prompt
-  private formatProductsForPrompt(products: any[]): string {
+  private formatProductsForPrompt(products: unknown[]): string {
     if (!products || products.length === 0) {
       return 'لا توجد نتائج مرتبطة بالاستفسار. يمكنك طلب تفاصيل أكثر (المقاس/اللون/الفئة).';
     }
-    return products.map((p: any, idx: number) => {
-      const price = p?.sale_price_amount ?? p?.price_amount ?? p?.price_usd ?? 'غير محدد';
-      const stockNum = Number(p?.stock_quantity ?? 0);
+    return products.map((p: unknown, idx: number) => {
+      if (typeof p !== 'object' || p === null) return `${idx + 1}. منتج غير صالح`;
+      
+      const product = p as Record<string, unknown>;
+      const price = product.sale_price_amount ?? product.price_amount ?? product.price_usd ?? 'غير محدد';
+      const stockNum = Number(product.stock_quantity ?? 0);
       const stock = stockNum > 0 ? `متوفر (مخزون: ${stockNum})` : 'غير متوفر';
-      const sku = p?.sku ? ` | SKU: ${p.sku}` : '';
-      return `${idx + 1}. ${p?.name_ar} — ${price} د.ع — ${stock}${sku}`;
+      const sku = product.sku ? ` | SKU: ${product.sku}` : '';
+      const name = product.name_ar ?? product.name_en ?? 'غير محدد';
+      return `${idx + 1}. ${name} — ${price} د.ع — ${stock}${sku}`;
     }).join('\n');
   }
 
@@ -670,7 +674,7 @@ export class AIService {
       temperature: 0.7,
       max_tokens: 120,
     });
-    return completion.choices?.[0]?.message?.content || '';
+    return completion.choices?.[0]?.message?.content ?? '';
   }
 
   /**
@@ -861,7 +865,7 @@ ${productsText}
   private async getEnhancedFallbackResponse(context: ConversationContext, lastMessage: string): Promise<AIResponse> {
     try {
       const svc = new ErrorFallbacksService();
-      const fb = await svc.buildFallback(context.merchantId, context.customerId, lastMessage || '');
+      const fb = await svc.buildFallback(context.merchantId, context.customerId, lastMessage ?? '');
       const products = (fb.recommendations || []).map(r => ({
         productId: r.id,
         sku: r.sku,

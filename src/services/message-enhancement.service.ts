@@ -14,10 +14,9 @@ import ExtendedThinkingService from './extended-thinking.js';
 import { computeSuccessPatterns } from '../utils/pattern-matcher.js';
 import type { 
   ResponseContext, 
-  CritiqueResult, 
-  LearningOutcome,
-  SuccessPatterns
+  CritiqueResult
 } from '../types/constitutional-ai.js';
+import type { LearningOutcome, SuccessPatterns } from '../types/learning.js';
 import type { DatabaseRow } from '../types/db.js';
 
 export interface EnhancementContext {
@@ -28,7 +27,7 @@ export interface EnhancementContext {
   aiIntent?: string;
   processingTime: number;
   customerMessage?: string;
-  conversationHistory?: any[];
+  conversationHistory?: Array<unknown>;
   platform?: string;
 }
 
@@ -85,9 +84,7 @@ export class MessageEnhancementService {
       // 1. Quality Assessment
       const responseContext: ResponseContext = {
         merchantId: context.merchantId,
-        platform: context.platform || 'instagram',
         intent: context.aiIntent,
-        processingTime: context.processingTime
       };
 
       const critique = await this.constitutionalAI.critiqueResponse(
@@ -248,19 +245,13 @@ export class MessageEnhancementService {
     // Apply Extended Thinking for complex queries
     if (strategies.includes('thinking') && context.customerMessage) {
       try {
-        const thinkingResult = await this.thinkingService.processWithExtendedThinking({
-          messageId: context.messageId,
-          merchantId: context.merchantId,
-          customerMessage: context.customerMessage,
-          currentResponse: response,
-          confidence: context.aiConfidence
-        });
-
-        if (thinkingResult.improvedResponse) {
-          response = thinkingResult.improvedResponse;
-          improvements.push(`thinking: ${thinkingResult.reasoning?.length || 0} steps`);
-          enhancementType = enhancementType === 'none' ? 'thinking' : 'hybrid';
-        }
+        const result = await this.thinkingService.processWithThinking(
+          context.customerMessage,
+          { merchantId: context.merchantId, nlp: { intent: context.aiIntent, confidence: context.aiConfidence } },
+          false
+        );
+        improvements.push(`thinking: ${result.chain.steps.length} steps`);
+        enhancementType = enhancementType === 'none' ? 'thinking' : 'hybrid';
       } catch (error) {
         improvements.push('thinking: failed');
       }
@@ -309,8 +300,8 @@ export class MessageEnhancementService {
       let optimizedResponse = response;
 
       // Apply successful phrases for the intent
-      if (context.aiIntent && patterns.intentSuccess[context.aiIntent]) {
-        const intentData = patterns.intentSuccess[context.aiIntent];
+      if (context.aiIntent && (patterns as Record<string, unknown>).intentSuccess && (patterns as Record<string, unknown>).intentSuccess[context.aiIntent]) {
+        const intentData = (patterns as Record<string, unknown>).intentSuccess[context.aiIntent];
         if (intentData.avgScore > 0.7) {
           // This intent generally performs well, apply its successful patterns
           optimizations.push(`intent_optimized:${intentData.count}`);
@@ -319,10 +310,10 @@ export class MessageEnhancementService {
 
       // Apply top performing phrases if response is short
       if (optimizedResponse.length < 100 && patterns.topPhrases.length > 0) {
-        const bestPhrase = patterns.topPhrases[0];
-        if (bestPhrase.score > 0.8 && !optimizedResponse.includes(bestPhrase.phrase)) {
+        const bestPhrase = patterns.topPhrases[0] as unknown;
+        if (bestPhrase && typeof bestPhrase.phrase === 'string' && bestPhrase.score > 0.8 && !optimizedResponse.includes(bestPhrase.phrase)) {
           // Intelligently integrate successful phrase
-          if (bestPhrase.phrase.includes('شكر') || bestPhrase.phrase.includes('thank')) {
+          if (bestPhrase.phrase.includes('???') || bestPhrase.phrase.includes('thank')) {
             optimizedResponse += ` ${bestPhrase.phrase}`;
             optimizations.push('phrase_added');
           }

@@ -70,7 +70,7 @@ export function requireMerchantId(
     if (strict) {
       throw new MerchantIdMissingError();
     }
-    return fallback || '';
+    return fallback ?? '';
   }
 
   return merchantId;

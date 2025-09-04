@@ -17,7 +17,7 @@ export interface NormalizationOptions {
 }
 
 export function normalizeArabic(input: string, opts: NormalizationOptions = {}): string {
-  let text = input || '';
+  let text = input ?? '';
   if (opts.stripDiacritics !== false) {
     text = text.replace(AR_DIACRITICS, '').replace(TATWEEL, '');
   }

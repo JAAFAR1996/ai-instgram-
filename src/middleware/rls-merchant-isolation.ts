@@ -116,10 +116,10 @@ function getClientIP(c: Context): string {
   if (forwardedFor) {
     // Take the first IP from X-Forwarded-For
     const firstIP = forwardedFor.split(',')[0];
-    return firstIP ? firstIP.trim() : (realIP || cfConnectingIP || 'unknown');
+    return firstIP ? firstIP.trim() : (realIP ?? cfConnectingIP ?? 'unknown');
   }
   
-  return realIP || cfConnectingIP || 'unknown';
+  return realIP ?? cfConnectingIP ?? 'unknown';
 }
 
 /**
@@ -149,7 +149,7 @@ function isIPBlocked(ip: string, config: MerchantIsolationConfig): boolean {
  */
 function recordFailedAttempt(ip: string, config: MerchantIsolationConfig): void {
   const now = new Date();
-  const entry = failedAttempts.get(ip) || {
+  const entry = failedAttempts.get(ip) ?? {
     count: 0,
     firstAttempt: now
   };
@@ -157,8 +157,8 @@ function recordFailedAttempt(ip: string, config: MerchantIsolationConfig): void 
   entry.count++;
   
   // Block IP if too many failed attempts
-  if (entry.count >= (config.rateLimitConfig?.maxFailedAttempts || 5)) {
-    entry.blockedUntil = new Date(now.getTime() + (config.rateLimitConfig?.blockDurationMs || 300000));
+  if (entry.count >= (config.rateLimitConfig?.maxFailedAttempts ?? 5)) {
+    entry.blockedUntil = new Date(now.getTime() + (config.rateLimitConfig?.blockDurationMs ?? 300000));
   }
 
   failedAttempts.set(ip, entry);
@@ -196,7 +196,7 @@ export function createMerchantIsolationMiddleware(
   const getQuery = (c: Context, name: string): string | undefined => {
     try {
       const url = new URL(c.req.url);
-      return url.searchParams.get(name) || undefined;
+      return url.searchParams.get(name) ?? undefined;
     } catch {
       return undefined;
     }
@@ -226,7 +226,7 @@ export function createMerchantIsolationMiddleware(
       }
 
       // Simplified path extraction
-      const path = c.req.path || '/';
+      const path = c.req.path ?? '/';
       
       // Skip webhooks immediately (before any checks)
       if (path === '/webhooks/instagram' || path.startsWith('/webhooks/instagram/')) {
@@ -266,7 +266,7 @@ export function createMerchantIsolationMiddleware(
         // Fallback to query parameter if JWT validation fails
         if (finalConfig.queryParam) {
           const queryValue = getQuery(c, finalConfig.queryParam);
-          merchantId = queryValue || null;
+          merchantId = queryValue ?? null;
         }
       }
       
@@ -398,7 +398,9 @@ export function requireMerchantId(c: Context): string {
  * Create SQL template with automatic merchant isolation
  * This ensures all queries automatically filter by current merchant
  */
-export function createMerchantSQL(sql: any) {
+export function createMerchantSQL(
+  sql: <TRow = unknown>(strings: TemplateStringsArray, ...args: unknown[]) => Promise<TRow[]>
+) {
   return {
     /**
      * Execute query with automatic merchant verification
@@ -421,7 +423,7 @@ export function createMerchantSQL(sql: any) {
     async getCurrentMerchant(): Promise<string | null> {
       try {
         const result = await sql`SELECT current_merchant_id() as merchant_id`;
-        return result[0]?.merchant_id || null;
+        return result[0]?.merchant_id ?? null;
       } catch (error) {
         log.warn('Could not get current merchant from unified function', { error: serr(error) });
         return null;

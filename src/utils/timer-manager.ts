@@ -39,7 +39,7 @@ export function setupTimerManagement(): void {
   patched = true;
 
   global.setTimeout = (
-    (handler: (...a: any[]) => void, timeout?: number, ...args: any[]) => {
+    (handler: (...a: unknown[]) => void, timeout?: number, ...args: unknown[]) => {
       const timer = originalSetTimeout(handler, timeout, ...args);
       timerManager.register(timer);
       timer.unref?.();
@@ -48,7 +48,7 @@ export function setupTimerManagement(): void {
   ) as typeof setTimeout;
 
   global.setInterval = (
-    (handler: (...a: any[]) => void, timeout?: number, ...args: any[]) => {
+    (handler: (...a: unknown[]) => void, timeout?: number, ...args: unknown[]) => {
       const timer = originalSetInterval(handler, timeout, ...args);
       timerManager.register(timer);
       timer.unref?.();

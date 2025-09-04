@@ -1,6 +1,8 @@
 // Production-grade tenant isolation context
 import { Pool } from 'pg';
 import { z } from 'zod';
+import { getLogger } from '../services/logger.js';
+const log = getLogger({ component: 'tenant-isolation' });
 
 // Error serialization helper
 export function serr(e: unknown): { name?: string; message?: string; code?: unknown; stack?: string; cause?: string } {
@@ -84,15 +86,16 @@ export async function withDbTenant<T>(
     try {
       await client.query('ROLLBACK');
     } catch (rollbackError) {
-      // use logger upstream
+      // Log rollback failure; original error will still be rethrown below
+      log.error('ROLLBACK failed', { err: serr(rollbackError), merchantId });
     }
     
     // Re-throw original error
     throw error;
   } finally {
     // Clear context and release connection
-    await client.query('RESET app.current_merchant_id').catch(() => {});
-    await client.query('RESET app.admin_mode').catch(() => {});
+    await client.query('RESET app.current_merchant_id').catch((e) => { log.error('RESET app.current_merchant_id failed', { err: e as unknown, merchantId }); throw e instanceof Error ? e : new Error(String(e)); });
+    await client.query('RESET app.admin_mode').catch((e) => { log.error('RESET app.admin_mode failed', { err: e as unknown, merchantId }); throw e instanceof Error ? e : new Error(String(e)); });
     client.release();
   }
 }
@@ -254,7 +257,10 @@ async function handleTenantJobError(
     err: serr(errorToLog),
     jobId: job.id,
     jobName: job.name,
-    merchantId: (job.data as any)?.merchantId
+      merchantId: (() => {
+        const d = job.data as Record<string, unknown> | undefined;
+        return typeof d?.merchantId === 'string' ? (d.merchantId as string) : undefined;
+      })()
   }, 'Job execution failed');
   
   throw error;

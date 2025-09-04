@@ -72,7 +72,7 @@ const defaultFashionProducts = [
 ];
 
 function productsByCategory(category) {
-  switch ((category || '').toLowerCase()) {
+  switch ((category ?? '').toLowerCase()) {
     case 'electronics':
       return [
         { sku: 'EL-1001', name_ar: 'هاتف ذكي 128GB', category: 'electronics', price_usd: 299, stock: 25, tags: ['هواتف','Android'], desc: 'شاشة 6.5"، بطارية كبيرة، كاميرا 48MP.' },
@@ -211,7 +211,7 @@ async function main() {
     await client.query('COMMIT');
     console.log('✅ Seeded real merchant and catalog');
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch((err) => { console.error('ROLLBACK failed', err); });
     console.error('❌ Seed failed:', err?.message || String(err));
     process.exit(1);
   } finally {

@@ -35,7 +35,7 @@ export class InstagramHashtagMonitor {
 
   // Extract hashtags and mentions from text (supports Arabic letters in hashtags)
   private extract(text: string): { hashtags: string[]; mentions: string[] } {
-    const t = (text || '').trim();
+    const t = (text ?? '').trim();
     // Hashtags: allow Arabic letters, Latin letters, digits, underscore, dot
     // Stop at whitespace or punctuation
     const hashtagRegex = /#([A-Za-z0-9_.\-\u0600-\u06FF]+)/gu;
@@ -46,11 +46,11 @@ export class InstagramHashtagMonitor {
 
     let m: RegExpExecArray | null;
     while ((m = hashtagRegex.exec(t)) !== null) {
-      const tag = (m[1] || '').trim();
+      const tag = (m[1] ?? '').trim();
       if (tag) hashtags.add('#' + tag.toLowerCase());
     }
     while ((m = mentionRegex.exec(t)) !== null) {
-      const u = (m[1] || '').trim();
+      const u = (m[1] ?? '').trim();
       if (u) mentions.add(u.toLowerCase());
     }
 
@@ -59,7 +59,7 @@ export class InstagramHashtagMonitor {
 
   // Lightweight sentiment analysis for Arabic/Iraqi texts with emoji signals
   private analyzeSentiment(text: string): 'positive' | 'neutral' | 'negative' {
-    const t = (text || '').toLowerCase();
+    const t = (text ?? '').toLowerCase();
     // Emojis
     const posEmoji = ['😍','❤','❤️','👍','😊','😁','🔥','👏','💯','⭐','🥰','😄','😃'];
     const negEmoji = ['😡','😠','👎','😞','😢','😭','💔','🤬'];
@@ -84,7 +84,7 @@ export class InstagramHashtagMonitor {
 
   // Heuristic engagement score per message (0..100)
   private computeEngagementScore(text: string): number {
-    const t = (text || '').trim();
+    const t = (text ?? '').trim();
     if (!t) return 30;
     let score = 40;
     const length = Math.min(t.length, 400);
@@ -110,7 +110,7 @@ export class InstagramHashtagMonitor {
 
     let inserted = 0;
     // Precompute row engagement once
-    const rowEngagement = this.computeEngagementScore(input.content || '');
+    const rowEngagement = this.computeEngagementScore(input.content ?? '');
 
     // Insert hashtags
     for (const tag of hashtags) {
@@ -188,13 +188,13 @@ export class InstagramHashtagMonitor {
   private async maybeCreateOpportunity(merchantId: string, content: string, platform: 'INSTAGRAM', hashtags: string[], mentions: string[]): Promise<number> {
     const sql = this.db.getSQL();
     try {
-      const assess = await sql<{ assessment: any }>`
+      const assess = await sql<{ assessment: Record<string, unknown> }>`
         SELECT assess_marketing_opportunity(${merchantId}::uuid, ${content}, ${platform}) AS assessment
       `;
-      const a = assess?.[0]?.assessment as any;
+      const a = assess?.[0]?.assessment as Record<string, unknown>;
       if (!a) return 0;
 
-      let priority: 'LOW'|'MEDIUM'|'HIGH'|'URGENT' = (String(a.priority || 'LOW').toUpperCase() as any) || 'LOW';
+      let priority: 'LOW'|'MEDIUM'|'HIGH'|'URGENT' = (String((a as { priority?: unknown }).priority || 'LOW').toUpperCase() as 'LOW'|'MEDIUM'|'HIGH'|'URGENT') || 'LOW';
       let est = Number(a.estimated_value || 0);
       const conversion = Number(a.conversion_probability || 0);
 
@@ -207,7 +207,7 @@ export class InstagramHashtagMonitor {
             WHERE merchant_id = ${merchantId}::uuid
               AND is_active = TRUE
           `;
-          const targets = new Set(rows.map(r => (r.tag || '').toLowerCase()));
+          const targets = new Set(rows.map(r => (r.tag ?? '').toLowerCase()));
           const hit = hashtags.some(h => targets.has(h.toLowerCase()));
           if (hit && priority !== 'URGENT') priority = 'HIGH';
           if (hit && est < 100) est = Math.max(est, 100);
@@ -243,8 +243,8 @@ export class InstagramHashtagMonitor {
 
   // Public: Process inbound text for hashtags/mentions/sentiment and persist
   public async processInboundText(input: ProcessInput): Promise<ProcessResult> {
-    const { hashtags, mentions } = this.extract(input.content || '');
-    const sentiment = this.analyzeSentiment(input.content || '');
+    const { hashtags, mentions } = this.extract(input.content ?? '');
+    const sentiment = this.analyzeSentiment(input.content ?? '');
 
     const insertedMentions = await this.persistMentions(input, hashtags, mentions, sentiment);
     let opportunitiesCreated = 0;

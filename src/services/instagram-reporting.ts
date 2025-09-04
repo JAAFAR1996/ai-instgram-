@@ -86,23 +86,43 @@ export class InstagramReportingService {
   }
 
   async generateWeeklyReport(merchantId: string, ref: Date = new Date()): Promise<DailyReport[]> {
-    const days: DailyReport[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(ref.getTime() - i * 24 * 60 * 60 * 1000);
-      // eslint-disable-next-line no-await-in-loop
-      days.push(await this.generateDailyReport(merchantId, d));
-    }
+    // Generate all dates for the week
+    const dates = Array.from({ length: 7 }, (_, i) => 
+      new Date(ref.getTime() - (6 - i) * 24 * 60 * 60 * 1000)
+    );
+    
+    // Process all dates concurrently for better performance
+    const days = await Promise.all(
+      dates.map(date => this.generateDailyReport(merchantId, date))
+    );
+    
     return days;
   }
 
   async generateMonthlyReport(merchantId: string, ref: Date = new Date()): Promise<DailyReport[]> {
-    const days: DailyReport[] = [];
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(ref.getTime() - i * 24 * 60 * 60 * 1000);
-      // eslint-disable-next-line no-await-in-loop
-      days.push(await this.generateDailyReport(merchantId, d));
+    // Generate all dates for the month (30 days)
+    const dates = Array.from({ length: 30 }, (_, i) => 
+      new Date(ref.getTime() - (29 - i) * 24 * 60 * 60 * 1000)
+    );
+    
+    // Process dates in smaller concurrent batches to avoid overwhelming the database
+    const batchSize = 5;
+    const results: DailyReport[] = [];
+    
+    for (let i = 0; i < dates.length; i += batchSize) {
+      const batch = dates.slice(i, i + batchSize);
+      const batchResults = await Promise.all(
+        batch.map(date => this.generateDailyReport(merchantId, date))
+      );
+      results.push(...batchResults);
+      
+      // Small delay between batches to prevent database overload
+      if (i + batchSize < dates.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     }
-    return days;
+    
+    return results;
   }
 }
 

@@ -319,7 +319,7 @@ export class InstagramAPIClient {
           return this.sendMessage(credentials, merchantId, {
         recipientId,
         messagingType: 'RESPONSE',
-        content: caption || '',
+        content: caption ?? '',
         attachment: { type: 'image', payload: { url: imageUrl } }
       });
   }
@@ -700,8 +700,8 @@ export class InstagramAPIClient {
           '',
           {
             grant_type: 'fb_exchange_token',
-            client_id: process.env.FACEBOOK_APP_ID || '',
-            client_secret: credentials.appSecret || '',
+            client_id: process.env.FACEBOOK_APP_ID ?? '',
+            client_secret: credentials.appSecret ?? '',
             fb_exchange_token: currentToken
           },
           merchantId,
@@ -817,8 +817,8 @@ export class InstagramAPICredentialsManager {
           ${credentials.businessAccountId},
           ${hashedToken},
           'instagram',
-          ${ipAddress || null}::inet,
-          ${ipAddress || null}::inet,
+          ${ipAddress ?? null}::inet,
+          ${ipAddress ?? null}::inet,
           NOW()
         )
         ON CONFLICT (merchant_id, platform)

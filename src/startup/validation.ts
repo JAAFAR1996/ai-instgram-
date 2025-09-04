@@ -16,7 +16,7 @@ export interface ValidationResult {
   service: string;
   message: string;
   duration: number;
-  details?: any;
+  details?: Record<string, unknown>;
 }
 
 export interface StartupValidationReport {
@@ -788,7 +788,7 @@ async function validateSecurityConfiguration(): Promise<ValidationResult> {
 
     // Encryption algorithm validation
     const supportedAlgorithms = ['aes-256-gcm', 'aes-256-cbc', 'chacha20-poly1305'];
-    const encryptionAlgorithm = process.env.ENCRYPTION_ALGORITHM || 'aes-256-gcm';
+    const encryptionAlgorithm = process.env.ENCRYPTION_ALGORITHM ?? 'aes-256-gcm';
     if (!supportedAlgorithms.includes(encryptionAlgorithm)) {
       warnings.push(`Unsupported encryption algorithm: ${encryptionAlgorithm}`);
     } else {
@@ -826,7 +826,7 @@ async function validateSecurityConfiguration(): Promise<ValidationResult> {
     }
 
     // JWT expiration validation
-    const jwtExpiry = process.env.JWT_EXPIRES_IN || '24h';
+    const jwtExpiry = process.env.JWT_EXPIRES_IN ?? '24h';
     if (!jwtExpiry.includes('h') || parseInt(jwtExpiry) > 24) {
       warnings.push('JWT expiration time is longer than recommended (>24h)');
     } else {
@@ -876,7 +876,7 @@ async function validateSecurityConfiguration(): Promise<ValidationResult> {
       securityScore.passed++;
     }
 
-    const refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
+    const refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN ?? '7d';
     if (!refreshTokenExpiry.includes('d') || parseInt(refreshTokenExpiry) > 30) {
       warnings.push('Refresh token expiration is longer than recommended (>30d)');
     } else {
@@ -963,8 +963,8 @@ async function validateSecurityConfiguration(): Promise<ValidationResult> {
         },
         corsOrigins: config.security.corsOrigins.length,
         sslEnabled: config.database.ssl,
-        encryptionAlgorithm: process.env.ENCRYPTION_ALGORITHM || 'aes-256-gcm',
-        jwtExpiry: process.env.JWT_EXPIRES_IN || '24h',
+        encryptionAlgorithm: process.env.ENCRYPTION_ALGORITHM ?? 'aes-256-gcm',
+        jwtExpiry: process.env.JWT_EXPIRES_IN ?? '24h',
         tokenRotationEnabled: process.env.TOKEN_ROTATION_ENABLED === 'true',
         securityHeaders: Object.keys(securityHeaders).length - missingHeaders.length,
         issues: issues.length > 0 ? issues : undefined,
@@ -1260,7 +1260,8 @@ async function validateMemoryUsage(): Promise<ValidationResult> {
         warnings.push(`System memory usage is high: ${Math.round(systemMemoryUsage)}%`);
       }
     } catch (error) {
-      // OS module not available, skip system memory check
+      // Log and continue if OS module is unavailable
+      console.warn('[validation] System memory check skipped', error instanceof Error ? { message: error.message, name: error.name } : { message: String(error) });
     }
 
     return {
@@ -1364,7 +1365,7 @@ async function validateConnectionLimits(): Promise<ValidationResult> {
 
     // 3. Redis connection limits (if Redis is configured)
     try {
-      const redisMaxConnections = process.env.REDIS_MAX_CONNECTIONS || '10';
+      const redisMaxConnections = process.env.REDIS_MAX_CONNECTIONS ?? '10';
       const redisMaxConnectionsNum = parseInt(redisMaxConnections);
       
       if (redisMaxConnectionsNum > 50) {
@@ -1377,7 +1378,8 @@ async function validateConnectionLimits(): Promise<ValidationResult> {
         status: redisMaxConnectionsNum <= 20 ? 'good' : redisMaxConnectionsNum <= 50 ? 'warning' : 'critical'
       });
     } catch (error) {
-      // Redis not configured or not available
+      // Log and continue if Redis is not configured or not available
+      console.warn('[validation] Redis status check skipped', error instanceof Error ? { message: error.message, name: error.name } : { message: String(error) });
     }
 
     // 4. Rate limiting as connection control
@@ -1404,7 +1406,8 @@ async function validateConnectionLimits(): Promise<ValidationResult> {
         }
       }
     } catch (error) {
-      // OS module not available or error checking limits
+      // Log and continue if OS module is unavailable or limits cannot be checked
+      console.warn('[validation] OS limits check skipped', error instanceof Error ? { message: error.message, name: error.name } : { message: String(error) });
     }
 
     return {
@@ -1446,7 +1449,7 @@ async function validateConnectionLimits(): Promise<ValidationResult> {
 export async function validateMerchantConfig(merchantId: string): Promise<boolean> {
   try {
     const db = getDatabase();
-    const sql = db.getSQL() as any;
+    const sql = db.getSQL();
 
     // Check if merchant exists and is active
     const [merchant] = await sql<{ id: string; is_active: boolean; business_name: string }>`

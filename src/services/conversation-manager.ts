@@ -35,7 +35,7 @@ export class ConversationManager {
       const trimmed = messages.slice(-keepLast);
       // Derive a short summary of older messages
       const older = messages.slice(0, Math.max(0, messages.length - keepLast));
-      let prior = (await this.cache.getCustomerContext(merchantId, customerId))?.lastSummary || '';
+      let prior = (await this.cache.getCustomerContext(merchantId, customerId))?.lastSummary ?? '';
       const olderSummary = summarizeNaively(older, 600);
       const summary = mergeSummaries(prior, olderSummary, 700);
 
@@ -80,7 +80,7 @@ function mergeSummaries(prev: string, next: string, max = 900): string {
 }
 
 function sanitize(s: string): string {
-  return (s || '').replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return (s ?? '').replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 export default ConversationManager;

@@ -22,7 +22,7 @@ let state: RedisIntegrationResult | null = null;
 export async function initializeRedisIntegration(_pool: Pool): Promise<RedisIntegrationResult> {
   if (state) return state;
 
-  const url = process.env.REDIS_URL || '';
+  const url = process.env.REDIS_URL ?? '';
   const disabled = process.env.DISABLE_REDIS === 'true';
 
   if (disabled || !url) {

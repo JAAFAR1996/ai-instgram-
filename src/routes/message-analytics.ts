@@ -77,7 +77,7 @@ app.get('/overview/:merchantId', async (c) => {
         
       FROM message_logs 
       WHERE merchant_id = ${merchantId}::uuid
-        AND created_at > NOW() - INTERVAL '${intervals[timeRange]}'
+        AND created_at > NOW() - INTERVAL '${intervals[timeRange as keyof typeof intervals]}'
         AND direction = 'OUTGOING'
     `;
 
@@ -91,7 +91,7 @@ app.get('/overview/:merchantId', async (c) => {
         MAX(CAST(metadata->'enhancement'->'metadata'->>'improvement' AS FLOAT)) as max_improvement
       FROM message_logs
       WHERE merchant_id = ${merchantId}::uuid
-        AND created_at > NOW() - INTERVAL '${intervals[timeRange]}'
+        AND created_at > NOW() - INTERVAL '${intervals[timeRange as keyof typeof intervals]}'
         AND metadata->'enhancement' IS NOT NULL
     `;
 
@@ -318,7 +318,7 @@ app.get('/success-patterns/:merchantId', async (c) => {
         patterns: patterns || {},
         patternEffectiveness,
         optimizationOpportunities: opportunities,
-        recommendations: this.generateRecommendations(patterns, opportunities),
+        recommendations: generateRecommendations(patterns, opportunities),
         analysisWindow: `${days} days`
       }
     });
@@ -342,12 +342,12 @@ app.post('/simulate-enhancement', async (c) => {
       return c.json({ error: 'Missing required fields' }, 400);
     }
 
-    // Create simulation context
-    const context = {
+    // Create simulation contexts
+    const enhancementContext = {
       messageId: 'simulation-' + Date.now(),
       merchantId,
       customerMessage,
-      currentResponse,
+      originalResponse: currentResponse,
       aiConfidence: aiConfidence || 0.5,
       aiIntent: aiIntent || 'OTHER',
       processingTime: 0,
@@ -355,19 +355,28 @@ app.post('/simulate-enhancement', async (c) => {
     };
 
     // Run enhancement simulation
-    const enhancementResult = await messageEnhancer.enhanceMessage(context);
+    const enhancementResult = await messageEnhancer.enhanceMessage(enhancementContext);
     
     // Run pattern enhancement simulation
     const patternResult = await responseEnhancer.enhanceResponse(currentResponse, {
       merchantId,
       customerMessage,
-      aiConfidence: context.aiConfidence,
-      aiIntent: context.aiIntent,
+      aiConfidence: enhancementContext.aiConfidence,
+      aiIntent: enhancementContext.aiIntent,
       timeOfDay: new Date().getHours()
     });
 
     // Run routing simulation
-    const routingResult = await confidenceRouter.routeMessage(context);
+    const routingResult = await confidenceRouter.routeMessage({
+      messageId: enhancementContext.messageId,
+      merchantId,
+      customerMessage,
+      currentResponse,
+      aiConfidence: enhancementContext.aiConfidence,
+      aiIntent: enhancementContext.aiIntent,
+      processingTime: 0,
+      platform: 'simulation'
+    });
 
     return c.json({
       success: true,
@@ -454,7 +463,7 @@ app.get('/real-time-stats/:merchantId', async (c) => {
 });
 
 // Helper function to generate recommendations
-function generateRecommendations(patterns: any, opportunities: any[]): string[] {
+function generateRecommendations(patterns: Record<string, unknown>, opportunities: Array<Record<string, unknown>>): string[] {
   const recommendations: string[] = [];
 
   // Pattern-based recommendations

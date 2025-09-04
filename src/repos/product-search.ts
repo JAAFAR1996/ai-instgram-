@@ -40,7 +40,7 @@ export async function searchProduct(
   // Guard: ensure RLS context matches merchantId to prevent cross-tenant leakage
   try {
     const ctx = await sql<{ merchant_id: string }>`SELECT current_setting('app.current_merchant_id', true) as merchant_id`;
-    const mid = (ctx[0]?.merchant_id || '').trim();
+    const mid = (ctx[0]?.merchant_id ?? '').trim();
     if (!mid || mid !== merchantId) {
       throw new Error('RLS context mismatch or not set');
     }
@@ -49,7 +49,7 @@ export async function searchProduct(
   }
 
   // Build ILIKE patterns using normalized expansions
-  const expansions = normalizeForSearch(queryText || '', synonyms)
+  const expansions = normalizeForSearch(queryText ?? '', synonyms)
     .filter(Boolean)
     .slice(0, 6);
 
@@ -88,20 +88,21 @@ export async function searchProduct(
     if (entities.size) weight += 3;
     if (entities.color) weight += 2;
     if (entities.brand) weight += 2;
-    if ((entities.free?.length || 0) > 0) weight += Math.min(entities.free!.length, 3);
+  const freeLen = entities.free?.length ?? 0;
+  if (freeLen > 0) weight += Math.min(freeLen, 3);
     if (r.stock_quantity > 0) weight += 1;
     return { ...toHit(r), weight } as ProductHit;
   })
   .sort((a, b) => (b.weight || 0) - (a.weight || 0));
 
-  return { top: ranked[0] || null, alternatives: ranked.slice(1, 4) };
+  return { top: ranked[0] ?? null, alternatives: ranked.slice(1, 4) };
 }
 
 function icontains(a: string, b: string): boolean {
-  return a?.toLowerCase().includes((b || '').toLowerCase());
+  return a?.toLowerCase().includes((b ?? '').toLowerCase());
 }
 
-function toHit(r: any): ProductHit {
+function toHit(r: { id: unknown; sku: unknown; name_ar: unknown; category: unknown; price_amount: unknown; sale_price_amount: unknown; price_currency: unknown; stock_quantity: unknown; image_urls: unknown }): ProductHit {
   return {
     id: String(r.id),
     sku: String(r.sku),

@@ -25,7 +25,7 @@ export async function upsertVault(
     VALUES (
       ${merchantId}::uuid,
       ${customerId},
-      ${conversationId || null},
+      ${conversationId ?? null},
       ${JSON.stringify(patch)}::jsonb,
       NOW() + (${ttlDays} || ' days')::interval
     )

@@ -198,7 +198,10 @@ export function startHealth(refreshMs = 120000) { // 2 دقيقة لتوفير �
       };
     }
   };
-  void tick();
+  tick().catch((e) => {
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.error('[health] initial compute failed', { message: err.message, stack: err.stack });
+  });
   timer = setInterval(tick, refreshMs);
   // make interval unref to not block process exit on Render
   if (timer && typeof timer.unref === 'function') {

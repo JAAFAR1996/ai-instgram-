@@ -49,10 +49,10 @@ export async function orchestrate(
   const sql = db.getSQL();
 
   // Load merchant hints (ai_config)
-  const rows = await sql<{ ai_config: any; business_name: string; business_category: string | null; merchant_type: string | null; currency: string | null; settings: any }>`
+  const rows = await sql<{ ai_config: Record<string, unknown> | null; business_name: string; business_category: string | null; merchant_type: string | null; currency: string | null; settings: Record<string, unknown> | null }>`
     SELECT ai_config, business_name, business_category, merchant_type::text as merchant_type, currency, settings FROM merchants WHERE id = ${merchantId}::uuid LIMIT 1
   `;
-  const merchant: { ai_config: any; business_name: string; business_category: string | null; merchant_type: string | null; currency: string | null; settings: any } =
+  const merchant: { ai_config: Record<string, unknown> | null; business_name: string; business_category: string | null; merchant_type: string | null; currency: string | null; settings: Record<string, unknown> | null } =
     rows[0] ?? { ai_config: {}, business_name: 'متجرنا', business_category: null, merchant_type: 'other', currency: 'IQD', settings: {} };
   const aiCfg = merchant.ai_config || {};
 
@@ -65,11 +65,11 @@ export async function orchestrate(
     sizeAliases: Record<string, string[]>;
     customEntities: Record<string, string[]>;
   } = {
-    synonyms: aiCfg?.synonyms || { 'جزمه': ['حذاء','بوت'] },
+    synonyms: aiCfg?.synonyms && typeof aiCfg.synonyms === 'object' ? aiCfg.synonyms as Record<string, string[]> : {},
     categories: aiCfg?.categories || [],
     brands: aiCfg?.brands || [],
     colors: aiCfg?.colors || [],
-    genders: aiCfg?.genders || undefined,
+    genders: aiCfg?.genders ?? undefined,
     sizeAliases: aiCfg?.sizeAliases || {},
     customEntities: aiCfg?.customEntities || {},
   };
@@ -128,9 +128,9 @@ export async function orchestrate(
         username,
         intent: res.intent,
         stage: res.stage,
-      } as any);
+      });
       if (!critique.meetsThreshold) {
-        const { improved } = await consAI.improveResponse(text, critique, { merchantId, username, intent: res.intent, stage: res.stage } as any);
+        const { improved } = await consAI.improveResponse(text, critique, { merchantId, username, intent: res.intent, stage: res.stage });
         text = improved;
         res.decision_path = [...res.decision_path, 'constitutional_ai=improved'];
         // record analytics with quality score
@@ -178,7 +178,7 @@ export async function orchestrate(
         merchantId,
         username,
         session: options.session || {},
-        nlp: { intent: analysis.intent, entities: analysis.entities as unknown as Record<string, unknown>, confidence: analysis.confidence },
+        nlp: { intent: analysis.intent, entities: analysis.entities as Record<string, unknown>, confidence: analysis.confidence },
         hints
       }, options.showThinking ?? true);
       thinkingChain = thinking.chain;
@@ -231,7 +231,7 @@ export async function orchestrate(
     }
 
     const q = messageText;
-    const res = await findProduct(merchantId, q, analysis.entities as unknown as FinderEntities, hints.synonyms);
+    const res = await findProduct(merchantId, q, analysis.entities as FinderEntities, hints.synonyms);
     if (res.top) {
       const top = res.top!;
       if (top.stock_quantity <= 0) {
@@ -354,12 +354,12 @@ export async function orchestrate(
     try {
       const hits = await productSearch.searchProducts(messageText, merchantId, { limit: 5 });
       if (hits.length > 0) {
-        const info = hits.map(h => {
-          const p: any = h.product;
-          const price = Number(p.sale_price_amount ?? p.price_amount ?? 0);
-          const priceText = price > 0 ? `${Math.round(price).toLocaleString('ar-IQ')} د.ع` : 'السعر يحتاج تأكيد';
-          return `• ${String(p.name_ar).split(' ').slice(0,6).join(' ')} - ${priceText}`;
-        }).join('\n');
+      const info = hits.map(h => {
+        const p = h.product as { name_ar: string; sale_price_amount?: unknown; price_amount?: unknown };
+        const price = Number(p.sale_price_amount ?? p.price_amount ?? 0);
+        const priceText = price > 0 ? `${Math.round(price).toLocaleString('ar-IQ')} د.ع` : 'السعر يحتاج تأكيد';
+        return `• ${String(p.name_ar).split(' ').slice(0,6).join(' ')} - ${priceText}`;
+      }).join('\n');
         decision.push('smart_search=used');
         return withThinking(await postProcess({
           text: `توقعت يمكن تقصد هالخيارات:\n${info}\nتحب أي واحد بيها؟`,
@@ -376,7 +376,7 @@ export async function orchestrate(
       const smartHits = await productSearch.searchProducts(messageText, merchantId, { limit: 5 });
       if (smartHits.length > 0) {
         const info = smartHits.map(h => {
-          const p: any = h.product;
+          const p = h.product as { name_ar: string; sale_price_amount?: unknown; price_amount?: unknown };
           const price = Number(p.sale_price_amount ?? p.price_amount ?? 0);
           const priceText = price > 0 ? `${Math.round(price).toLocaleString('ar-IQ')} د.ع` : 'السعر يحتاج تأكيد';
           return `• ${String(p.name_ar).split(' ').slice(0,6).join(' ')} - ${priceText}`;

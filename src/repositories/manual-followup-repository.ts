@@ -63,7 +63,7 @@ export class ManualFollowupRepository {
         ${params.reason},
         ${params.priority ? params.priority.toLowerCase() : 'normal'},
         ${params.scheduledFor || new Date()},
-        ${params.notes || null}
+        ${params.notes ?? null}
       )
       RETURNING *
     `;
@@ -82,7 +82,7 @@ export class ManualFollowupRepository {
       WHERE id = ${id}::uuid
     `;
 
-    return result as ManualFollowupRow || null;
+    return result as ManualFollowupRow ?? null;
   }
 
   /**
@@ -126,7 +126,7 @@ export class ManualFollowupRepository {
       RETURNING *
     `;
 
-    return result as ManualFollowupRow || null;
+    return result as ManualFollowupRow ?? null;
   }
 
   /**

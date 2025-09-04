@@ -79,7 +79,7 @@ export class InstagramMessageSender {
   public async sendTemplateMessage(
     merchantId: string,
     recipientUsername: string,
-    _template: any,
+    _template: unknown,
     conversationId?: string
   ): Promise<SendResult> {
     // ARCHITECTURE ENFORCEMENT: Only ManyChat is allowed

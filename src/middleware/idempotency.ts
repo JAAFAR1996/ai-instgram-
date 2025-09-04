@@ -72,7 +72,13 @@ async function generateIdempotencyKey(
         keyData += `:${bodyHash}`;
       }
     } catch (error) {
-      // If body parsing fails, continue without body hash
+      // If body parsing fails, log and continue without body hash
+      logger.warn('Body parsing failed while generating idempotency key; continuing without body hash', {
+        error: error instanceof Error ? { message: error.message, name: error.name, stack: error.stack } : { message: String(error) },
+        requestPath: c.req.path,
+        requestMethod: c.req.method,
+        merchantId
+      });
     }
 
     // Restore original request body so downstream handlers can read it
@@ -219,7 +225,7 @@ export function markIdempotent<T>(
 /**
  * Hash merchant and body pattern for audit compliance
  */
-export function hashMerchantAndBody(merchantId: string, body: any): string {
+export function hashMerchantAndBody(merchantId: string, body: unknown): string {
   const content = `${merchantId}:${JSON.stringify(body)}`;
   return crypto.createHash('sha256').update(content).digest('hex');
 }

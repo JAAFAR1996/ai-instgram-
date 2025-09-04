@@ -206,7 +206,12 @@ export class ImageAnalysisService {
   private async performAnalysis(
     imageData: Buffer | string, 
     metadata: ImageMetadata,
-    options: any
+    options: {
+      enableOCR?: boolean;
+      enableVisualSearch?: boolean;
+      enableProductMatching?: boolean;
+      forceReprocess?: boolean;
+    }
   ): Promise<ImageAnalysisResult> {
     
     const imageBase64 = Buffer.isBuffer(imageData) 
@@ -226,7 +231,10 @@ export class ImageAnalysisService {
     }
     
     return {
-      ...visionAnalysis,
+      labels: visionAnalysis.labels ?? [],
+      objects: visionAnalysis.objects ?? [],
+      contentType: visionAnalysis.contentType ?? { category: 'unknown', confidence: 0.1 },
+      confidence: visionAnalysis.confidence ?? 0.5,
       visualFeatures,
       productMatches,
       processingTimeMs: 0 // Will be set by caller
@@ -239,7 +247,11 @@ export class ImageAnalysisService {
   private async analyzeWithOpenAIVision(
     imageBase64: string,
     metadata: ImageMetadata,
-    options: any
+    options: {
+      enableOCR?: boolean;
+      enableVisualSearch?: boolean;
+      enableProductMatching?: boolean;
+    }
   ): Promise<Partial<ImageAnalysisResult>> {
     
     const systemPrompt = `You are an expert image analyst for an e-commerce platform. Analyze the image and provide detailed insights in JSON format.
@@ -262,7 +274,7 @@ Response must be valid JSON with this exact structure:
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: getEnv('OPENAI_VISION_MODEL', 'gpt-4o-mini'),
+        model: getEnv('OPENAI_VISION_MODEL', { defaultValue: 'gpt-4o-mini' }),
         messages: [
           {
             role: "system",
@@ -301,7 +313,7 @@ Response must be valid JSON with this exact structure:
       
       // Validate and sanitize the response
       return {
-        ocrText: analysisData.ocrText || undefined,
+        ocrText: analysisData.ocrText ?? undefined,
         labels: Array.isArray(analysisData.labels) ? analysisData.labels : [],
         objects: Array.isArray(analysisData.objects) ? analysisData.objects : [],
         contentType: analysisData.contentType || { category: 'unknown', confidence: 0.1 },
@@ -367,8 +379,8 @@ Response must be valid JSON with this exact structure:
       
       // Search by text content and labels
       const searchTerms = [
-        analysis.ocrText || '',
-        ...(analysis.labels || []).map(l => l.name)
+        analysis.ocrText ?? '',
+        ...(analysis.labels ?? []).map(l => l.name)
       ].filter(term => term.length > 2);
       
       if (searchTerms.length === 0) return [];
@@ -439,7 +451,7 @@ Response must be valid JSON with this exact structure:
       const sql = this.db.getSQL();
       
       const cached = await sql<{
-        analysis_data: any;
+        analysis_data: unknown;
         created_at: string;
         usage_count: number;
       }>`
@@ -451,9 +463,9 @@ Response must be valid JSON with this exact structure:
       `;
       
       if (cached.length === 0) return null;
-      
+      const first = cached[0]!;
       return {
-        ...cached[0].analysis_data,
+        ...(first.analysis_data as ImageAnalysisResult),
         processingTimeMs: 0 // Cached result
       };
       
@@ -542,7 +554,7 @@ Response must be valid JSON with this exact structure:
           ${metadata.height},
           ${metadata.sizeBytes},
           ${metadata.contentHash},
-          ${analysis.ocrText || null},
+          ${analysis.ocrText ?? null},
           ${JSON.stringify({
             labels: analysis.labels,
             objects: analysis.objects,
@@ -579,7 +591,7 @@ Response must be valid JSON with this exact structure:
   ): Promise<Array<{
     messageId: string;
     contentHash: string;
-    labels: any;
+    labels: unknown;
     ocrText?: string;
     similarity: number;
   }>> {
@@ -592,7 +604,7 @@ Response must be valid JSON with this exact structure:
       const results = await sql<{
         message_id: string;
         content_hash: string;
-        labels: any;
+        labels: unknown;
         ocr_text: string;
         similarity: number;
       }>`

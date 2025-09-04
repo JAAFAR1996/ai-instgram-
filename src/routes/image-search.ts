@@ -166,7 +166,15 @@ app.post('/find-products', async (c) => {
     const sql = db.getSQL();
     const productIds = relevantMatches.map(m => m.productId);
     
-    let detailedProducts = [];
+    let detailedProducts: {
+      id: string;
+      sku: string;
+      name_ar: string;
+      price_usd: number;
+      category: string;
+      description_ar?: string;
+      image_urls: string[];
+    }[] = [];
     if (productIds.length > 0) {
       detailedProducts = await sql<{
         id: string;
@@ -264,7 +272,7 @@ app.get('/content/:merchantId', async (c) => {
   
   try {
     const merchantId = c.req.param('merchantId');
-    const query = c.req.query('q') || '';
+    const query = c.req.query('q') ?? '';
     const contentType = c.req.query('contentType');
     const minConfidence = parseFloat(c.req.query('minConfidence') || '0.5');
     const limit = parseInt(c.req.query('limit') || '20');

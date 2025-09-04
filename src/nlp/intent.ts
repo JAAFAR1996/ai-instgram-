@@ -32,7 +32,7 @@ const DEFAULT_COLORS = ['اسود','ابيض','احمر','ازرق','اخضر','
 const DEFAULT_GENDERS = ['رجالي','نسائي','ولادي','بناتي'];
 
 export function classifyAndExtract(text: string, hints: MerchantNLPHints = {}): IntentResult {
-  const raw = (text || '').trim();
+  const raw = (text ?? '').trim();
   const normalized = normalizeArabic(raw, { taMarbutaToHa: true });
   const tokens = normalized.split(/\s+/);
   const searchForms = normalizeForSearch(normalized, hints.synonyms);
@@ -82,9 +82,9 @@ export function classifyAndExtract(text: string, hints: MerchantNLPHints = {}): 
 
   // size: numbers 20-60, S/M/L/XL/XXL
   const sizeMatch = normalized.match(/\b(\d{2})\b/);
-  if (sizeMatch) { const cap = sizeMatch[1] || null; entities.size = cap; }
+  if (sizeMatch) { const cap = sizeMatch[1] ?? null; entities.size = cap; }
   const sizeAlpha = normalized.match(/\b(XXL|XL|XS|S|M|L|XXS)\b/i);
-  if (!entities.size && sizeAlpha) entities.size = (sizeAlpha[1] || '').toUpperCase() || null;
+  if (!entities.size && sizeAlpha) entities.size = (sizeAlpha[1] ?? '').toUpperCase() ?? null;
   if (!entities.size) {
     const sizeAliases = hints.sizeAliases ?? {};
     for (const [k, alts] of Object.entries(sizeAliases)) {

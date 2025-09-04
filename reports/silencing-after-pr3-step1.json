@@ -1,0 +1,284 @@
+﻿{
+  "totals": {
+    "tsIgnore": 0,
+    "anyCasts": 251,
+    "nonNull": 0,
+    "emptyCatch": 0,
+    "catchNoop": 0,
+    "voidFn": 0,
+    "processHandlers": 2,
+    "eslintDisable": 0,
+    "falsyOr": 69,
+    "allSettled": 3
+  },
+  "perFile": {
+    "src/boot/error-handlers.ts": {
+      "processHandlers": 1
+    },
+    "src/cache/index.ts": {
+      "anyCasts": 8
+    },
+    "src/container/index.ts": {
+      "anyCasts": 3
+    },
+    "src/database/migrate.ts": {
+      "anyCasts": 13,
+      "falsyOr": 1
+    },
+    "src/database/rls-wrapper.ts": {
+      "anyCasts": 1
+    },
+    "src/db/adapter.ts": {
+      "anyCasts": 10,
+      "falsyOr": 1
+    },
+    "src/db/index.ts": {
+      "anyCasts": 1
+    },
+    "src/db/safe-sql.ts": {
+      "anyCasts": 1
+    },
+    "src/infrastructure/db/sql-compat.ts": {
+      "anyCasts": 12
+    },
+    "src/infrastructure/db/sql-tag.ts": {
+      "anyCasts": 1
+    },
+    "src/isolation/context.ts": {
+      "anyCasts": 1
+    },
+    "src/kb/ingest.ts": {
+      "falsyOr": 1
+    },
+    "src/middleware/idempotency.ts": {
+      "anyCasts": 1
+    },
+    "src/middleware/rls-merchant-isolation.ts": {
+      "anyCasts": 1,
+      "falsyOr": 3
+    },
+    "src/middleware/security.ts": {
+      "anyCasts": 1,
+      "falsyOr": 1
+    },
+    "src/nlp/intent.ts": {
+      "falsyOr": 2
+    },
+    "src/production-index.ts": {
+      "processHandlers": 1
+    },
+    "src/queue/db-spool.ts": {
+      "anyCasts": 1
+    },
+    "src/queue/dead-letter.ts": {
+      "allSettled": 1
+    },
+    "src/queue/withTenantJob.ts": {
+      "anyCasts": 1
+    },
+    "src/repos/customer-vault.ts": {
+      "falsyOr": 1
+    },
+    "src/repos/message.repo.ts": {
+      "anyCasts": 5,
+      "falsyOr": 1
+    },
+    "src/repos/product-finder.ts": {
+      "falsyOr": 1
+    },
+    "src/repos/product-search.ts": {
+      "anyCasts": 1,
+      "falsyOr": 1
+    },
+    "src/repos/template.repo.ts": {
+      "anyCasts": 2
+    },
+    "src/repos/unit-of-work.ts": {
+      "anyCasts": 1
+    },
+    "src/repositories/conversation-repository.ts": {
+      "anyCasts": 4,
+      "falsyOr": 7
+    },
+    "src/repositories/credentials-repository.ts": {
+      "anyCasts": 1,
+      "falsyOr": 5
+    },
+    "src/repositories/index.ts": {
+      "anyCasts": 4
+    },
+    "src/repositories/manual-followup-repository.ts": {
+      "falsyOr": 3
+    },
+    "src/repositories/merchant-repository.ts": {
+      "anyCasts": 4,
+      "falsyOr": 3
+    },
+    "src/repositories/message-repository.ts": {
+      "anyCasts": 4,
+      "falsyOr": 5
+    },
+    "src/repositories/product-repository.ts": {
+      "anyCasts": 1
+    },
+    "src/routes/admin.ts": {
+      "anyCasts": 1,
+      "falsyOr": 2
+    },
+    "src/routes/merchant-admin.ts": {
+      "anyCasts": 3
+    },
+    "src/routes/message-analytics.ts": {
+      "anyCasts": 2
+    },
+    "src/routes/utility-messages.ts": {
+      "anyCasts": 5
+    },
+    "src/routes/webhooks.ts": {
+      "anyCasts": 3,
+      "falsyOr": 2
+    },
+    "src/services/ai.ts": {
+      "anyCasts": 3
+    },
+    "src/services/confidence-router.service.ts": {
+      "anyCasts": 1
+    },
+    "src/services/conversation-ai-orchestrator.ts": {
+      "anyCasts": 2
+    },
+    "src/services/cross-platform-conversation-manager.ts": {
+      "anyCasts": 3,
+      "falsyOr": 1
+    },
+    "src/services/customer-memory.ts": {
+      "anyCasts": 2,
+      "falsyOr": 2
+    },
+    "src/services/customer-profiler.ts": {
+      "anyCasts": 18,
+      "falsyOr": 2
+    },
+    "src/services/database-job-processor.ts": {
+      "anyCasts": 2
+    },
+    "src/services/extended-thinking.ts": {
+      "anyCasts": 4
+    },
+    "src/services/image-analysis.ts": {
+      "anyCasts": 5,
+      "falsyOr": 2
+    },
+    "src/services/instagram-ai.ts": {
+      "anyCasts": 8,
+      "falsyOr": 1
+    },
+    "src/services/instagram-api.ts": {
+      "falsyOr": 2
+    },
+    "src/services/instagram-hashtag-monitor.ts": {
+      "anyCasts": 3
+    },
+    "src/services/instagram-interaction-analyzer.ts": {
+      "anyCasts": 1,
+      "falsyOr": 1
+    },
+    "src/services/instagram-manychat-bridge.ts": {
+      "anyCasts": 10,
+      "falsyOr": 1
+    },
+    "src/services/instagram-media-manager.ts": {
+      "anyCasts": 9,
+      "falsyOr": 1
+    },
+    "src/services/instagram-message-sender.ts": {
+      "anyCasts": 1
+    },
+    "src/services/learning-analytics.ts": {
+      "anyCasts": 2
+    },
+    "src/services/logger.ts": {
+      "anyCasts": 1
+    },
+    "src/services/manychat-api.ts": {
+      "anyCasts": 3
+    },
+    "src/services/message-enhancement.service.ts": {
+      "anyCasts": 5
+    },
+    "src/services/message-window.ts": {
+      "falsyOr": 9
+    },
+    "src/services/monitoring.ts": {
+      "anyCasts": 1,
+      "falsyOr": 2
+    },
+    "src/services/notification-service.ts": {
+      "anyCasts": 1
+    },
+    "src/services/predictive-scheduler.ts": {
+      "allSettled": 1
+    },
+    "src/services/proactive-service.ts": {
+      "falsyOr": 1
+    },
+    "src/services/ProductionQueueManager.ts": {
+      "anyCasts": 18,
+      "falsyOr": 1
+    },
+    "src/services/recommendation/product-recommendation.engine.ts": {
+      "anyCasts": 3
+    },
+    "src/services/RedisConnectionManager.ts": {
+      "anyCasts": 3,
+      "allSettled": 1
+    },
+    "src/services/RedisSimpleHealthCheck.ts": {
+      "anyCasts": 1
+    },
+    "src/services/response-enhancer.service.ts": {
+      "anyCasts": 5
+    },
+    "src/services/search/smart-product-search.ts": {
+      "anyCasts": 1
+    },
+    "src/services/service-controller.ts": {
+      "anyCasts": 6
+    },
+    "src/services/smart-orchestrator.ts": {
+      "anyCasts": 13,
+      "falsyOr": 1
+    },
+    "src/services/utility-messages.ts": {
+      "anyCasts": 1,
+      "falsyOr": 2
+    },
+    "src/startup/maintenance.ts": {
+      "anyCasts": 3
+    },
+    "src/startup/migrate.ts": {
+      "anyCasts": 1
+    },
+    "src/startup/runMigrations.ts": {
+      "anyCasts": 1
+    },
+    "src/startup/security-compliance.ts": {
+      "anyCasts": 1
+    },
+    "src/startup/validation.ts": {
+      "anyCasts": 2
+    },
+    "src/utils/pattern-matcher.ts": {
+      "anyCasts": 1
+    },
+    "src/utils/reasoning-chain.ts": {
+      "anyCasts": 1
+    },
+    "src/utils/safe-error-handler.ts": {
+      "anyCasts": 4
+    },
+    "src/utils/timer-manager.ts": {
+      "anyCasts": 4
+    }
+  }
+}

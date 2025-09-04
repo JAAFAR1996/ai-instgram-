@@ -74,7 +74,7 @@ export async function logUtilityMessage(
       input.messageId,
       input.messageType,
       input.status || 'sent',
-      input.errorMessage || null
+      input.errorMessage ?? null
     ]
   );
 
@@ -86,7 +86,7 @@ export async function logUtilityMessage(
     templateId: must(row).template_id,
     messageId: must(row).message_id,
     messageType: must(row).message_type as UtilityMessageType,
-    status: must(row).status as any,
+    status: String(must(row).status),
     sentAt: must(row).sent_at,
     deliveredAt: must(row).delivered_at,
     readAt: must(row).read_at,
@@ -105,7 +105,7 @@ export async function updateMessageStatus(
   errorMessage?: string
 ): Promise<boolean> {
   const updates: string[] = ['status = $2'];
-  const params: any[] = [messageId, status];
+  const params: unknown[] = [messageId, status];
   let paramIndex = 3;
 
   if (status === 'delivered') {
@@ -152,7 +152,7 @@ export async function listUtilityMessages(
   const { recipientId, templateId, messageType, status, startDate, endDate, limit = 50, offset = 0 } = options;
   
   const whereConditions = ['l.merchant_id = $1::uuid'];
-  const params: any[] = [merchantId];
+  const params: unknown[] = [merchantId];
   let paramIndex = 2;
   
   if (recipientId) {
@@ -227,7 +227,7 @@ export async function listUtilityMessages(
     templateId: row.template_id,
     messageId: row.message_id,
     messageType: row.message_type as UtilityMessageType,
-    status: row.status as any,
+    status: String(row.status),
     sentAt: row.sent_at,
     deliveredAt: row.delivered_at,
     readAt: row.read_at,
@@ -272,7 +272,7 @@ export async function getMessageStats(
   }
   
   const whereConditions = ['merchant_id = $1::uuid'];
-  const params: any[] = [merchantId];
+  const params: unknown[] = [merchantId];
   let paramIndex = 2;
   
   if (startDate) {

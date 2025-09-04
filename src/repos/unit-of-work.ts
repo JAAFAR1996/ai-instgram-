@@ -62,7 +62,7 @@ export class UnitOfWork {
         }
         
         return result;
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (!rolledBack) {
           log.error('Transaction failed, rolling back:', error);
         }

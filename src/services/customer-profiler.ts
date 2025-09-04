@@ -68,7 +68,7 @@ export class CustomerProfiler {
       previousOrders: orders[0]?.cnt || 0,
       totalSpent: Number(orders[0]?.total || 0),
       averageOrderValue: Number(orders[0]?.aov || 0),
-      lastOrderAt: orders[0]?.last_at || null,
+      lastOrderAt: orders[0]?.last_at ?? null,
       messagesCount30d: msgs[0]?.cnt || 0,
     };
   }
@@ -87,12 +87,18 @@ export class CustomerProfiler {
         SELECT data FROM customer_preferences WHERE merchant_id = ${merchantId}::uuid AND customer_id = ${customerId} LIMIT 1
       `;
       const d = prefRows[0]?.data || {};
-      if (Array.isArray((d as any).preferredCategories)) categories = ((d as any).preferredCategories as unknown[]).filter((v): v is string => typeof v === 'string');
-      if (typeof (d as any).favoriteColor === 'string') colors.push((d as any).favoriteColor);
-      if (typeof (d as any).size === 'string') sizes.push((d as any).size);
-      if (typeof (d as any).brand === 'string') brands.push((d as any).brand);
-      if (typeof (d as any).priceSensitivity === 'string') {
-        const ps = String((d as any).priceSensitivity);
+      const obj = d as Record<string, unknown>;
+      const pc = obj['preferredCategories'];
+      if (Array.isArray(pc)) categories = pc.filter((v): v is string => typeof v === 'string');
+      const fc = obj['favoriteColor'];
+      if (typeof fc === 'string') colors.push(fc);
+      const sz = obj['size'];
+      if (typeof sz === 'string') sizes.push(sz);
+      const br = obj['brand'];
+      if (typeof br === 'string') brands.push(br);
+      const psVal = obj['priceSensitivity'];
+      if (typeof psVal === 'string') {
+        const ps = String(psVal);
         if (ps === 'low' || ps === 'medium' || ps === 'high') priceSensitivity = ps;
       }
     } catch (e) {
@@ -107,11 +113,11 @@ export class CustomerProfiler {
         ORDER BY created_at DESC LIMIT 50
       `;
       for (const h of hist) {
-        const m = h.metadata || {};
-        if (typeof (m as any).category === 'string') categories.push((m as any).category);
-        if (typeof (m as any).color === 'string') colors.push((m as any).color);
-        if (typeof (m as any).size === 'string') sizes.push((m as any).size);
-        if (typeof (m as any).brand === 'string') brands.push((m as any).brand);
+        const m = (h.metadata || {}) as Record<string, unknown>;
+        const cat = m['category']; if (typeof cat === 'string') categories.push(cat);
+        const col = m['color']; if (typeof col === 'string') colors.push(col);
+        const sz = m['size']; if (typeof sz === 'string') sizes.push(sz);
+        const br = m['brand']; if (typeof br === 'string') brands.push(br);
       }
     } catch (e) {
       this.log.warn('analyzePreferences: behavior history load failed', { error: String(e) });
@@ -165,7 +171,7 @@ export class CustomerProfiler {
           WHERE o.merchant_id = ${merchantId}::uuid AND o.customer_instagram = ${customerId}
           ORDER BY o.created_at DESC LIMIT 1
         `;
-        cat = last[0]?.category || undefined;
+        cat = last[0]?.category ?? undefined;
       } catch {}
     }
     const conf = cat ? (journey.previousOrders > 1 ? 0.8 : 0.6) : 0.4;

@@ -66,8 +66,8 @@ export class PredictiveSchedulerService {
     }, cleanupIntervalMs);
 
     // Initial runs
-    setTimeout(() => this.processProactiveMessages().catch(() => {}), 10000); // 10 seconds
-    setTimeout(() => this.runPredictiveAnalytics().catch(() => {}), 60000); // 1 minute
+    setTimeout(() => this.processProactiveMessages().catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); }), 10000); // 10 seconds
+    setTimeout(() => this.runPredictiveAnalytics().catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); }), 60000); // 1 minute
   }
 
   /**
@@ -281,9 +281,17 @@ export class PredictiveSchedulerService {
       const failedCleanups = cleanupResults.filter(result => result.status === 'rejected');
       if (failedCleanups.length > 0) {
         this.log.warn('Some cleanup operations failed', { 
-          failedCount: failedCleanups.length 
+          failedCount: failedCleanups.length,
+          errors: failedCleanups.map(f => String(f.reason))
         });
       }
+
+      const successCount = cleanupResults.filter(r => r.status === 'fulfilled').length;
+      this.log.info('Data cleanup completed', {
+        totalOperations: cleanupResults.length,
+        successful: successCount,
+        failed: failedCleanups.length
+      });
 
       // Update performance metrics
       await this.updatePerformanceMetrics();

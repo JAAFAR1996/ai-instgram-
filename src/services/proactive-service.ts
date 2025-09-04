@@ -359,7 +359,7 @@ export class ProactiveCustomerService {
         ) VALUES (
           ${merchantId}::uuid, ${customerId}, ${type}, ${message}, 
           NOW(), ${delivered ? 'NOW()' : null}, ${delivered ? 'SENT' : 'FAILED'},
-          ${JSON.stringify({ channel: manychatId ? 'manychat' : 'none', result: mcResult || undefined })}::jsonb,
+          ${JSON.stringify({ channel: manychatId ? 'manychat' : 'none', result: mcResult ?? undefined })}::jsonb,
           'HIGH', NOW()
         )
       `;
