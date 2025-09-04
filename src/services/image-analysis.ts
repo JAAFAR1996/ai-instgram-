@@ -170,7 +170,7 @@ export class ImageAnalysisService {
         merchantId: metadata.merchantId,
         contentType: analysis.contentType.category,
         confidence: analysis.confidence,
-        ocrLength: analysis.ocrText?.length || 0,
+        ocrLength: analysis.ocrText?.length ?? 0,
         objectsDetected: analysis.objects.length,
         processingTime
       });
@@ -317,7 +317,7 @@ Response must be valid JSON with this exact structure:
         labels: Array.isArray(analysisData.labels) ? analysisData.labels : [],
         objects: Array.isArray(analysisData.objects) ? analysisData.objects : [],
         contentType: analysisData.contentType || { category: 'unknown', confidence: 0.1 },
-        confidence: Math.max(0, Math.min(1, analysisData.confidence || 0.5))
+        confidence: Math.max(0, Math.min(1, analysisData.confidence ?? 0.5))
       };
       
     } catch (error) {
@@ -598,8 +598,8 @@ Response must be valid JSON with this exact structure:
     
     try {
       const sql = this.db.getSQL();
-      const minConfidence = options.minConfidence || 0.5;
-      const limit = options.limit || 20;
+      const minConfidence = options.minConfidence ?? 0.5;
+      const limit = options.limit ?? 20;
       
       const results = await sql<{
         message_id: string;
@@ -717,13 +717,13 @@ Response must be valid JSON with this exact structure:
       `;
       
       return {
-        totalImages: Number(stats[0]?.total_images || 0),
-        ocrEnabled: Number(stats[0]?.ocr_enabled || 0),
+        totalImages: Number(stats[0]?.total_images ?? 0),
+        ocrEnabled: Number(stats[0]?.ocr_enabled ?? 0),
         contentTypes: contentTypes.reduce((acc, ct) => {
           acc[ct.content_type] = Number(ct.count);
           return acc;
         }, {} as Record<string, number>),
-        averageConfidence: Number(stats[0]?.avg_confidence || 0),
+        averageConfidence: Number(stats[0]?.avg_confidence ?? 0),
         topLabels: topLabels.map(tl => ({
           label: tl.label,
           count: Number(tl.count)

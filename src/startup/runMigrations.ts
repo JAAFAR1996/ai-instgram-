@@ -54,7 +54,8 @@ export async function runMigrations(pool: Pool) {
     }
   } catch (e: unknown) {
     await client.query('ROLLBACK');
-    console.error('⚠️ Migration failed (non-fatal):', e.message);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('⚠️ Migration failed (non-fatal):', msg);
   } finally {
     client.release();
   }

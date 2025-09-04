@@ -76,7 +76,10 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
 
       if (mode !== 'subscribe') {
         log.warn('Instagram webhook verification failed - invalid mode', { mode });
-        try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_mode', mode }); } catch {}
+        try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_mode', mode }); } catch (e: unknown) {
+          const err = e instanceof Error ? e : new Error(String(e));
+          log.warn({ err }, "Failed to log compliance event for invalid mode");
+        }
         return c.text('Bad Request', 400);
       }
 
@@ -86,16 +89,25 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           providedToken: token,
           expectedExists: !!expectedToken
         });
-        try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_token' }); } catch {}
+        try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_token' }); } catch (e: unknown) {
+          const err = e instanceof Error ? e : new Error(String(e));
+          log.warn({ err }, "Failed to log compliance event for invalid token");
+        }
         return c.text('Forbidden', 403);
       }
 
       log.info('Instagram webhook verification successful', { challenge });
-      try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'SUCCESS', { endpoint: 'instagram', challenge }); } catch {}
+      try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'SUCCESS', { endpoint: 'instagram', challenge }); } catch (e: unknown) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        log.warn({ err }, "Failed to log compliance event for successful verification");
+      }
       return c.text(challenge);
     } catch (error: unknown) {
       log.error('Instagram webhook verification error:', error instanceof Error ? { message: error.message } : { error });
-      try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { error: String(error) }); } catch {}
+      try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { error: String(error) }); } catch (e: unknown) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        log.warn({ err }, "Failed to log compliance event for verification error");
+      }
       return c.text('Internal Server Error', 500);
     }
   });
@@ -156,7 +168,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         if (!validation.success) {
           log.warn('ManyChat webhook validation failed', {
             errors: validation.error.errors,
-            rawBodyLength: rawBody?.length || 0
+            rawBodyLength: rawBody?.length ?? 0
           });
           return c.json({ 
             ok: false, 
@@ -169,7 +181,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       } catch (parseErr) {
         log.error('ManyChat webhook JSON parse error', {
           error: parseErr instanceof Error ? parseErr.message : String(parseErr),
-          rawBodyLength: rawBody?.length || 0
+          rawBodyLength: rawBody?.length ?? 0
         });
         return c.json({ ok: false, error: 'invalid_json' }, 400);
       }
@@ -420,7 +432,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 job_id: queueResult.jobId,
                 event_id: eventId,
                 webhook_time: webhookDuration,
-                queue_position: queueResult.queuePosition || 0
+                queue_position: queueResult.queuePosition ?? 0
               }
             });
 
@@ -567,7 +579,7 @@ const dumpPath = path.join(dir, first.f);
         }
 
         const allowedIps = (getEnv('PROD_DEBUG_ALLOWED_IPS') ?? '').split(',').map(s => s.trim()).filter(Boolean);
-        const remoteIp = (c.req.header('x-forwarded-for') ?? '').split(',')[0]?.trim() || c.req.header('cf-connecting-ip') ?? '';
+        const remoteIp = (c.req.header('x-forwarded-for') ?? '').split(',')[0]?.trim() || (c.req.header('cf-connecting-ip') ?? '');
         if (allowedIps.length && remoteIp && !allowedIps.includes(remoteIp)) {
           log.warn('Prod debug IP not allowed', { remoteIp });
           return c.text('forbidden', 403);
@@ -688,4 +700,5 @@ const dumpPath = path.join(dir, first.f);
 
   log.info('Webhook routes registered successfully');
 }
+
 

@@ -23,7 +23,14 @@ const clean = (v?: string | null) =>
 
 const config = getConfig();
 const log = getLogger({ component: 'security-middleware' });
-const extractLogCtx = (c?: Context) => ({ requestId: c?.req?.header('x-request-id') ?? undefined, merchantId: c?.req?.header('x-merchant-id') ?? undefined });
+const extractLogCtx = (c?: Context) => {
+  const requestId = c?.req?.header('x-request-id');
+  const merchantId = c?.req?.header('x-merchant-id');
+  return {
+    ...(requestId ? { requestId } : {}),
+    ...(merchantId ? { merchantId } : {}),
+  };
+};
 let redisClient: Redis | null = null;
 
 async function getRedisClient(): Promise<Redis | null> {

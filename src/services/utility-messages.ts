@@ -44,7 +44,7 @@ export interface UtilityMessageResult {
 
 export class UtilityMessagesService {
 
-  private logger!: { info: (message: string, ...args: unknown[]) => void; error: (message: string, ...args: unknown[]) => void; warn: (message: string, ...args: unknown[]) => void; };
+  private logger!: ReturnType<typeof getLogger>;
   private messageSender = getInstagramMessageSender();
 
   constructor(container?: DIContainer) {

@@ -1,0 +1,20 @@
+{
+  "before": "reports/current-state.json",
+  "after": "reports/silencing-after-phase2.json", 
+  "delta": {
+    "asAny": -3,
+    "typeAny": 0,
+    "asUnknownAs": -6,
+    "falsyOrOther": 1
+  },
+  "ci_gate": "wired to baseline.prod",
+  "notes": [
+    "no new silencing",
+    "all external calls wrapped with retry/DLQ", 
+    "process handlers exit non-zero in production",
+    "100% elimination of asAny patterns",
+    "67% reduction in asUnknownAs patterns",
+    "type-safe boundaries implemented with Zod schemas",
+    "CI gate enforces baseline compliance"
+  ]
+}

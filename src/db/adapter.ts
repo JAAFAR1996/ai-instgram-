@@ -121,7 +121,7 @@ export class DatabaseAdapter implements IDatabase {
         const duration = Date.now() - startTime;
         
               // Log performance metrics
-      this.logQueryMetrics(sql, (compiled.values as unknown[]) || [], duration, result.length);
+      this.logQueryMetrics(sql, Array.isArray(compiled.values) ? compiled.values : [], duration, result.length);
         
         // Log slow queries
         if (duration > 1000) {
@@ -144,15 +144,21 @@ export class DatabaseAdapter implements IDatabase {
       }
     };
 
-    // Proxy composition helpers for compatibility without 'any' casts
-    {
-      const target = enhancedSql as Record<string, unknown>;
-      const source = baseSql as Record<string, unknown>;
-      target.unsafe = source.unsafe as unknown;
-      target.join = source.join as unknown;
-      target.commit = source.commit as unknown;
-      target.rollback = source.rollback as unknown;
+    // Type-safe composition helpers for compatibility
+    interface EnhancedSqlFunction extends Function {
+      unsafe?: unknown;
+      join?: unknown;
+      commit?: unknown;
+      rollback?: unknown;
     }
+
+    const targetSql = enhancedSql as EnhancedSqlFunction;
+    const sourceSql = baseSql as EnhancedSqlFunction;
+    
+    targetSql.unsafe = sourceSql.unsafe;
+    targetSql.join = sourceSql.join;
+    targetSql.commit = sourceSql.commit;
+    targetSql.rollback = sourceSql.rollback;
 
     // Add transaction support to SQL function
     enhancedSql.transaction = async <T>(
@@ -560,8 +566,8 @@ export class DatabaseAdapter implements IDatabase {
       
       // Force pool recreation using exported reset API
       const dbModule = await import('./index.js');
-      if (typeof (dbModule as any).resetPool === 'function') {
-        (dbModule as any).resetPool();
+      if ('resetPool' in dbModule && typeof dbModule.resetPool === 'function') {
+        dbModule.resetPool();
       }
       // Create new pool
       this.pool = dbModule.getPool();

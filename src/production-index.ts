@@ -207,24 +207,27 @@ async function bootstrap() {
     try {
       registerUtilityMessageRoutes(app);
       log.info('Utility message routes registered');
-    } catch (e) {
-      log.warn('Failed to register utility message routes', { error: String(e) });
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      log.warn('Failed to register utility message routes', { err });
     }
     
     // Register image search routes
     try {
       registerImageSearchRoutes(app);
       log.info('Image search routes registered');
-    } catch (e) {
-      log.warn('Failed to register image search routes', { error: String(e) });
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      log.warn('Failed to register image search routes', { err });
     }
 
     // Register message analytics routes
     try {
       registerMessageAnalyticsRoutes(app);
       log.info('Message analytics routes registered');
-    } catch (e) {
-      log.warn('Failed to register message analytics routes', { error: String(e) });
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      log.warn('Failed to register message analytics routes', { err });
     }
 
     // Prometheus Metrics (enabled only when METRICS_ENABLED)
@@ -285,7 +288,10 @@ async function bootstrap() {
         if (!d.database.ok) reasons.push(d.database.error ? `db:${d.database.error}` : 'database');
         if (!d.memory.ok) reasons.push('memory');
         if (d.manychat && !d.manychat.ok) reasons.push(d.manychat.error ? `manychat:${d.manychat.error}` : 'manychat');
-      } catch {}
+      } catch (e: unknown) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        log.warn("Health check details parsing failed", { err });
+      }
       return c.json({ status: 'degraded', reasons }, 503);
     });
 
@@ -298,7 +304,10 @@ async function bootstrap() {
       try {
         const d = snapshot.details;
         if (!d.database.ok) reasons.push(d.database.error ? `db:${d.database.error}` : 'database');
-      } catch {}
+      } catch (e: unknown) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        log.warn("Ready check details parsing failed", { err });
+      }
       return c.json({ status: 'degraded', reasons }, 503);
     });
 
@@ -314,7 +323,10 @@ async function bootstrap() {
         if (!d.database.ok) reasons.push(d.database.error ? `db:${d.database.error}` : 'database');
         if (!d.memory.ok) reasons.push('memory');
         if (d.manychat && !d.manychat.ok) reasons.push(d.manychat.error ? `manychat:${d.manychat.error}` : 'manychat');
-      } catch {}
+      } catch (e: unknown) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        log.warn("Healthz check details parsing failed", { err });
+      }
       return c.json({ status: 'degraded', reasons }, 503);
     });
 
@@ -327,7 +339,10 @@ async function bootstrap() {
           const html = fs.readFileSync(fp, 'utf8');
           return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
         }
-      } catch {}
+      } catch (e: unknown) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        log.warn("Legal file read failed", { err });
+      }
       return new Response('Not Found', { status: 404 });
     };
 

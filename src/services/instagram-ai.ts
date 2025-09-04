@@ -482,9 +482,9 @@ export class InstagramAIService {
       
       // Add metadata
       aiResponse.tokens = {
-        prompt: completion.usage?.prompt_tokens || 0,
-        completion: completion.usage?.completion_tokens || 0,
-        total: completion.usage?.total_tokens || 0
+        prompt: completion.usage?.prompt_tokens ?? 0,
+        completion: completion.usage?.completion_tokens ?? 0,
+        total: completion.usage?.total_tokens ?? 0
       };
       aiResponse.responseTime = responseTime;
 
@@ -719,7 +719,7 @@ export class InstagramAIService {
 📱 نوع التفاعل: ${context.interactionType}
 🏪 اسم المحل: ${context.merchantSettings?.businessName || 'غير محدد'}
 🛍️ فئة المنتجات: ${context.merchantSettings?.businessCategory || 'عام'}
-📊 عدد الطلبات السابقة: ${context.customerProfile?.previousOrders || 0}
+📊 عدد الطلبات السابقة: ${context.customerProfile?.previousOrders ?? 0}
 
 🎨 إرشادات المحتوى:
 1. استخدم 3-5 رموز تعبيرية في كل رد
@@ -1407,8 +1407,8 @@ ${productsText}
               interactionType: context.interactionType,
               visualStyle: response.visualStyle,
               engagement: response.engagement,
-              mediaRecommendations: response.mediaRecommendations?.length || 0,
-              hashtagsGenerated: response.hashtagSuggestions?.length || 0
+              mediaRecommendations: response.mediaRecommendations?.length ?? 0,
+              hashtagsGenerated: response.hashtagSuggestions?.length ?? 0
             })},
             ${response.responseTime},
             true
@@ -1421,7 +1421,7 @@ ${productsText}
             merchant_id, day, interaction_type, tokens_used, response_time_ms, total_interactions, total_tokens, avg_response_time
           ) VALUES (
             ${context.merchantId}::uuid, CURRENT_DATE, ${context.interactionType},
-            ${response.tokens?.total || 0}, ${response.responseTime}, 1, ${response.tokens?.total || 0}, ${response.responseTime}
+            ${response.tokens?.total ?? 0}, ${response.responseTime}, 1, ${response.tokens?.total ?? 0}, ${response.responseTime}
           )
           ON CONFLICT (merchant_id, day)
           DO UPDATE SET

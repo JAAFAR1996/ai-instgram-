@@ -109,6 +109,9 @@ export class DatabaseJobSpool {
         priority: request.priority
       });
 
+      if (!row) {
+        throw new Error('No row returned from job spool insert');
+      }
       return this.mapSpooledJob(row);
     } finally {
       await this.recordJobMetrics(startTime, success);
@@ -145,7 +148,13 @@ export class DatabaseJobSpool {
         RETURNING *
       `;
 
-      const jobs = result.map(row => this.mapSpooledJob(row));
+      const jobs = result.map(row => {
+        if (!row) {
+          this.logger.warn('Null row in job spool result');
+          return null;
+        }
+        return this.mapSpooledJob(row);
+      }).filter((job): job is SpooledJob => job !== null);
       
       if (jobs.length > 0) {
         this.logger.info('Retrieved jobs from database spool', {
@@ -175,20 +184,20 @@ export class DatabaseJobSpool {
     
     try {
       const [totalResult, priorityResult, typeResult] = await Promise.all([
-        sql`
+        sql<{ total: number; pending: number; processed: number }>`
           SELECT 
             COUNT(*) as total,
             COUNT(*) FILTER (WHERE processed_at IS NULL) as pending,
             COUNT(*) FILTER (WHERE processed_at IS NOT NULL) as processed
           FROM job_spool
         `,
-        sql`
+        sql<{ priority: string; count: string | number }>`
           SELECT priority, COUNT(*) as count
           FROM job_spool 
           WHERE processed_at IS NULL
           GROUP BY priority
         `,
-        sql`
+        sql<{ job_type: string; count: string | number }>`
           SELECT job_type, COUNT(*) as count
           FROM job_spool 
           WHERE processed_at IS NULL

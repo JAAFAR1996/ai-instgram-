@@ -204,8 +204,8 @@ export class Logger {
     try {
       // Check if directory exists
       await accessAsync(dirname(config.logDirectory));
-    } catch {
-      // Create directory with recursive option
+    } catch (e: unknown) {
+      // Create directory with recursive option - directory doesn't exist
       await mkdirAsync(dirname(config.logDirectory), { recursive: true });
       
       // Verify directory was created successfully
@@ -667,7 +667,8 @@ export class Logger {
         // استخدام JSON.stringify كآخر حل مع protection من circular references
         try {
           message = JSON.stringify(errorObj, null, 0);
-        } catch {
+        } catch (serializationError: unknown) {
+          console.warn('JSON serialization failed in logger:', serializationError instanceof Error ? serializationError.message : String(serializationError));
           message = 'Error (serialization failed)';
         }
       }
@@ -918,7 +919,7 @@ export class Logger {
       urlObj.pathname = redactedPath.join('/');
       
       return urlObj.toString();
-    } catch {
+    } catch (e: unknown) {
       // If URL parsing fails, apply pattern redaction
       return this.redactStringPatterns(url);
     }

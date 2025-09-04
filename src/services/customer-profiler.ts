@@ -65,11 +65,11 @@ export class CustomerProfiler {
     ]);
 
     return {
-      previousOrders: orders[0]?.cnt || 0,
-      totalSpent: Number(orders[0]?.total || 0),
-      averageOrderValue: Number(orders[0]?.aov || 0),
+      previousOrders: orders[0]?.cnt ?? 0,
+      totalSpent: Number(orders[0]?.total ?? 0),
+      averageOrderValue: Number(orders[0]?.aov ?? 0),
       lastOrderAt: orders[0]?.last_at ?? null,
-      messagesCount30d: msgs[0]?.cnt || 0,
+      messagesCount30d: msgs[0]?.cnt ?? 0,
     };
   }
 
@@ -147,7 +147,7 @@ export class CustomerProfiler {
     const counts = new Map<'morning'|'afternoon'|'evening'|'night', number>();
     for (const r of rows) {
       const slot = toSlot(new Date(r.created_at));
-      counts.set(slot, (counts.get(slot) || 0) + 1);
+      counts.set(slot, (counts.get(slot) ?? 0) + 1);
     }
     const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).map(([k]) => k).slice(0, 2);
     const engagementLevel: BehaviorPatterns['engagementLevel'] = rows.length > 60 ? 'high' : rows.length > 20 ? 'medium' : 'low';

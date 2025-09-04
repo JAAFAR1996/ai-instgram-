@@ -117,7 +117,7 @@ app.get('/overview/:merchantId', async (c) => {
           topPhrases: patterns?.topPhrases?.slice(0, 5) || [],
           intentSuccess: patterns?.intentSuccess || {},
           timeSlots: patterns?.timeSlots?.slice(0, 3) || [],
-          totalPatterns: patterns?.topPhrases?.length || 0
+          totalPatterns: patterns?.topPhrases?.length ?? 0
         },
         processingTime,
         generatedAt: new Date().toISOString()
@@ -348,7 +348,7 @@ app.post('/simulate-enhancement', async (c) => {
       merchantId,
       customerMessage,
       originalResponse: currentResponse,
-      aiConfidence: aiConfidence || 0.5,
+      aiConfidence: aiConfidence ?? 0.5,
       aiIntent: aiIntent || 'OTHER',
       processingTime: 0,
       platform: 'simulation'

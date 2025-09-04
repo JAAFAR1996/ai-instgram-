@@ -1,4 +1,4 @@
-﻿-- ===============================================
+-- ===============================================
 -- Full Schema Bundle (auto-generated)
 -- Generated: 2025-09-03T03:17:27.7440558+03:00
 -- Source directory: src/database/migrations
@@ -101,6 +101,9 @@ CREATE TABLE IF NOT EXISTS merchants (
             "outside_hours": "نعتذر، المحل مغلق حالياً. أوقات العمل: 9 صباحاً - 10 مساءً"
         }
     }'::JSONB,
+    
+    -- Preferred AI Sales Style
+    sales_style TEXT DEFAULT 'neutral',
     
     -- Audit fields
     created_at TIMESTAMPTZ DEFAULT NOW(),

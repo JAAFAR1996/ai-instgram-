@@ -327,9 +327,9 @@ export class AIService {
         products: [],
         confidence: 0.9,
         tokens: {
-          prompt: completion.usage?.prompt_tokens || 0,
-          completion: completion.usage?.completion_tokens || 0,
-          total: completion.usage?.total_tokens || 0
+          prompt: completion.usage?.prompt_tokens ?? 0,
+          completion: completion.usage?.completion_tokens ?? 0,
+          total: completion.usage?.total_tokens ?? 0
         },
         responseTime: responseTime
       };
@@ -340,7 +340,7 @@ export class AIService {
           productId: p.id,
           sku: p.sku,
           name: p.name_ar,
-          price: Number(p.effective_price || 0),
+          price: Number(p.effective_price ?? 0),
           confidence: 0.7,
           reason: 'visual_match'
         }));
@@ -377,9 +377,9 @@ export class AIService {
       
       // Add metadata
       aiResponse.tokens = {
-        prompt: completion.usage?.prompt_tokens || 0,
-        completion: completion.usage?.completion_tokens || 0,
-        total: completion.usage?.total_tokens || 0
+        prompt: completion.usage?.prompt_tokens ?? 0,
+        completion: completion.usage?.completion_tokens ?? 0,
+        total: completion.usage?.total_tokens ?? 0
       };
       aiResponse.responseTime = responseTime;
 
@@ -414,7 +414,7 @@ export class AIService {
       const completion = await this.openai.chat.completions.create({
         model: this.config.ai.intentModel || 'gpt-4o-mini',
         messages: prompt,
-        temperature: this.config.ai.intentTemperature || 0.3,
+        temperature: this.config.ai.intentTemperature ?? 0.3,
         max_tokens: this.config.ai.intentMaxTokens || 200,
         response_format: { type: 'json_object' }
       });
@@ -462,7 +462,7 @@ export class AIService {
       const completion = await this.openai.chat.completions.create({
         model: this.config.ai.recommendationModel || 'gpt-4o-mini',
         messages: prompt,
-        temperature: this.config.ai.recommendationTemperature || 0.5,
+        temperature: this.config.ai.recommendationTemperature ?? 0.5,
         max_tokens: this.config.ai.recommendationMaxTokens || 300,
         response_format: { type: 'json_object' }
       });
@@ -498,7 +498,7 @@ export class AIService {
       const completion = await this.openai.chat.completions.create({
         model: this.config.ai.summaryModel || 'gpt-4o-mini',
         messages: prompt,
-        temperature: this.config.ai.summaryTemperature || 0.3,
+        temperature: this.config.ai.summaryTemperature ?? 0.3,
         max_tokens: this.config.ai.summaryMaxTokens || 200
       });
 
@@ -870,7 +870,7 @@ ${productsText}
         productId: r.id,
         sku: r.sku,
         name: r.name,
-        price: r.price || 0,
+        price: r.price ?? 0,
         confidence: 0.6,
         reason: 'اقتراح تلقائي'
       }));

@@ -558,7 +558,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
       const jwtOk = !!process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32;
       const igOk = !!process.env.META_APP_SECRET && (process.env.META_APP_SECRET ?? '').length >= 32;
       const status = jwtOk && igOk ? 'SUCCESS' : 'FAILURE';
-      await svc.logSecurity(merchantId, 'RUNTIME_QUICK_CHECK', status as unknown as string, { jwtOk, igOk });
+      await svc.logSecurity(merchantId, 'RUNTIME_QUICK_CHECK', status, { jwtOk, igOk });
       return c.json({ ok: true, result: { jwtOk, igOk, status } });
     } catch (error) {
       log.error('Runtime quick security check failed', { error: String(error) });

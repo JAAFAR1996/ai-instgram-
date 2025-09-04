@@ -88,8 +88,8 @@ export class AdvancedAnalyticsService {
              COUNT(CASE WHEN q IS NOT NULL AND q >= 0.7 THEN 1 END)::int AS good
       FROM ms
     `;
-    const totalOut = accuracyRows[0]?.total || 0;
-    const goodOut = accuracyRows[0]?.good || 0;
+    const totalOut = accuracyRows[0]?.total ?? 0;
+    const goodOut = accuracyRows[0]?.good ?? 0;
     const responseAccuracyRate = totalOut > 0 ? goodOut / totalOut : 0;
 
     // Conversion rate: customers with any order in window / active conversations in window
@@ -110,8 +110,8 @@ export class AdvancedAnalyticsService {
       SELECT (SELECT COUNT(*) FROM convs)::int AS convs,
              (SELECT COUNT(*) FROM convs c JOIN buyers b ON b.cid = c.cid)::int AS buyers
     `;
-    const convs = convRows[0]?.convs || 0;
-    const buyers = convRows[0]?.buyers || 0;
+    const convs = convRows[0]?.convs ?? 0;
+    const buyers = convRows[0]?.buyers ?? 0;
     const conversionRate = convs > 0 ? buyers / convs : 0;
 
     // Engagement: response rate and average response time (simplified)
@@ -130,10 +130,10 @@ export class AdvancedAnalyticsService {
              AVG(CASE WHEN direction = 'INCOMING' AND prev_dir = 'OUTGOING' THEN delta_min END)::float AS avg_minutes
       FROM times
     `;
-    const sent = engageRows[0]?.sent || 0;
-    const responses = engageRows[0]?.responses || 0;
+    const sent = engageRows[0]?.sent ?? 0;
+    const responses = engageRows[0]?.responses ?? 0;
     const responseRate = sent > 0 ? responses / sent : 0;
-    const avgResponseTimeMinutes = Math.max(0, Math.round((engageRows[0]?.avg_minutes || 0) * 10) / 10);
+    const avgResponseTimeMinutes = Math.max(0, Math.round((engageRows[0]?.avg_minutes ?? 0) * 10) / 10);
 
     // Satisfaction score: blend of accuracy and engagement
     const satisfactionScore = Math.min(1, (responseAccuracyRate * 0.6) + (responseRate * 0.4));

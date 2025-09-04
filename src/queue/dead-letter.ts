@@ -116,7 +116,10 @@ export function enqueueDLQ(
   category: DeadLetterItem['category'] = 'other'
 ) {
   pushDLQ({ reason, payload, severity, category });
-  try { telemetry.counter('dlq_enqueued_total', 'DLQ enqueued items').add(1, { reason, category }); } catch {}
+  try { telemetry.counter('dlq_enqueued_total', 'DLQ enqueued items').add(1, { reason, category }); } catch (e: unknown) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    logger.warn("Failed to record DLQ telemetry", { err });
+  }
 }
 
 /**
@@ -131,7 +134,7 @@ export function getDLQStats(): {
   const reasons: Record<string, number> = {};
   
   dlq.forEach(item => {
-    reasons[item.reason] = (reasons[item.reason] || 0) + 1;
+    reasons[item.reason] = (reasons[item.reason] ?? 0) + 1;
   });
   
   return {
@@ -364,10 +367,11 @@ export async function processRetryableItems(
         logger.error('DLQ retry handler error', errorDetails);
         
         // Update item with error information
+        const stack = error instanceof Error ? error.stack : undefined;
         item.error = {
           name: error instanceof Error ? error.name : 'RetryHandlerError',
           message: error instanceof Error ? error.message : 'Retry handler failed',
-          stack: error instanceof Error ? error.stack : undefined
+          ...(stack ? { stack } : {})
         };
         
         // Increment retry count even on handler error
@@ -391,22 +395,21 @@ export async function processRetryableItems(
     // Check for failures in this batch
     const fails = results.filter(r => r.status === 'rejected');
     if (fails.length) {
-      logger.error({ 
+      logger.error("DLQ batch processing failures", { 
         fails: fails.length, 
-        sample: fails.slice(0,3).map(f => String((f as any).reason)),
+        sample: fails.slice(0,3).map(f => f.status === 'rejected' ? String(f.reason) : 'unknown'),
         batchSize: batch.length 
-      }, "DLQ batch processing failures");
+      });
       
       // Re-enqueue failed items for next retry cycle
       for (const failure of fails) {
         const failedIndex = results.indexOf(failure);
         if (failedIndex >= 0 && failedIndex < batch.length) {
-          const failedItem = batch[failedIndex];
+          const failedItem = batch[failedIndex]!;
           failedItem.retryCount++;
           failedItem.error = {
             name: 'BatchProcessingError',
-            message: String((failure as any).reason),
-            stack: undefined
+            message: failure.status === 'rejected' ? String(failure.reason) : 'Unknown batch error'
           };
         }
       }
@@ -486,8 +489,8 @@ export function getDLQMonitoring(): {
   const latencies: number[] = [];
 
   dlq.forEach(item => {
-    categories[item.category] = (categories[item.category] || 0) + 1;
-    severities[item.severity] = (severities[item.severity] || 0) + 1;
+    categories[item.category] = (categories[item.category] ?? 0) + 1;
+    severities[item.severity] = (severities[item.severity] ?? 0) + 1;
     latencies.push(now - item.ts);
   });
 
@@ -520,7 +523,7 @@ export function getDLQMonitoring(): {
 function percentile(arr: number[], p: number): number {
   if (arr.length === 0) return 0;
   const index = Math.ceil(arr.length * p) - 1;
-  return arr[index] || 0;
+  return arr[index] ?? 0;
 }
 
 /**
@@ -611,7 +614,7 @@ setInterval(async () => {
       logger.fatal('DLQ auto-retry system experiencing frequent failures', {
         totalFailed: dlqStats.totalFailed,
         queueSize: dlq.length,
-        lastError: error?.message
+        lastError: error instanceof Error ? error.message : String(error)
       });
     }
   }

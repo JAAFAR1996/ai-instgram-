@@ -11,6 +11,11 @@ import type { Sql, SqlFragment } from '../types/sql.js';
 import type { DatabaseRow } from '../types/db.js';
 // Database access via pg adapter
 
+// Type for SQL instance with join method
+interface SqlWithJoin extends Sql {
+  join(parts: Array<SqlFragment | string>, separator?: SqlFragment | string): SqlFragment;
+}
+
 interface MerchantDbRow extends DatabaseRow {
   id: string;
   business_name: string;
@@ -262,7 +267,7 @@ export class MerchantRepository {
 
     const [merchant] = await sql<MerchantDbRow>`
       UPDATE merchants
-      SET ${(sql as any).join(updateFields, sql`, `)}
+      SET ${(sql as SqlWithJoin).join(updateFields, sql`, `)}
       WHERE id = ${id}::uuid
       RETURNING *
     `;
@@ -341,7 +346,7 @@ export class MerchantRepository {
       }
 
       // Log successful increment
-      const newUsage = parseInt(result.rows[0].monthly_messages_used) || 0;
+      const newUsage = parseInt(result.rows[0].monthly_messages_used) ?? 0;
       console.log(`Message usage incremented for merchant ${id}: ${newUsage}/${limit}`);
 
       return true;
@@ -419,7 +424,7 @@ export class MerchantRepository {
     }
 
     // const whereClause = conditions.length  // unused
-    //   ? sql`WHERE ${(sql as any).join(conditions, sql` AND `)}`
+    //   ? sql`WHERE ${(sql as SqlWithJoin).join(conditions, sql` AND `)}`
     //   : sql``;
     const limitClause = filters.limit ? sql`LIMIT ${filters.limit}` : sql``;
     const offsetClause = filters.offset ? sql`OFFSET ${filters.offset}` : sql``;
@@ -428,7 +433,7 @@ export class MerchantRepository {
     if (conditions.length > 0) {
       const merchants = await sql<MerchantDbRow>`
         SELECT * FROM merchants
-        WHERE ${(sql as any).join(conditions, sql` AND `)}
+        WHERE ${(sql as SqlWithJoin).join(conditions, sql` AND `)}
         ORDER BY created_at DESC
         ${limitClause}
         ${offsetClause}
@@ -477,13 +482,13 @@ export class MerchantRepository {
       const statsRow = row as MerchantStatsRow;
       if (!statsRow.subscription_tier && !statsRow.business_category) {
         // Overall totals
-        stats.totalMerchants = parseInt(statsRow.total_merchants || '0');
-        stats.activeMerchants = parseInt(statsRow.active_merchants || '0');
-        stats.totalMessagesUsed = parseInt(statsRow.total_messages_used || '0');
-        stats.averageMessagesPerMerchant = parseFloat(statsRow.avg_messages_per_merchant || '0');
+        stats.totalMerchants = parseInt(statsRow.total_merchants ?? '0');
+        stats.activeMerchants = parseInt(statsRow.active_merchants ?? '0');
+        stats.totalMessagesUsed = parseInt(statsRow.total_messages_used ?? '0');
+        stats.averageMessagesPerMerchant = parseFloat(statsRow.avg_messages_per_merchant ?? '0');
       } else if (statsRow.subscription_tier && !statsRow.business_category) {
         // Subscription tier totals
-        stats.bySubscriptionTier[statsRow.subscription_tier] = parseInt(statsRow.total_merchants || '0');
+        stats.bySubscriptionTier[statsRow.subscription_tier] = parseInt(statsRow.total_merchants ?? '0');
       } else if (statsRow.subscription_tier && statsRow.business_category) {
         // Business category totals
         if (!statsRow?.business_category) continue;
@@ -597,7 +602,7 @@ export class MerchantRepository {
       'ENTERPRISE': 50000
     };
     
-    return limits[tier] || limits.FREE;
+    return limits[tier] ?? limits.FREE;
   }
 
   /**
@@ -612,7 +617,7 @@ export class MerchantRepository {
       isActive: row.is_active,
       subscriptionTier: row.subscription_tier,
       monthlyMessageLimit: parseInt(row.monthly_message_limit),
-      monthlyMessagesUsed: parseInt(row.monthly_messages_used) || 0,
+      monthlyMessagesUsed: parseInt(row.monthly_messages_used) ?? 0,
       settings: typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at)

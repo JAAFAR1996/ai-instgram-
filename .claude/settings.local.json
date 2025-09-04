@@ -24,7 +24,9 @@
       "Bash(curl:*)",
       "Bash(rm:*)",
       "Bash(git restore:*)",
-      "Bash(rg:*)"
+      "Bash(rg:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)"
     ],
     "deny": [],
     "ask": []

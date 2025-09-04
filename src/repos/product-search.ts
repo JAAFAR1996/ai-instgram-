@@ -107,11 +107,11 @@ function toHit(r: { id: unknown; sku: unknown; name_ar: unknown; category: unkno
     id: String(r.id),
     sku: String(r.sku),
     name_ar: String(r.name_ar),
-    category: r.category ?? null,
+    category: r.category != null ? String(r.category) : null,
     price_amount: Number(r.price_amount),
     sale_price_amount: r.sale_price_amount != null ? Number(r.sale_price_amount) : null,
     price_currency: String(r.price_currency || 'USD').toUpperCase(),
     stock_quantity: Number(r.stock_quantity),
-    image_urls: r.image_urls ?? null,
+    image_urls: Array.isArray(r.image_urls) ? (r.image_urls as string[]) : null,
   };
 }

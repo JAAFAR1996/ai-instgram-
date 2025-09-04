@@ -17,8 +17,8 @@ export function initializeSecurityCompliance(): void {
   const hourly = setInterval(async () => {
     try {
       const report = await runStartupValidation();
-      const overall = report.overallSuccess ? 'SUCCESS' : 'FAILURE';
-      await svc.logEvent(null, 'RUNTIME_SECURITY_VALIDATION', overall as Record<string, unknown>, {
+      const overall = report.overallSuccess ? 'SUCCESS' as 'SUCCESS' | 'FAILURE' : 'FAILURE' as 'SUCCESS' | 'FAILURE';
+      await svc.logEvent(null, 'RUNTIME_SECURITY_VALIDATION', overall, {
         overallSuccess: report.overallSuccess,
         criticalErrors: report.criticalErrors,
         totalDurationMs: report.totalDuration

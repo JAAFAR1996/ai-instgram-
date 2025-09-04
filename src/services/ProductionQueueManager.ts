@@ -460,7 +460,7 @@ export class ProductionQueueManager {
             conversationId,
             merchantId,
             jobId: job.id,
-            messageLength: (message as string).length || 0,
+            messageLength: (message as string).length ?? 0,
             attempt: 1 // BullMQ handles attempts internally
           });
 
@@ -772,7 +772,7 @@ export class ProductionQueueManager {
             try {
               // فحص إذا كان الوقت المحدد للـ delay انتهى
               const now = Date.now();
-              const jobDelay = delayedJob.opts?.delay || 0;
+              const jobDelay = delayedJob.opts?.delay ?? 0;
               const addedAt = delayedJob.timestamp;
               const shouldRun = (now - addedAt) >= jobDelay;
               
@@ -1509,7 +1509,7 @@ export class ProductionQueueManager {
         conversationId: jobData.conversationId,
         merchantId: jobData.merchantId,
         customerId: jobData.customerId,
-        messageLength: (jobData.message as string)?.length || 0,
+        messageLength: (jobData.message as string)?.length ?? 0,
         platform: jobData.platform
       });
 
@@ -1863,7 +1863,7 @@ export class ProductionQueueManager {
         const healthResult = await performHealthCheck(this.queueConnection);
         redisHealth = {
           connected: healthResult.success,
-          responseTime: healthResult.latency || 0,
+          responseTime: healthResult.latency ?? 0,
           metrics: {}
         };
         
@@ -2273,7 +2273,7 @@ export class ProductionQueueManager {
         merchant_id: jobData.merchantId,
         success: 'true',
         has_images: String(jobData.metadata.hasImages),
-        cached: String(result.usedCache || false)
+        cached: String(result.usedCache ?? false)
       });
       
       // 🎯 Business metrics
@@ -2304,7 +2304,7 @@ export class ProductionQueueManager {
         qualityScore: result.qualityScore,
         qualityImproved: result.qualityImproved,
         usedCache: result.usedCache,
-        decisionPathCount: result.decisionPath?.length || 0
+        decisionPathCount: result.decisionPath?.length ?? 0
       });
 
       return {
@@ -2449,7 +2449,7 @@ export class ProductionQueueManager {
                   merchant_id: jobData.merchantId,
                   content_type: analysisResult.contentType.category,
                   has_ocr: String(Boolean(analysisResult.ocrText)),
-                  product_matches: String(analysisResult.productMatches?.length || 0)
+                  product_matches: String(analysisResult.productMatches?.length ?? 0)
                 });
                 
               } catch (imageError) {
@@ -2501,7 +2501,7 @@ export class ProductionQueueManager {
             const igResp = await ig.generateInstagramResponse(enhancedMessage, igCtx);
             aiResponse = igResp.messageAr || igResp.message || 'تم تحليل الصورة بنجاح.';
             aiIntent = igResp.intent || 'IMAGE_INQUIRY';
-            aiConfidence = Math.max(igResp.confidence || 0.7, 
+            aiConfidence = Math.max(igResp.confidence ?? 0.7, 
               imageAnalysisResults.reduce((acc, r) => acc + r.analysis.confidence, 0) / imageAnalysisResults.length);
             decisionPath.push(`image_analysis=${imageAnalysisResults.length}`, 
               `ocr=${Boolean(combinedOCRText)}`, 
@@ -2546,7 +2546,7 @@ export class ProductionQueueManager {
             const igResp = await ig.generateInstagramResponse(jobData.messageText, igCtx);
             aiResponse = igResp.messageAr || igResp.message || 'تم معالجة الصورة.';
             aiIntent = igResp.intent || 'IMAGE_INQUIRY';
-            aiConfidence = igResp.confidence || 0.7;
+            aiConfidence = igResp.confidence ?? 0.7;
             decisionPath.push('vision=fallback');
             if (
               igResp.stage === 'AWARE' || igResp.stage === 'BROWSE' || igResp.stage === 'INTENT' ||
@@ -2777,8 +2777,9 @@ export class ProductionQueueManager {
       // ❌ تحديث حالة الرسالة كفاشلة
       try {
         await this.repositories.message.markAsFailed(String((jobData as { messageId?: unknown }).messageId ?? ''));
-      } catch {
-        // ignore repository errors during failure marking
+      } catch (e: unknown) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        this.logger.warn({ err }, "Failed to mark message as failed in repository");
       }
       
       this.logger.error('💥 [MESSAGE-DELIVERY-ERROR] خطأ في تسليم الرسالة', {

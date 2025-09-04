@@ -130,7 +130,7 @@ export class ServiceController {
   public async getAllServicesStatus(merchantId: string): Promise<MerchantServices> {
     try {
       const sql = this.db.getSQL();
-      const result = await sql`
+      const result = await sql<{ service_name: string; enabled: boolean; last_toggled: Date; toggled_by: string; reason?: string }>`
         SELECT 
           service_name,
           enabled,
@@ -290,7 +290,7 @@ export class ServiceController {
    */
   public async getServicesHealth(merchantId: string): Promise<ServiceHealth[]> {
     try {
-      const healthData = await this.sql`
+      const healthData = await this.sql<{ service_name: string; enabled: boolean; last_toggled: Date; error_count: number; last_check: Date }>`
         SELECT 
           mss.service_name,
           mss.enabled,

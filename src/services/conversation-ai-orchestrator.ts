@@ -183,7 +183,7 @@ export class ConversationAIOrchestrator {
           const thinking = await thinkingService.processWithThinking(customerMessage, {
             merchantId: context.merchantId,
             username: context.customerId,
-            session: (context as { session?: Record<string, unknown> } | undefined)?.session ?? {} || {},
+            session: (context as { session?: Record<string, unknown> } | undefined)?.(session ?? {}) || {},
             nlp: undefined,
             hints: {}
           }, false);
@@ -735,7 +735,7 @@ export class ConversationAIOrchestrator {
     const platforms = interactions.reduce(
       (acc: Record<string, number>, interaction: InteractionRow) => {
         const key = String(interaction.platform).toLowerCase();
-        acc[key] = (acc[key] || 0) + 1;
+        acc[key] = (acc[key] ?? 0) + 1;
         return acc;
       },
       {} as Record<string, number>
@@ -744,8 +744,8 @@ export class ConversationAIOrchestrator {
     const total = interactions.length;
     
     return {
-      whatsappPreference: total > 0 ? ((platforms.whatsapp || 0) / total) * 100 : 0,
-      instagramPreference: total > 0 ? ((platforms.instagram || 0) / total) * 100 : 0,
+      whatsappPreference: total > 0 ? ((platforms.whatsapp ?? 0) / total) * 100 : 0,
+      instagramPreference: total > 0 ? ((platforms.instagram ?? 0) / total) * 100 : 0,
       switchingFrequency: this.calculateSwitchingFrequency(interactions)
     };
   }
@@ -758,7 +758,7 @@ export class ConversationAIOrchestrator {
     
     const hours = interactions.map(i => new Date(i.created_at).getHours());
     const hourCounts = hours.reduce((acc, hour) => {
-      acc[hour] = (acc[hour] || 0) + 1;
+      acc[hour] = (acc[hour] ?? 0) + 1;
       return acc;
     }, {} as Record<number, number>);
     
@@ -805,7 +805,7 @@ export class ConversationAIOrchestrator {
     // Determine preferred message type
     const messageTypes = interactions.map(i => i.message_type);
     const typeCounts = messageTypes.reduce((acc, type) => {
-      acc[type] = (acc[type] || 0) + 1;
+      acc[type] = (acc[type] ?? 0) + 1;
       return acc;
     }, {} as Record<string, number>);
     
@@ -1124,3 +1124,4 @@ export function getConversationAIOrchestrator(): ConversationAIOrchestrator {
 }
 
 export default ConversationAIOrchestrator;
+

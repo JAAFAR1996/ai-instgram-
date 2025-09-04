@@ -34,9 +34,9 @@ export class InstagramReportingService {
              COUNT(CASE WHEN direction='INCOMING' AND prev_dir='OUTGOING' THEN 1 END)::int as responses
       FROM base
     `;
-    const incoming = inter[0]?.incoming || 0;
-    const outgoing = inter[0]?.outgoing || 0;
-    const responsePairs = inter[0]?.responses || 0;
+    const incoming = inter[0]?.incoming ?? 0;
+    const outgoing = inter[0]?.outgoing ?? 0;
+    const responsePairs = inter[0]?.responses ?? 0;
 
     // Window utilization proxy (sent vs responded)
     const windows = {
@@ -51,8 +51,8 @@ export class InstagramReportingService {
       FROM orders
       WHERE merchant_id = ${merchantId}::uuid AND created_at >= ${dayStart} AND created_at < ${dayEnd}
     `;
-    const orders = conv[0]?.orders || 0;
-    const revenue = Number(conv[0]?.revenue || 0);
+    const orders = conv[0]?.orders ?? 0;
+    const revenue = Number(conv[0]?.revenue ?? 0);
     const conversionRate = incoming > 0 ? Math.round((orders / incoming) * 100) : 0;
 
     // Personalization effectiveness (quality_score metadata)

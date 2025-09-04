@@ -56,8 +56,7 @@ export function createEnhancedErrorHandler(component: string, options: {
     includeRequestInfo = false
   } = options;
 
-  return {
-    handleError: (
+  const handleError = (
       error: unknown, 
       context: Record<string, unknown> = {},
       requestInfo?: {
@@ -110,7 +109,10 @@ export function createEnhancedErrorHandler(component: string, options: {
         message,
         context: safeContext
       };
-    },
+    };
+
+  return {
+    handleError,
 
     // Utility method for logging
     logError: (
@@ -123,7 +125,7 @@ export function createEnhancedErrorHandler(component: string, options: {
         query?: Record<string, string>;
       }
     ) => {
-      const handledError = this.handleError(error, context, requestInfo);
+      const handledError = handleError(error, context, requestInfo);
       
       // Use console.error for immediate logging (avoid circular dependencies)
       console.error(JSON.stringify({

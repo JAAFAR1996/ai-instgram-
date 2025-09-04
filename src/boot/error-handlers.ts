@@ -29,7 +29,7 @@ async function attemptSystemRecovery(event: RecoveryEvent, reason?: string): Pro
 
   // Track windowed attempts
   recentRecoveries.push(now);
-  while (recentRecoveries.length && now - (recentRecoveries[0] || 0) > RECOVERY_MAX_ATTEMPTS_WINDOW) recentRecoveries.shift();
+  while (recentRecoveries.length && now - (recentRecoveries[0] ?? 0) > RECOVERY_MAX_ATTEMPTS_WINDOW) recentRecoveries.shift();
   recoveryAttempts = recentRecoveries.length;
 
   logger.warn('Attempting system recovery...', { event, reason, attemptsInWindow: recoveryAttempts });
@@ -69,7 +69,10 @@ async function attemptSystemRecovery(event: RecoveryEvent, reason?: string): Pro
         // Do not autostart here; just log to avoid noisy restarts
         logger.warn('Predictive scheduler not running (observed during recovery)');
       }
-    } catch {}
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      logger.warn("Failed to check predictive scheduler status", { err });
+    }
 
     // 4) Switch to degraded mode if we keep failing
     if (recoveryAttempts >= RECOVERY_MAX_ATTEMPTS) {

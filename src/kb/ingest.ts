@@ -86,7 +86,10 @@ export async function ingestText(
       SELECT merchant_type::text FROM public.merchants WHERE id = ${merchantId}::uuid LIMIT 1
     `;
     merchantType = row[0]?.merchant_type ?? null;
-  } catch {}
+  } catch (e: unknown) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.warn({ err, merchantId }, "Failed to fetch merchant type for KB tagging");
+  }
 
   const chunks = chunkText(text, opts);
   if (chunks.length === 0) return { inserted: 0 };

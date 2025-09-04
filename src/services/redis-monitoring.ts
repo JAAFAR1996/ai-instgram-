@@ -88,12 +88,12 @@ export class RedisMonitor {
         redis: {
           connected: true,
           responseTime,
-          memoryUsage: stats.used_memory || 0,
-          connectedClients: stats.connected_clients || 0,
-          commandsProcessed: stats.total_commands_processed || 0,
-          keyspaceHits: stats.keyspace_hits || 0,
-          keyspaceMisses: stats.keyspace_misses || 0,
-          usedMemoryPeak: stats.used_memory_peak || 0,
+          memoryUsage: stats.used_memory ?? 0,
+          connectedClients: stats.connected_clients ?? 0,
+          commandsProcessed: stats.total_commands_processed ?? 0,
+          keyspaceHits: stats.keyspace_hits ?? 0,
+          keyspaceMisses: stats.keyspace_misses ?? 0,
+          usedMemoryPeak: stats.used_memory_peak ?? 0,
         },
         dlq: {
           queue: {
@@ -170,8 +170,8 @@ export class RedisMonitor {
     };
 
     // Memory usage threshold (80% of max memory)
-    const maxMemory = stats.maxmemory || 0;
-    const usedMemory = stats.used_memory || 0;
+    const maxMemory = stats.maxmemory ?? 0;
+    const usedMemory = stats.used_memory ?? 0;
     if (maxMemory > 0 && (usedMemory / maxMemory) > 0.8) {
       this.alerts.highMemoryUsage = true;
     }
@@ -182,8 +182,8 @@ export class RedisMonitor {
     }
 
     // Hit rate threshold (< 90%)
-    const hits = stats.keyspace_hits || 0;
-    const misses = stats.keyspace_misses || 0;
+    const hits = stats.keyspace_hits ?? 0;
+    const misses = stats.keyspace_misses ?? 0;
     const total = hits + misses;
     if (total > 0 && (hits / total) < 0.9) {
       logger.warn('Redis hit rate below threshold', {

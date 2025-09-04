@@ -157,7 +157,7 @@ export class CrossPlatformConversationManager {
       for (const platform of allPlatforms) {
         const platformConversations = conversations.filter(c => c.platform === platform);
         const totalMessages = platformConversations.reduce((sum, c) => sum + parseInt(c.message_count), 0);
-        const avgResponseTimeRaw = platformConversations.reduce((sum, c) => sum + (c.avg_response_time || 0), 0) / Math.max(1, platformConversations.length);
+        const avgResponseTimeRaw = platformConversations.reduce((sum, c) => sum + (c.avg_response_time ?? 0), 0) / Math.max(1, platformConversations.length);
         const avgResponseTime = Number.isFinite(avgResponseTimeRaw) ? Math.max(0, Math.round(avgResponseTimeRaw)) : 0;
 
         const profile: PlatformProfile = {
@@ -167,7 +167,7 @@ export class CrossPlatformConversationManager {
             : platformConversations[0]?.customer_instagram ?? '',
           conversationCount: platformConversations.length,
           messageCount: totalMessages,
-          averageResponseTime: Math.round(Number.isFinite(avgResponseTime) ? (avgResponseTime || 0) : 0),
+          averageResponseTime: Math.round(Number.isFinite(avgResponseTime) ? (avgResponseTime ?? 0) : 0),
           preferredTime: await this.calculatePreferredTime(),
           lastSeen: new Date(platformConversations[0]?.last_message_at || platformConversations[0]?.updated_at || new Date().toISOString()),
           stage: platformConversations[0]?.conversation_stage || 'GREETING',
@@ -192,7 +192,7 @@ export class CrossPlatformConversationManager {
       const tags = await this.generateCustomerTags(conversations, platformProfiles);
 
       const unifiedProfile: UnifiedCustomerProfile = {
-        customerId: identifier.phone || identifier.instagram ?? '',
+        customerId: identifier.phone || (identifier.instagram ?? ''),
         masterCustomerId,
         whatsappNumber: identifier.phone ?? '',
         instagramUsername: identifier.instagram ?? '',
@@ -822,7 +822,9 @@ export class CrossPlatformConversationManager {
       if (sourceFields.length === 0) return 1; // Nothing to preserve
 
       return preservedFields.length / sourceFields.length;
-    } catch {
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      this.logger.warn({ err }, "Data preservation parsing failed");
       return 0.5; // Partial success if parsing fails
     }
   }
@@ -965,7 +967,7 @@ export class CrossPlatformConversationManager {
       template: 0.9,
       urgent: 0.9
     };
-    return scores[messageType as keyof typeof scores] || 0.5;
+    return scores[messageType as keyof typeof scores] ?? 0.5;
   }
 
   private getInstagramMessageScore(messageType: string): number {
@@ -976,7 +978,7 @@ export class CrossPlatformConversationManager {
       template: 0.7,
       urgent: 0.4
     };
-    return scores[messageType as keyof typeof scores] || 0.5;
+    return scores[messageType as keyof typeof scores] ?? 0.5;
   }
 
   private async getTimeBasedPlatformPreferences(): Promise<{ WHATSAPP: number; INSTAGRAM: number }> {
@@ -1060,4 +1062,5 @@ export function getCrossPlatformConversationManager(): CrossPlatformConversation
 export default CrossPlatformConversationManager;
 
 // Using imported types from conversations.ts
+
 

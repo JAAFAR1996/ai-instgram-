@@ -6,6 +6,7 @@
  */
 
 import { Pool, PoolClient, PoolConfig } from 'pg';
+import type { ConnectionOptions as TLSConnectionOptions } from 'tls';
 import { getLogger } from '../services/logger.js';
 import { getConfig } from '../config/index.js';
 import type { DatabaseError } from '../types/database.js';
@@ -42,7 +43,7 @@ function createPoolConfig(): PoolConfig {
   const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
   
   // TLS configuration
-  let sslConfig: boolean | { rejectUnauthorized?: boolean } = false;
+  let sslConfig: boolean | TLSConnectionOptions = false;
   const dbUrl = config.database.url;
   const ca = process.env.DB_SSL_CA;
   const sslModeRequire = (() => {
@@ -530,8 +531,8 @@ async function handleDeadlockRecovery(
   // تسجيل معلومات إضافية للتشخيص
   if (attempt === 1) {
     log.info('📊 Deadlock analysis', {
-      currentConnections: pool?.totalCount || 0,
-      idleConnections: pool?.idleCount || 0,
+      currentConnections: pool?.totalCount ?? 0,
+      idleConnections: pool?.idleCount ?? 0,
       avgResponseTime: poolHealthStats.avgResponseTime,
       recentDeadlocks: poolHealthStats.deadlockCount
     });
@@ -571,11 +572,11 @@ export function getPoolStats() {
 
   try {
     return {
-      totalCount: pool.totalCount || 0,
-      idleCount: pool.idleCount || 0,
-      waitingCount: pool.waitingCount || 0,
-      max: pool.options?.max || 0,
-      min: pool.options?.min || 0,
+      totalCount: pool.totalCount ?? 0,
+      idleCount: pool.idleCount ?? 0,
+      waitingCount: pool.waitingCount ?? 0,
+      max: pool.options?.max ?? 0,
+      min: pool.options?.min ?? 0,
       // Extended statistics
       utilization: ((pool.totalCount - pool.idleCount) / (pool.options?.max || 1)) * 100,
       healthStats: poolHealthStats,
@@ -730,7 +731,7 @@ export async function query<T = Record<string, unknown>>(
       duration,
       error: error instanceof Error ? error.message : String(error),
       sql: text.substring(0, 100) + (text.length > 100 ? '...' : ''),
-      params: params?.length || 0
+      params: params?.length ?? 0
     });
     throw error;
   }

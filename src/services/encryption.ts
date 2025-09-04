@@ -180,7 +180,9 @@ export function verifyHMACRaw(payload: Buffer, signature: string, secret: string
 
     const equal = crypto.timingSafeEqual(a, b);
     return equal ? { ok: true } : { ok: false, reason: 'mismatch' };
-  } catch {
+  } catch (e: unknown) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    logger.error({ err }, "Timing-safe comparison failed");
     return { ok: false, reason: 'error' };
   }
 }

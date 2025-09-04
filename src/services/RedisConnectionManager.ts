@@ -9,6 +9,7 @@ import {
   validateConnection as validateConn, 
   performHealthCheck 
 } from './RedisSimpleHealthCheck.js';
+import { withRetry } from '../utils/retry.js';
 // Removed unused import: RedisErrorHandler
 
 export interface ConnectionInfo {
@@ -55,7 +56,7 @@ export class RedisConnectionManager {
   constructor(
     private redisUrl: string,
     private environment: Environment,
-    private logger?: { info?: Function; warn?: Function; error?: Function },
+    private logger?: { info?: Function; warn?: Function; error?: Function; debug?: Function },
     poolConfig?: Partial<ConnectionPoolConfig>
   ) {
     this.configFactory = new ProductionRedisConfigurationFactory();
@@ -382,7 +383,11 @@ export class RedisConnectionManager {
 
     try {
       const connection = await this.getConnection(usageType);
-      const result = await callback(connection);
+      const result = await withRetry(
+        () => callback(connection),
+        `redis_${usageType}`,
+        { attempts: 2, logger: this.logger, payload: { usageType } }
+      );
       return { ok: true, result };
     } catch (error: unknown) {
       // تجنب الاستدعاء المتكرر للـ error handler
@@ -481,7 +486,7 @@ export class RedisConnectionManager {
     if (fails.length) {
       this.logger.error({ 
         fails: fails.length, 
-        sample: fails.slice(0,3).map(f => String((f as any).reason)),
+        sample: fails.slice(0,3).map(f => f.status === 'rejected' ? String(f.reason) : 'unknown'),
         totalConnections: closePromises.length 
       }, "Redis connection close failures");
       
@@ -518,7 +523,7 @@ export class RedisConnectionManager {
     this.redisEnabled = true;
             delete this.rateLimitResetAt;
           delete this.pauseReconnectionsUntil;
-    this.logger?.info('Redis re-enabled');
+    this.logger?.info?.('Redis re-enabled');
   }
 
   /**
@@ -526,12 +531,12 @@ export class RedisConnectionManager {
    */
   disableRedis(reason: string = 'manual'): void {
     this.redisEnabled = false;
-    this.logger?.warn('Redis disabled', { reason });
+    this.logger?.warn?.('Redis disabled', { reason });
     
     // ✅ إضافة إعادة تفعيل تلقائية بعد 5 دقائق
     if (reason === 'rate_limit') {
       setTimeout(() => {
-        this.logger?.info('Redis auto-re-enabling after rate limit cooldown');
+        this.logger?.info?.('Redis auto-re-enabling after rate limit cooldown');
         this.enableRedis();
       }, 5 * 60 * 1000); // 5 دقائق
     }
@@ -541,7 +546,7 @@ export class RedisConnectionManager {
    * Manual health check for all connections
    */
   async performHealthCheckOnAllConnections(): Promise<void> {
-    this.logger?.debug('Starting health check for all Redis connections...');
+    this.logger?.debug?.('Starting health check for all Redis connections...');
     
     const connections = Array.from(this.connections.entries());
     
@@ -556,13 +561,13 @@ export class RedisConnectionManager {
           info.healthScore = Math.min(100, info.healthScore + 5); // تحسن تدريجي
           if (info.status === 'error') {
             info.status = 'connected';
-            this.logger?.info('Connection recovered', { usageType });
+            this.logger?.info?.('Connection recovered', { usageType });
           }
         } else {
           info.healthScore = Math.max(0, info.healthScore - 10); // تدهور تدريجي
           if (info.healthScore <= 20) {
             info.status = 'error';
-            this.logger?.warn('Connection marked as unhealthy', { 
+            this.logger?.warn?.('Connection marked as unhealthy', { 
               usageType, 
               healthScore: info.healthScore 
             });
@@ -571,16 +576,16 @@ export class RedisConnectionManager {
       } catch (error: unknown) {
         info.status = 'error';
         info.healthScore = 0;
-        info.lastError = error.message;
+        info.lastError = error instanceof Error ? error.message : String(error);
         
-        this.logger?.error('Health check failed for connection', {
+        this.logger?.error?.('Health check failed for connection', {
           usageType,
-          error: error.message
+          error: error instanceof Error ? error.message : String(error)
         });
       }
     }
 
-    this.logger?.debug('Health check completed for all connections');
+    this.logger?.debug?.('Health check completed for all connections');
   }
 
   // removed unused method

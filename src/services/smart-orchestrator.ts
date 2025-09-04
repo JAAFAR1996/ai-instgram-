@@ -13,7 +13,7 @@ import { getDatabase } from '../db/adapter.js';
 import { shouldUseExtendedThinking } from '../utils/reasoning-chain.js';
 import ExtendedThinkingService from './extended-thinking.js';
 import type { ThinkingChain } from '../types/thinking.js';
-import { getClarifyAttemptCount, getSessionClarifyAttempts, type ClarifyAttempts } from '../types/session-data.js';
+import { getClarifyAttemptCount, getSessionClarifyAttempts } from '../types/session-data.js';
 
 export interface OrchestratorOptions {
   askAtMostOneFollowup?: boolean;
@@ -66,13 +66,13 @@ export async function orchestrate(
     sizeAliases: Record<string, string[]>;
     customEntities: Record<string, string[]>;
   } = {
-    synonyms: aiCfg?.synonyms && typeof aiCfg.synonyms === 'object' ? aiCfg.synonyms as Record<string, string[]> : {},
-    categories: aiCfg?.categories || [],
-    brands: aiCfg?.brands || [],
-    colors: aiCfg?.colors || [],
-    genders: aiCfg?.genders ?? undefined,
-    sizeAliases: aiCfg?.sizeAliases || {},
-    customEntities: aiCfg?.customEntities || {},
+    synonyms: (aiCfg?.synonyms && typeof aiCfg.synonyms === 'object') ? (aiCfg.synonyms as Record<string, string[]>) : ({} as Record<string, string[]>),
+    categories: Array.isArray((aiCfg as Record<string, unknown>)?.categories) ? (aiCfg as Record<string, unknown>).categories as string[] : [],
+    brands: Array.isArray((aiCfg as Record<string, unknown>)?.brands) ? (aiCfg as Record<string, unknown>).brands as string[] : [],
+    colors: Array.isArray((aiCfg as Record<string, unknown>)?.colors) ? (aiCfg as Record<string, unknown>).colors as string[] : [],
+    ...(Array.isArray((aiCfg as Record<string, unknown>)?.genders) ? { genders: (aiCfg as Record<string, unknown>).genders as string[] } : {}),
+    sizeAliases: ((aiCfg as Record<string, unknown>)?.sizeAliases && typeof (aiCfg as Record<string, unknown>).sizeAliases === 'object') ? (aiCfg as Record<string, unknown>).sizeAliases as Record<string, string[]> : ({} as Record<string, string[]>),
+    customEntities: ((aiCfg as Record<string, unknown>)?.customEntities && typeof (aiCfg as Record<string, unknown>).customEntities === 'object') ? (aiCfg as Record<string, unknown>).customEntities as Record<string, string[]> : ({} as Record<string, string[]>),
   };
 
   // Customer profiling to influence categorization and personalization
@@ -128,10 +128,10 @@ export async function orchestrate(
         merchantId,
         username,
         intent: res.intent,
-        stage: res.stage,
+        ...(res.stage ? { stage: res.stage } : {}),
       });
       if (!critique.meetsThreshold) {
-        const { improved } = await consAI.improveResponse(text, critique, { merchantId, username, intent: res.intent, stage: res.stage });
+        const { improved } = await consAI.improveResponse(text, critique, { merchantId, username, intent: res.intent, ...(res.stage ? { stage: res.stage } : {}) });
         text = improved;
         res.decision_path = [...res.decision_path, 'constitutional_ai=improved'];
         // record analytics with quality score
@@ -185,7 +185,7 @@ export async function orchestrate(
       thinkingChain = thinking.chain;
       decision.push('thinking=enabled');
       decision.push(`thinking_steps=${thinking.chain.steps.length}`);
-      decision.push(`thinking_conf=${Math.round((thinking.chain.overallConfidence || 0) * 100)}`);
+      decision.push(`thinking_conf=${Math.round((thinking.chain.overallConfidence ?? 0) * 100)}`);
     } catch {}
   }
 
@@ -196,7 +196,7 @@ export async function orchestrate(
   }
 
   // Generic OTHER response (non-sector-specific) before falling back further
-  if (analysis.intent === 'OTHER') {
+  if (String(analysis.intent) === 'OTHER') {
     const examples = Array.isArray(hints.categories) && hints.categories.length
       ? ` (مثال: ${hints.categories.slice(0, 3).filter(Boolean).join(' / ')})`
       : '';
@@ -242,7 +242,7 @@ export async function orchestrate(
         let altText = 'ماكو نفس المواصفات، تحب أشوف بدائل قريبة؟';
         if (alts.length) {
           const formatted = alts.map(a => {
-            const price = (a.final_price_iqd ?? a.base_price_iqd) || 0;
+            const price = (a.final_price_iqd ?? a.base_price_iqd) ?? 0;
             return `${a.name_ar.split(' ').slice(0,3).join(' ')} ${Math.round(Number(price)).toLocaleString('ar-IQ')} د.ع`;
           }).slice(0,3);
           if (formatted.length) altText = `ماكو نفس المواصفات، الأقرب: ${formatted.join('، ')}. أي واحد يعجبك؟`;
@@ -297,7 +297,7 @@ export async function orchestrate(
     let text = 'ماكو نفس المواصفات، تحب أشوف بدائل قريبة؟';
     if (alts.length) {
       const formatted = alts.map(a => {
-        const price = (a.final_price_iqd ?? a.base_price_iqd) || 0;
+        const price = (a.final_price_iqd ?? a.base_price_iqd) ?? 0;
         return `${a.name_ar.split(' ').slice(0,3).join(' ')} ${Math.round(Number(price)).toLocaleString('ar-IQ')} د.ع`;
       }).slice(0,3);
       if (formatted.length) text = `ماكو نفس المواصفات، الأقرب: ${formatted.join('، ')}. أي واحد يعجبك؟`;
@@ -351,7 +351,7 @@ export async function orchestrate(
     return withThinking(await postProcess({ text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision }));
   }
   // SmartProductSearch suggestions for general queries (best-effort)
-  if (analysis.intent === 'OTHER') {
+  if (String(analysis.intent) === 'OTHER') {
     try {
       const hits = await productSearch.searchProducts(messageText, merchantId, { limit: 5 });
       if (hits.length > 0) {

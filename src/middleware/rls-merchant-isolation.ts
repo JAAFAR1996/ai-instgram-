@@ -408,7 +408,7 @@ export function createMerchantSQL(
     async withMerchantCheck<T>(query: Promise<T>, merchantId?: string): Promise<T> {
       if (merchantId) {
         // Verify the merchant matches the one set in GUC
-        const currentMerchant = await sql`SELECT current_setting('app.current_merchant_id', true) as merchant_id`;
+        const currentMerchant = await sql<{ merchant_id: string }>`SELECT current_setting('app.current_merchant_id', true) as merchant_id`;
         if (currentMerchant[0]?.merchant_id !== merchantId) {
           throw new Error('Merchant ID mismatch - possible security violation');
         }
@@ -422,7 +422,7 @@ export function createMerchantSQL(
      */
     async getCurrentMerchant(): Promise<string | null> {
       try {
-        const result = await sql`SELECT current_merchant_id() as merchant_id`;
+        const result = await sql<{ merchant_id: string }>`SELECT current_merchant_id() as merchant_id`;
         return result[0]?.merchant_id ?? null;
       } catch (error) {
         log.warn('Could not get current merchant from unified function', { error: serr(error) });

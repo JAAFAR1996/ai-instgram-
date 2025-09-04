@@ -30,7 +30,10 @@ export function addStep<TIn = unknown>(chain: ThinkingChain, stage: ReasoningSta
     startedAt: new Date().toISOString(),
     status: 'in_progress',
   };
-  if (typeof input !== 'undefined' && step && typeof step === 'object') (step as Record<string, unknown>).input = input as unknown;
+  if (typeof input !== 'undefined' && step && typeof step === 'object') {
+    const stepWithInput = step as ThinkingStep<any, any> & { input?: unknown };
+    stepWithInput.input = input;
+  }
   chain.steps.push(step);
   chain.status = 'in_progress';
   return step;

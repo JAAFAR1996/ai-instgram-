@@ -9,6 +9,7 @@ import { getLogger } from './logger.js';
 import { getEnv } from '../config/env.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
 import { ExpiringMap } from '../utils/expiring-map.js';
+import { withRetry } from '../utils/retry.js';
 
 // Types
 export interface ManyChatOptions {
@@ -551,7 +552,7 @@ export class ManyChatService {
       ...(options.body && { body: options.body })
     };
 
-    try {
+    return await withRetry(async () => {
       const response = await fetch(url, fetchOptions);
       const data = await response.json();
 
@@ -565,17 +566,11 @@ export class ManyChatService {
       }
 
       return data;
-
-    } catch (error) {
-      if (error instanceof ManyChatAPIError) {
-        throw error;
-      }
-
-      throw new ManyChatAPIError(
-        `Network error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        0
-      );
-    }
+    }, `manychat_api_${endpoint}`, {
+      attempts: 3,
+      logger: this.logger,
+      payload: { endpoint, method: options.method, body: options.body }
+    });
   }
 
   /**

@@ -282,7 +282,7 @@ export class PredictiveSchedulerService {
       if (fails.length) {
         this.log.error({ 
           fails: fails.length, 
-          sample: fails.slice(0,3).map(f => String((f as any).reason))
+          sample: fails.slice(0,3).map(f => f.status === 'rejected' ? String(f.reason) : 'unknown')
         }, "Cleanup operations batch failures");
         
         // Schedule retry for failed cleanup operations after delay

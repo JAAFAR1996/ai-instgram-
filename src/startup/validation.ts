@@ -472,8 +472,8 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
     // Check for tables with high dead tuple ratios
     const deadTupleWarnings = [];
     for (const stat of tableStats) {
-      const liveTuples = parseInt(stat.n_live_tup) || 0;
-      const deadTuples = parseInt(stat.n_dead_tup) || 0;
+      const liveTuples = parseInt(stat.n_live_tup) ?? 0;
+      const deadTuples = parseInt(stat.n_dead_tup) ?? 0;
       
       if (liveTuples > 0 && deadTuples > 0) {
         const deadRatio = deadTuples / (liveTuples + deadTuples);
@@ -630,7 +630,7 @@ async function validateExternalServices(): Promise<ValidationResult> {
       service: 'External Services',
       message: hasErrors ? 'Some external services are unreachable' : 'External service connectivity verified',
       duration: Date.now() - startTime,
-      details: results
+      details: { results }
     };
   } catch (error) {
     return {

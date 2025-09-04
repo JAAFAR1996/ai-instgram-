@@ -12,6 +12,7 @@ import { telemetry } from './telemetry.js';
 import { createHash } from 'crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { withRetry } from '../utils/retry.js';
 import type {
 
   InstagramAPIResponse,
@@ -162,44 +163,52 @@ export class InstagramAPIClient {
     // Rate limiting disabled for ManyChat flow
 
     const url = `${GRAPH_API_BASE_URL}${path}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
     const start = Date.now();
-    try {
-      const init: RequestInit = {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        signal: controller.signal
-      };
-      if (body !== undefined) {
-        (init as Record<string, unknown>).body = JSON.stringify(body);
+    
+    const res = await withRetry(async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      
+      try {
+        const init: RequestInit = {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          signal: controller.signal
+        };
+        if (body !== undefined) {
+          (init as Record<string, unknown>).body = JSON.stringify(body);
+        }
+        return await fetch(url, init);
+      } finally {
+        clearTimeout(timeout);
       }
-      const res = await fetch(url, init);
+    }, `instagram_graph_${path}`, {
+      attempts: 3,
+      logger: this.logger,
+      payload: { method, path, merchantId, body }
+    });
 
-      const latency = Date.now() - start;
-      telemetry.recordMetaRequest('instagram', path, res.status, latency, res.status === 429);
+    const latency = Date.now() - start;
+    telemetry.recordMetaRequest('instagram', path, res.status, latency, res.status === 429);
 
-      // اختياري: قراءة رؤوس فيسبوك الخاصة بالاستهلاك (إن وُجدت) لتسجيلها
-      const appUsage = res.headers.get('x-app-usage');
-      const pageUsage = res.headers.get('x-page-usage');
-      if (appUsage || pageUsage) {
-        this.logger.info(`📊 Graph API usage - App: ${appUsage}, Page: ${pageUsage}`);
-      }
-
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => '');
-        const err = new Error(`IG Graph error ${res.status}: ${errBody}`) as Error & { status?: number };
-        err.status = res.status;
-        throw err;
-      }
-
-      return returnResponse ? res : await res.json() as T;
-    } finally {
-      clearTimeout(timeout);
+    // اختياري: قراءة رؤوس فيسبوك الخاصة بالاستهلاك (إن وُجدت) لتسجيلها
+    const appUsage = res.headers.get('x-app-usage');
+    const pageUsage = res.headers.get('x-page-usage');
+    if (appUsage || pageUsage) {
+      this.logger.info(`📊 Graph API usage - App: ${appUsage}, Page: ${pageUsage}`);
     }
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      const err = new Error(`IG Graph error ${res.status}: ${errBody}`) as Error & { status?: number };
+      err.status = res.status;
+      throw err;
+    }
+
+    return returnResponse ? res : await res.json() as T;
   }
 
   /**

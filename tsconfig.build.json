@@ -9,7 +9,6 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "downlevelIteration": true,
-    // نفس تليين الأنواع في tsconfig العادي
     "exactOptionalPropertyTypes": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false

@@ -1,0 +1,251 @@
+{
+  "root": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform",
+  "scanned_extensions": [
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mts",
+    ".cts"
+  ],
+  "excluded_dirs": [
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "coverage",
+    ".next",
+    "out",
+    "test",
+    "tests"
+  ],
+  "totals": {
+    "falsyOrOther": 35,
+    "asUnknownAs": 9,
+    "asAny": 3,
+    "allSettled": 3,
+    "thenSecondArg": 2,
+    "falsyOrStringNullUndef": 1,
+    "tsIgnore": 0,
+    "tsExpectError": 0,
+    "tsNoCheck": 0,
+    "istanbulIgnore": 0,
+    "c8Ignore": 0,
+    "typeAny": 0,
+    "nonNullAssert": 0,
+    "emptyCatchBlock": 0,
+    "catchIgnoreComment": 0,
+    "catchNoopArrow": 0,
+    "catchToNullish": 0,
+    "catchBoolean": 0,
+    "voidPrefixCall": 0,
+    "processHandlers": 0,
+    "eslintDisable": 0
+  },
+  "files_count": 33,
+  "top_files": [
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/infrastructure/db/sql-compat.ts",
+      "total": 5
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/cross-platform-conversation-manager.ts",
+      "total": 4
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/merchant-repository.ts",
+      "total": 3
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-continuous-improvement.ts",
+      "total": 3
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/db/adapter.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/db-spool.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repos/product-search.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/image-search.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/analytics/conversation-analytics.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/customer-memory.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-hashtag-monitor.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/message-enhancement.service.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/recommendation/product-recommendation.engine.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/dead-letter.ts",
+      "total": 1
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repos/product-finder.ts",
+      "total": 1
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/conversation-repository.ts",
+      "total": 1
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/index.ts",
+      "total": 1
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/merchant-admin.ts",
+      "total": 1
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/webhooks.ts",
+      "total": 1
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ProductionQueueManager.ts",
+      "total": 1
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisConnectionManager.ts",
+      "total": 1
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/catalog/merchant-catalog.service.ts",
+      "total": 1
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/compliance.ts",
+      "total": 1
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-manychat-bridge.ts",
+      "total": 1
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-timing-optimizer.ts",
+      "total": 1
+    }
+  ],
+  "per_file": {
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/db/adapter.ts": {
+      "asUnknownAs": 2
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/infrastructure/db/sql-compat.ts": {
+      "asUnknownAs": 5
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/db-spool.ts": {
+      "falsyOrOther": 2
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/dead-letter.ts": {
+      "allSettled": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repos/product-finder.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repos/product-search.ts": {
+      "falsyOrOther": 2
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/conversation-repository.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/index.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/merchant-repository.ts": {
+      "asAny": 3
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/image-search.ts": {
+      "falsyOrOther": 2
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/merchant-admin.ts": {
+      "asUnknownAs": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/webhooks.ts": {
+      "falsyOrStringNullUndef": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ProductionQueueManager.ts": {
+      "thenSecondArg": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisConnectionManager.ts": {
+      "allSettled": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/analytics/conversation-analytics.ts": {
+      "falsyOrOther": 2
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/catalog/merchant-catalog.service.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/compliance.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/cross-platform-conversation-manager.ts": {
+      "falsyOrOther": 4
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/customer-memory.ts": {
+      "falsyOrOther": 2
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-continuous-improvement.ts": {
+      "falsyOrOther": 3
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-hashtag-monitor.ts": {
+      "falsyOrOther": 2
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-manychat-bridge.ts": {
+      "thenSecondArg": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-timing-optimizer.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-webhook.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/message-enhancement.service.ts": {
+      "falsyOrOther": 2
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/predictive-analytics.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/predictive-scheduler.ts": {
+      "allSettled": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/proactive-service.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/recommendation/product-recommendation.engine.ts": {
+      "falsyOrOther": 2
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/search/smart-product-search.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/smart-cache.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/utils/pattern-matcher.ts": {
+      "falsyOrOther": 1
+    },
+    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/utils/reasoning-chain.ts": {
+      "asUnknownAs": 1
+    }
+  },
+  "timestamp": "2025-09-04T20:10:04.209Z",
+  "note": "processHandlers يُحتسب فقط إذا لم نجد process.exit(non-zero) في الملف نفسه. falsyOr* ترصد استخدام || لفولباكات صامتة."
+}

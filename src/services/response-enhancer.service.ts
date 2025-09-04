@@ -294,8 +294,8 @@ export class ResponseEnhancerService {
     context: ResponseEnhancementContext
   ): { enhanced: boolean; response: string; boost: number } {
     
-    const is = (patterns as Record<string, unknown>).intentSuccess as Record<string, unknown> | undefined; const intentData = is ? (is[String(intent)] as { avgScore?: number }) : undefined;
-    if (!intentData || intentData.avgScore < 0.6) {
+    const is = (patterns as Record<string, unknown>).intentSuccess as Record<string, unknown> | undefined; const intentData = is ? (is[String(intent)] as { avgScore?: number }) : undefined; const avg = intentData?.avgScore ?? 0;
+    if (!intentData || avg < 0.6) {
       return { enhanced: false, response, boost: 0 };
     }
 
@@ -305,21 +305,21 @@ export class ResponseEnhancerService {
     // Apply intent-specific enhancements
     switch (intent) {
       case 'PRICE':
-        if (intentData.avgScore > 0.8 && !response.includes('سعر') && !response.includes('price')) {
+        if (avg > 0.8 && !response.includes('سعر') && !response.includes('price')) {
           optimizedResponse += ' يمكنني أن أوضح لك تفاصيل الأسعار والعروض المتاحة.';
           boost = 0.15;
         }
         break;
 
       case 'INVENTORY':
-        if (intentData.avgScore > 0.8 && !response.includes('متوفر') && !response.includes('stock')) {
+        if (avg > 0.8 && !response.includes('متوفر') && !response.includes('stock')) {
           optimizedResponse += ' دعني أتحقق من التوفر الحالي لك فوراً.';
           boost = 0.15;
         }
         break;
 
       case 'OBJECTION':
-        if (intentData.avgScore > 0.7) {
+        if (avg > 0.7) {
           // Add empathy and solution-focused language
           const empathyPhrases = ['أتفهم تماماً', 'هذا مهم جداً', 'دعني أساعدك'];
           const missingEmpathy = empathyPhrases.find(phrase => !response.includes(phrase));
@@ -331,7 +331,7 @@ export class ResponseEnhancerService {
         break;
 
       case 'FAQ':
-        if (intentData.avgScore > 0.75 && response.length < 100) {
+        if (avg > 0.75 && response.length < 100) {
           optimizedResponse += ' هل تحتاج لتوضيحات إضافية؟';
           boost = 0.08;
         }
@@ -525,8 +525,12 @@ export class ResponseEnhancerService {
     }
 
     // Intent match bonus
-    if (context.aiIntent) { const is2 = (patterns as Record<string, unknown>).intentSuccess as Record<string, unknown> | undefined; const d = is2 ? (is2[String(context.aiIntent)] as { avgScore?: number }) : undefined; if ((d?.avgScore ?? 0) > 0.7) {
-      qualityScore += 0.15;
+    if (context.aiIntent) { 
+      const is2 = (patterns as Record<string, unknown>).intentSuccess as Record<string, unknown> | undefined; 
+      const d = is2 ? (is2[String(context.aiIntent)] as { avgScore?: number }) : undefined; 
+      if ((d?.avgScore ?? 0) > 0.7) {
+        qualityScore += 0.15;
+      }
     }
 
     // Enhancement bonus

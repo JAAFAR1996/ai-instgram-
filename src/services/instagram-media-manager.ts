@@ -253,9 +253,9 @@ export class InstagramMediaManager {
           merchantId,
           customerId: 'system',
           mimeType: 'image/jpeg', // Default
-          width: media.metadata?.dimensions?.width || 0,
-          height: media.metadata?.dimensions?.height || 0,
-          sizeBytes: media.metadata?.fileSize || 0,
+          width: media.metadata?.dimensions?.width ?? 0,
+          height: media.metadata?.dimensions?.height ?? 0,
+          sizeBytes: media.metadata?.fileSize ?? 0,
           contentHash: ''
         };
 
@@ -320,11 +320,11 @@ export class InstagramMediaManager {
    * Detect if this is a product inquiry
    */
   private detectProductInquiry(analysis: ImageAnalysisResult, textContent?: string): boolean {
-    const text = (textContent || analysis.ocrText ?? '').toLowerCase();
+    const text = ((textContent || analysis.ocrText) ?? '').toLowerCase();
     const productKeywords = /سعر|كم|price|cost|اشتري|buy|منتج|product/;
     
     const hasProductKeywords = productKeywords.test(text);
-    const hasProductMatches = (analysis.productMatches?.length || 0) > 0;
+    const hasProductMatches = (analysis.productMatches?.length ?? 0) > 0;
     const isProductType = analysis.contentType?.category === 'product';
 
     return hasProductKeywords || hasProductMatches || isProductType;
@@ -477,9 +477,9 @@ export class InstagramMediaManager {
           ${merchantId}::uuid,
           ${userId},
           'image/jpeg',
-          ${media.metadata?.dimensions?.width || 0},
-          ${media.metadata?.dimensions?.height || 0},
-          ${media.metadata?.fileSize || 0},
+          ${media.metadata?.dimensions?.width ?? 0},
+          ${media.metadata?.dimensions?.height ?? 0},
+          ${media.metadata?.fileSize ?? 0},
           ${`hash_${Date.now()}`},
           ${analysis.extractedText ?? null},
           ${JSON.stringify({
@@ -575,3 +575,4 @@ export function getInstagramMediaManager(): InstagramMediaManager {
 }
 
 export default InstagramMediaManager;
+

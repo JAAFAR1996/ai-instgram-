@@ -95,10 +95,10 @@ export class PredictiveAnalyticsEngine {
       const totalBySizes = new Map<string, number>();
       
       for (const item of sizeHistory) {
-        const size = item.size || 'unknown';
-        totalBySizes.set(size, (totalBySizes.get(size) || 0) + 1);
+        const size = item.size ?? 'unknown';
+        totalBySizes.set(size, (totalBySizes.get(size) ?? 0) + 1);
         if (item.returned) {
-          returnsBySize.set(size, (returnsBySize.get(size) || 0) + 1);
+          returnsBySize.set(size, (returnsBySize.get(size) ?? 0) + 1);
         }
       }
 
@@ -152,7 +152,7 @@ export class PredictiveAnalyticsEngine {
         const sizesBySuccess = uniqueSizes
           .map(size => ({
             size,
-            successRate: 1 - ((returnsBySize.get(size) || 0) / (totalBySizes.get(size) || 1))
+            successRate: 1 - ((returnsBySize.get(size) ?? 0) / (totalBySizes.get(size) ?? 1))
           }))
           .sort((a, b) => b.successRate - a.successRate)
           .slice(0, 2)
@@ -328,7 +328,7 @@ export class PredictiveAnalyticsEngine {
         riskFactors,
       };
       if (churnProbability > 0.5) {
-        const days = Math.max(7, Math.floor(30 - (data.last_message_days_ago || 0)));
+        const days = Math.max(7, Math.floor(30 - (data.last_message_days_ago ?? 0)));
         base.daysToPredictedChurn = days;
       }
       return base;
@@ -377,7 +377,7 @@ export class PredictiveAnalyticsEngine {
         actions.push({
           type: 'FOLLOWUP_MESSAGE',
           priority: urgency,
-          message: `عميل معرض لخطر فقدانه! ${churnRisk.retentionActions[0] || 'تواصل فوري'}`,
+          message: `عميل معرض لخطر فقدانه! ${churnRisk.retentionActions[0] ?? 'تواصل فوري'}`,
           scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // Tomorrow
           context: { churnRisk, customerId, merchantId },
         });
@@ -385,7 +385,7 @@ export class PredictiveAnalyticsEngine {
         actions.push({
           type: 'LOYALTY_OFFER',
           priority: 'MEDIUM',
-          message: `اقترح عرض خاص للعميل ${customerId} - ${churnRisk.retentionActions[0] || 'خصم حصري'}`,
+          message: `اقترح عرض خاص للعميل ${customerId} - ${churnRisk.retentionActions[0] ?? 'خصم حصري'}`,
           scheduledAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // In 3 days
           context: { churnRisk, customerId, merchantId },
         });
