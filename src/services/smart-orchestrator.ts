@@ -13,6 +13,7 @@ import { getDatabase } from '../db/adapter.js';
 import { shouldUseExtendedThinking } from '../utils/reasoning-chain.js';
 import ExtendedThinkingService from './extended-thinking.js';
 import type { ThinkingChain } from '../types/thinking.js';
+import { getClarifyAttemptCount, getSessionClarifyAttempts, type ClarifyAttempts } from '../types/session-data.js';
 
 export interface OrchestratorOptions {
   askAtMostOneFollowup?: boolean;
@@ -207,7 +208,7 @@ export async function orchestrate(
   if (analysis.intent === 'PRICE' || analysis.intent === 'INVENTORY') {
     // Check missing critical property
     const needsCategory = !analysis.entities.category;
-    const clarifyAttempts = Number((session as Record<string, unknown>)?.clarify_attempts && typeof (session as any).clarify_attempts?.category === 'number' ? (session as any).clarify_attempts.category : 0);
+    const clarifyAttempts = getClarifyAttemptCount(session, 'category');
     if (needsCategory && options.askAtMostOneFollowup) {
       if (clarifyAttempts < 1) {
         const text = 'تريد شنو بالضبط؟ قميص، حذاء، بنطلون؟';
@@ -220,7 +221,7 @@ export async function orchestrate(
           decision_path: decision,
           session_patch: {
             clarify_attempts: {
-              ...(session as any)?.clarify_attempts,
+              ...getSessionClarifyAttempts(session),
               category: clarifyAttempts + 1
             }
           }

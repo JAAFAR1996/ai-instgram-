@@ -32,11 +32,11 @@ export function computeSuccessPatterns(
   for (const r of rows) {
     // Time slots
     const slot = timeSlotFromDate(new Date(r.created_at));
-    slotMap.set(slot, (slotMap.get(slot) || 0) + 1);
+    slotMap.set(slot, (slotMap.get(slot) ?? 0) + 1);
 
     // Phrases
     for (const ph of extractPhrases(r.content ?? '')) {
-      phraseMap.set(ph, (phraseMap.get(ph) || 0) + 1);
+      phraseMap.set(ph, (phraseMap.get(ph) ?? 0) + 1);
     }
 
     // Preferences signals from session_data
@@ -45,7 +45,7 @@ export function computeSuccessPatterns(
       const v = s[key];
       if (typeof v === 'string' && v) {
         const k = `${key}:${v}`;
-        prefMap.set(k, (prefMap.get(k) || 0) + 1);
+        prefMap.set(k, (prefMap.get(k) ?? 0) + 1);
       }
     }
   }

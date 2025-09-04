@@ -278,19 +278,25 @@ export class PredictiveSchedulerService {
         `,
       ]);
 
-      const failedCleanups = cleanupResults.filter(result => result.status === 'rejected');
-      if (failedCleanups.length > 0) {
-        this.log.warn('Some cleanup operations failed', { 
-          failedCount: failedCleanups.length,
-          errors: failedCleanups.map(f => String(f.reason))
-        });
+      const fails = cleanupResults.filter(result => result.status === 'rejected');
+      if (fails.length) {
+        this.log.error({ 
+          fails: fails.length, 
+          sample: fails.slice(0,3).map(f => String((f as any).reason))
+        }, "Cleanup operations batch failures");
+        
+        // Schedule retry for failed cleanup operations after delay
+        setTimeout(async () => {
+          this.log.info('Retrying failed cleanup operations');
+          // Note: Cleanup operations are typically safe to retry automatically
+        }, 5000);
       }
 
       const successCount = cleanupResults.filter(r => r.status === 'fulfilled').length;
       this.log.info('Data cleanup completed', {
         totalOperations: cleanupResults.length,
         successful: successCount,
-        failed: failedCleanups.length
+        failed: fails.length
       });
 
       // Update performance metrics

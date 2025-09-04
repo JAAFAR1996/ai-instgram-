@@ -30,7 +30,11 @@ export interface ConfidenceRoutingContext {
   aiIntent?: string;
   processingTime: number;
   platform?: string;
-  conversationHistory?: any[];
+  conversationHistory?: Array<{
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: Date;
+  }>;
   customerProfile?: {
     language?: string;
     previousInteractions: number;

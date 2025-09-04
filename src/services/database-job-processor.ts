@@ -68,7 +68,14 @@ export function isDatabaseJobProcessorRunning(): boolean {
   return isRunning && processingInterval !== null;
 }
 
-async function processWebhookFromDatabase(job: any) {
+interface WebhookJob {
+  jobId: string;
+  merchantId: string;
+  priority: number;
+  data: Record<string, unknown>;
+}
+
+async function processWebhookFromDatabase(job: WebhookJob) {
   try {
     logger.info('🔄 Processing webhook job from database', {
       jobId: job.jobId,
@@ -77,7 +84,7 @@ async function processWebhookFromDatabase(job: any) {
     });
 
     // إضافة فحص قاعدة البيانات قبل الاستخدام
-    let webhookHandler: any;
+    let webhookHandler: { processWebhook?: (data: Record<string, unknown>) => Promise<void> };
     try {
       webhookHandler = await getInstagramWebhookHandler();
     } catch (error) {

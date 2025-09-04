@@ -20,18 +20,18 @@
     "tests"
   ],
   "totals": {
-    "falsyOrOther": 175,
-    "typeAny": 43,
-    "asAny": 40,
-    "asUnknownAs": 11,
-    "thenSecondArg": 4,
+    "falsyOrOther": 137,
+    "asAny": 9,
     "allSettled": 3,
+    "thenSecondArg": 2,
+    "asUnknownAs": 1,
     "falsyOrStringNullUndef": 1,
     "tsIgnore": 0,
     "tsExpectError": 0,
     "tsNoCheck": 0,
     "istanbulIgnore": 0,
     "c8Ignore": 0,
+    "typeAny": 0,
     "nonNullAssert": 0,
     "emptyCatchBlock": 0,
     "catchIgnoreComment": 0,
@@ -42,22 +42,10 @@
     "processHandlers": 0,
     "eslintDisable": 0
   },
-  "files_count": 68,
+  "files_count": 45,
   "top_files": [
     {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-ai.ts",
-      "total": 13
-    },
-    {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/monitoring.ts",
-      "total": 13
-    },
-    {
       "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ai.ts",
-      "total": 12
-    },
-    {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/image-analysis.ts",
       "total": 11
     },
     {
@@ -70,50 +58,26 @@
     },
     {
       "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/db/index.ts",
-      "total": 9
-    },
-    {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-media-manager.ts",
-      "total": 9
-    },
-    {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/response-enhancer.service.ts",
-      "total": 9
-    },
-    {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/merchant-repository.ts",
       "total": 8
     },
     {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-manychat-bridge.ts",
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-ai.ts",
       "total": 8
-    },
-    {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/smart-orchestrator.ts",
-      "total": 8
-    },
-    {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/rls-wrapper.ts",
-      "total": 7
     },
     {
       "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/advanced-analytics.ts",
       "total": 7
     },
     {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/conversation-ai-orchestrator.ts",
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-media-manager.ts",
       "total": 7
     },
     {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/cross-platform-conversation-manager.ts",
-      "total": 7
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/image-analysis.ts",
+      "total": 6
     },
     {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/message-enhancement.service.ts",
-      "total": 7
-    },
-    {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/service-controller.ts",
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/smart-orchestrator.ts",
       "total": 6
     },
     {
@@ -121,11 +85,15 @@
       "total": 5
     },
     {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/customer-profiler.ts",
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/merchant-repository.ts",
       "total": 5
     },
     {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-hashtag-monitor.ts",
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/conversation-ai-orchestrator.ts",
+      "total": 5
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/customer-profiler.ts",
       "total": 5
     },
     {
@@ -137,51 +105,62 @@
       "total": 5
     },
     {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/recommendation/product-recommendation.engine.ts",
-      "total": 5
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/webhooks.ts",
+      "total": 4
     },
     {
-      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/utils/pattern-matcher.ts",
-      "total": 5
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/cross-platform-conversation-manager.ts",
+      "total": 4
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-continuous-improvement.ts",
+      "total": 3
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/db/adapter.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/db-spool.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repos/product-search.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/image-search.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/message-analytics.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/analytics/conversation-analytics.ts",
+      "total": 2
+    },
+    {
+      "file": "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/customer-memory.ts",
+      "total": 2
     }
   ],
   "per_file": {
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/boot/error-handlers.ts": {
       "falsyOrOther": 1
     },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/migrate.ts": {
-      "typeAny": 1
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/database/rls-wrapper.ts": {
-      "asUnknownAs": 1,
-      "falsyOrOther": 6
-    },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/db/adapter.ts": {
       "asAny": 2
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/db/index.ts": {
-      "falsyOrOther": 9
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/infrastructure/db/sql-compat.ts": {
-      "thenSecondArg": 2
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/middleware/rls-merchant-isolation.ts": {
-      "typeAny": 1
+      "falsyOrOther": 8
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/db-spool.ts": {
-      "asUnknownAs": 1,
       "falsyOrOther": 2
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/dead-letter.ts": {
       "falsyOrOther": 4,
       "allSettled": 1
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/queue/withTenantJob.ts": {
-      "asUnknownAs": 1,
-      "falsyOrOther": 1
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repos/message.repo.ts": {
-      "typeAny": 1
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repos/product-finder.ts": {
       "falsyOrOther": 1
@@ -190,29 +169,22 @@
       "falsyOrOther": 2
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/conversation-repository.ts": {
-      "falsyOrOther": 3
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/credentials-repository.ts": {
-      "asUnknownAs": 1
+      "falsyOrOther": 1
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/index.ts": {
       "falsyOrOther": 1
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/merchant-repository.ts": {
-      "asAny": 4,
-      "falsyOrOther": 4
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/repositories/message-repository.ts": {
-      "falsyOrOther": 3
+      "asAny": 3,
+      "falsyOrOther": 2
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/image-search.ts": {
       "falsyOrOther": 2
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/merchant-admin.ts": {
-      "asAny": 1
+      "asUnknownAs": 1
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/message-analytics.ts": {
-      "typeAny": 2,
       "falsyOrOther": 2
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/routes/webhooks.ts": {
@@ -224,14 +196,12 @@
       "falsyOrOther": 9
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/RedisConnectionManager.ts": {
-      "typeAny": 1,
       "allSettled": 1
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/advanced-analytics.ts": {
       "falsyOrOther": 7
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/ai.ts": {
-      "asUnknownAs": 1,
       "falsyOrOther": 11
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/analytics/conversation-analytics.ts": {
@@ -243,62 +213,35 @@
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/compliance.ts": {
       "falsyOrOther": 1
     },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/confidence-router.service.ts": {
-      "typeAny": 1
-    },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/conversation-ai-orchestrator.ts": {
-      "asAny": 2,
       "falsyOrOther": 5
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/cross-platform-conversation-manager.ts": {
-      "asUnknownAs": 3,
       "falsyOrOther": 4
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/customer-memory.ts": {
-      "asAny": 2,
       "falsyOrOther": 2
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/customer-profiler.ts": {
       "falsyOrOther": 5
     },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/database-job-processor.ts": {
-      "typeAny": 2
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/extended-thinking.ts": {
-      "asAny": 4
-    },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/image-analysis.ts": {
-      "typeAny": 5,
       "falsyOrOther": 6
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-ai.ts": {
-      "typeAny": 3,
-      "asAny": 1,
-      "asUnknownAs": 1,
       "falsyOrOther": 8
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-continuous-improvement.ts": {
       "falsyOrOther": 3
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-hashtag-monitor.ts": {
-      "typeAny": 1,
-      "asAny": 2,
       "falsyOrOther": 2
     },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-interaction-analyzer.ts": {
-      "asAny": 1
-    },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-manychat-bridge.ts": {
-      "typeAny": 5,
-      "asAny": 2,
       "thenSecondArg": 1
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-media-manager.ts": {
-      "typeAny": 2,
       "falsyOrOther": 7
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-message-sender.ts": {
-      "typeAny": 1
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-reporting.ts": {
       "falsyOrOther": 5
@@ -309,26 +252,8 @@
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/instagram-webhook.ts": {
       "falsyOrOther": 1
     },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/learning-analytics.ts": {
-      "typeAny": 2
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/logger.ts": {
-      "asAny": 1
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/manychat-api.ts": {
-      "typeAny": 2,
-      "asAny": 1
-    },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/message-enhancement.service.ts": {
-      "typeAny": 1,
-      "asAny": 4,
       "falsyOrOther": 2
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/monitoring.ts": {
-      "falsyOrOther": 13
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/notification-service.ts": {
-      "typeAny": 1
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/predictive-analytics.ts": {
       "falsyOrOther": 5
@@ -340,53 +265,29 @@
       "falsyOrOther": 1
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/recommendation/product-recommendation.engine.ts": {
-      "typeAny": 3,
       "falsyOrOther": 2
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/redis-monitoring.ts": {
       "falsyOrOther": 10
     },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/response-enhancer.service.ts": {
-      "typeAny": 1,
-      "asAny": 4,
-      "falsyOrOther": 4
-    },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/search/smart-product-search.ts": {
       "asAny": 1,
       "falsyOrOther": 1
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/service-controller.ts": {
-      "typeAny": 3,
-      "asAny": 3
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/smart-cache.ts": {
       "falsyOrOther": 1
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/smart-orchestrator.ts": {
       "asAny": 3,
-      "asUnknownAs": 2,
       "falsyOrOther": 3
     },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/services/utility-messages.ts": {
-      "typeAny": 1
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/startup/migrate.ts": {
-      "typeAny": 1
-    },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/startup/validation.ts": {
-      "typeAny": 1,
-      "asAny": 1,
       "falsyOrOther": 2
     },
     "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/utils/pattern-matcher.ts": {
-      "typeAny": 1,
-      "falsyOrOther": 4
-    },
-    "/mnt/c/Users/jaafa/Desktop/New folder (8)/ai-sales-platform/src/utils/reasoning-chain.ts": {
-      "asAny": 1,
-      "falsyOrOther": 3
+      "falsyOrOther": 1
     }
   },
-  "timestamp": "2025-09-04T13:35:21.696Z",
+  "timestamp": "2025-09-04T18:36:54.286Z",
   "note": "processHandlers يُحتسب فقط إذا لم نجد process.exit(non-zero) في الملف نفسه. falsyOr* ترصد استخدام || لفولباكات صامتة."
 }

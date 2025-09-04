@@ -27,11 +27,19 @@ export interface CustomerPreferences {
   color?: string[];
 }
 
+export interface ClarifyAttempts {
+  category?: number;
+  size?: number;
+  color?: number;
+  brand?: number;
+}
+
 export interface SessionData {
   cart?: CartItem[];
   preferences?: CustomerPreferences;
   lastActivity?: Date | string;
   clarifyAttempts?: number;
+  clarify_attempts?: ClarifyAttempts;
   searchHistory?: string[];
   viewedProducts?: string[];
   [key: string]: unknown;
@@ -66,4 +74,22 @@ export function getSessionPreferences(sessionData: unknown): CustomerPreferences
     return {};
   }
   return sessionData.preferences as CustomerPreferences;
+}
+
+/**
+ * Safe accessor for clarify attempts data
+ */
+export function getSessionClarifyAttempts(sessionData: unknown): ClarifyAttempts {
+  if (!isSessionData(sessionData) || typeof sessionData.clarify_attempts !== 'object' || !sessionData.clarify_attempts) {
+    return {};
+  }
+  return sessionData.clarify_attempts as ClarifyAttempts;
+}
+
+/**
+ * Safe accessor for specific clarify attempt count
+ */
+export function getClarifyAttemptCount(sessionData: unknown, category: keyof ClarifyAttempts): number {
+  const attempts = getSessionClarifyAttempts(sessionData);
+  return Number(attempts[category] ?? 0);
 }

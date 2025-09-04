@@ -389,13 +389,27 @@ export async function processRetryableItems(
     }));
 
     // Check for failures in this batch
-    const failures = results.filter(r => r.status === 'rejected');
-    if (failures.length > 0) {
-      logger.warn('DLQ batch processing failures', {
-        batchSize: batch.length,
-        failures: failures.length,
-        reasons: failures.map(f => f.status === 'rejected' ? String(f.reason) : 'Unknown')
-      });
+    const fails = results.filter(r => r.status === 'rejected');
+    if (fails.length) {
+      logger.error({ 
+        fails: fails.length, 
+        sample: fails.slice(0,3).map(f => String((f as any).reason)),
+        batchSize: batch.length 
+      }, "DLQ batch processing failures");
+      
+      // Re-enqueue failed items for next retry cycle
+      for (const failure of fails) {
+        const failedIndex = results.indexOf(failure);
+        if (failedIndex >= 0 && failedIndex < batch.length) {
+          const failedItem = batch[failedIndex];
+          failedItem.retryCount++;
+          failedItem.error = {
+            name: 'BatchProcessingError',
+            message: String((failure as any).reason),
+            stack: undefined
+          };
+        }
+      }
     }
     
     // Small delay between batches to prevent overwhelming

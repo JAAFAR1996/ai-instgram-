@@ -437,8 +437,8 @@ export class ConversationRepository {
         // Overall totals
         stats.total = parseInt(statsRow.total);
         stats.active = parseInt(statsRow.active);
-        stats.avgMessagesPerConversation = parseFloat(statsRow.avg_messages) || 0;
-        stats.avgDurationMinutes = parseFloat(statsRow.avg_duration_minutes) || 0;
+        stats.avgMessagesPerConversation = parseFloat(statsRow.avg_messages) ?? 0;
+        stats.avgDurationMinutes = parseFloat(statsRow.avg_duration_minutes) ?? 0;
       } else if (statsRow.platform && !statsRow.conversation_stage) {
         // Platform totals
         stats.byPlatform[statsRow.platform] = parseInt(statsRow.total);

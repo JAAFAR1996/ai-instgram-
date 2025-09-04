@@ -56,7 +56,7 @@ export class SmartProductSearch {
         relevanceScore: Math.round((r.relevance_score || 0) * 100),
         matchType: 'fts',
       };
-      if (typeof r.highlight === 'string') (base as any).highlight = r.highlight;
+      if (typeof r.highlight === 'string') base.highlight = r.highlight;
       return base;
     });
 

@@ -96,7 +96,11 @@ export async function migrateAndSeed(): Promise<void> {
 /**
  * Seeds initial data (merchant and page mapping)
  */
-async function seedInitialData(client: any): Promise<void> {
+interface DatabaseClient {
+  query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }>;
+}
+
+async function seedInitialData(client: DatabaseClient): Promise<void> {
   // Get configuration from environment
   const merchantId = requireMerchantId();
   const merchantName = getEnv('MERCHANT_NAME');

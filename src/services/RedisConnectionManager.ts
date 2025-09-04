@@ -476,14 +476,17 @@ export class RedisConnectionManager {
     
     const results = await Promise.allSettled(closePromises);
     
-    // Log any connection close failures
-    const failures = results.filter(r => r.status === 'rejected');
-    if (failures.length > 0) {
-      this.logger.warn('Some Redis connections failed to close cleanly', {
-        totalConnections: closePromises.length,
-        failures: failures.length,
-        errors: failures.map(f => String(f.reason))
-      });
+    // Check for connection close failures
+    const fails = results.filter(r => r.status === 'rejected');
+    if (fails.length) {
+      this.logger.error({ 
+        fails: fails.length, 
+        sample: fails.slice(0,3).map(f => String((f as any).reason)),
+        totalConnections: closePromises.length 
+      }, "Redis connection close failures");
+      
+      // Note: Connection close failures are not retryable in shutdown context
+      // Just ensure we track them for monitoring
     }
     
     // ✅ إصلاح مشكلة clearInterval
