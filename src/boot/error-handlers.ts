@@ -46,14 +46,14 @@ async function attemptSystemRecovery(event: RecoveryEvent, reason?: string): Pro
         logger.info('DB recovery successful');
       }
     } catch (e) {
-      logger.error('DB recovery failed', e instanceof Error ? e : { error: String(e) });
+      logger.error('DB recovery failed', { err: e instanceof Error ? e : new Error(String(e)) });
     }
 
     // 2) Redis recovery
     try {
       const { getRedisConnectionManager } = await import('../services/RedisConnectionManager.js');
       const rm = getRedisConnectionManager();
-      await rm.performHealthCheckOnAllConnections().catch(() => {});
+      await rm.performHealthCheckOnAllConnections().catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
       // If rate limited or disabled, try to re-enable after cooldown
       rm.enableRedis();
       logger.info('Redis recovery attempted');
@@ -83,7 +83,7 @@ async function attemptSystemRecovery(event: RecoveryEvent, reason?: string): Pro
 
     logger.info('System recovery pass completed', { degradedMode });
   } catch (err) {
-    logger.error('System recovery pass failed', err instanceof Error ? err : { error: String(err) });
+    logger.error('System recovery pass failed', { err: err instanceof Error ? err : new Error(String(err)) });
   }
 }
 
@@ -121,7 +121,9 @@ process.on('unhandledRejection', (reason, promise) => {
   }
 
   // In production, try recovery; allow a burst then exit for safety
-  void attemptSystemRecovery('unhandledRejection', error.message).catch(() => {});
+  attemptSystemRecovery('unhandledRejection', error.message).catch((e) => {
+    logger.error('attemptSystemRecovery failed (unhandledRejection)', { err: e instanceof Error ? e : new Error(String(e)) });
+  });
   if (unhandledRejectionCount > 50) {
     console.error('Too many unhandled rejections, shutting down for safety');
     process.exit(1);
@@ -141,9 +143,14 @@ process.on('uncaughtException', (err) => {
   });
 
   // Attempt recovery first; if fatal class, proceed to exit
-  void attemptSystemRecovery('uncaughtException', err.message).catch(() => {});
+  attemptSystemRecovery('uncaughtException', err.message).catch((e) => {
+    logger.error('attemptSystemRecovery failed (uncaughtException)', { err: e instanceof Error ? e : new Error(String(e)) });
+  });
   console.error('Uncaught exception detected, scheduling graceful shutdown...');
-  void delay(1500).then(() => process.exit(1));
+  delay(1500).then(() => process.exit(1)).catch((e) => {
+    logger.error('delay before exit failed', { err: e instanceof Error ? e : new Error(String(e)) });
+    process.exit(1);
+  });
 });
 
 // Process warnings
@@ -157,7 +164,9 @@ process.on('warning', (warning) => {
   // Opportunistic recovery on critical warnings
   const msg = (warning?.message || '').toLowerCase();
   if (/fswatch|memory leak|eventemitter leak/.test(msg)) {
-    void attemptSystemRecovery('warning', warning.message).catch(() => {});
+    attemptSystemRecovery('warning', warning.message).catch((e) => {
+      logger.error('attemptSystemRecovery failed (warning)', { err: e instanceof Error ? e : new Error(String(e)) });
+    });
   }
 });
 
@@ -212,9 +221,9 @@ export async function gracefulShutdown(signal: string, code = 0) {
 }
 
 // Register shutdown handlers
-process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
-process.on('SIGABRT', () => void gracefulShutdown('SIGABRT', 1));
+process.on('SIGTERM', () => { gracefulShutdown('SIGTERM').catch((e) => logger.error('gracefulShutdown error SIGTERM', { err: e as Error })); });
+process.on('SIGINT', () => { gracefulShutdown('SIGINT').catch((e) => logger.error('gracefulShutdown error SIGINT', { err: e as Error })); });
+process.on('SIGABRT', () => { gracefulShutdown('SIGABRT', 1).catch((e) => logger.error('gracefulShutdown error SIGABRT', { err: e as Error })); });
 
 // Utility wrappers
 export async function safeAsync<T>(operation: () => Promise<T>, context: string, fallback?: T): Promise<T | undefined> {
@@ -240,7 +249,10 @@ export function wrapError(error: unknown, context: string): Error {
 }
 
 export function fireAndForget(operation: () => Promise<void>, context: string): void {
-  void safeAsync(operation, context);
+  operation().catch((error) => {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error(`[fireAndForget] ${context} failed`, { err });
+  });
 }
 
 export { shutdownController };
