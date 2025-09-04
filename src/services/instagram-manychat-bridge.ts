@@ -10,6 +10,7 @@ import { getLogger } from './logger.js';
 import { getManyChatService, type ManyChatResponse } from './manychat-api.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
 import { getInstagramMessageSender } from './instagram-message-sender.js';
+import { createHash } from 'node:crypto';
 import { getDatabase } from '../db/adapter.js';
 import { getManychatIdByInstagramUsername, upsertManychatMapping } from '../repositories/manychat.repo.js';
 import { guardManyChatOperation } from '../utils/architecture-guard.js';
@@ -72,6 +73,24 @@ export class InstagramManyChatBridge {
     const startTime = Date.now();
     
     try {
+      // Step 0.3: Hashtag tracking + sentiment + opportunity (best-effort)
+      try {
+        const { getInstagramHashtagMonitor } = await import('./instagram-hashtag-monitor.js');
+        const monitor = getInstagramHashtagMonitor();
+        const mid = 'mc:' + data.merchantId + ':' + data.customerId + ':' + createHash('sha1').update(String(data.message || '') + ':' + data.interactionType).digest('hex').slice(0, 16);
+        const src = (data.interactionType === 'comment' ? 'comment' : (data.interactionType.startsWith('story') ? 'story' : 'dm')) as 'dm'|'comment'|'story';
+        monitor.processInboundText({
+          merchantId: data.merchantId,
+          messageId: mid,
+          userId: data.customerId,
+          source: src,
+          content: data.message || ''
+        }).then(r => {
+          this.logger.debug('Hashtag monitor snapshot', { h: r.hashtags.length, m: r.mentions.length, s: r.sentiment, opp: r.opportunitiesCreated });
+        }).catch(() => {});
+      } catch (e) {
+        this.logger.debug('Hashtag monitor skipped', { error: String(e) });
+      }
       this.logger.info('🔄 Processing Instagram message through bridge', {
         merchantId: data.merchantId,
         customerId: data.customerId,
@@ -92,8 +111,17 @@ export class InstagramManyChatBridge {
               content: data.message
             });
           }
+          // Update engagement + behavior
+          analyzer.updateSubscriberEngagementForUsername(data.merchantId, data.customerId).catch(() => {});
+          analyzer.trackUserBehavior(data.merchantId, data.customerId, 'story').catch(() => {});
         } else if (data.interactionType === 'dm') {
           await analyzer.categorizeDMIntent(data.message).catch(() => {});
+          analyzer.updateSubscriberEngagementForUsername(data.merchantId, data.customerId).catch(() => {});
+          analyzer.trackUserBehavior(data.merchantId, data.customerId, 'dm').catch(() => {});
+        } else if (data.interactionType === 'comment') {
+          analyzer.analyzeCommentSentiment(data.merchantId, data.customerId, data.message).catch(() => {});
+          analyzer.updateSubscriberEngagementForUsername(data.merchantId, data.customerId).catch(() => {});
+          analyzer.trackUserBehavior(data.merchantId, data.customerId, 'comment').catch(() => {});
         }
       } catch (e) {
         this.logger.debug('Interaction analysis skipped', { error: String(e) });

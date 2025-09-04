@@ -1,5 +1,6 @@
 import type { ExtendedThinkingContext, ThinkingChain, ThinkingStep } from '../types/thinking.js';
 import { createChain, addStep, finalizeStep, selfReflect, shouldUseExtendedThinking } from '../utils/reasoning-chain.js';
+import { telemetry } from './telemetry.js';
 
 export class ExtendedThinkingService {
   /**
@@ -7,6 +8,15 @@ export class ExtendedThinkingService {
    */
   async processWithThinking(query: string, context: ExtendedThinkingContext, showThinking = true): Promise<{ chain: ThinkingChain; visible: boolean; } & Partial<{ aide: string }>>
   {
+    const startTime = Date.now();
+    
+    // 📊 Record extended thinking usage
+    telemetry.counter('extended_thinking_requests_total', 'Extended thinking requests').add(1, {
+      merchant_id: context.merchantId || 'unknown',
+      show_thinking: String(showThinking),
+      has_context: String(Boolean(context.nlp))
+    });
+    
     const chain = await this.generateThinkingChain(query, context, showThinking);
 
     // ANALYZE → EXPLORE → EVALUATE → DECIDE
@@ -27,6 +37,24 @@ export class ExtendedThinkingService {
     await this.analyzeStep(decide, context);
 
     await this.validateReasoning(chain);
+
+    const processingTime = Date.now() - startTime;
+    
+    // 📊 Record completion metrics
+    telemetry.histogram('extended_thinking_processing_time_ms', 'Extended thinking processing time', 'ms').record(processingTime, {
+      merchant_id: context.merchantId || 'unknown',
+      steps_completed: String(chain.steps.length),
+      has_summary: String(Boolean(chain.summary))
+    });
+    
+    // 📈 Record stage completion metrics
+    const completedStages = chain.steps.filter(s => s.status === 'completed').map(s => s.stage);
+    completedStages.forEach(stage => {
+      telemetry.counter('extended_thinking_stages_completed_total', 'Extended thinking stages completed').add(1, {
+        stage: stage,
+        merchant_id: context.merchantId || 'unknown'
+      });
+    });
 
     const payload: { chain: ThinkingChain; visible: boolean } & Partial<{ aide: string }> = {
       chain,

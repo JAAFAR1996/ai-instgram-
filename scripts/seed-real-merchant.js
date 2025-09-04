@@ -5,8 +5,18 @@
 import { Pool } from 'pg';
 
 const MERCHANT_ID = 'dd90061a-a1ad-42de-be9b-1c9760d0de02';
-const MERCHANT_USERNAME = 'zo27j';
-const MANYCHAT_SUBSCRIBER_ID = '365717805';
+const MERCHANT_USERNAME = process.env.SEED_IG_USERNAME || 'zo27j';
+const MANYCHAT_SUBSCRIBER_ID = process.env.SEED_MANYCHAT_ID || '365717805';
+
+function getArgFlag(name, defVal) {
+  const prefix = `--${name}=`;
+  const found = process.argv.find((a) => a.startsWith(prefix));
+  if (found) return found.substring(prefix.length);
+  return defVal;
+}
+
+// Accept category via env or CLI flag (e.g., --category=electronics)
+const SEED_CATEGORY = (process.env.SEED_CATEGORY || getArgFlag('category', 'fashion')).toLowerCase();
 
 function getPool() {
   const url = process.env.DATABASE_URL;
@@ -33,7 +43,7 @@ function realSettings() {
     payment_methods: ['COD', 'ZAIN_CASH', 'ASIA_HAWALA'],
     delivery_fees: { inside_baghdad: 3, outside_baghdad: 5 },
     auto_responses: {
-      welcome_message: 'أهلاً بك في ZO Boutique! كيف نساعدك اليوم؟',
+      welcome_message: process.env.SEED_WELCOME_MSG || 'أهلاً بك! كيف نساعدك اليوم؟',
       outside_hours: 'نرحب برسالتك، سنعود لك بأقرب وقت ضمن ساعات الدوام.'
     }
   };
@@ -50,7 +60,7 @@ function aiConfig() {
   };
 }
 
-const products = [
+const defaultFashionProducts = [
   { sku: 'ZJ-1001', name_ar: 'تيشيرت قطن رجالي', category: 'fashion', price_usd: 12.5, stock: 40, tags: ['رجالي','صيفي'], desc: 'قماش قطني 100%، مريح وناعم.' },
   { sku: 'ZJ-1002', name_ar: 'قميص رسمي كلاسيك', category: 'fashion', price_usd: 24.9, stock: 25, tags: ['رجالي','رسمي'], desc: 'قصة عصرية وخياطة دقيقة، مناسب للمناسبات.' },
   { sku: 'ZJ-2001', name_ar: 'فستان كاجوال موف', category: 'fashion', price_usd: 29.0, stock: 18, tags: ['نسائي','صيفي'], desc: 'خامة خفيفة وتصميم مريح للحركة.' },
@@ -61,12 +71,44 @@ const products = [
   { sku: 'ZJ-5001', name_ar: 'معطف شتوي', category: 'fashion', price_usd: 49.0, stock: 10, tags: ['شتوي'], desc: 'دفء ومتانة لتجربة مريحة بالشتاء.' }
 ];
 
+function productsByCategory(category) {
+  switch ((category || '').toLowerCase()) {
+    case 'electronics':
+      return [
+        { sku: 'EL-1001', name_ar: 'هاتف ذكي 128GB', category: 'electronics', price_usd: 299, stock: 25, tags: ['هواتف','Android'], desc: 'شاشة 6.5"، بطارية كبيرة، كاميرا 48MP.' },
+        { sku: 'EL-1002', name_ar: 'سماعات بلوتوث', category: 'electronics', price_usd: 39, stock: 60, tags: ['صوت'], desc: 'عزل ضوضاء، شحن سريع، تصميم مريح.' },
+        { sku: 'EL-2001', name_ar: 'لابتوب 15" Core i5', category: 'electronics', price_usd: 649, stock: 12, tags: ['لابتوب'], desc: 'ذاكرة 8GB، قرص 512GB SSD، هيكل خفيف.' },
+        { sku: 'EL-3001', name_ar: 'باور بانك 20,000mAh', category: 'electronics', price_usd: 29, stock: 40, tags: ['شحن'], desc: 'منفذ USB-C PD، وزن مناسب للسفر.' },
+        { sku: 'EL-4001', name_ar: 'تلفزيون 43" 4K', category: 'electronics', price_usd: 329, stock: 8, tags: ['TV'], desc: 'ألوان غنية، تطبيقات ذكية، دعم HDR.' }
+      ];
+    case 'grocery':
+      return [
+        { sku: 'GR-1001', name_ar: 'رز بسمتي 5كغ', category: 'grocery', price_usd: 8.9, stock: 50, tags: ['مواد غذائية'], desc: 'حبة طويلة وجودة ممتازة للطهو اليومي.' },
+        { sku: 'GR-1002', name_ar: 'سكر أبيض 2كغ', category: 'grocery', price_usd: 2.4, stock: 80, tags: ['مواد غذائية'], desc: 'نقاوة عالية ومعبأ بإحكام.' },
+        { sku: 'GR-1003', name_ar: 'زيت طبخ 1.8ل', category: 'grocery', price_usd: 3.5, stock: 60, tags: ['زيوت'], desc: 'مناسب للقلي والطبخ اليومي.' },
+        { sku: 'GR-2001', name_ar: 'عدس أحمر 1كغ', category: 'grocery', price_usd: 1.9, stock: 70, tags: ['بقوليات'], desc: 'طبخ سريع ومصدر بروتين نباتي.' },
+        { sku: 'GR-3001', name_ar: 'حليب طويل الأمد 1ل', category: 'grocery', price_usd: 1.2, stock: 90, tags: ['ألبان'], desc: 'مدعم بالكالسيوم وفيتامين D.' }
+      ];
+    case 'beauty':
+      return [
+        { sku: 'BE-1001', name_ar: 'مرطب وجه 50مل', category: 'beauty', price_usd: 12.0, stock: 40, tags: ['عناية بالبشرة'], desc: 'ترطيب خفيف يمتص بسرعة.' },
+        { sku: 'BE-1002', name_ar: 'ماسكرا كثافة', category: 'beauty', price_usd: 9.5, stock: 50, tags: ['مكياج'], desc: 'رموش أكثر طولاً وكثافة بدون تكتل.' },
+        { sku: 'BE-2001', name_ar: 'سيروم فيتامين C', category: 'beauty', price_usd: 15.0, stock: 30, tags: ['عناية بالبشرة'], desc: 'يوحد لون البشرة ويمنح إشراقة.' },
+        { sku: 'BE-3001', name_ar: 'بلسم شعر 300مل', category: 'beauty', price_usd: 6.0, stock: 45, tags: ['عناية بالشعر'], desc: 'تنعيم وتقليل التشابك للشعر الجاف.' },
+        { sku: 'BE-4001', name_ar: 'عطر خفيف 50مل', category: 'beauty', price_usd: 18.0, stock: 20, tags: ['عطور'], desc: 'ثبات لطيف ونفحات زهرية.' }
+      ];
+    case 'fashion':
+    default:
+      return defaultFashionProducts;
+  }
+}
+
 async function upsertMerchant(client) {
   await client.query(`SELECT set_config('app.is_admin','true', true)`);
-  const whatsapp = '9647701234567';
-  const email = 'owner@zo-boutique.example';
-  const businessName = 'ZO Boutique — زو بوتيك';
-  const category = 'fashion';
+  const whatsapp = process.env.SEED_WHATSAPP || '9647701234567';
+  const email = process.env.SEED_EMAIL || 'owner@example.com';
+  const businessName = process.env.SEED_BUSINESS_NAME || (SEED_CATEGORY === 'electronics' ? 'Ahmed Mobiles — أحمد للموبايلات' : SEED_CATEGORY === 'grocery' ? 'سوبرماركت النخلة' : SEED_CATEGORY === 'beauty' ? 'صالون روز بيوتي' : 'ZO Boutique — زو بوتيك');
+  const category = SEED_CATEGORY;
   const address = 'Baghdad, Karrada, 52nd Street';
 
   await client.query(
@@ -126,7 +168,8 @@ async function upsertManychatMapping(client) {
 }
 
 async function upsertProducts(client) {
-  for (const p of products) {
+  const catalog = productsByCategory(SEED_CATEGORY);
+  for (const p of catalog) {
     await client.query(
       `INSERT INTO public.products (
          merchant_id, sku, name_ar, description_ar, category,
@@ -181,4 +224,3 @@ main().catch((e) => {
   console.error('Fatal:', e?.message || String(e));
   process.exit(1);
 });
-

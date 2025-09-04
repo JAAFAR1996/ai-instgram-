@@ -34,6 +34,8 @@ import { getPool } from './startup/database.js';
 import { initializeRedisIntegration } from './startup/redis.js';
 import { scheduleMaintenance } from './startup/maintenance.js';
 import { initializePredictiveServices } from './startup/predictive-services.js';
+import { initializeSecurityCompliance } from './startup/security-compliance.js';
+import { initializeHashtagServices } from './startup/hashtag-services.js';
 
 // 6) Middleware imports
 import { securityHeaders, rateLimiter } from './middleware/security.js';
@@ -44,6 +46,8 @@ import { registerWebhookRoutes } from './routes/webhooks.js';
 import { registerMerchantAdminRoutes } from './routes/merchant-admin.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerUtilityMessageRoutes } from './routes/utility-messages.js';
+import { registerImageSearchRoutes } from './routes/image-search.js';
+import { registerMessageAnalyticsRoutes } from './routes/message-analytics.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -124,6 +128,14 @@ async function bootstrap() {
     await initializePredictiveServices();
     log.info('Predictive analytics services initialized');
 
+    // Initialize security + compliance monitoring (runtime)
+    initializeSecurityCompliance();
+    log.info('Security compliance monitors initialized');
+
+    // Initialize hashtag monitoring services
+    await initializeHashtagServices();
+    log.info('Hashtag monitoring services initialized');
+
     // Create Hono app
     const app = new Hono();
 
@@ -190,12 +202,29 @@ async function bootstrap() {
     registerWebhookRoutes(app, deps);
     registerMerchantAdminRoutes(app);
     registerAdminRoutes(app);
+    
     // Register utility messages routes
     try {
       registerUtilityMessageRoutes(app);
       log.info('Utility message routes registered');
     } catch (e) {
       log.warn('Failed to register utility message routes', { error: String(e) });
+    }
+    
+    // Register image search routes
+    try {
+      registerImageSearchRoutes(app);
+      log.info('Image search routes registered');
+    } catch (e) {
+      log.warn('Failed to register image search routes', { error: String(e) });
+    }
+
+    // Register message analytics routes
+    try {
+      registerMessageAnalyticsRoutes(app);
+      log.info('Message analytics routes registered');
+    } catch (e) {
+      log.warn('Failed to register message analytics routes', { error: String(e) });
     }
 
     // Prometheus Metrics (enabled only when METRICS_ENABLED)
@@ -430,4 +459,3 @@ process.on('SIGUSR2', async () => {
 const app = await bootstrap();
 
 export default app;
-

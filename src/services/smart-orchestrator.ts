@@ -1,9 +1,14 @@
-import { classifyAndExtract, type IntentResult } from '../nlp/intent.js';
+﻿import { classifyAndExtract, type IntentResult } from '../nlp/intent.js';
 import { kbSearch } from '../kb/search.js';
 import { findProduct } from '../repos/product-finder.js';
 import type { FinderEntities } from '../repos/product-finder.js';
 import MerchantCatalogService from './catalog/merchant-catalog.service.js';
 import ProductRecommendationEngine from './recommendation/product-recommendation.engine.js';
+import ConstitutionalAI from './constitutional-ai.js';
+import CustomerProfiler from './customer-profiler.js';
+import ResponsePersonalizer from './response-personalizer.js';
+import AdvancedAnalyticsService from './advanced-analytics.js';
+import SmartProductSearch from './search/smart-product-search.js';
 import { getDatabase } from '../db/adapter.js';
 import { shouldUseExtendedThinking } from '../utils/reasoning-chain.js';
 import ExtendedThinkingService from './extended-thinking.js';
@@ -34,6 +39,12 @@ export async function orchestrate(
   messageText: string,
   options: OrchestratorOptions = { askAtMostOneFollowup: true }
 ): Promise<OrchestratorResult> {
+  const t0 = Date.now();
+  const consAI = new ConstitutionalAI();
+  const profiler = new CustomerProfiler();
+  const personalizer = new ResponsePersonalizer();
+  const analytics = new AdvancedAnalyticsService();
+  const productSearch = new SmartProductSearch();
   const db = getDatabase();
   const sql = db.getSQL();
 
@@ -62,6 +73,16 @@ export async function orchestrate(
     sizeAliases: aiCfg?.sizeAliases || {},
     customEntities: aiCfg?.customEntities || {},
   };
+
+  // Customer profiling to influence categorization and personalization
+  let customerProfile: Awaited<ReturnType<CustomerProfiler['personalizeResponses']>> | undefined;
+  try {
+    customerProfile = await profiler.personalizeResponses(merchantId, username);
+    if (customerProfile?.preferences?.categories?.length) {
+      const merged = new Set([...(hints.categories || []), ...customerProfile.preferences.categories]);
+      hints.categories = Array.from(merged);
+    }
+  } catch {}
 
   // Dynamically derive categories from catalog if requested
   if (aiCfg?.categories_dynamic === true && (!Array.isArray(hints.categories) || hints.categories.length === 0)) {
@@ -92,6 +113,57 @@ export async function orchestrate(
   };
   const decision: string[] = [`intent=${analysis.intent}`, `confidence=${analysis.confidence.toFixed(2)}`];
 
+  // Lightweight product context for telemetry/decision breadcrumbs
+  try {
+    const relevant = await productSearch.searchProducts(messageText, merchantId, { limit: 5 });
+    decision.push(relevant.length > 0 ? 'product_context=has_hits' : 'product_context=no_hits');
+  } catch {}
+
+  // Post-processing pipeline: Constitutional AI + Personalization + Analytics
+  const postProcess = async (res: OrchestratorResult): Promise<OrchestratorResult> => {
+    let text = res.text;
+    try {
+      const critique = await consAI.critiqueResponse(text, {
+        merchantId,
+        username,
+        intent: res.intent,
+        stage: res.stage,
+      } as any);
+      if (!critique.meetsThreshold) {
+        const { improved } = await consAI.improveResponse(text, critique, { merchantId, username, intent: res.intent, stage: res.stage } as any);
+        text = improved;
+        res.decision_path = [...res.decision_path, 'constitutional_ai=improved'];
+        // record analytics with quality score
+        try { await analytics.recordAIInteraction({ merchantId, customerId: username, model: 'smart-orchestrator', intent: res.intent, latencyMs: Date.now() - t0, qualityScore: critique.score, improved: true }); } catch {}
+      } else {
+        res.decision_path = [...res.decision_path, 'constitutional_ai=ok'];
+        try { await analytics.recordAIInteraction({ merchantId, customerId: username, model: 'smart-orchestrator', intent: res.intent, latencyMs: Date.now() - t0, qualityScore: critique.score, improved: false }); } catch {}
+      }
+    } catch {
+      // best-effort only
+      try { await analytics.recordAIInteraction({ merchantId, customerId: username, model: 'smart-orchestrator', intent: res.intent, latencyMs: Date.now() - t0 }); } catch {}
+    }
+
+    try {
+      if (customerProfile) {
+        const personalized = await personalizer.personalizeResponses(text, {
+          merchantId,
+          customerId: username,
+          tier: customerProfile.tier,
+          preferences: customerProfile.preferences,
+        });
+        text = personalized.text;
+        res.decision_path = [...res.decision_path, 'personalized=applied'];
+        if (personalized.recommendations?.length) {
+          const recLine = personalized.recommendations.slice(0, 3).map(r => `• ${r.name}${r.price ? ` — ${r.price.toLocaleString('ar-IQ')} د.ع` : ''}`).join('\n');
+          text = `${text}\n${recLine}`;
+        }
+      }
+    } catch {}
+
+    return { ...res, text };
+  };
+
   // Optional extended thinking for complex queries
   const useThinking = (options.useExtendedThinking ?? shouldUseExtendedThinking(messageText, { intent: analysis.intent, confidence: analysis.confidence })) === true;
   let thinkingChain: ThinkingChain | undefined;
@@ -119,7 +191,7 @@ export async function orchestrate(
   // Small talk
   if (analysis.intent === 'SMALL_TALK') {
     const text = `هلا ${username}! شلونك؟ خلي أعرف شنو تبحث عنه اليوم 🌟`;
-    return withThinking({ text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision });
+    return withThinking(await postProcess({ text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision }));
   }
 
   // Generic OTHER response (non-sector-specific) before falling back further
@@ -128,14 +200,7 @@ export async function orchestrate(
       ? ` (مثال: ${hints.categories.slice(0, 3).filter(Boolean).join(' / ')})`
       : '';
     const text = `أوكي! حتى أساعدك بسرعة، اكتب اسم المنتج أو الفئة${examples} والمواصفات المهمة (مثل اللون/القياس/السعة/الموديل) إذا موجود.`;
-    return withThinking({
-      text,
-      intent: analysis.intent,
-      confidence: analysis.confidence,
-      entities: analysis.entities,
-      decision_path: decision,
-      stage: 'AWARE'
-    });
+    return withThinking(await postProcess({ text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision, stage: 'AWARE' }));
   }
 
   // Pricing / Inventory via SQL
@@ -181,7 +246,7 @@ export async function orchestrate(
           }).slice(0,3);
           if (formatted.length) altText = `ماكو نفس المواصفات، الأقرب: ${formatted.join('، ')}. أي واحد يعجبك؟`;
         }
-        return withThinking({
+        return withThinking(await postProcess({
           text: altText,
           intent: analysis.intent,
           confidence: analysis.confidence,
@@ -194,7 +259,7 @@ export async function orchestrate(
             ...(analysis.entities.color ? { color: analysis.entities.color } : {}),
             ...(analysis.entities.category ? { category: analysis.entities.category } : {})
           }
-        });
+        }));
       }
       const priceIQD = top.final_price_iqd ?? top.base_price_iqd;
       const avail = top.stock_quantity > 0 ? 'متوفر' : 'غير متوفر حالياً';
@@ -210,7 +275,7 @@ export async function orchestrate(
         text = `سعر ${top.name_ar}${analysis.entities.size ? ` مقاس ${analysis.entities.size}` : ''} ${Math.round(Number(priceIQD)).toLocaleString('ar-IQ')} د.ع، ${avail}${extra}. نمشي بالطلب؟`;
         decision.push('sql=hit');
       }
-      return withThinking({
+      return withThinking(await postProcess({
         text,
         intent: analysis.intent,
         confidence: analysis.confidence,
@@ -224,7 +289,7 @@ export async function orchestrate(
           ...(analysis.entities.color ? { color: analysis.entities.color } : {}),
           ...(analysis.entities.category ? { category: analysis.entities.category } : {})
         }
-      });
+      }));
     }
     decision.push('sql=miss');
     const alts = res.alternatives;
@@ -243,7 +308,7 @@ export async function orchestrate(
         if (names.length) text = `ماكو نفس المواصفات، الأقرب: ${names.join('، ')}. أي واحد يعجبك؟`;
       } catch {}
     }
-    return withThinking({
+    return withThinking(await postProcess({
       text,
       intent: analysis.intent,
       confidence: analysis.confidence,
@@ -256,7 +321,7 @@ export async function orchestrate(
         ...(analysis.entities.color ? { color: analysis.entities.color } : {}),
         ...(analysis.entities.category ? { category: analysis.entities.category } : {})
       }
-    });
+    }));
   }
 
   // FAQ via KB search
@@ -269,7 +334,7 @@ export async function orchestrate(
       const snippet = top.chunk.trim().slice(0, 280);
       const text = `حسب سياسة «${top.title}»: ${snippet}${snippet.length >= 280 ? '…' : ''}`;
       decision.push('rag=hit');
-      return withThinking({
+      return withThinking(await postProcess({
         text,
         intent: analysis.intent,
         confidence: analysis.confidence,
@@ -278,34 +343,52 @@ export async function orchestrate(
         stage: 'BROWSE',
         kb_source: { id: top.id, title: top.title },
         session_patch: { last_kb_doc_id: top.id }
-      });
+      }));
     }
     decision.push('rag=miss');
     const text = 'أحتاج أتأكد من السياسة. أرجعلك بالتفاصيل حالاً بعد المراجعة.';
-    return withThinking({ text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision });
+    return withThinking(await postProcess({ text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision }));
   }
-
-  // OBJECTION handling
-  if (analysis.intent === 'OBJECTION') {
-    const text = 'أفهمك. عندي خيارات تناسب ميزانيتك. تفضل تحدد فئة أو سعر تقريبي؟';
-    decision.push('objection=ack');
-    return withThinking({ text, intent: analysis.intent, confidence: analysis.confidence, entities: analysis.entities, decision_path: decision, stage: 'OBJECTION' });
+  // SmartProductSearch suggestions for general queries (best-effort)
+  if (analysis.intent === 'OTHER') {
+    try {
+      const hits = await productSearch.searchProducts(messageText, merchantId, { limit: 5 });
+      if (hits.length > 0) {
+        const info = hits.map(h => {
+          const p: any = h.product;
+          const price = Number(p.sale_price_amount ?? p.price_amount ?? 0);
+          const priceText = price > 0 ? `${Math.round(price).toLocaleString('ar-IQ')} د.ع` : 'السعر يحتاج تأكيد';
+          return `• ${String(p.name_ar).split(' ').slice(0,6).join(' ')} - ${priceText}`;
+        }).join('\n');
+        decision.push('smart_search=used');
+        return withThinking(await postProcess({
+          text: `توقعت يمكن تقصد هالخيارات:\n${info}\nتحب أي واحد بيها؟`,
+          intent: analysis.intent,
+          confidence: analysis.confidence,
+          entities: analysis.entities,
+          decision_path: decision,
+          stage: 'BROWSE'
+        }));
+      }
+    } catch {}
   }
-
-  // OTHER: short guidance
-  const text = `أوكي! حتى أساعدك بسرعة، خبرني شنو المنتج والمقاس/اللون إذا تريده.`;
-  return withThinking({
-    text,
-    intent: analysis.intent,
-    confidence: analysis.confidence,
-    entities: analysis.entities,
-    decision_path: decision,
-    stage: 'AWARE',
-    session_patch: {
-      ...(analysis.entities.gender ? { gender: analysis.entities.gender } : {}),
-      ...(analysis.entities.size ? { size: analysis.entities.size } : {}),
-      ...(analysis.entities.color ? { color: analysis.entities.color } : {}),
-      ...(analysis.entities.category ? { category: analysis.entities.category } : {})
-    }
-  });
-}
+      // Prefer SmartProductSearch hits for direct relevance
+      const smartHits = await productSearch.searchProducts(messageText, merchantId, { limit: 5 });
+      if (smartHits.length > 0) {
+        const info = smartHits.map(h => {
+          const p: any = h.product;
+          const price = Number(p.sale_price_amount ?? p.price_amount ?? 0);
+          const priceText = price > 0 ? `${Math.round(price).toLocaleString('ar-IQ')} د.ع` : 'السعر يحتاج تأكيد';
+          return `• ${String(p.name_ar).split(' ').slice(0,6).join(' ')} - ${priceText}`;
+        }).join('\n');
+        decision.push('smart_search=used');
+        return withThinking(await postProcess({
+          text: `عدنا خيارات قريبة من طلبك:\n${info}\nأي واحد يهمك أكثر؟`,
+          intent: analysis.intent,
+          confidence: analysis.confidence,
+          entities: analysis.entities,
+          decision_path: decision,
+          stage: 'BROWSE'
+        }));
+      }
+  }

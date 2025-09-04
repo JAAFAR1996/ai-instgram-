@@ -1,0 +1,24 @@
+  // Early product recommendations if user intent suggests browsing/inventory/price
+  if (analysis.intent === 'INVENTORY' || analysis.intent === 'PRICE') {
+    try {
+      const catalog = await new MerchantCatalogService().analyzeMerchantInventory(merchantId);
+      const engine = new ProductRecommendationEngine();
+      const recommendations = await engine.generateRecommendations(messageText, [], catalog);
+      if (recommendations.length > 0) {
+        const info = recommendations.map(r => {
+          const price = Number(r.product.sale_price_amount ?? r.product.price_amount ?? 0);
+          const priceText = price > 0 ? `${Math.round(price).toLocaleString('ar-IQ')} د.ع` : 'السعر يحتاج تأكيد';
+          return `• ${String(r.product.name_ar).split(' ').slice(0,6).join(' ')} - ${priceText}`;
+        }).join('\n');
+        decision.push('product_recommendations=used');
+        return withThinking(await postProcess({
+          text: `عندنا خيارات حلوة لك:\n${info}\nأي واحد يهمك أكثر؟`,
+          intent: analysis.intent,
+          confidence: analysis.confidence,
+          entities: analysis.entities,
+          decision_path: decision,
+          stage: 'BROWSE'
+        }));
+      }
+    } catch {}
+  }

@@ -21,17 +21,11 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest --watch",
-    
-    
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "db:migrate": "tsx src/database/migrate.ts",
     "db:migrate:js": "node dist/database/migrate.js",
-    
-    
-    
-    
     "docker:dev": "docker-compose -f docker-compose.dev.yml up -d",
     "docker:prod": "docker-compose -f docker-compose.prod.yml up -d",
     "docker:stop": "docker-compose down",
@@ -61,8 +55,10 @@
     "@hono/node-server": "^1.18.2",
     "@hono/zod-validator": "^0.7.2",
     "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-prometheus": "^0.203.0",
     "@opentelemetry/sdk-metrics": "^2.0.1",
     "@opentelemetry/sdk-trace-node": "^2.0.1",
+    "@opentelemetry/semantic-conventions": "^1.37.0",
     "@sentry/node": "^7.90.0",
     "bcryptjs": "^2.4.3",
     "bullmq": "4.18.3",

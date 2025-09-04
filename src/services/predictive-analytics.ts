@@ -1,5 +1,6 @@
 import { getDatabase } from '../db/adapter.js';
 import { getLogger } from './logger.js';
+import { telemetry } from './telemetry.js';
 import CustomerProfiler, { PersonalizationProfile } from './customer-profiler.js';
 
 export interface SizeIssuesPrediction {
@@ -48,7 +49,16 @@ export class PredictiveAnalyticsEngine {
     proposedProductId?: string,
     proposedSize?: string
   ): Promise<SizeIssuesPrediction> {
+    const startTime = Date.now();
+    
     try {
+      // 📊 Record size prediction request
+      telemetry.counter('predictive_analytics_size_predictions_total', 'Size issue predictions').add(1, {
+        merchant_id: merchantId,
+        has_proposed_product: String(Boolean(proposedProductId)),
+        has_proposed_size: String(Boolean(proposedSize))
+      });
+      
       const sql = this.db.getSQL();
       const reasonCodes: SizeIssuesPrediction['reasonCodes'] = [];
       const suggestedActions: string[] = [];
@@ -160,9 +170,39 @@ export class PredictiveAnalyticsEngine {
       if (alternativeSizes.length > 0) {
         result.alternativeSizes = alternativeSizes;
       }
+      
+      // 📊 Record successful prediction metrics
+      const processingTime = Date.now() - startTime;
+      telemetry.histogram('predictive_analytics_processing_time_ms', 'Predictive analytics processing time', 'ms').record(processingTime, {
+        prediction_type: 'size_issues',
+        merchant_id: merchantId,
+        risk_level: riskLevel,
+        confidence_range: result.confidence >= 0.8 ? 'high' : result.confidence >= 0.5 ? 'medium' : 'low'
+      });
+      
+      telemetry.counter('predictive_analytics_predictions_completed_total', 'Completed predictions').add(1, {
+        prediction_type: 'size_issues',
+        merchant_id: merchantId,
+        risk_level: riskLevel
+      });
+      
       return result;
 
     } catch (error) {
+      // 📊 Record error metrics
+      const processingTime = Date.now() - startTime;
+      telemetry.counter('predictive_analytics_errors_total', 'Prediction errors').add(1, {
+        prediction_type: 'size_issues',
+        merchant_id: merchantId,
+        error_type: error instanceof Error ? error.constructor.name : 'Unknown'
+      });
+      
+      telemetry.histogram('predictive_analytics_processing_time_ms', 'Predictive analytics processing time', 'ms').record(processingTime, {
+        prediction_type: 'size_issues',
+        merchant_id: merchantId,
+        success: 'false'
+      });
+      
       this.log.warn('Size issues prediction failed', { error: String(error) });
       return {
         riskLevel: 'MEDIUM',

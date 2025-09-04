@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ===============================================
  * Merchant Admin Routes (Production-ready)
  * Secure endpoints to manage merchant context/settings/AI config
@@ -15,6 +15,11 @@ import { requireMerchantId } from '../middleware/rls-merchant-isolation.js';
 import { ingestText } from '../kb/ingest.js';
 import MerchantCatalogService from '../services/catalog/merchant-catalog.service.js';
 import ConversationAnalytics from '../services/analytics/conversation-analytics.js';
+import { getServiceController } from '../services/service-controller.js';
+import { getDLQHealth, getDLQStats } from '../queue/dead-letter.js';
+import { checkPredictiveServicesHealth } from '../startup/predictive-services.js';
+import { runManualPredictiveAnalytics, getSchedulerService } from '../startup/predictive-services.js';
+import { getComplianceService } from '../services/compliance.js';
 
 const log = getLogger({ component: 'merchant-admin-routes' });
 
@@ -49,6 +54,9 @@ export function registerMerchantAdminRoutes(app: Hono) {
   const db = getDatabase();
   const sql = db.getSQL();
   const cache = getCache();
+  async function activateRLS(merchantId: string) {
+    try { await sql`SELECT set_merchant_context(${merchantId}::uuid)`; } catch {}
+  }
 
   // Helper to invalidate merchant caches used by AI layer
   async function invalidateMerchantCache(merchantId: string) {
@@ -64,6 +72,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
   app.get('/api/merchant/context', async (c) => {
     try {
       const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
       const rows = await sql<{
         id: string;
         business_name: string;
@@ -88,6 +97,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
   app.patch('/api/merchant/settings', async (c) => {
     try {
       const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
       const body = await c.req.json();
       const parsed = SettingsSchema.safeParse(body);
       if (!parsed.success) {
@@ -115,6 +125,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
   app.patch('/api/merchant/ai-config', async (c) => {
     try {
       const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
       const body = await c.req.json();
       const parsed = AIConfigSchema.safeParse(body);
       if (!parsed.success) {
@@ -142,6 +153,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
   app.patch('/api/merchant/currency', async (c) => {
     try {
       const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
       const body = await c.req.json();
       const parsed = CurrencySchema.safeParse(body);
       if (!parsed.success) {
@@ -210,6 +222,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
   app.get('/api/merchant/catalog', async (c) => {
     try {
       const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
       const svc = new MerchantCatalogService();
       const profile = await svc.analyzeMerchantInventory(merchantId);
       return c.json({ ok: true, catalog: profile });
@@ -225,13 +238,309 @@ export function registerMerchantAdminRoutes(app: Hono) {
   app.get('/api/analytics/dashboard', async (c) => {
     try {
       const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
       const daysParam = c.req.query('days');
       const days = daysParam ? Math.max(1, Math.min(90, parseInt(daysParam))) : 30;
       const analytics = new ConversationAnalytics();
       const dashboard = await analytics.generateMerchantDashboard(merchantId, { days });
+  // Additional analytics endpoints (time series, response time, intents)
+  app.get('/api/analytics/conversations/timeseries', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
+      const days = Math.max(1, Math.min(180, parseInt(c.req.query('days') || '30')));
+      const analytics = new ConversationAnalytics();
+      const series = await analytics.getTimeSeries(merchantId, { days });
+      return c.json({ ok: true, series });
+    } catch (error) {
+      log.error('Get analytics timeseries failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  app.get('/api/analytics/conversations/response-times', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
+      const days = Math.max(1, Math.min(180, parseInt(c.req.query('days') || '30')));
+      const analytics = new ConversationAnalytics();
+      const byHour = await analytics.getResponseTimeByHour(merchantId, { days });
+      return c.json({ ok: true, byHour });
+    } catch (error) {
+      log.error('Get response times failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  app.get('/api/analytics/conversations/intents', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
+      const days = Math.max(1, Math.min(180, parseInt(c.req.query('days') || '30')));
+      const limit = Math.max(1, Math.min(50, parseInt(c.req.query('limit') || '10')));
+      const analytics = new ConversationAnalytics();
+      const intents = await analytics.getTopIntents(merchantId, { days }, limit);
+      return c.json({ ok: true, intents });
+    } catch (error) {
+      log.error('Get intents analytics failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
       return c.json({ ok: true, dashboard });
     } catch (error) {
       log.error('Get analytics dashboard failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  // ===============================================
+  // Service Management (toggle, status, health)
+  // ===============================================
+  app.get('/api/services/status', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
+      const sc = getServiceController();
+      const services = await sc.getAllServicesStatus(merchantId);
+      return c.json({ ok: true, services });
+    } catch (error) {
+      log.error('Get services status failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  app.get('/api/services/health', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
+      const sc = getServiceController();
+      const health = await sc.getServicesHealth(merchantId);
+      return c.json({ ok: true, health });
+    } catch (error) {
+      log.error('Get services health failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  app.post('/api/services/toggle', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
+      const body = await c.req.json();
+      const sc = getServiceController();
+      const req = {
+        merchantId,
+        service: String(body?.service || '').trim(),
+        enabled: !!body?.enabled,
+        toggledBy: String((body?.toggledBy || 'admin')).trim(),
+        reason: String((body?.reason || '')).trim()
+      } as any;
+      if (!req.service) return c.json({ ok: false, error: 'service_required' }, 400);
+      const result = await sc.toggleService(req);
+      return c.json({ ok: result.success, message: result.message, previous: result.previousState });
+    } catch (error) {
+      log.error('Toggle service failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  // ===============================================
+  // Performance Overview (DLQ, Predictive, basic counters)
+  // ===============================================
+  app.get('/api/performance/overview', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
+      const sql = db.getSQL();
+
+      // Basic counters from message_logs
+      const [msgStats] = await sql<{ total_7d: number; incoming_7d: number; outgoing_7d: number; avg_latency_ms: number }>`
+        WITH window AS (
+          SELECT * FROM message_logs ml
+          JOIN conversations c ON c.id = ml.conversation_id
+          WHERE c.merchant_id = ${merchantId}::uuid
+            AND ml.created_at >= NOW() - INTERVAL '7 days'
+        )
+        SELECT 
+          COUNT(*)::int as total_7d,
+          COUNT(*) FILTER (WHERE direction = 'INCOMING')::int as incoming_7d,
+          COUNT(*) FILTER (WHERE direction = 'OUTGOING')::int as outgoing_7d,
+          COALESCE(AVG(processing_time_ms)::int, 0) as avg_latency_ms
+        FROM window
+      `;
+
+      const dlq = getDLQHealth();
+      const dlqStats = getDLQStats();
+      const predictive = checkPredictiveServicesHealth();
+
+      return c.json({
+        ok: true,
+        message_logs: msgStats || { total_7d: 0, incoming_7d: 0, outgoing_7d: 0, avg_latency_ms: 0 },
+        dlq,
+        dlqStats,
+        predictive
+      });
+    } catch (error) {
+      log.error('Get performance overview failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  // ===============================================
+  // ML Performance Tracking (status, metrics, manual run)
+  // ===============================================
+  app.get('/api/predictive/status', async (c) => {
+    try {
+      const health = checkPredictiveServicesHealth();
+      const running = !!getSchedulerService()?.getStatus().isRunning;
+      return c.json({ ok: true, health, running });
+    } catch (error) {
+      log.error('Predictive status failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  app.post('/api/predictive/run-manual', async (c) => {
+    try {
+      const result = await runManualPredictiveAnalytics();
+      return c.json({ ok: result.success, results: result.results, error: result.error });
+    } catch (error) {
+      log.error('Manual predictive analytics failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  app.get('/api/predictive/metrics', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
+      const daysParam = c.req.query('days');
+      const modelParam = c.req.query('model');
+      const days = daysParam ? Math.max(1, Math.min(180, parseInt(daysParam))) : 60;
+
+      const sql = db.getSQL();
+      if (modelParam) {
+        const rows = await sql<{
+          model_type: string; accuracy_score: number; training_data_size: number; evaluation_date: string; model_version: string;
+        }>`
+          SELECT model_type, accuracy_score, training_data_size, evaluation_date, model_version
+          FROM ml_model_performance
+          WHERE evaluation_date >= NOW() - INTERVAL '${days} days'
+            AND model_type = ${modelParam}
+          ORDER BY evaluation_date DESC
+          LIMIT 1000
+        `;
+        return c.json({ ok: true, metrics: rows });
+      } else {
+        const rows = await sql<{
+          model_type: string; accuracy_score: number; training_data_size: number; evaluation_date: string; model_version: string;
+        }>`
+          SELECT model_type, accuracy_score, training_data_size, evaluation_date, model_version
+          FROM ml_model_performance
+          WHERE evaluation_date >= NOW() - INTERVAL '${days} days'
+          ORDER BY evaluation_date DESC
+          LIMIT 1000
+        `;
+        return c.json({ ok: true, metrics: rows });
+      }
+    } catch (error) {
+      log.error('Get predictive metrics failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  // ===============================================
+  // Compliance Logs (view) and Manual Security Check
+  // ===============================================
+  app.get('/api/compliance/logs', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
+      const daysParam = c.req.query('days');
+      const days = daysParam ? Math.max(1, Math.min(180, parseInt(daysParam))) : 30;
+      const rows = await sql<{
+        id: string; compliance_type: string; status: string; event_data: any; created_at: string;
+      }>`
+        SELECT id, compliance_type, status, event_data, created_at
+        FROM compliance_logs
+        WHERE merchant_id = ${merchantId}::uuid
+          AND created_at >= NOW() - INTERVAL '${days} days'
+        ORDER BY created_at DESC
+        LIMIT 1000
+      `;
+      return c.json({ ok: true, logs: rows });
+    } catch (error) {
+      log.error('Get compliance logs failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  app.post('/api/security/runtime-check', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
+      const svc = getComplianceService();
+      // Minimal quick checks: JWT length and IG token presence
+      const jwtOk = !!process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32;
+      const igOk = !!process.env.META_APP_SECRET && (process.env.META_APP_SECRET || '').length >= 32;
+      const status = jwtOk && igOk ? 'SUCCESS' : 'FAILURE';
+      await svc.logSecurity(merchantId, 'RUNTIME_QUICK_CHECK', status as any, { jwtOk, igOk });
+      return c.json({ ok: true, result: { jwtOk, igOk, status } });
+    } catch (error) {
+      log.error('Runtime quick security check failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  // ===============================================
+  // Instagram Business API Admin Helpers
+  // ===============================================
+  app.get('/api/instagram/health', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      const { getInstagramClient } = await import('../services/instagram-api.js');
+      const client = await getInstagramClient(merchantId);
+      const creds = await client.loadMerchantCredentials(merchantId);
+      const health = await client.healthCheck(creds, merchantId);
+      return c.json({ ok: true, health, hasCredentials: !!creds });
+    } catch (error) {
+      log.error('Instagram health failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  app.get('/api/instagram/profile', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      const { getInstagramClient } = await import('../services/instagram-api.js');
+      const client = await getInstagramClient(merchantId);
+      const creds = await client.loadMerchantCredentials(merchantId);
+      if (!creds) return c.json({ ok: false, error: 'not_connected' }, 404);
+      const profile = await client.getBusinessAccountInfo(creds, merchantId);
+      return c.json({ ok: true, profile });
+    } catch (error) {
+      log.error('Instagram profile failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  app.post('/api/instagram/send-test', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      const body = await c.req.json();
+      const recipientId = String(body?.recipientId || '').trim();
+      const message = String(body?.message || 'Test from admin').trim();
+      if (!recipientId) return c.json({ ok: false, error: 'recipientId_required' }, 400);
+
+      const { getInstagramClient } = await import('../services/instagram-api.js');
+      const client = await getInstagramClient(merchantId);
+      const creds = await client.loadMerchantCredentials(merchantId);
+      if (!creds) return c.json({ ok: false, error: 'not_connected' }, 404);
+
+      const res = await client.sendMessage(creds, merchantId, { recipientId, content: message });
+      return c.json({ ok: res.success, result: res });
+    } catch (error) {
+      log.error('Instagram send-test failed', { error: String(error) });
       return c.json({ ok: false, error: 'internal_error' }, 500);
     }
   });

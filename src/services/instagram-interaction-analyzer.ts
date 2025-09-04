@@ -60,6 +60,121 @@ export class InstagramInteractionAnalyzer {
   }
 
   /**
+   * Analyze comment sentiment and record in message_logs metadata if conversation exists
+   */
+  async analyzeCommentSentiment(merchantId: string, username: string, comment: string): Promise<{ sentiment: 'positive'|'neutral'|'negative'; saved: boolean }>{
+    const text = (comment || '').toLowerCase();
+    const positive = /(شكرا|حلو|جميل|😍|❤️|👍|🔥|ممتاز)/.test(text);
+    const negative = /(سيء|رديء|خايس|ما|مو|👎|😡|💔|بطيء)/.test(text);
+    const sentiment: 'positive'|'neutral'|'negative' = positive ? 'positive' : negative ? 'negative' : 'neutral';
+
+    try {
+      const sql = this.db.getSQL();
+      // Find latest conversation for this user
+      const conv = await sql<{ id: string }>`
+        SELECT id FROM conversations
+        WHERE merchant_id = ${merchantId}::uuid AND platform = 'instagram' AND lower(customer_instagram) = lower(${username})
+        ORDER BY last_message_at DESC NULLS LAST, created_at DESC
+        LIMIT 1
+      `;
+      const conversationId = conv[0]?.id;
+      if (!conversationId) return { sentiment, saved: false };
+
+      const meta = { event_type: 'comment_sentiment', sentiment };
+      await sql`
+        INSERT INTO message_logs (
+          conversation_id, content, message_type, direction, platform, source_channel, ai_intent, ai_confidence, processing_time_ms, metadata, created_at
+        ) VALUES (
+          ${conversationId}::uuid, ${comment}, 'COMMENT', 'INCOMING', 'instagram', 'manychat', NULL, NULL, 0, ${JSON.stringify(meta)}::jsonb, NOW()
+        )
+      `;
+      return { sentiment, saved: true };
+    } catch (e) {
+      this.log.warn('analyzeCommentSentiment failed', { error: String(e) });
+      return { sentiment, saved: false };
+    }
+  }
+
+  /**
+   * Update subscriber engagement score (0..100) based on recent interactions
+   */
+  async updateSubscriberEngagementForUsername(merchantId: string, username: string): Promise<number> {
+    try {
+      const sql = this.db.getSQL();
+      // Aggregate interactions: DMs from message_logs + story interactions (last 30d)
+      const rows = await sql<{ dms: number; comments: number; stories: number }>`
+        WITH d AS (
+          SELECT COUNT(*)::int AS c
+          FROM message_logs ml
+          JOIN conversations c ON c.id = ml.conversation_id
+          WHERE c.merchant_id = ${merchantId}::uuid
+            AND c.platform = 'instagram'
+            AND lower(c.customer_instagram) = lower(${username})
+            AND ml.created_at >= NOW() - INTERVAL '30 days'
+        ),
+        cm AS (
+          SELECT COUNT(*)::int AS c
+          FROM message_logs ml
+          JOIN conversations c ON c.id = ml.conversation_id
+          WHERE c.merchant_id = ${merchantId}::uuid
+            AND c.platform = 'instagram'
+            AND lower(c.customer_instagram) = lower(${username})
+            AND ml.message_type = 'COMMENT'
+            AND ml.created_at >= NOW() - INTERVAL '30 days'
+        ),
+        si AS (
+          SELECT COUNT(*)::int AS c
+          FROM instagram_story_interactions si
+          WHERE si.merchant_id = ${merchantId}::uuid
+            AND si.customer_id = ${username}
+            AND si.created_at >= NOW() - INTERVAL '30 days'
+        )
+        SELECT (SELECT c FROM d) AS dms, (SELECT c FROM cm) AS comments, (SELECT c FROM si) AS stories
+      `;
+      const r = rows[0] || { dms: 0, comments: 0, stories: 0 } as any;
+      const score = Math.max(0, Math.min(100, (r.dms * 3) + (r.comments * 4) + (r.stories * 2)));
+
+      await sql`
+        UPDATE manychat_subscribers
+        SET engagement_score = ${score}, last_interaction_at = NOW(), updated_at = NOW()
+        WHERE merchant_id = ${merchantId}::uuid AND lower(instagram_username) = lower(${username})
+      `;
+      return score;
+    } catch (e) {
+      this.log.debug('updateSubscriberEngagementForUsername skipped', { error: String(e) });
+      return 0;
+    }
+  }
+
+  /**
+   * Track user behavior rollups for analytics (per 24h window)
+   */
+  async trackUserBehavior(merchantId: string, username: string, interaction: 'dm'|'comment'|'story'): Promise<void> {
+    try {
+      const sql = this.db.getSQL();
+      await sql`
+        INSERT INTO customer_interaction_patterns (
+          merchant_id, customer_id, last_updated, interaction_count, dm_count, comment_count, story_count
+        ) VALUES (
+          ${merchantId}::uuid, ${username}, NOW(), 1,
+          ${interaction === 'dm' ? 1 : 0},
+          ${interaction === 'comment' ? 1 : 0},
+          ${interaction === 'story' ? 1 : 0}
+        )
+        ON CONFLICT (merchant_id, customer_id)
+        DO UPDATE SET
+          last_updated = NOW(),
+          interaction_count = customer_interaction_patterns.interaction_count + 1,
+          dm_count = customer_interaction_patterns.dm_count + ${interaction === 'dm' ? 1 : 0},
+          comment_count = customer_interaction_patterns.comment_count + ${interaction === 'comment' ? 1 : 0},
+          story_count = customer_interaction_patterns.story_count + ${interaction === 'story' ? 1 : 0}
+      `;
+    } catch (e) {
+      this.log.debug('trackUserBehavior skipped', { error: String(e) });
+    }
+  }
+
+  /**
    * Compute a simple engagement score from recent interactions
    */
   async calculateEngagementScore(merchantId: string, customerId: string): Promise<number> {
@@ -103,4 +218,3 @@ export class InstagramInteractionAnalyzer {
 }
 
 export default InstagramInteractionAnalyzer;
-

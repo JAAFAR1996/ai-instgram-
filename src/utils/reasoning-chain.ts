@@ -121,8 +121,8 @@ export function summarizeChain(chain: ThinkingChain): string {
 
 export function shouldUseExtendedThinking(query: string, nlp?: { intent?: string; confidence?: number }): boolean {
   const q = (query || '').toLowerCase();
-  const long = q.length > 140;
-  const hasWhyOrHow = /(ليش|كيف|شنو|policy|استرجاع|إرجاع|return|refund|why|how|طريقة|مشكلة)/.test(q);
+  const long = q.length > 100; // enable for moderately long queries too
+  const hasWhyOrHow = /(ليش|كيف|شنو|policy|سياسة|استرجاع|إرجاع|return|refund|why|how|طريقة|مشكلة|ضمان|رسوم|توصيل|جدول|مقاس)/.test(q);
   const hasQuestion = q.includes('?') || /^(ليش|كيف|شنو|هل|لو|ممكن)/.test(q.trim());
   const lowNlp = (nlp?.confidence ?? 1) < 0.6;
   const intent = (nlp?.intent || '').toUpperCase();

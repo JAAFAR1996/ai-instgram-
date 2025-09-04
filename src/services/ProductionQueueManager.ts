@@ -3,6 +3,7 @@ import type { Job, RedisClient, JobsOptions } from 'bullmq';
 import { Redis, ReplyError } from 'ioredis';
 import { Pool } from 'pg';
 import { withWebhookTenantJob, withAITenantJob } from '../isolation/context.js';
+import { telemetry } from './telemetry.js';
 
 function settleOnce<T>() {
   let settled = false;
@@ -65,6 +66,24 @@ export interface QueueJob {
   platform: 'INSTAGRAM' | 'WHATSAPP' | 'FACEBOOK';
   priority: 'low' | 'normal' | 'high' | 'urgent';
   metadata?: Record<string, unknown>;
+}
+
+export interface ManyChatJob {
+  eventId: string;
+  merchantId: string;
+  username: string;
+  conversationId: string;
+  incomingMessageId: string | null;
+  messageText: string;
+  imageData?: Array<{ url: string }>;
+  sessionData: Record<string, unknown>;
+  priority: 'urgent' | 'high' | 'normal';
+  metadata: {
+    processingStartTime: number;
+    source: 'manychat';
+    hasImages: boolean;
+    originalPayload?: unknown;
+  };
 }
 
 export interface QueueInitResult {
@@ -272,6 +291,25 @@ export class ProductionQueueManager {
 
     events.on('failed', ({ jobId, failedReason }) => {
       this.failedJobs++;
+      
+      // 📊 DLQ metrics: Record failed job
+      telemetry.counter('queue_dlq_jobs_total', 'Jobs moved to Dead Letter Queue').add(1);
+      telemetry.gauge('queue_dlq_current_count', 'Current DLQ job count').record(this.failedJobs);
+      
+      // 🚨 Error type classification for DLQ
+      const errorType = failedReason && typeof failedReason === 'string' 
+        ? failedReason.includes('timeout') ? 'timeout'
+          : failedReason.includes('network') ? 'network' 
+          : failedReason.includes('database') ? 'database'
+          : failedReason.includes('AI') || failedReason.includes('OpenAI') ? 'ai_service'
+          : 'unknown'
+        : 'unknown';
+      
+      telemetry.counter('queue_dlq_by_error_type_total', 'DLQ jobs by error type').add(1, {
+        error_type: errorType,
+        queue: this.queueName
+      });
+      
       this.logger.error('فشلت مهمة', { jobId, error: failedReason, totalFailed: this.failedJobs });
     });
   }
@@ -547,11 +585,101 @@ export class ProductionQueueManager {
     );
     this.workers['message-delivery'] = messageDeliveryWorker;
 
+    // 💬 معالج ManyChat المتقدم - العمليات الثقيلة
+    this.logger.info('🔧 [DEBUG] تسجيل معالج manychat-processing...');
+    
+    const manyChatProcessor = withAITenantJob(
+      this.dbPool,
+      this.logger,
+      async (job, data, _client) => {
+        this.logger.info('💬 [MANYCHAT-WORKER-START] معالج ManyChat استقبل job!', { 
+          jobId: job.id, 
+          jobName: job.name,
+          merchantId: data.merchantId,
+          username: data.username 
+        });
+        
+        clearTimeout(workerInitTimeout);
+        
+        const manyChatWorkerId = `manychat-worker-${crypto.randomUUID().slice(0, 8)}`;
+        const startTime = Date.now();
+        const manyChatData = data as ManyChatJob;
+      
+        return await this.circuitBreaker.execute(async () => {
+          try {
+            this.logger.info(`💬 ${manyChatWorkerId} - بدء معالجة ManyChat متقدمة`, {
+              manyChatWorkerId,
+              eventId: manyChatData.eventId,
+              merchantId: manyChatData.merchantId,
+              username: manyChatData.username,
+              conversationId: manyChatData.conversationId,
+              hasImages: manyChatData.metadata.hasImages,
+              messageLength: manyChatData.messageText.length,
+              jobId: job.id,
+              processingDelay: startTime - manyChatData.metadata.processingStartTime
+            });
+
+            const result = await this.processManyChatJob(manyChatData);
+            
+            const duration = Date.now() - startTime;
+            this.logger.info(`✅ ${manyChatWorkerId} - ManyChat معُولج بنجاح`, {
+              manyChatWorkerId,
+              eventId: manyChatData.eventId,
+              duration: `${duration}ms`,
+              totalDuration: `${Date.now() - manyChatData.metadata.processingStartTime}ms`,
+              aiResponse: result.aiResponse?.slice(0, 100) + '...',
+              stage: result.stage,
+              intent: result.intent,
+              confidence: result.confidence
+            });
+            
+            return { 
+              processed: true, 
+              manyChatWorkerId,
+              eventId: manyChatData.eventId,
+              result,
+              processingTime: duration,
+              totalTime: Date.now() - manyChatData.metadata.processingStartTime
+            };
+            
+          } catch (error) {
+            const duration = Date.now() - startTime;
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            
+            this.logger.error(`❌ ${manyChatWorkerId} - فشل في معالجة ManyChat`, { 
+              manyChatWorkerId,
+              eventId: manyChatData.eventId,
+              merchantId: manyChatData.merchantId,
+              username: manyChatData.username,
+              conversationId: manyChatData.conversationId,
+              duration: `${duration}ms`,
+              error: errorMessage,
+              jobId: job.id,
+              stack: error instanceof Error ? error.stack?.substring(0, 500) : undefined
+            });
+            
+            const processedError = error instanceof Error ? error : new Error(errorMessage);
+            throw processedError;
+          }
+        });
+      }
+    );
+    
+    const manyChatWorker = new Worker(
+      this.queueName,
+      async (job: Job) => {
+        if (job.name !== 'manychat-processing') return;
+        return manyChatProcessor(job as unknown as { id: string; name: string; data: unknown; moveToFailed: (err: Error, retry: boolean) => Promise<void> });
+      },
+      { connection, concurrency: 4 } // 4 concurrent ManyChat jobs
+    );
+    this.workers['manychat-processing'] = manyChatWorker;
+
     // تأكيد إنجاز تسجيل جميع المعالجات
     this.logger.info('🎯 [SUCCESS] تم تسجيل جميع معالجات الطوابير بنجاح!', {
-      processors: ['process-webhook', 'ai-response', 'cleanup', 'notification', 'message-delivery'],
-      concurrency: { webhook: 5, ai: 3, cleanup: 1, notification: 2, messageDelivery: 3 },
-      total: 14
+      processors: ['process-webhook', 'ai-response', 'cleanup', 'notification', 'message-delivery', 'manychat-processing'],
+      concurrency: { webhook: 5, ai: 3, cleanup: 1, notification: 2, messageDelivery: 3, manyChat: 4 },
+      total: 18
     });
     
     // 🔍 تحقق فوري من أن القائمة يمكنها إرسال إشعارات عند تفعيل الاختبارات صراحة
@@ -962,6 +1090,108 @@ export class ProductionQueueManager {
       return { success: true, jobId: String(job.id ?? '') };
 
     } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+
+  async addManyChatJob(
+    eventId: string,
+    merchantId: string,
+    username: string,
+    conversationId: string,
+    incomingMessageId: string | null,
+    messageText: string,
+    imageData: Array<{ url: string }> | undefined,
+    sessionData: Record<string, unknown>,
+    priority: 'urgent' | 'high' | 'normal' = 'high'
+  ): Promise<JobResult> {
+    if (!this.queue) {
+      return { 
+        success: false, 
+        error: 'مدير الطوابير غير مهيأ' 
+      };
+    }
+
+    try {
+      const jobData: ManyChatJob = {
+        eventId,
+        merchantId,
+        username,
+        conversationId,
+        incomingMessageId,
+        messageText,
+        imageData,
+        sessionData,
+        priority,
+        metadata: {
+          processingStartTime: Date.now(),
+          source: 'manychat',
+          hasImages: !!(imageData && imageData.length > 0)
+        }
+      };
+
+      const priorityValue = this.getPriorityValue(priority);
+      
+      this.logger.info('📤 [ADD-MANYCHAT-JOB] إضافة ManyChat job إلى الطابور...', {
+        jobName: 'manychat-processing',
+        eventId,
+        merchantId,
+        username,
+        conversationId,
+        priority,
+        hasImages: jobData.metadata.hasImages,
+        messageLength: messageText.length
+      });
+
+      // 📊 Queue Metrics: Record job enqueue
+      telemetry.recordQueueOperation(this.queueName, 'add', 1);
+
+      const job = await this.queue.add('manychat-processing', jobData, {
+        priority: priorityValue,
+        delay: 0,
+        removeOnComplete: priority === 'urgent' ? 200 : 100,
+        removeOnFail: priority === 'urgent' ? 100 : 50,
+        attempts: priority === 'urgent' ? 3 : 2,
+        backoff: { type: 'exponential', delay: 2000 }
+      });
+
+      this.logger.info('✅ [ADD-MANYCHAT-JOB] تم إضافة ManyChat job بنجاح', {
+        jobId: job.id,
+        jobName: job.name,
+        eventId,
+        username
+      });
+
+      // الحصول على موقع المهمة في الطابور
+      const waiting = await this.queue.getWaiting();
+      const queuePosition = waiting.findIndex(j => String(j.id ?? '') === String(job.id ?? '')) + 1;
+
+      this.logger.info('تم إضافة مهمة ManyChat للطابور', {
+        jobId: job.id,
+        eventId,
+        merchantId,
+        username,
+        priority,
+        queuePosition
+      });
+
+      return { 
+        success: true, 
+        jobId: String(job.id ?? ''),
+        queuePosition
+      };
+
+    } catch (error) {
+      this.logger.error('فشل في إضافة مهمة ManyChat للطابور', { 
+        eventId,
+        merchantId,
+        username,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
       return { 
         success: false, 
         error: error instanceof Error ? error.message : String(error)
@@ -1439,8 +1669,20 @@ export class ProductionQueueManager {
     this.monitoringInterval = setInterval(async () => {
       try {
         await this.performQueueHealthCheck();
+        
+        // 📊 Export queue metrics for monitoring
+        const stats = await this.getQueueStats();
+        telemetry.gauge('queue_monitoring_total_jobs', 'Total jobs in queue').record(stats.total);
+        telemetry.gauge('queue_monitoring_waiting_jobs', 'Jobs waiting in queue').record(stats.waiting);
+        telemetry.gauge('queue_monitoring_active_jobs', 'Jobs currently processing').record(stats.active);
+        telemetry.gauge('queue_monitoring_failed_jobs', 'Failed jobs count').record(stats.failed);
+        telemetry.gauge('queue_monitoring_completed_jobs', 'Completed jobs count').record(stats.completed);
+        telemetry.gauge('queue_monitoring_delayed_jobs', 'Delayed jobs count').record(stats.delayed);
+        telemetry.gauge('queue_monitoring_error_rate', 'Queue error rate percentage').record(stats.errorRate);
+        
       } catch (error) {
         this.logger.error('Queue monitoring error', { error });
+        telemetry.counter('queue_monitoring_errors_total', 'Queue monitoring errors').add(1);
       }
     }, 30000);
 
@@ -1469,6 +1711,9 @@ export class ProductionQueueManager {
       
       // فحص إذا كانت هناك مهام في الانتظار لكن لا يتم معالجتها
       if (stats.waiting > 0 && stats.active === 0) {
+        // 📊 Record stalled queue metric
+        telemetry.counter('queue_stalled_detection_total', 'Queue stalled (jobs waiting but no active processing)').add(1);
+        
         this.logger.warn('🚨 مهام في الانتظار لكن لا توجد معالجة نشطة', {
           waiting: stats.waiting,
           active: stats.active,
@@ -1481,6 +1726,13 @@ export class ProductionQueueManager {
         // إذا لم تتم معالجة أي مهمة خلال آخر 5 دقائق والمهام متراكمة
         if (stats.waiting > 10 && 
             (!this.lastProcessedAt || now - this.lastProcessedAt.getTime() > 300000)) {
+          // 🚨 Critical queue failure metric
+          telemetry.counter('queue_critical_failure_total', 'Critical queue failure requiring restart').add(1, {
+            waiting_jobs: String(stats.waiting),
+            active_jobs: String(stats.active),
+            time_since_last_process: String(this.lastProcessedAt ? now - this.lastProcessedAt.getTime() : 'never')
+          });
+          
           this.logger.error('🔥 Workers معطلة - محاولة إعادة تشغيل المعالجات', {
             queueStats: stats,
             action: 'restart_processors'
@@ -1499,6 +1751,10 @@ export class ProductionQueueManager {
         });
 
         if (stalledJobs.length > 0) {
+          // 📊 Record stalled jobs metric
+          telemetry.counter('queue_stalled_jobs_total', 'Jobs stalled for too long').add(stalledJobs.length);
+          telemetry.gauge('queue_stalled_jobs_current', 'Currently stalled jobs').record(stalledJobs.length);
+          
           this.logger.warn('⏰ مهام نشطة عالقة لفترة طويلة', {
             stalledCount: stalledJobs.length,
             totalActive: stats.active,
@@ -1911,6 +2167,474 @@ export class ProductionQueueManager {
       
       throw error;
     }
+  }
+
+  /**
+   * معالجة مهام ManyChat المتقدمة
+   */
+  private async processManyChatJob(jobData: ManyChatJob): Promise<{
+    success: boolean;
+    aiResponse?: string;
+    intent?: string;
+    confidence?: number;
+    stage?: string;
+    sessionPatch?: Record<string, unknown>;
+    processingTime: number;
+    error?: string;
+    qualityScore?: number;
+    qualityImproved?: boolean;
+    usedCache?: boolean;
+    decisionPath?: string[];
+  }> {
+    const startTime = Date.now();
+    
+    try {
+      // 📊 Queue metrics: Record processing start
+      telemetry.recordQueueOperation(this.queueName, 'process', 1);
+      
+      // 📈 Queue depth gauge
+      const queueStats = await this.getQueueStats();
+      telemetry.gauge('queue_depth', 'Current queue depth').record(queueStats.waiting + queueStats.active);
+      telemetry.gauge('queue_active_jobs', 'Active jobs count').record(queueStats.active);
+      telemetry.gauge('queue_waiting_jobs', 'Waiting jobs count').record(queueStats.waiting);
+      telemetry.gauge('queue_error_rate_percent', 'Queue error rate percentage').record(queueStats.errorRate);
+      
+      this.logger.info('📬 [MANYCHAT-PROCESS] بدء معالجة ManyChat job متقدمة', {
+        eventId: jobData.eventId,
+        merchantId: jobData.merchantId,
+        username: jobData.username,
+        conversationId: jobData.conversationId,
+        messageLength: jobData.messageText.length,
+        hasImages: jobData.metadata.hasImages,
+        sessionKeys: Object.keys(jobData.sessionData || {}),
+        queueDelay: startTime - jobData.metadata.processingStartTime
+      });
+
+      // 🔍 التحقق من صحة البيانات
+      if (!jobData.merchantId || !jobData.username || !jobData.conversationId) {
+        throw new Error('Missing required ManyChat job data: merchantId, username, or conversationId');
+      }
+      
+      // 🚀 المعالجة الشاملة للAI + Analytics + Constitutional AI
+      const result = await this.executeFullManyChatPipeline(jobData);
+
+      const totalDuration = Date.now() - startTime;
+      
+      // 📊 Record successful processing metrics
+      telemetry.recordQueueOperation(this.queueName, 'completed', 1);
+      telemetry.histogram('queue_processing_duration_ms', 'Job processing time in milliseconds', 'ms').record(totalDuration, {
+        job_type: 'manychat',
+        merchant_id: jobData.merchantId,
+        success: 'true',
+        has_images: String(jobData.metadata.hasImages),
+        cached: String(result.usedCache || false)
+      });
+      
+      // 🎯 Business metrics
+      if (result.intent) {
+        telemetry.counter('manychat_intent_classified_total', 'ManyChat intents classified').add(1, {
+          intent: result.intent,
+          merchant_id: jobData.merchantId
+        });
+      }
+      
+      if (result.confidence && result.confidence >= 0.8) {
+        telemetry.counter('manychat_high_confidence_responses_total', 'High confidence AI responses').add(1, {
+          merchant_id: jobData.merchantId
+        });
+      }
+      
+      this.logger.info('✅ [MANYCHAT-PROCESS] تمت معالجة ManyChat بنجاح شاملة', {
+        eventId: jobData.eventId,
+        merchantId: jobData.merchantId,
+        username: jobData.username,
+        conversationId: jobData.conversationId,
+        duration: `${totalDuration}ms`,
+        totalTime: `${Date.now() - jobData.metadata.processingStartTime}ms`,
+        aiResponse: result.aiResponse?.slice(0, 120) + '...',
+        intent: result.intent,
+        confidence: result.confidence,
+        stage: result.stage,
+        qualityScore: result.qualityScore,
+        qualityImproved: result.qualityImproved,
+        usedCache: result.usedCache,
+        decisionPathCount: result.decisionPath?.length || 0
+      });
+
+      return {
+        ...result,
+        success: true,
+        processingTime: totalDuration
+      };
+
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // 📊 Record failed processing metrics
+      telemetry.recordQueueOperation(this.queueName, 'failed', 1);
+      telemetry.histogram('queue_processing_duration_ms', 'Job processing time in milliseconds', 'ms').record(duration, {
+        job_type: 'manychat',
+        merchant_id: jobData.merchantId,
+        success: 'false',
+        has_images: String(jobData.metadata.hasImages),
+        error_type: error instanceof Error ? error.constructor.name : 'Unknown'
+      });
+      
+      // 🚨 Error classification counter
+      telemetry.counter('manychat_processing_errors_total', 'ManyChat processing errors').add(1, {
+        error_type: error instanceof Error ? error.constructor.name : 'Unknown',
+        merchant_id: jobData.merchantId,
+        has_message: String(Boolean(jobData.messageText)),
+        has_images: String(jobData.metadata.hasImages)
+      });
+      
+      this.logger.error('💥 [MANYCHAT-ERROR] خطأ في معالجة ManyChat', {
+        eventId: jobData.eventId,
+        merchantId: jobData.merchantId,
+        username: jobData.username,
+        conversationId: jobData.conversationId,
+        duration: `${duration}ms`,
+        error: errorMessage,
+        stack: error instanceof Error ? error.stack?.substring(0, 500) : undefined
+      });
+      
+      return {
+        success: false,
+        processingTime: duration,
+        error: errorMessage
+      };
+    }
+  }
+
+  /**
+   * تنفيذ pipeline شامل للمعالجة المتقدمة
+   */
+  private async executeFullManyChatPipeline(jobData: ManyChatJob): Promise<{
+    aiResponse?: string;
+    intent?: string;
+    confidence?: number;
+    stage?: string;
+    sessionPatch?: Record<string, unknown>;
+    qualityScore?: number;
+    qualityImproved?: boolean;
+    usedCache?: boolean;
+    decisionPath?: string[];
+  }> {
+    let aiResponse: string = '';
+    let aiIntent: string | undefined;
+    let aiConfidence: number | undefined;
+    let decisionPath: string[] = [];
+    let stage: 'AWARE' | 'BROWSE' | 'INTENT' | 'OBJECTION' | 'CLOSE' | undefined;
+    let sessionPatch: Record<string, unknown> | undefined;
+    let qualityScore: number | undefined;
+    let qualityImproved: boolean | undefined;
+    let usedCache = false;
+
+    // 1. محاولة Cache أولاً للرسائل القصيرة
+    try {
+      const isShortText = jobData.messageText && jobData.messageText.length <= 64 && !jobData.metadata.hasImages;
+      if (isShortText) {
+        const { SmartCache } = await import('../services/smart-cache.js');
+        const sc = new SmartCache();
+        const cached = await sc.getCommonReply(jobData.merchantId, jobData.messageText);
+        if (cached?.text && (cached as any).intent && !['OTHER','SMALL_TALK'].includes(String((cached as any).intent).toUpperCase())) {
+          aiResponse = cached.text;
+          aiIntent = 'CACHED_COMMON';
+          aiConfidence = 0.9;
+          decisionPath = ['cache=hit'];
+          usedCache = true;
+          this.logger.info('🎯 [CACHE-HIT] استخدم رد محفوظ', { merchantId: jobData.merchantId, intent: (cached as any).intent });
+        }
+      }
+    } catch (cacheErr) {
+      this.logger.debug('Cache lookup failed, proceeding with AI', { error: String(cacheErr) });
+    }
+
+    // 2. معالجة AI إذا لم نستخدم Cache
+    if (!usedCache) {
+      try {
+        if (jobData.metadata.hasImages && jobData.imageData?.length) {
+          // 🖼️ ENHANCED: Comprehensive image analysis + AI response
+          decisionPath.push('image=enhanced_analysis');
+          
+          try {
+            // Import the new Image Analysis Service
+            const { default: ImageAnalysisService } = await import('../services/image-analysis.js');
+            const imageAnalyzer = new ImageAnalysisService();
+            
+            // Process each image with comprehensive analysis
+            const imageAnalysisResults = [];
+            for (const imageInfo of jobData.imageData) {
+              try {
+                // Download image for analysis
+                const imageResponse = await fetch(imageInfo.url);
+                if (!imageResponse.ok) continue;
+                
+                const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+                const contentType = imageResponse.headers.get('content-type') || 'image/jpeg';
+                
+                // Prepare metadata
+                const imageMetadata = {
+                  messageId: jobData.incomingMessageId || 'temp-' + Date.now(),
+                  merchantId: jobData.merchantId,
+                  customerId: jobData.username,
+                  mimeType: contentType,
+                  width: 0, // Will be extracted by the service if needed
+                  height: 0,
+                  sizeBytes: imageBuffer.length,
+                  contentHash: '',
+                  url: imageInfo.url
+                };
+                
+                // Perform comprehensive analysis
+                const analysisResult = await imageAnalyzer.analyzeImage(imageBuffer, imageMetadata, {
+                  enableOCR: true,
+                  enableVisualSearch: true,
+                  enableProductMatching: true
+                });
+                
+                imageAnalysisResults.push({
+                  url: imageInfo.url,
+                  analysis: analysisResult
+                });
+                
+                telemetry.counter('manychat_image_analysis_total', 'ManyChat images analyzed').add(1, {
+                  merchant_id: jobData.merchantId,
+                  content_type: analysisResult.contentType.category,
+                  has_ocr: String(Boolean(analysisResult.ocrText)),
+                  product_matches: String(analysisResult.productMatches?.length || 0)
+                });
+                
+              } catch (imageError) {
+                this.logger.warn('Individual image analysis failed', {
+                  url: imageInfo.url,
+                  error: String(imageError)
+                });
+              }
+            }
+            
+            // Combine analysis results for AI processing
+            const combinedOCRText = imageAnalysisResults
+              .map(r => r.analysis.ocrText)
+              .filter(Boolean)
+              .join(' ');
+            
+            const combinedLabels = imageAnalysisResults
+              .flatMap(r => r.analysis.labels)
+              .map(l => l.name)
+              .join(', ');
+            
+            const productMatches = imageAnalysisResults
+              .flatMap(r => r.analysis.productMatches || []);
+              
+            // Enhanced context for AI response
+            const enhancedMessage = [
+              jobData.messageText,
+              combinedOCRText && `OCR النص المستخرج: ${combinedOCRText}`,
+              combinedLabels && `وصف الصورة: ${combinedLabels}`,
+              productMatches.length > 0 && `منتجات مطابقة: ${productMatches.map(p => p.name).join(', ')}`
+            ].filter(Boolean).join('\n\n');
+            
+            // Use Instagram AI with enhanced context
+            const ig = getInstagramAIService();
+            const igCtx: import('../services/instagram-ai.js').InstagramContext = {
+              merchantId: jobData.merchantId,
+              customerId: jobData.username,
+              platform: 'instagram',
+              stage: 'BROWSING',
+              cart: [],
+              preferences: {},
+              conversationHistory: [],
+              interactionType: 'dm',
+              imageData: jobData.imageData,
+              // Enhanced with analysis results
+              imageAnalysis: imageAnalysisResults.map(r => r.analysis)
+            };
+            
+            const igResp = await ig.generateInstagramResponse(enhancedMessage, igCtx);
+            aiResponse = igResp.messageAr || igResp.message || 'تم تحليل الصورة بنجاح.';
+            aiIntent = igResp.intent || 'IMAGE_INQUIRY';
+            aiConfidence = Math.max(igResp.confidence || 0.7, 
+              imageAnalysisResults.reduce((acc, r) => acc + r.analysis.confidence, 0) / imageAnalysisResults.length);
+            decisionPath.push(`image_analysis=${imageAnalysisResults.length}`, 
+              `ocr=${Boolean(combinedOCRText)}`, 
+              `products=${productMatches.length}`);
+            stage = igResp.stage as any;
+            
+            // Store enhanced analysis for future reference
+            sessionPatch = {
+              ...sessionPatch,
+              lastImageAnalysis: {
+                timestamp: new Date().toISOString(),
+                results: imageAnalysisResults.length,
+                ocrText: combinedOCRText,
+                productMatches: productMatches.length
+              }
+            };
+            
+          } catch (analysisError) {
+            // Fallback to original Instagram AI processing
+            this.logger.warn('Enhanced image analysis failed, falling back to basic processing', {
+              error: String(analysisError),
+              merchantId: jobData.merchantId
+            });
+            
+            const ig = getInstagramAIService();
+            const igCtx: import('../services/instagram-ai.js').InstagramContext = {
+              merchantId: jobData.merchantId,
+              customerId: jobData.username,
+              platform: 'instagram',
+              stage: 'BROWSING',
+              cart: [],
+              preferences: {},
+              conversationHistory: [],
+              interactionType: 'dm',
+              imageData: jobData.imageData
+            };
+            const igResp = await ig.generateInstagramResponse(jobData.messageText, igCtx);
+            aiResponse = igResp.messageAr || igResp.message || 'تم معالجة الصورة.';
+            aiIntent = igResp.intent || 'IMAGE_INQUIRY';
+            aiConfidence = igResp.confidence || 0.7;
+            decisionPath.push('vision=fallback');
+            stage = igResp.stage as any;
+          }
+        } else {
+          // معالجة النص بـ Orchestrator
+          const { orchestrate } = await import('../services/smart-orchestrator.js');
+          const orchResult = await Promise.race([
+            orchestrate(jobData.merchantId, jobData.username, jobData.messageText, { 
+              askAtMostOneFollowup: true, 
+              session: jobData.sessionData, 
+              showThinking: true 
+            }),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI orchestration timeout')), 25000))
+          ]);
+          aiResponse = orchResult.text;
+          aiIntent = orchResult.intent;
+          aiConfidence = orchResult.confidence;
+          decisionPath = orchResult.decision_path || [];
+          sessionPatch = orchResult.session_patch || undefined;
+          stage = orchResult.stage;
+        }
+      } catch (aiErr) {
+        this.logger.error('AI processing failed in ManyChat pipeline', { error: String(aiErr) });
+        aiResponse = 'عذراً، حدث خطأ في المعالجة. يرجى المحاولة مرة أخرى.';
+        aiIntent = 'ERROR_FALLBACK';
+        aiConfidence = 0.1;
+        decisionPath = ['ai=error'];
+      }
+    }
+
+    // 3. تحسين الجودة بـ Constitutional AI
+    if (aiResponse && !usedCache) {
+      try {
+        const ConstitutionalAI = (await import('../services/constitutional-ai.js')).default;
+        const consAI = new ConstitutionalAI();
+        const ctxObj: import('../types/constitutional-ai.js').ResponseContext = {
+          merchantId: jobData.merchantId,
+          username: jobData.username,
+        };
+        if (aiIntent) ctxObj.intent = aiIntent;
+        if (stage) ctxObj.stage = stage;
+        if (jobData.sessionData) ctxObj.session = jobData.sessionData;
+        
+        const critique = await consAI.critiqueResponse(aiResponse, ctxObj);
+        if (!critique.meetsThreshold) {
+          const improveCtx = { ...ctxObj };
+          const { improved, record } = await consAI.improveResponse(aiResponse, critique, improveCtx);
+          qualityImproved = true;
+          qualityScore = record.newScore;
+          aiResponse = improved;
+          this.logger.info('🔧 [QUALITY] تحسين Constitutional AI', { 
+            prevScore: record.prevScore, 
+            newScore: record.newScore 
+          });
+        } else {
+          qualityScore = critique.score;
+        }
+      } catch (qualityErr) {
+        this.logger.warn('Constitutional AI improvement failed', { error: String(qualityErr) });
+      }
+    }
+
+    // 4. تخصيص الاستجابة
+    if (aiResponse && !usedCache) {
+      try {
+        const { CustomerProfiler } = await import('../services/customer-profiler.js');
+        const { ResponsePersonalizer } = await import('../services/response-personalizer.js');
+        const profiler = new CustomerProfiler();
+        const profile = await profiler.personalizeResponses(jobData.merchantId, jobData.username);
+        const personalizer = new ResponsePersonalizer();
+        const personalized = await personalizer.personalizeResponses(aiResponse, {
+          merchantId: jobData.merchantId,
+          customerId: jobData.username,
+          tier: profile.tier,
+          preferences: {
+            categories: profile.preferences.categories,
+            colors: profile.preferences.colors,
+            sizes: profile.preferences.sizes,
+            brands: profile.preferences.brands,
+            priceSensitivity: profile.preferences.priceSensitivity,
+          },
+          queryHint: jobData.messageText.slice(0, 80)
+        });
+        aiResponse = personalized.text;
+      } catch (personalizeErr) {
+        this.logger.debug('Response personalization skipped', { error: String(personalizeErr) });
+      }
+    }
+
+    // 5. حفظ الاستجابة كرسالة صادرة
+    try {
+      const outgoingMessage = await this.repositories.message.create({
+        conversationId: jobData.conversationId,
+        direction: 'OUTGOING',
+        platform: 'instagram',
+        messageType: 'TEXT',
+        content: aiResponse,
+        platformMessageId: `ai_generated_${Date.now()}`,
+        aiProcessed: true,
+        deliveryStatus: 'PENDING',
+        aiConfidence: aiConfidence,
+        aiIntent: aiIntent,
+        processingTimeMs: Date.now() - jobData.metadata.processingStartTime
+      });
+
+      // تحديث stage المحادثة
+      if (stage) {
+        await this.repositories.conversation.update(jobData.conversationId, {
+          conversationStage: stage
+        });
+      }
+
+      this.logger.info('💾 [MESSAGE-SAVED] تم حفظ رسالة صادرة', { 
+        messageId: outgoingMessage.id, 
+        conversationId: jobData.conversationId 
+      });
+    } catch (saveErr) {
+      this.logger.warn('Failed to save outgoing message', { error: String(saveErr) });
+    }
+
+    // 6. تشغيل Analytics في الخلفية (best-effort)
+    try {
+      const { PredictiveAnalyticsEngine } = await import('../services/predictive-analytics.js');
+      const predictiveEngine = new PredictiveAnalyticsEngine();
+      // تشغيل غير متزامن
+      predictiveEngine.runPredictions(jobData.merchantId, jobData.username).catch(() => {});
+    } catch {}
+
+    return {
+      aiResponse,
+      intent: aiIntent,
+      confidence: aiConfidence,
+      stage,
+      sessionPatch,
+      qualityScore,
+      qualityImproved,
+      usedCache,
+      decisionPath
+    };
   }
 
   /**

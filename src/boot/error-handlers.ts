@@ -8,6 +8,90 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { teardownTimerManagement } from '../utils/timer-manager.js';
 import { logger } from '../services/logger.js';
 
+// =============== Advanced Recovery Manager ===============
+type RecoveryEvent = 'unhandledRejection' | 'uncaughtException' | 'manual' | 'warning';
+
+let lastRecoveryAt = 0;
+let recoveryAttempts = 0;
+let degradedMode = false;
+const RECOVERY_COOLDOWN_MS = 30_000; // 30s between recovery attempts
+const RECOVERY_MAX_ATTEMPTS_WINDOW = 10 * 60_000; // 10 minutes window
+const RECOVERY_MAX_ATTEMPTS = 3; // after this, exit gracefully
+const recentRecoveries: number[] = [];
+
+async function attemptSystemRecovery(event: RecoveryEvent, reason?: string): Promise<void> {
+  const now = Date.now();
+  if (now - lastRecoveryAt < RECOVERY_COOLDOWN_MS) {
+    logger.warn('Recovery suppressed due to cooldown', { event, sinceMs: now - lastRecoveryAt });
+    return;
+  }
+  lastRecoveryAt = now;
+
+  // Track windowed attempts
+  recentRecoveries.push(now);
+  while (recentRecoveries.length && now - (recentRecoveries[0] || 0) > RECOVERY_MAX_ATTEMPTS_WINDOW) recentRecoveries.shift();
+  recoveryAttempts = recentRecoveries.length;
+
+  logger.warn('Attempting system recovery...', { event, reason, attemptsInWindow: recoveryAttempts });
+
+  try {
+    // 1) Database recovery
+    try {
+      const { getDatabase } = await import('../db/adapter.js');
+      const db = getDatabase();
+      const healthy = await db.health().catch(() => false);
+      if (!healthy) {
+        logger.warn('DB unhealthy, attempting recovery');
+        await db.recoverConnection();
+        logger.info('DB recovery successful');
+      }
+    } catch (e) {
+      logger.error('DB recovery failed', e instanceof Error ? e : { error: String(e) });
+    }
+
+    // 2) Redis recovery
+    try {
+      const { getRedisConnectionManager } = await import('../services/RedisConnectionManager.js');
+      const rm = getRedisConnectionManager();
+      await rm.performHealthCheckOnAllConnections().catch(() => {});
+      // If rate limited or disabled, try to re-enable after cooldown
+      rm.enableRedis();
+      logger.info('Redis recovery attempted');
+    } catch (e) {
+      logger.warn('Redis recovery skipped/failed', { error: String(e) });
+    }
+
+    // 3) Predictive scheduler sanity (best-effort)
+    try {
+      const { getSchedulerService } = await import('../startup/predictive-services.js');
+      const svc = getSchedulerService();
+      if (svc && !svc.getStatus().isRunning) {
+        // Do not autostart here; just log to avoid noisy restarts
+        logger.warn('Predictive scheduler not running (observed during recovery)');
+      }
+    } catch {}
+
+    // 4) Switch to degraded mode if we keep failing
+    if (recoveryAttempts >= RECOVERY_MAX_ATTEMPTS) {
+      degradedMode = true;
+      logger.error('Too many recovery attempts, entering degraded mode');
+      // Graceful shutdown to allow process manager to restart
+      await delay(1000);
+      await gracefulShutdown('RECOVERY_LIMIT', 1);
+      return;
+    }
+
+    logger.info('System recovery pass completed', { degradedMode });
+  } catch (err) {
+    logger.error('System recovery pass failed', err instanceof Error ? err : { error: String(err) });
+  }
+}
+
+// Export a manual trigger for recovery (for admin/ops usage)
+export async function triggerRecovery(reason?: string): Promise<void> {
+  await attemptSystemRecovery('manual', reason);
+}
+
 // Error counters for simple telemetry
 let unhandledRejectionCount = 0;
 let uncaughtExceptionCount = 0;
@@ -36,7 +120,8 @@ process.on('unhandledRejection', (reason, promise) => {
     process.exit(1);
   }
 
-  // In production, allow a burst then exit for safety
+  // In production, try recovery; allow a burst then exit for safety
+  void attemptSystemRecovery('unhandledRejection', error.message).catch(() => {});
   if (unhandledRejectionCount > 50) {
     console.error('Too many unhandled rejections, shutting down for safety');
     process.exit(1);
@@ -55,8 +140,10 @@ process.on('uncaughtException', (err) => {
     pid: process.pid
   });
 
-  console.error('Uncaught exception detected, shutting down gracefully...');
-  void delay(1000).then(() => process.exit(1));
+  // Attempt recovery first; if fatal class, proceed to exit
+  void attemptSystemRecovery('uncaughtException', err.message).catch(() => {});
+  console.error('Uncaught exception detected, scheduling graceful shutdown...');
+  void delay(1500).then(() => process.exit(1));
 });
 
 // Process warnings
@@ -67,6 +154,11 @@ process.on('warning', (warning) => {
     stack: warning.stack,
     timestamp: new Date().toISOString()
   });
+  // Opportunistic recovery on critical warnings
+  const msg = (warning?.message || '').toLowerCase();
+  if (/fswatch|memory leak|eventemitter leak/.test(msg)) {
+    void attemptSystemRecovery('warning', warning.message).catch(() => {});
+  }
 });
 
 // Graceful shutdown
@@ -157,6 +249,8 @@ export function getErrorStats() {
   return {
     unhandledRejectionCount,
     uncaughtExceptionCount,
+    recoveryAttempts,
+    degradedMode,
     uptime: process.uptime(),
     memoryUsage: process.memoryUsage(),
     timestamp: new Date().toISOString()

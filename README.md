@@ -213,6 +213,28 @@ bun run db:migrate
 bun run dev
 ```
 
+### فئات التجارة (categories)
+
+- لتجربة أصناف مختلفة غير الملابس، يمكن تهيئة بيانات التاجر الاختبارية حسب الفئة:
+
+```bash
+# أمثلة:
+SEED_CATEGORY=electronics node scripts/seed-real-merchant.js
+SEED_CATEGORY=grocery node scripts/seed-real-merchant.js
+SEED_CATEGORY=beauty node scripts/seed-real-merchant.js
+
+# أيضاً يمكن تمريرها كـ CLI flag
+node scripts/seed-real-merchant.js --category=electronics
+```
+
+- لتغيير فئة تاجر موجود:
+
+```bash
+DATABASE_URL=postgresql://... node scripts/set-merchant-category.js --merchant-id=<uuid> --category=electronics
+# أو حسب اسم مستخدم Instagram المسجل
+DATABASE_URL=postgresql://... node scripts/set-merchant-category.js --ig-username=zo27j --category=grocery
+```
+
 ### إعداد متغيرات البيئة المتقدمة
 
 ```env

@@ -13,6 +13,12 @@ import type { Platform } from '../types/database.js';
 import type { DIContainer } from '../container/index.js';
 
 import { logger } from './logger.js';
+import ExtendedThinkingService from './extended-thinking.js';
+import { shouldUseExtendedThinking } from '../utils/reasoning-chain.js';
+import { PredictiveAnalyticsEngine } from './predictive-analytics.js';
+import IntelligentRejectionHandler from './rejection/intelligent-rejection-handler.js';
+import SelfLearningSystem from './learning-analytics.js';
+import { pushDLQ } from '../queue/dead-letter.js';
 
 interface InteractionRow extends Record<string, unknown> {
   platform: string;
@@ -167,6 +173,25 @@ export class ConversationAIOrchestrator {
 
       let response: AIResponse | InstagramAIResponse;
       let adaptations: PlatformAdaptation[] = [];
+      let thinkingChain: import('../types/thinking.js').ThinkingChain | undefined;
+
+      // 0) Extended thinking for complex queries (best-effort)
+      try {
+        const enableThinking = shouldUseExtendedThinking(customerMessage, undefined);
+        if (enableThinking) {
+          const thinkingService = new ExtendedThinkingService();
+          const thinking = await thinkingService.processWithThinking(customerMessage, {
+            merchantId: context.merchantId,
+            username: context.customerId,
+            session: (context as any).session || {},
+            nlp: undefined,
+            hints: {}
+          }, false);
+          thinkingChain = thinking.chain;
+        }
+      } catch (e) {
+        logger.debug('Extended thinking skipped', { error: String(e) });
+      }
 
       if (platform === 'instagram') {
         // Use Instagram-specific AI
@@ -188,6 +213,61 @@ export class ConversationAIOrchestrator {
 
       // Apply cross-platform learning
       response = await this.applyCrossPlatformLearning(response, crossPlatformContext);
+
+      // 1) Merge extended-thinking decision into final text when available
+      try {
+        if (thinkingChain && (response as AIResponse)?.message) {
+          const enhanced = this.mergeThinkingWithResponse((response as AIResponse).message, thinkingChain);
+          if (enhanced && enhanced !== (response as AIResponse).message) {
+            (response as AIResponse).message = enhanced;
+            (response as AIResponse).messageAr = enhanced;
+            adaptations.push({ type: 'tone', originalValue: 'auto', adaptedValue: 'with-clarifier', reason: 'extended-thinking decision integration' });
+          }
+        }
+      } catch {}
+
+      // 2) Predictive analytics influences (size/churn/timing)
+      try {
+        const pae = new PredictiveAnalyticsEngine();
+        const insights = await pae.getCustomerInsights(context.merchantId, context.customerId);
+        if (insights.sizeRisk.riskLevel === 'HIGH' || insights.sizeRisk.riskLevel === 'MEDIUM') {
+          const hint = 'ممكن نتأكد من القياس المناسب إلك؟ إذا تحب أعطيك جدول المقاسات ✅';
+          (response as AIResponse).message = `${hint}\n\n${(response as AIResponse).message}`;
+          (response as AIResponse).actions = [ ...(response.actions || []), { type: 'COLLECT_INFO', data: { field: 'size' }, priority: 1 } ];
+          adaptations.push({ type: 'length', originalValue: 'base', adaptedValue: 'add-size-clarifier', reason: 'predictive size risk' });
+        }
+        if (insights.churnRisk.riskLevel === 'HIGH') {
+          const retain = 'نحبك تبقى ويانه ♥️ عدنا عرض بسيط خاص إلك إذا مهتم.';
+          (response as AIResponse).message = `${(response as AIResponse).message}\n\n${retain}`;
+          (response as AIResponse).actions = [ ...(response.actions || []), { type: 'SCHEDULE_TEMPLATE', data: { template: 'LOYALTY_OFFER' }, priority: 2 } ];
+          adaptations.push({ type: 'tone', originalValue: 'base', adaptedValue: 'retention', reason: 'high churn risk' });
+        }
+      } catch (e) {
+        logger.debug('Predictive analytics influence skipped', { error: String(e) });
+      }
+
+      // 3) Intelligent rejection handling even if not strictly OBJECTION
+      try {
+        const msg = (customerMessage || '').toLowerCase();
+        const looksRejection = /(غالي|ما اريد|مو حلو|رديء|خايس|مو الآن|بعدين)/.test(msg);
+        if (looksRejection) {
+          const rej = new IntelligentRejectionHandler();
+          const analysis = await rej.analyzeRejection(customerMessage, context as ConversationContext);
+          const counter = await rej.generateCounterResponse(analysis);
+          (response as AIResponse).message = `${counter}\n\n${(response as AIResponse).message}`;
+          adaptations.push({ type: 'tone', originalValue: 'base', adaptedValue: 'objection-handled', reason: 'rejection heuristic' });
+        }
+      } catch (e) {
+        logger.debug('Rejection handler skipped', { error: String(e) });
+      }
+
+      // 4) Light self-learning adaptation
+      try {
+        const sl = new SelfLearningSystem();
+        const prefs = (context as any)?.preferences || {};
+        const adj = await sl.adaptToCustomerPreferences(context.customerId, prefs);
+        if (adj.notes?.length) adaptations.push({ type: 'tone', originalValue: 'base', adaptedValue: 'personalized', reason: adj.notes.join('; ').slice(0, 80) });
+      } catch {}
 
       // Log platform-specific interaction (لا تسقط النظام لو فشلت الكتابة)
       try {
@@ -213,7 +293,8 @@ export class ConversationAIOrchestrator {
         merchantId: context.merchantId,
         customerId: context.customerId
       });
-      
+      try { pushDLQ({ reason: 'orchestrator_generate_failed', payload: { platform, customerMessage }, merchantId: context.merchantId, platform: String(platform), severity: 'high', category: 'other' }); } catch {}
+
       // Return fallback response
       return this.getFallbackPlatformResponse(platform, context);
     }
@@ -552,6 +633,19 @@ export class ConversationAIOrchestrator {
     }
 
     return response;
+  }
+
+  private mergeThinkingWithResponse(base: string, chain: import('../types/thinking.js').ThinkingChain): string {
+    try {
+      const decide = chain.steps.find(s => s.stage === 'DECIDE');
+      const hint = typeof decide?.result === 'string' ? decide.result.trim() : '';
+      if (!hint) return base;
+      const concise = hint.replace(/\s+/g, ' ').replace(/^\W+/, '').slice(0, 140);
+      if (!concise) return base;
+      return `${concise}\n\n${base}`;
+    } catch {
+      return base;
+    }
   }
 
   /**

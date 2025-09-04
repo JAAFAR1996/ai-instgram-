@@ -167,6 +167,9 @@ export class PredictiveSchedulerService {
         }
       }
 
+      // Opportunistic performance update here too (in addition to cleanup)
+      try { await this.updatePerformanceMetrics(); } catch (e) { this.log.debug('Perf metrics update (cycle) skipped', { error: String(e) }); }
+
       const duration = Date.now() - startTime;
       this.log.info('Completed predictive analytics cycle', { 
         merchantsProcessed: activeMerchants.length,

@@ -13,13 +13,7 @@ import { z } from 'zod';
 import { createHmac } from 'node:crypto';
 import { getPool } from '../db/index.js';
 import { getEnv } from '../config/env.js';
-import { orchestrate } from '../services/smart-orchestrator.js';
-import ConstitutionalAI from '../services/constitutional-ai.js';
-import { getInstagramAIService } from '../services/instagram-ai.js';
 import type { ImageData } from '../services/ai.js';
-import type { ConversationContext } from '../services/ai.js';
-import type { ThinkingChain } from '../types/thinking.js';
-import type { AIInteractionMetric } from '../services/advanced-analytics.js';
 
 type ManyChatWebhookBody = {
   merchant_id?: string;
@@ -66,6 +60,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
 
       if (mode !== 'subscribe') {
         log.warn('Instagram webhook verification failed - invalid mode', { mode });
+        try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_mode', mode }); } catch {}
         return c.text('Bad Request', 400);
       }
 
@@ -75,13 +70,16 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           providedToken: token,
           expectedExists: !!expectedToken
         });
+        try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_token' }); } catch {}
         return c.text('Forbidden', 403);
       }
 
       log.info('Instagram webhook verification successful', { challenge });
+      try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'SUCCESS', { endpoint: 'instagram', challenge }); } catch {}
       return c.text(challenge);
     } catch (error: unknown) {
       log.error('Instagram webhook verification error:', error instanceof Error ? { message: error.message } : { error });
+      try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { error: String(error) }); } catch {}
       return c.text('Internal Server Error', 500);
     }
   });
@@ -116,6 +114,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       if (webhookSecret) {
         if (!signature) {
           log.warn('ManyChat webhook: signature missing while secret configured');
+          try { (await import('../services/compliance.js')).getComplianceService().logSecurity(null, 'WEBHOOK_SIGNATURE', 'FAILURE', { endpoint: 'manychat', reason: 'missing_signature' }); } catch {}
           return c.json({ error: 'signature_required' }, 401);
         }
         try {
@@ -123,10 +122,13 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           const provided = signature.replace(/^sha256=/, '').trim();
           if (expected !== provided) {
             log.warn('ManyChat webhook: signature mismatch');
+            try { (await import('../services/compliance.js')).getComplianceService().logSecurity(null, 'WEBHOOK_SIGNATURE', 'FAILURE', { endpoint: 'manychat', reason: 'mismatch' }); } catch {}
             return c.json({ error: 'invalid_signature' }, 401);
           }
+          try { (await import('../services/compliance.js')).getComplianceService().logSecurity(null, 'WEBHOOK_SIGNATURE', 'SUCCESS', { endpoint: 'manychat' }); } catch {}
         } catch (sigErr) {
           log.error('ManyChat webhook: signature verification error', sigErr as Error);
+          try { (await import('../services/compliance.js')).getComplianceService().logSecurity(null, 'WEBHOOK_SIGNATURE', 'FAILURE', { endpoint: 'manychat', error: String(sigErr) }); } catch {}
           return c.json({ error: 'signature_error' }, 401);
         }
       }
@@ -175,6 +177,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         await sql`SELECT set_config('app.current_merchant_id', ${sanitizedMerchantId}::text, true)`;
       } catch (ctxErr) {
         log.error('Failed to set merchant context', ctxErr as Error);
+        try { (await import('../services/compliance.js')).getComplianceService().logSecurity(sanitizedMerchantId, 'RLS_CONTEXT', 'FAILURE', { error: String(ctxErr) }); } catch {}
         return c.json({ ok: false, error: 'context_error' }, 503);
       }
 
@@ -197,8 +200,11 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           });
         }
 
+        // 🚀 QUEUE PROCESSING: All AI processing moved to queue workers
+        let queueManager: ProductionQueueManager | null = null;
+
         try {
-          // 🔒 PRODUCTION: Database operations with proper error handling
+          // ⚡ LIGHTWEIGHT: Only essential database operations in webhook
           const pool = getPool();
           
           // Find or create conversation
@@ -302,546 +308,115 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             );
           }
 
-          // Save image metadata (best-effort)
-          if (hasImages) {
-            for (const img of imageData) {
-              try {
-                await pool.query(
-                  `INSERT INTO message_image_metadata (merchant_id, customer_id, message_id, labels)
-                   VALUES ($1::uuid, $2, $3::uuid, $4::jsonb)`,
-                  [sanitizedMerchantId, sanitizedUsername, incomingMessageId, JSON.stringify({ url: img.url })]
-                );
-              } catch (imgErr) {
-                log.warn('Failed to persist image metadata', { error: String(imgErr) });
-              }
-            }
-          }
+          // ⚡ SKIP image metadata in webhook - moved to queue processing
 
-          // 🤖 PRODUCTION: Generate AI response
-          let aiResponse: string = '';
-          let aiIntent: string | undefined;
-          let aiConfidence: number | undefined;
-          let decisionPath: string[] = [];
-          let kbSource: { id: string; title: string } | undefined;
-          let sessionPatch: Record<string, unknown> | undefined;
-          let stage: 'AWARE' | 'BROWSE' | 'INTENT' | 'OBJECTION' | 'CLOSE' | undefined;
-          let thinkingMeta: ThinkingChain | undefined;
-          let qualityScore: number | undefined;
-          let qualityImproved: boolean | undefined;
-          let qualityDelta: number | undefined;
-          let usedCache = false;
-
-          // Fast-path: use cached common reply for short, text-only queries
+          // 🚀 QUEUE PROCESSING: All AI processing moved to queue workers
           try {
-            const short = messageText && messageText.length <= 64 && !hasImages;
-            if (short) {
-              const { SmartCache } = await import('../services/smart-cache.js');
-              const sc = new SmartCache();
-              const cached = await sc.getCommonReply(sanitizedMerchantId, messageText);
-              if (cached && cached.text && typeof (cached as any).intent === 'string' && !['OTHER','SMALL_TALK'].includes(String((cached as any).intent).toUpperCase())) {
-                aiResponse = cached.text;
-                aiIntent = 'CACHED_COMMON';
-                aiConfidence = 0.9;
-                decisionPath = ['cache=hit'];
-                usedCache = true;
-              }
-            }
-          } catch {}
-
-          try {
-            if (!usedCache && hasImages) {
-              // Route image messages through Instagram AI (vision-enabled)
-              const ig = getInstagramAIService();
-              const igCtx: import('../services/instagram-ai.js').InstagramContext = {
-                merchantId: sanitizedMerchantId,
-                customerId: sanitizedUsername,
-                platform: 'instagram',
-                stage: 'BROWSING',
-                cart: [],
-                preferences: {},
-                conversationHistory: [],
-                interactionType: 'dm',
-                imageData
-              };
-              const igResp = await ig.generateInstagramResponse(messageText, igCtx);
-              aiResponse = igResp.messageAr || igResp.message || 'تم تحليل الصورة.';
-              aiIntent = igResp.intent || 'IMAGE_INQUIRY';
-              aiConfidence = igResp.confidence || 0.7;
-              decisionPath = ['vision=used'];
-              stage = igResp.stage as any;
-            } else if (!usedCache) {
-              const orchResult = await Promise.race([
-                orchestrate(sanitizedMerchantId, sanitizedUsername, messageText, { askAtMostOneFollowup: true, session: sessionData, showThinking: true }),
-                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 30000))
-              ]);
-              aiResponse = orchResult.text;
-              aiIntent = orchResult.intent;
-              aiConfidence = orchResult.confidence;
-              decisionPath = orchResult.decision_path;
-              kbSource = orchResult.kb_source;
-              sessionPatch = orchResult.session_patch || undefined;
-              if (preSessionPatch && Object.keys(preSessionPatch).length) {
-                sessionPatch = { ...(preSessionPatch || {}), ...(sessionPatch || {}) } as any;
-              }
-              stage = orchResult.stage;
-              thinkingMeta = (orchResult as unknown as { thinking_chain?: ThinkingChain }).thinking_chain;
-            }
-
-            // If objection intent -> generate smarter counter response and record
-            if (aiIntent === 'OBJECTION') {
-              try {
-                const { IntelligentRejectionHandler } = await import('../services/rejection/intelligent-rejection-handler.js');
-                const handler = new IntelligentRejectionHandler();
-                const rejectionCtx: ConversationContext = {
-                  merchantId: sanitizedMerchantId,
-                  customerId: sanitizedUsername,
-                  platform: 'instagram',
-                  stage: 'BROWSING',
-                  cart: [],
-                  preferences: {},
-                  conversationHistory: []
-                };
-                const analysis = await handler.analyzeRejection(messageText, rejectionCtx);
-                aiResponse = await handler.generateCounterResponse(analysis);
-                await handler.recordRejection(sanitizedMerchantId, sanitizedUsername, conversationId, {
-                  type: analysis.rejectionType,
-                  reason: analysis.suggestedApproach,
-                  customerMessage: messageText,
-                  strategiesUsed: [analysis.suggestedApproach],
-                  context: { stage }
-                });
-              } catch (rejErr) {
-                log.warn('Rejection handling failed', { error: String(rejErr) });
-              }
-            }
-
-            try {
-              if (decisionPath.some(d => String(d).startsWith('clarify='))) {
-                telemetry.trackEvent('followup_question', { platform: 'instagram', merchant_id: sanitizedMerchantId });
-                telemetry.kpi.followupAsked();
-              }
-              if (decisionPath.includes('sql=hit')) telemetry.kpi.priceHit();
-              if (decisionPath.includes('sql=miss')) telemetry.kpi.priceMiss();
-              if (decisionPath.includes('sql=hit_no_price')) telemetry.kpi.managerHandoff();
-            } catch {}
-            
-            // Validate AI response
-            if (!aiResponse || aiResponse.trim().length === 0) {
-              log.warn('Empty AI response received', { intent: aiIntent, decisionPath });
-              return c.json({
-                version: "v2",
-                messages: [{ type: "text", text: "تعذر توليد رد مناسب. جرّب رسالة أخرى." }],
-                set_attributes: { ai_reply: "EMPTY_RESPONSE", processing_time: Date.now() - processingStartTime }
-              });
-            }
-
-            // Constitutional AI critique and improvement
-            try {
-              const consAI = new ConstitutionalAI();
-              const ctxObj: import('../types/constitutional-ai.js').ResponseContext = {
-                merchantId: sanitizedMerchantId,
-                username: sanitizedUsername,
-              };
-              if (aiIntent) ctxObj.intent = aiIntent;
-              if (stage) ctxObj.stage = stage;
-              if (sessionData) ctxObj.session = sessionData;
-              if (kbSource?.title) ctxObj.kbSourceTitle = kbSource.title as string;
-              const critique = await consAI.critiqueResponse(aiResponse, ctxObj);
-              if (!critique.meetsThreshold) {
-                const improveCtx: import('../types/constitutional-ai.js').ResponseContext = {
-                  merchantId: sanitizedMerchantId,
-                  username: sanitizedUsername,
-                };
-                if (aiIntent) improveCtx.intent = aiIntent;
-                if (stage) improveCtx.stage = stage;
-                if (sessionData) improveCtx.session = sessionData;
-                const { improved, record } = await consAI.improveResponse(aiResponse, critique, improveCtx);
-                qualityImproved = true;
-                qualityDelta = record.newScore - record.prevScore;
-                qualityScore = record.newScore;
-                aiResponse = improved;
-              } else {
-                qualityScore = critique.score;
-              }
-            } catch (qErr) {
-              log.warn('Constitutional AI improvement failed', { error: String(qErr) });
-            }
-
-            // Response personalization (advanced profiling)
-            try {
-              const { CustomerProfiler } = await import('../services/customer-profiler.js');
-              const { ResponsePersonalizer } = await import('../services/response-personalizer.js');
-              const profiler = new CustomerProfiler();
-              const profile = await profiler.personalizeResponses(sanitizedMerchantId, sanitizedUsername);
-              const personalizer = new ResponsePersonalizer();
-              const personalized = await personalizer.personalizeResponses(aiResponse, {
-                merchantId: sanitizedMerchantId,
-                customerId: sanitizedUsername,
-                tier: profile.tier,
-                preferences: {
-                  categories: profile.preferences.categories,
-                  colors: profile.preferences.colors,
-                  sizes: profile.preferences.sizes,
-                  brands: profile.preferences.brands,
-                  priceSensitivity: profile.preferences.priceSensitivity,
-                },
-                queryHint: String(data?.text || '').slice(0, 80)
-              });
-              aiResponse = personalized.text;
-
-              // Smart responses by business category (best-effort)
-              try {
-                const { MerchantCatalogService } = await import('../services/catalog/merchant-catalog.service.js');
-                const { InstagramSmartResponses } = await import('../services/instagram-smart-responses.js');
-                const catalog = new MerchantCatalogService();
-                const inv = await catalog.analyzeMerchantInventory(sanitizedMerchantId);
-                const topCat = inv.categories.sort((a,b) => b.count - a.count)[0]?.name || 'general';
-                const smart = new InstagramSmartResponses();
-                const smartReply = await smart.generateSmartReply({
-                  merchantId: sanitizedMerchantId,
-                  customerId: sanitizedUsername,
-                  businessCategory: topCat,
-                  interactionText: String(data?.text || '').slice(0, 120),
-                  preferences: {
-                    categories: profile.preferences.categories,
-                    colors: profile.preferences.colors,
-                    brands: profile.preferences.brands,
-                    priceSensitivity: profile.preferences.priceSensitivity,
-                  }
-                });
-                // Append product suggestions if available
-                if (smartReply.recommendations && smartReply.recommendations.length) {
-                  const lines = smartReply.recommendations.map(r => `• ${r.name}${typeof r.price === 'number' && r.price > 0 ? ` – ${r.price}` : ''}`).join('\n');
-                  aiResponse = `${aiResponse}\n\nاقتراحات تناسب ذوقك:\n${lines}`.trim();
-                }
-              } catch (sErr) {
-                log.debug('Smart responses skipped', { error: String(sErr) });
-              }
-            } catch (pErr) {
-              log.warn('Response personalization failed', { error: String(pErr) });
-            }
-
-            // Cache common replies for frequently asked questions (short queries)
-            try {
-              const { SmartCache } = await import('../services/smart-cache.js');
-              const sc = new SmartCache();
-              await sc.maybeCacheCommonReply(sanitizedMerchantId, messageText, aiResponse, aiIntent);
-            } catch {}
-
-            // Predictive analytics and proactive service (Phase 4)
-            try {
-              const { PredictiveAnalyticsEngine } = await import('../services/predictive-analytics.js');
-              
-              const predictiveEngine = new PredictiveAnalyticsEngine();
-
-              // Run predictions in background (non-blocking)
-              Promise.all([
-                // Generate proactive actions based on current interaction
-                predictiveEngine.suggestProactiveActions(sanitizedMerchantId, sanitizedUsername).then(actions => {
-                  // Process high-priority actions immediately
-                  const urgentActions = actions.filter(a => a.priority === 'URGENT');
-                  if (urgentActions.length > 0) {
-                    log.info('Urgent proactive actions detected', { 
-                      merchantId: sanitizedMerchantId, 
-                      customerId: sanitizedUsername,
-                      actions: urgentActions.map(a => ({ type: a.type, priority: a.priority }))
-                    });
-                  }
-                }),
-
-                // Check for size issues if this conversation mentions products
-                messageText && (messageText.includes('مقاس') || messageText.includes('size') || messageText.includes('قياس')) 
-                  ? predictiveEngine.predictSizeIssues(sanitizedMerchantId, sanitizedUsername)
-                      .then(sizeRisk => {
-                        if (sizeRisk.riskLevel === 'HIGH') {
-                          log.warn('High size issue risk detected', { 
-                            merchantId: sanitizedMerchantId, 
-                            customerId: sanitizedUsername,
-                            risk: sizeRisk 
-                          });
-                          // Could trigger immediate size consultation
-                        }
-                      })
-                  : Promise.resolve(),
-
-                // Update customer interaction patterns for timing optimization
-                // This is handled automatically by database triggers, but we could enhance it here
-
-              ]).catch(predErr => {
-                log.warn('Predictive analytics failed', { error: String(predErr) });
-              });
-
-            } catch (predError) {
-              log.warn('Predictive analytics service failed', { error: String(predError) });
-            }
-            
-          } catch (aiError) {
-            log.error('❌ AI service failed - attempting retry', { error: String(aiError), attempt: 1 });
-            
-            // Retry AI service once before fallback
-            try {
-              const retryResult = await orchestrate(
-                sanitizedMerchantId,
-                sanitizedUsername,
-                messageText,
-                { askAtMostOneFollowup: true, session: sessionData, showThinking: false }
-              );
-              log.info('✅ AI retry succeeded', { processingTime: Date.now() - processingStartTime });
-              
-              return c.json({
-                version: "v2",
-                messages: [{ type: "text", text: retryResult.text || "شكراً لرسالتك!" }],
-                set_attributes: { 
-                  ai_reply: retryResult.text || "RETRY_SUCCESS", 
-                  processing_time: Date.now() - processingStartTime 
-                }
-              });
-            } catch (retryError) {
-              log.error('❌ AI retry also failed', { error: String(retryError), attempt: 2 });
-            }
-            
-            // Enhanced fallback handling (Phase 6)
-            try {
-              const { ErrorFallbacksService } = await import('../services/error-fallbacks.js');
-              const fb = new ErrorFallbacksService();
-              const fr = await fb.buildFallback(sanitizedMerchantId, sanitizedUsername, messageText);
-              // Record minimal analytics for degraded path
-              try {
-                const { AdvancedAnalyticsService } = await import('../services/advanced-analytics.js');
-                const aas = new AdvancedAnalyticsService();
-                await aas.recordAIInteraction({
-                  merchantId: sanitizedMerchantId,
-                  customerId: sanitizedUsername,
-                  conversationId,
-                  model: 'fallback',
-                  intent: 'FALLBACK',
-                  latencyMs: Date.now() - processingStartTime,
-                  qualityScore: 0.6,
-                  improved: false,
-                });
-              } catch {}
-
-              return c.json({
-                version: "v2",
-                messages: [{ type: "text", text: fr.text }],
-                set_attributes: { ai_reply: "AI_FALLBACK", processing_time: Date.now() - processingStartTime }
-              });
-            } catch {
-              // Graceful degradation: static friendly message
-              return c.json({
-                version: "v2",
-                messages: [{ type: "text", text: "صار خلل بسيط عندي حالياً، ممكن تعيد صياغة طلبك بجملة قصيرة؟" }],
-                set_attributes: { ai_reply: "AI_ERROR", processing_time: Date.now() - processingStartTime }
-              });
-            }
-          }
-
-          // Store AI response
-          // Compute vault_hit based on existing session data presence
-          const vaultHit = Boolean((sessionData && (sessionData.category || sessionData.size || sessionData.color || sessionData.gender || sessionData.brand)));
-          if (decisionPath.includes('sql=miss')) { try { telemetry.kpi.altSuggested(); } catch {} }
-
-          await pool.query(`
-            INSERT INTO message_logs (
-              conversation_id, content, message_type, direction, platform, source_channel,
-              ai_intent, ai_confidence, processing_time_ms, metadata, created_at
-            )
-            VALUES ($1, $2, 'TEXT', 'OUTGOING', 'instagram', 'manychat', $3, $4, $5, $6, NOW())
-          `, [
-            conversationId,
-            aiResponse,
-            aiIntent ?? null,
-            typeof aiConfidence === 'number' ? aiConfidence : null,
-            Date.now() - processingStartTime,
-            JSON.stringify({ 
-              decision_path: decisionPath, 
-              kb_source: kbSource || null,
-              stage: stage || null,
-              sql_hit: decisionPath.includes('sql=hit'),
-              rag_used: decisionPath.includes('rag=hit'),
-              vault_hit: vaultHit,
-              quality_score: typeof qualityScore === 'number' ? qualityScore : undefined,
-              quality_improved: qualityImproved,
-              quality_delta: typeof qualityDelta === 'number' ? qualityDelta : undefined,
-              thinking: thinkingMeta ? {
-                id: thinkingMeta.id,
-                steps_count: Array.isArray(thinkingMeta.steps) ? thinkingMeta.steps.length : 0,
-                overall_confidence: typeof thinkingMeta.overallConfidence === 'number' ? thinkingMeta.overallConfidence : undefined,
-              } : undefined
-            })
-          ]);
-
-          // Update session_data incrementally with sessionPatch (if provided)
-          try {
-            if (sessionPatch && Object.keys(sessionPatch).length > 0) {
-              await pool.query(
-                `UPDATE conversations SET session_data = COALESCE(session_data, '{}'::jsonb) || $1::jsonb, updated_at = NOW() WHERE id = $2`,
-                [JSON.stringify(sessionPatch), conversationId]
-              );
-              // Also update SmartCache customer context for fast access
-              try {
-                const { SmartCache } = await import('../services/smart-cache.js');
-                const sc = new SmartCache();
-                await sc.patchCustomerContext(sanitizedMerchantId, sanitizedUsername, sessionPatch as any);
-              } catch {}
-            }
-          } catch (sessErr) {
-            log.warn('Failed to update session_data', { error: String(sessErr) });
-          }
-
-          // Advanced analytics (Phase 6): record AI outcome
-          try {
-            const { AdvancedAnalyticsService } = await import('../services/advanced-analytics.js');
-            const aas = new AdvancedAnalyticsService();
-            let metrics: AIInteractionMetric = {
-              merchantId: sanitizedMerchantId,
-              customerId: sanitizedUsername,
-              conversationId,
-              model: 'orchestrator',
-              intent: String(aiIntent || ''),
-              latencyMs: Date.now() - processingStartTime,
-            };
-            if (typeof qualityScore === 'number') {
-              metrics = { ...metrics, qualityScore };
-            }
-            if (typeof qualityImproved === 'boolean') {
-              metrics = { ...metrics, improved: qualityImproved };
-            }
-            await aas.recordAIInteraction(metrics);
-          } catch {}
-
-          // Update Customer Vault (per-merchant per-customer context)
-          try {
-            if (sessionPatch && Object.keys(sessionPatch).length > 0) {
-              const { upsertVault } = await import('../repos/customer-vault.js');
-              type VaultPatchLocal = {
-                category?: string | null;
-                size?: string | null;
-                color?: string | null;
-                gender?: string | null;
-                brand?: string | null;
-                stage?: 'AWARE' | 'BROWSE' | 'INTENT' | 'OBJECTION' | 'CLOSE';
-                confidence?: number;
-              };
-              const sp = (sessionPatch || {}) as Record<string, unknown>;
-              const vaultPatch: VaultPatchLocal = {
-                ...(typeof sp.gender === 'string' ? { gender: sp.gender } : {}),
-                ...(typeof sp.size === 'string' ? { size: sp.size } : {}),
-                ...(typeof sp.color === 'string' ? { color: sp.color } : {}),
-                ...(typeof sp.category === 'string' ? { category: sp.category } : {}),
-                ...(typeof aiConfidence === 'number' ? { confidence: aiConfidence } : {}),
-                ...(stage ? { stage } : {})
-              };
-              await upsertVault(sanitizedMerchantId, sanitizedUsername, vaultPatch, conversationId, 30);
-            }
-          } catch (vaultErr) {
-            log.warn('Failed to update customer vault', { error: String(vaultErr) });
-          }
-
-          // Update conversation stats
-          await pool.query(`
-            UPDATE conversations 
-            SET message_count = message_count + 2, last_message_at = NOW(), updated_at = NOW()
-            WHERE id = $1
-          `, [conversationId]);
-
-          // Delete the consumed history messages (keep DB light as requested)
-          try {
-            // Keep only the latest 100 messages per conversation
-            await pool.query(
-              `DELETE FROM message_logs 
-               WHERE conversation_id = $1 
-                 AND id IN (
-                   SELECT id FROM message_logs 
-                   WHERE conversation_id = $1 
-                   ORDER BY created_at DESC 
-                   OFFSET 100
-                 )`,
-              [conversationId]
+            // Initialize queue manager for this request
+            queueManager = new ProductionQueueManager(
+              log,
+              RedisEnvironment.PRODUCTION,
+              pool,
+              'ai-sales-production'
             );
-          } catch (delErr) {
-            log.warn('Failed to delete consumed history messages', { error: String(delErr), count: historyIds.length });
-          }
+            
+            const initResult = await queueManager.initialize();
+            if (!initResult.success) {
+              throw new Error(`Queue initialization failed: ${initResult.error}`);
+            }
 
-          // Update ManyChat mapping
-          if (subscriber_id) {
-            try {
-              const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
-              await upsertManychatMapping(sanitizedMerchantId, sanitizedUsername, subscriber_id);
-            } catch (mappingError) {
-              log.warn('⚠️ ManyChat mapping failed', { error: String(mappingError) });
+            // Generate unique event ID for this processing
+            const eventId = `manychat_${Date.now()}_${sanitizedMerchantId.slice(-8)}_${Math.random().toString(36).slice(2, 8)}`;
+
+            // Enqueue all heavy processing
+            const queueResult = await queueManager.addManyChatJob(
+              eventId,
+              sanitizedMerchantId,
+              sanitizedUsername,
+              conversationId,
+              incomingMessageId,
+              messageText,
+              imageData,
+              sessionData,
+              'high' // priority based on real-time user interaction
+            );
+
+            if (!queueResult.success) {
+              throw new Error(`Failed to enqueue ManyChat job: ${queueResult.error}`);
+            }
+
+            const webhookDuration = Date.now() - processingStartTime;
+            log.info('⚡ [WEBHOOK-FAST] Enqueued ManyChat processing successfully', {
+              eventId,
+              jobId: queueResult.jobId,
+              queuePosition: queueResult.queuePosition,
+              webhookDuration: `${webhookDuration}ms`,
+              merchantId: sanitizedMerchantId,
+              username: sanitizedUsername,
+              conversationId,
+              messageLength: messageText.length,
+              hasImages
+            });
+
+            // ⚡ IMMEDIATE RESPONSE: Return quickly while processing in background
+            return c.json({
+              version: "v2",
+              messages: [{ 
+                type: "text", 
+                text: "أهلاً! سأعود إليك بعد لحظات برد مفصل 😊" 
+              }],
+              set_attributes: { 
+                ai_reply: "PROCESSING",
+                job_id: queueResult.jobId,
+                event_id: eventId,
+                webhook_time: webhookDuration,
+                queue_position: queueResult.queuePosition || 0
+              }
+            });
+
+          } catch (queueError) {
+            log.error('❌ Queue processing failed, falling back to direct processing', { 
+              error: String(queueError),
+              fallback: 'direct'
+            });
+            
+            // FALLBACK: Simple cached response when queue fails
+            return c.json({
+              version: "v2",
+              messages: [{ 
+                type: "text", 
+                text: "أهلاً بك! أحتاج لحظة لمعالجة طلبك، يرجى المحاولة مرة أخرى." 
+              }],
+              set_attributes: { 
+                ai_reply: "QUEUE_ERROR_FALLBACK",
+                processing_time: Date.now() - processingStartTime,
+                error: "queue_unavailable"
+              }
+            });
+          } finally {
+            // Cleanup queue manager
+            if (queueManager) {
+              try {
+                await queueManager.close();
+              } catch (closeErr) {
+                log.warn('Failed to close queue manager', { error: String(closeErr) });
+              }
             }
           }
-
-          // Learning: track interaction outcome (reply sent) with quality/thinking signals
-          try {
-            const { SelfLearningSystem } = await import('../services/learning-analytics.js');
-            const learner = new SelfLearningSystem();
-            const strategies: string[] = [];
-            if (Array.isArray(decisionPath) && decisionPath.some(d => String(d).startsWith('thinking='))) strategies.push('extended-thinking');
-            if (typeof (qualityImproved as boolean | undefined) === 'boolean') strategies.push('constitutional-ai');
-            const baseOutcome: Partial<import('../types/learning.js').LearningOutcome> = {
-              type: 'REPLY_SENT',
-              converted: false,
-              strategiesUsed: strategies,
-              metadata: { has_kb: !!kbSource, steps: decisionPath?.length || 0 },
-            };
-            if (aiIntent) baseOutcome.intent = aiIntent;
-            if (stage) baseOutcome.stage = stage;
-            if (typeof qualityScore === 'number') baseOutcome.qualityScore = qualityScore;
-            await learner.trackConversationOutcome(conversationId, baseOutcome as import('../types/learning.js').LearningOutcome);
-          } catch (learnErr) {
-            log.warn('Learning analytics tracking failed', { error: String(learnErr) });
-          }
-
-          const processingTime = Date.now() - processingStartTime;
-          log.info('✅ ManyChat message processed successfully', {
-            conversationId,
-            username: sanitizedUsername,
-            responseLength: aiResponse.length,
-            processingTime
-          });
-
-          // 📊 Record telemetry
-          telemetry.recordMetaRequest('instagram', 'manychat_processed', 200, processingTime);
-
-          // 🎯 PRODUCTION: Return ManyChat-compatible response (JSON v2 content only)
-          // Build ManyChat attributes with optional quality/thinking metadata
-          const attrs: Record<string, unknown> = {
-            ai_reply: aiResponse ?? 'AI_ERROR',
-            intent: aiIntent ?? null,
-            conversation_id: conversationId,
-            processing_time: processingTime,
-          };
-          try {
-            if (typeof qualityScore === 'number') attrs['quality_score'] = Math.round(qualityScore);
-            if (typeof qualityImproved === 'boolean') attrs['quality_improved'] = qualityImproved;
-            if (typeof qualityDelta === 'number') attrs['quality_delta'] = Math.round(qualityDelta);
-          } catch {}
-          try {
-            const t = thinkingMeta;
-            if (t) {
-              attrs['thinking_enabled'] = true;
-              attrs['thinking_steps'] = Array.isArray(t.steps) ? t.steps.length : 0;
-              if (typeof t.overallConfidence === 'number') attrs['thinking_confidence'] = Math.round((t.overallConfidence || 0) * 100);
-              if (typeof t.summary === 'string') attrs['thinking_summary'] = String(t.summary).slice(0, 240);
-            }
-          } catch {}
-
-          return c.json({
-            version: 'v2',
-            messages: [{ type: 'text', text: aiResponse ?? 'تعذر توليد رد.' }],
-            set_attributes: attrs,
-          });
-
         } catch (error) {
-          log.error('❌ ManyChat message processing failed', error);
-          telemetry.recordMetaRequest('instagram', 'manychat_error', 500, Date.now() - processingStartTime);
+          log.error('❌ ManyChat webhook processing error', { 
+            error: error instanceof Error ? error.message : String(error),
+            merchantId: sanitizedMerchantId,
+            username: sanitizedUsername 
+          });
           
           return c.json({
             version: "v2",
             messages: [{ type: "text", text: "عذراً، حدث خطأ مؤقت. يرجى المحاولة مرة أخرى." }],
-            set_attributes: { ai_reply: "processing_error" }
+            set_attributes: { 
+              ai_reply: "processing_error",
+              processing_time: Date.now() - processingStartTime
+            }
           });
         }
       }
@@ -929,6 +504,52 @@ const dumpPath = path.join(dir, first.f);
     });
   }
 
+  // Secure production debug endpoint (opt-in via env)
+  if (getEnv('ENABLE_PROD_DEBUG') === 'true') {
+    app.get('/internal/prod/debug/last-dump-hash', async (c) => {
+      try {
+        // Require strong bearer token and optional IP allowlist
+        const auth = c.req.header('authorization') || '';
+        const expected = (getEnv('PROD_DEBUG_BEARER') || '').trim();
+        if (!expected || !auth.startsWith(`Bearer ${expected}`)) {
+          log.warn('Prod debug unauthorized');
+          return c.text('unauthorized', 401);
+        }
+
+        const allowedIps = (getEnv('PROD_DEBUG_ALLOWED_IPS') || '').split(',').map(s => s.trim()).filter(Boolean);
+        const remoteIp = (c.req.header('x-forwarded-for') || '').split(',')[0]?.trim() || c.req.header('cf-connecting-ip') || '';
+        if (allowedIps.length && remoteIp && !allowedIps.includes(remoteIp)) {
+          log.warn('Prod debug IP not allowed', { remoteIp });
+          return c.text('forbidden', 403);
+        }
+
+        const fs = await import('fs');
+        const path = await import('path');
+        const dir = '/var/tmp';
+        const files = (await fs.promises.readdir(dir))
+          .filter(f => /^ig_\d+\.raw$/.test(f));
+        const filesWithTime = await Promise.all(
+          files.map(async (f) => ({
+            f,
+            t: (await fs.promises.stat(path.join(dir, f))).mtimeMs
+          }))
+        );
+        const sorted = filesWithTime.sort((a, b) => b.t - a.t);
+        if (!sorted.length) return c.text('no dumps', 404);
+        const first = sorted[0]!;
+        const dumpPath = path.join(dir, first.f);
+        const raw = await fs.promises.readFile(dumpPath);
+        const exp = createHmac('sha256', (getEnv('META_APP_SECRET') || '').trim())
+          .update(raw)
+          .digest('hex');
+        return c.text(`sha256=${exp}`);
+      } catch (error: unknown) {
+        log.error('Prod debug endpoint error:', error instanceof Error ? { message: error.message } : { error });
+        return c.text('Error', 500);
+      }
+    });
+  }
+
   // ===============================================
   // ManyChat Test Endpoint
   // ===============================================
@@ -937,6 +558,14 @@ const dumpPath = path.join(dir, first.f);
     try {
       const body = await c.req.json();
       const { merchantId, customerId, message } = body;
+      // RLS safety: ensure header/JWT merchant matches body merchant
+      try {
+        const { requireMerchantId } = await import('../middleware/rls-merchant-isolation.js');
+        const ctxMerchant = requireMerchantId(c);
+        if (ctxMerchant !== merchantId) {
+          return c.json({ success: false, error: 'merchant_mismatch' }, 403);
+        }
+      } catch {}
       
       if (!merchantId || !customerId || !message) {
         return c.json({

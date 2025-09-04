@@ -47,8 +47,11 @@ export function classifyAndExtract(text: string, hints: MerchantNLPHints = {}): 
 
   let intent: Intent = 'OTHER';
   let confidence = 0.5;
-  if (isPrice) { intent = 'PRICE'; confidence = 0.85; }
-  else if (isInventory) { intent = 'INVENTORY'; confidence = 0.8; }
+  // Extended heuristics: treat 'ثمن' as price, phone keywords as inventory-like
+  const _isPrice = isPrice || /\b(ثمن)\b/i.test(normalized);
+  const _isInventory = isInventory || /\b(تلفون|موبايل|هاتف|ايفون|iPhone|سامسونج|Samsung|شاومي|Xiaomi|هواوي|Huawei)\b/i.test(normalized);
+  if (_isPrice) { intent = 'PRICE'; confidence = 0.85; }
+  else if (_isInventory) { intent = 'INVENTORY'; confidence = 0.8; }
   else if (isFAQ) { intent = 'FAQ'; confidence = 0.75; }
   else if (isObjection) { intent = 'OBJECTION'; confidence = 0.8; }
   else if (isSmallTalk) { intent = 'SMALL_TALK'; confidence = 0.7; }

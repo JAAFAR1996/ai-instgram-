@@ -5,6 +5,7 @@ export interface PersonalizeOptions {
   merchantId: string;
   customerId: string;
   tier: 'NEW'|'REPEAT'|'VIP';
+  includeGreeting?: boolean; // default: true (only greet on first turn recommended)
   preferences?: {
     categories?: string[];
     colors?: string[];
@@ -63,7 +64,10 @@ export class ResponsePersonalizer {
     const greet = this.greetingForTier(opts.tier);
     const tone = this.adjustTone(baseText, opts.tier, opts.preferences?.priceSensitivity);
     const recommendations = await this.dynamicRecs(opts);
-    const text = `${greet} ${tone}`.trim();
+    const parts: string[] = [];
+    if (opts.includeGreeting !== false) parts.push(greet);
+    parts.push(tone);
+    const text = parts.filter(Boolean).join(' ').trim();
     return { text, recommendations };
   }
 }

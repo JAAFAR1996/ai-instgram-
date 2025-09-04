@@ -94,6 +94,27 @@ export interface InstagramContext extends ConversationContext {
     aestheticStyle: string;
     contentType: string[];
   };
+  // 🖼️ ENHANCED: Support for advanced image analysis
+  imageAnalysis?: Array<{
+    ocrText?: string;
+    labels: Array<{ name: string; confidence: number; category: string }>;
+    objects: Array<{ name: string; confidence: number }>;
+    contentType: { category: string; subcategory?: string; confidence: number };
+    visualFeatures: {
+      isProduct: boolean;
+      isText: boolean;
+      dominantColors: string[];
+      qualityScore: number;
+    };
+    productMatches?: Array<{
+      productId: string;
+      sku: string;
+      name: string;
+      similarity: number;
+      matchType: 'visual' | 'text' | 'combined';
+    }>;
+    confidence: number;
+  }>;
 }
 
 export class InstagramAIService {
@@ -121,6 +142,93 @@ export class InstagramAIService {
         ? parseInt(getEnv('OPENAI_TIMEOUT')!, 10)
         : InstagramAIService.DEFAULT_TIMEOUT_MS,
     });
+  }
+
+  /**
+   * Public: Generic vision analysis usable outside Instagram context
+   * - Extract descriptors (labels, attributes)
+   * - Build a visual query and search products in catalog
+   * - Run lightweight OCR and defect analysis (best-effort)
+   */
+  public async analyzeImagesGeneric(
+    merchantId: string,
+    images: ImageData[],
+    textHint?: string
+  ): Promise<{
+    descriptors: { labels: string[]; attributes: Record<string, string> } | null;
+    ocrText?: string;
+    defects?: { hasDefect: boolean; notes: string[] };
+    candidates: Array<{ id: string; sku: string; name_ar: string; effective_price?: number; price_currency?: string; stock_quantity: number }>
+  }> {
+    let descriptors: { labels: string[]; attributes: Record<string, string> } | null = null;
+    const candidates: Array<{ id: string; sku: string; name_ar: string; effective_price?: number; price_currency?: string; stock_quantity: number }>
+      = [];
+    let ocrText: string | undefined;
+    let defects: { hasDefect: boolean; notes: string[] } | undefined;
+
+    try {
+      descriptors = await this.classifyProductFromImages(images);
+    } catch (e) {
+      this.logger.warn('Vision descriptors failed', { error: String(e) });
+    }
+
+    // Visual query for product lookup
+    try {
+      const baseQ = this.buildVisualQuery(descriptors);
+      const hint = (textHint || '').toString().trim();
+      const q = [baseQ, hint].filter(Boolean).join(' ');
+      if (q) {
+        const found = await this.searchProductsDynamic(merchantId, q, 6);
+        candidates.push(
+          ...found.map((f: any) => ({
+            id: f.id, sku: f.sku, name_ar: f.name_ar,
+            effective_price: f.effective_price, price_currency: f.price_currency, stock_quantity: f.stock_quantity
+          }))
+        );
+      }
+    } catch (e) {
+      this.logger.warn('Visual search failed', { error: String(e) });
+    }
+
+    // OCR (best-effort)
+    try {
+      const sys = 'Extract readable text from images. Return JSON {"text":"..."} only.';
+      const user = this.buildUserContentWithImages('أقرأ أي نص واضح بالفاتورة/الملصق/الصورة وأعده بدون شرح.', images);
+      const visionModel = getEnv('OPENAI_VISION_MODEL') || 'gpt-4o';
+      const completion = await this.openai.chat.completions.create({
+        model: visionModel,
+        messages: [ { role: 'system', content: sys }, user ],
+        temperature: 0,
+        max_tokens: 800,
+        response_format: { type: 'json_object' }
+      });
+      const raw = completion.choices?.[0]?.message?.content || '{}';
+      const parsed = this.parseJsonSafe<{ text?: string }>(raw);
+      if (parsed.ok && parsed.data.text && parsed.data.text.trim()) ocrText = parsed.data.text.trim();
+    } catch (e) {
+      this.logger.debug('OCR skipped', { error: String(e) });
+    }
+
+    // Defect analysis (surface-level)
+    try {
+      const sys = 'You are a product quality inspector. Return JSON {"hasDefect":boolean,"notes":["..."]} with concise observations (scratches, dents, stains, cracks, low quality photo?).';
+      const user = this.buildUserContentWithImages('قيِّم هل بالصورة عيوب واضحة للمنتج؟ أعطني ملاحظات قصيرة.', images);
+      const model = getEnv('OPENAI_VISION_MODEL') || 'gpt-4o';
+      const completion = await this.openai.chat.completions.create({
+        model,
+        messages: [ { role: 'system', content: sys }, user ],
+        temperature: 0,
+        max_tokens: 300,
+        response_format: { type: 'json_object' }
+      });
+      const raw = completion.choices?.[0]?.message?.content || '{}';
+      const parsed = this.parseJsonSafe<{ hasDefect?: boolean; notes?: string[] }>(raw);
+      if (parsed.ok) defects = { hasDefect: !!parsed.data.hasDefect, notes: Array.isArray(parsed.data.notes) ? parsed.data.notes : [] };
+    } catch (e) {
+      this.logger.debug('Defect analysis skipped', { error: String(e) });
+    }
+
+    return { descriptors, ocrText, defects, candidates };
   }
   /**
    * Get merchant-specific AI configuration

@@ -1,0 +1,157 @@
+groups:
+  - name: ai-sales-platform.rules
+    rules:
+      # 🚨 Critical Queue Alerts
+      - alert: QueueCriticalFailure
+        expr: ai_sales_queue_critical_failure_total > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: queue
+        annotations:
+          summary: "Critical queue failure detected - immediate attention required"
+          description: "The queue system has detected a critical failure requiring restart. Waiting jobs: {{ $labels.waiting_jobs }}, Active jobs: {{ $labels.active_jobs }}"
+
+      - alert: QueueHighErrorRate
+        expr: ai_sales_queue_monitoring_error_rate > 20
+        for: 2m
+        labels:
+          severity: critical
+          service: queue
+        annotations:
+          summary: "Queue error rate is critically high ({{ $value }}%)"
+          description: "Queue error rate has exceeded 20% for more than 2 minutes. This indicates systemic issues with job processing."
+
+      - alert: QueueStalled
+        expr: ai_sales_queue_stalled_detection_total > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: queue
+        annotations:
+          summary: "Queue stalled - jobs waiting but no active processing"
+          description: "Queue has jobs waiting but no active processing for over 1 minute. This may indicate worker issues."
+
+      - alert: DeadLetterQueueGrowing
+        expr: ai_sales_queue_dlq_current_count > 50
+        for: 5m
+        labels:
+          severity: warning
+          service: queue
+        annotations:
+          summary: "Dead Letter Queue growing rapidly ({{ $value }} jobs)"
+          description: "Dead Letter Queue has {{ $value }} failed jobs. Investigate root cause of job failures."
+
+      # 🤖 AI Services Alerts
+      - alert: AIServiceHighErrorRate
+        expr: rate(ai_sales_predictive_analytics_errors_total[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          service: ai
+        annotations:
+          summary: "AI service error rate is high"
+          description: "Predictive analytics service is experiencing {{ $value }} errors per second over the last 5 minutes."
+
+      - alert: ExtendedThinkingSlowPerformance
+        expr: histogram_quantile(0.95, ai_sales_extended_thinking_processing_time_ms_bucket) > 10000
+        for: 5m
+        labels:
+          severity: warning
+          service: ai
+        annotations:
+          summary: "Extended thinking processing is slow (P95: {{ $value }}ms)"
+          description: "Extended thinking 95th percentile processing time is {{ $value }}ms, above the 10-second threshold."
+
+      - alert: ManyChatJobProcessingSlowdown
+        expr: histogram_quantile(0.95, rate(ai_sales_queue_processing_duration_ms_bucket{job_type="manychat"}[5m])) > 30000
+        for: 3m
+        labels:
+          severity: warning
+          service: queue
+        annotations:
+          summary: "ManyChat job processing is critically slow (P95: {{ $value }}ms)"
+          description: "ManyChat job processing 95th percentile is {{ $value }}ms, above the 30-second threshold."
+
+      # 📊 Business Metrics Alerts
+      - alert: LowAIConfidenceRate
+        expr: rate(ai_sales_manychat_high_confidence_responses_total[10m]) / rate(ai_sales_manychat_intent_classified_total[10m]) < 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: ai
+        annotations:
+          summary: "AI confidence rate is low ({{ $value | humanizePercentage }})"
+          description: "Less than 50% of AI responses have high confidence over the last 10 minutes. This may indicate model performance issues."
+
+      - alert: QueueBacklogBuilding
+        expr: ai_sales_queue_monitoring_waiting_jobs > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: queue
+        annotations:
+          summary: "Queue backlog building up ({{ $value }} waiting jobs)"
+          description: "{{ $value }} jobs are waiting in the queue for more than 5 minutes. Consider scaling up workers."
+
+      # 🏥 Health and Infrastructure Alerts
+      - alert: ServiceDown
+        expr: up{job="ai-sales-platform"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: infrastructure
+        annotations:
+          summary: "AI Sales Platform service is down"
+          description: "The main application service has been down for more than 30 seconds."
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          service: infrastructure
+        annotations:
+          summary: "High memory usage ({{ $value | humanizePercentage }})"
+          description: "Memory usage has been above 90% for more than 5 minutes."
+
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "High CPU usage ({{ $value }}%)"
+          description: "CPU usage has been above 90% for more than 5 minutes."
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"}) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          service: infrastructure
+        annotations:
+          summary: "Disk space critically low ({{ $value | humanizePercentage }} remaining)"
+          description: "Disk space is below 10% on {{ $labels.device }} mounted at {{ $labels.mountpoint }}."
+
+      # 🔄 Rate-based Alerts for Traffic Patterns
+      - alert: UnusualTrafficSpike
+        expr: rate(ai_sales_queue_operations_total{operation="add"}[5m]) > (rate(ai_sales_queue_operations_total{operation="add"}[1h] offset 1h) * 3)
+        for: 2m
+        labels:
+          severity: warning
+          service: traffic
+        annotations:
+          summary: "Unusual traffic spike detected"
+          description: "Current job addition rate is {{ $value }} jobs/sec, which is 3x higher than the same period yesterday."
+
+      - alert: TrafficDrop
+        expr: rate(ai_sales_queue_operations_total{operation="add"}[10m]) < (rate(ai_sales_queue_operations_total{operation="add"}[1h] offset 1h) * 0.2)
+        for: 10m
+        labels:
+          severity: warning
+          service: traffic
+        annotations:
+          summary: "Significant traffic drop detected"
+          description: "Current job addition rate is {{ $value }} jobs/sec, which is 80% lower than the same period yesterday."

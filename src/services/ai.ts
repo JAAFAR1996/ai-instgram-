@@ -6,6 +6,8 @@
  */
 
 import OpenAI from 'openai';
+import SmartProductSearch from './search/smart-product-search.js';
+import ErrorFallbacksService from './error-fallbacks.js';
 import type { ConversationStage, Platform } from '../types/database.js';
 import type { DIContainer } from '../container/index.js';
 import type { Pool } from 'pg';
@@ -129,6 +131,7 @@ export class AIService {
   // Performance optimization: Product caching
   private productCache = new Map<string, { products: Product[]; timestamp: number }>();
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  private search = new SmartProductSearch();
 
   constructor(container: DIContainer) {
     // Initialize OpenAI client with proper validation
@@ -258,13 +261,17 @@ export class AIService {
           merchantId: context.merchantId 
         });
         
-        const fallbackResponse = this.getFallbackResponse();
+        const fallbackResponse = await this.getEnhancedFallbackResponse(context, customerMessage);
         
         // تأكد من إيصال الرسالة للمستخدم
         await this.notifyUserAIDisabled(context);
         
         return fallbackResponse;
       }
+
+      // Lightweight intent analysis to guide downstream behavior
+      let analyzedIntent: IntentAnalysisResult | undefined;
+      try { analyzedIntent = await this.analyzeIntent(customerMessage, context); } catch {}
 
       // Build conversation prompt (text + optional vision parts)
       const prompt = await this.buildConversationPrompt(customerMessage, context);
@@ -275,6 +282,20 @@ export class AIService {
       const timer = setTimeout(() => controller.abort(), timeout);
       
       const useVision = Array.isArray(context.imageData) && context.imageData.length > 0;
+      // Best-effort vision product analysis to enrich results
+      let visionProducts: { id: string; sku: string; name_ar: string; effective_price?: number; price_currency?: string; stock_quantity: number }[] = [];
+      let visionInfo: { ocrText?: string; defects?: { hasDefect: boolean; notes: string[] } } | null = null;
+      if (useVision) {
+        try {
+          const { getInstagramAIService } = await import('./instagram-ai.js');
+          const ig = getInstagramAIService();
+          const analysis = await ig.analyzeImagesGeneric(context.merchantId, context.imageData!, customerMessage);
+          visionProducts = analysis.candidates || [];
+          visionInfo = { ocrText: analysis.ocrText, defects: analysis.defects };
+        } catch (e) {
+          this.logger.debug('Vision product analysis skipped', { error: String(e) });
+        }
+      }
       const model = useVision ? (this.config.ai.visionModel || 'gpt-4o-mini') : this.config.ai.model;
       const completion = await this.withRetry(
         () => this.openai.chat.completions.create({
@@ -300,7 +321,7 @@ export class AIService {
       const aiResponse: AIResponse = {
         message: response.trim(),
         messageAr: response.trim(),
-        intent: 'conversation',
+        intent: analyzedIntent?.intent || 'conversation',
         stage: context.stage,
         actions: [],
         products: [],
@@ -312,11 +333,46 @@ export class AIService {
         },
         responseTime: responseTime
       };
+
+      // Attach visual candidates and signals
+      if (visionProducts.length) {
+        aiResponse.products = visionProducts.slice(0, 5).map(p => ({
+          productId: p.id,
+          sku: p.sku,
+          name: p.name_ar,
+          price: Number(p.effective_price || 0),
+          confidence: 0.7,
+          reason: 'visual_match'
+        }));
+        aiResponse.actions.push({ type: 'SHOW_PRODUCT', data: { items: aiResponse.products.slice(0, 3) }, priority: 1 });
+      }
+      if (visionInfo?.ocrText && visionInfo.ocrText.length > 0) {
+        aiResponse.actions.push({ type: 'COLLECT_INFO', data: { field: 'ocr_text', value: visionInfo.ocrText.slice(0, 500) }, priority: 2 });
+      }
+      if (visionInfo?.defects && visionInfo.defects.hasDefect) {
+        aiResponse.actions.push({ type: 'ESCALATE', data: { reason: 'defect_detected', notes: (visionInfo.defects.notes || []).slice(0, 3) }, priority: 1 });
+      }
+
+      // Auto-suggest products for product-related intents
+      try {
+        const productIntents = new Set(['PRODUCT_INQUIRY', 'BROWSING', 'PRICE_INQUIRY']);
+        if (analyzedIntent && productIntents.has(analyzedIntent.intent)) {
+          const recs = await this.generateProductRecommendations(customerMessage, context, 5);
+          if (Array.isArray(recs) && recs.length) {
+            aiResponse.products = recs;
+            aiResponse.actions = [
+              { type: 'SHOW_PRODUCT', data: { items: recs.slice(0, 3) }, priority: 1 }
+            ];
+          }
+        }
+      } catch (e) {
+        this.logger.warn('Auto-suggestions generation failed', { error: String(e) });
+      }
       
       // Simple validation - just check if message exists
       if (!aiResponse.message || aiResponse.message.trim().length === 0) {
         this.logger.error("Empty AI response", { got: aiResponse });
-        return this.getFallbackResponse();
+        return await this.getEnhancedFallbackResponse(context, customerMessage);
       }
       
       // Add metadata
@@ -341,7 +397,7 @@ export class AIService {
       });
       
       // Return fallback response
-      return this.getFallbackResponse();
+      return await this.getEnhancedFallbackResponse(context, customerMessage);
     }
   }
 
@@ -469,6 +525,19 @@ export class AIService {
     const persona = await this.getMerchantPersona(context.merchantId);
     const memoryLine = this.buildMemoryLine(context.customerProfile);
 
+    // Enrich prompt with business label and relevant products
+    const catLabelMap: Record<string, string> = {
+      fashion: 'ملابس وأزياء', electronics: 'إلكترونيات', beauty: 'جمال', grocery: 'مواد غذائية',
+      pharmacy: 'صيدلية', toys: 'ألعاب', sports: 'رياضة', books: 'كتب', home: 'منزل', auto: 'سيارات',
+      electric: 'أجهزة كهربائية', other: 'عام'
+    };
+    const catLabel = catLabelMap[persona.businessCategory] || 'عام';
+    const businessName = context.merchantSettings?.businessName || 'متجرنا';
+    let relevantProducts: Array<Record<string, any>> = [];
+    try { relevantProducts = await this.searchRelevantProducts(customerMessage, context.merchantId, 5); } catch {}
+    const productInfo = this.formatProductsForPrompt(relevantProducts);
+    const newSystemPrompt = `أنت مساعد مبيعات خبير لمتجر ${businessName} (${catLabel}).\n\n📦 المنتجات المتوفرة حالياً (الأكثر صلة):\n${productInfo}\n\n🎯 مهمتك:\n- اربط استفسار العميل بالمنتجات الفعلية المتوفرة\n- اذكر الأسعار الحقيقية والمخزون المتوفر\n- اقترح بدائل مناسبة إذا لم يجد ما يريد\n- لا تختلق معلومات غير صحيحة`;
+
     const systemPrompt = `أنت مساعد مبيعات ذكي لمتجر ${persona.businessCategory || 'عام'}.
 قواعد صارمة:
 - اللغة: عربية بسيطة بلهجة عراقية.
@@ -480,13 +549,25 @@ export class AIService {
 - إذا أرسل المستخدم صورة: حلّل باختصار ما يفيد الشراء (اللون/الموديل/العيوب).`;
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: newSystemPrompt },
       { role: 'system', content: `تفضيلات العميل: ${memoryLine}` }
     ];
 
     // Add recent conversation history (last 6)
     for (const msg of context.conversationHistory.slice(-6)) {
       messages.push({ role: msg.role, content: msg.content });
+    }
+
+    // RAG: Merchant Knowledge Base (best-effort)
+    try {
+      const { kbSearch } = await import('../kb/search.js');
+      const kbHits = await kbSearch(context.merchantId, customerMessage, 3, {});
+      if (kbHits && kbHits.length) {
+        const ctx = kbHits.map(h => `• ${h.title}: ${h.chunk.trim().slice(0, 300)}`).join('\n');
+        messages.push({ role: 'system', content: `مقتطفات من قاعدة المعرفة (استخدمها فقط إذا كانت مناسبة للسؤال):\n${ctx}` });
+      }
+    } catch (e) {
+      this.logger.debug('KB retrieval skipped', { error: String(e) });
     }
 
     // Build user content with optional images (vision parts)
@@ -526,6 +607,31 @@ export class AIService {
     }
     if (img.url && /^https?:\/\//i.test(img.url)) return img.url;
     return null;
+  }
+
+  // Search products related to the user message (via SmartProductSearch)
+  private async searchRelevantProducts(message: string, merchantId: string, limit = 5): Promise<any[]> {
+    try {
+      const results = await this.search.searchProducts(message, merchantId, { limit });
+      return results.map(r => r.product);
+    } catch (error: unknown) {
+      this.logger.warn('Product search failed', { error: String(error) });
+      return [];
+    }
+  }
+
+  // Format product list for inclusion in system prompt
+  private formatProductsForPrompt(products: any[]): string {
+    if (!products || products.length === 0) {
+      return 'لا توجد نتائج مرتبطة بالاستفسار. يمكنك طلب تفاصيل أكثر (المقاس/اللون/الفئة).';
+    }
+    return products.map((p: any, idx: number) => {
+      const price = p?.sale_price_amount ?? p?.price_amount ?? p?.price_usd ?? 'غير محدد';
+      const stockNum = Number(p?.stock_quantity ?? 0);
+      const stock = stockNum > 0 ? `متوفر (مخزون: ${stockNum})` : 'غير متوفر';
+      const sku = p?.sku ? ` | SKU: ${p.sku}` : '';
+      return `${idx + 1}. ${p?.name_ar} — ${price} د.ع — ${stock}${sku}`;
+    }).join('\n');
   }
 
   /** Fetch merchant persona (tone/category) from DB */
@@ -749,6 +855,36 @@ ${productsText}
       tokens: { prompt: 0, completion: 0, total: 0 },
       responseTime: 0
     };
+  }
+
+  // Product-aware enhanced fallback (tries quick suggestions)
+  private async getEnhancedFallbackResponse(context: ConversationContext, lastMessage: string): Promise<AIResponse> {
+    try {
+      const svc = new ErrorFallbacksService();
+      const fb = await svc.buildFallback(context.merchantId, context.customerId, lastMessage || '');
+      const products = (fb.recommendations || []).map(r => ({
+        productId: r.id,
+        sku: r.sku,
+        name: r.name,
+        price: r.price || 0,
+        confidence: 0.6,
+        reason: 'اقتراح تلقائي'
+      }));
+      return {
+        message: fb.text,
+        messageAr: fb.text,
+        intent: 'FALLBACK',
+        stage: 'BROWSING',
+        actions: products.length ? [{ type: 'SHOW_PRODUCT', data: { items: products.slice(0, 3) }, priority: 1 }] : [],
+        products,
+        confidence: 0.6,
+        tokens: { prompt: 0, completion: 0, total: 0 },
+        responseTime: 0
+      };
+    } catch (e) {
+      this.logger.warn('Enhanced fallback failed', { error: String(e) });
+      return this.getFallbackResponse();
+    }
   }
 
   private async notifyUserAIDisabled(
