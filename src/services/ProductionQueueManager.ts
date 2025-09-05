@@ -119,6 +119,7 @@ export interface JobResult {
   queuePosition?: number;
 }
 
+// Minimal logger signature used internally (varargs to allow flexible calls)
 type Logger = {
   info: (...args: unknown[]) => void;
   warn: (...args: unknown[]) => void;

@@ -53,6 +53,9 @@ import path from 'node:path';
 
 // 8) Health monitoring
 import { getHealthSnapshot, startHealth } from './services/health-check.js';
+import { ProductionQueueManager } from './services/ProductionQueueManager.js';
+import { RedisEnvironment, RedisUsageType } from './config/RedisConfigurationFactory.js';
+import { getRedisConnectionManager } from './services/RedisConnectionManager.js';
 
 // Initialize logger
 const log = getLogger({ component: 'bootstrap' });
@@ -112,6 +115,26 @@ async function bootstrap() {
       mode: redisStatus.mode,
       success: redisStatus.success
     });
+
+    // Print key Redis env flags (masked)
+    try {
+      const maskRedisUrl = (u?: string) => {
+        if (!u) return 'not_set';
+        try {
+          const url = new URL(u);
+          return `${url.protocol}//${url.hostname}:${url.port || '6379'}`;
+        } catch {
+          return 'invalid_url';
+        }
+      };
+      log.info('Redis environment', {
+        DISABLE_REDIS: process.env.DISABLE_REDIS === 'true' ? 'true' : 'false',
+        SKIP_REDIS_HEALTH_CHECK: process.env.SKIP_REDIS_HEALTH_CHECK === 'true' ? 'true' : 'false',
+        REDIS_URL: maskRedisUrl(process.env.REDIS_URL),
+        REDIS_MAX_RETRIES: process.env.REDIS_MAX_RETRIES ?? 'default',
+        REDIS_COMMAND_TIMEOUT: process.env.REDIS_COMMAND_TIMEOUT ?? 'default'
+      });
+    } catch {}
 
     // Start Database Job Processor if Redis is not active
     if (redisStatus.mode !== 'active') {
@@ -196,9 +219,40 @@ async function bootstrap() {
     // RLS (Row Level Security) middleware for data isolation
     app.use('*', rlsMiddleware());
 
-    // Register route modules
-    const deps = { pool };
-    
+    // Prepare Queue Manager singleton (DI into routes)
+    const queueBaseLogger = getLogger({ component: 'queue' });
+    const queueLogger = {
+      info: (...args: unknown[]) => queueBaseLogger.info(String(args[0] ?? ''), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
+      warn: (...args: unknown[]) => queueBaseLogger.warn(String(args[0] ?? ''), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
+      error: (...args: unknown[]) => queueBaseLogger.error(String(args[0] ?? ''), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
+      debug: (...args: unknown[]) => queueBaseLogger.debug(String(args[0] ?? ''), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
+    };
+    const queueManager = new ProductionQueueManager(queueLogger, RedisEnvironment.PRODUCTION, pool, 'ai-sales-production');
+
+    // Initialize queue if Redis is active
+    if (redisStatus.mode === 'active' && process.env.DISABLE_REDIS !== 'true') {
+      const qmInit = await queueManager.initialize();
+
+      // Explicit production health check if not skipped
+      const skipRedisHealth = process.env.SKIP_REDIS_HEALTH_CHECK === 'true';
+      if (process.env.NODE_ENV === 'production' && !skipRedisHealth) {
+        if (!qmInit.success) {
+          throw new Error(`Queue/Redis initialization failed: ${qmInit.error ?? 'unknown'}`);
+        }
+        try {
+          const mgr = getRedisConnectionManager();
+          const conn = await mgr.getConnection(RedisUsageType.QUEUE_SYSTEM);
+          const healthy = await mgr.isConnectionHealthy(conn, 2000);
+          if (!healthy) throw new Error('Redis health check failed');
+        } catch (e: unknown) {
+          const err = e instanceof Error ? e.message : String(e);
+          throw new Error(`Redis not ready: ${err}`);
+        }
+      }
+    }
+
+    // Register route modules with DI
+    const deps = { pool, queueManager };
     registerWebhookRoutes(app, deps);
     registerMerchantAdminRoutes(app);
     registerAdminRoutes(app);
