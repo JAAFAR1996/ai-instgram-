@@ -688,23 +688,43 @@ export class Logger {
   /**
    * Core logging method with top-level context and error
    */
-  private async log(level: LogLevel, message: string, context?: LogContext & { err?: unknown; error?: unknown }): Promise<void> {
+  private async log(level: LogLevel, message: unknown, context?: LogContext & { err?: unknown; error?: unknown }): Promise<void> {
     if (!this.shouldLog(level)) return;
 
     // Check for duplicate message throttling
-    if (this.shouldThrottleDuplicate(level, message, context)) {
-      this.logThrottledDuplicate(level, message, context);
+    const previewMsg = typeof message === 'string' ? message : (message instanceof Error ? message.message : String(message));
+    if (this.shouldThrottleDuplicate(level, previewMsg, context)) {
+      this.logThrottledDuplicate(level, previewMsg, context);
       return;
     }
 
-    const ctx = this.redactSensitiveData({ ...this.context, ...(context ?? {}) }) as LogContext & { err?: unknown; error?: unknown };
+    // Normalize message and capture non-string into context
+    let normalizedMessage: string;
+    let extra: Record<string, unknown> = {};
+    if (typeof message === 'string') {
+      normalizedMessage = message;
+    } else if (message instanceof Error) {
+      normalizedMessage = message.message || 'Error';
+      extra.err = message;
+    } else {
+      try {
+        normalizedMessage = JSON.stringify(message);
+      } catch {
+        normalizedMessage = String(message);
+      }
+      if (message && typeof message === 'object') {
+        extra.originalMessage = message as Record<string, unknown>;
+      }
+    }
+
+    const ctx = this.redactSensitiveData({ ...this.context, ...(context ?? {}), ...extra }) as LogContext & { err?: unknown; error?: unknown };
     const { err, error, ...safeCtx } = ctx as Record<string, unknown>;
     const finalError = err ?? error;
 
     const entry: LogEntry = {
       level,
       timestamp: new Date().toISOString(),
-      message,
+      message: normalizedMessage,
       context: safeCtx,
              metadata: {
          pid: process.pid,
