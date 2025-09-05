@@ -57,6 +57,24 @@ export interface WebhookDependencies {
 /**
  * Register webhook routes on the app
  */
+// Queue manager singleton to avoid per-request init/close
+let queueManagerSingleton: ProductionQueueManager | null = null;
+async function getQueueManager(pool: Pool): Promise<ProductionQueueManager> {
+  if (!queueManagerSingleton) {
+    const qLogger = {
+      info: (...args: unknown[]) => log.info(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
+      warn: (...args: unknown[]) => log.warn(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
+      error: (...args: unknown[]) => log.error(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
+      debug: (...args: unknown[]) => log.debug?.(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
+    };
+    const qm = new ProductionQueueManager(qLogger as any, RedisEnvironment.PRODUCTION, pool, 'ai-sales-production');
+    const init = await qm.initialize();
+    if (!init.success) throw new Error(`Queue initialization failed: ${init.error}`);
+    queueManagerSingleton = qm;
+  }
+  return queueManagerSingleton;
+}
+
 export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): void {
 
   // Instagram webhook verification (GET)
@@ -252,8 +270,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           });
         }
 
-        // 🚀 QUEUE PROCESSING: All AI processing moved to queue workers
-        let queueManager: ProductionQueueManager | null = null;
+          // 🚀 QUEUE PROCESSING: All AI processing moved to queue workers
+          let queueManager: ProductionQueueManager | null = null;
 
         try {
           // ⚡ LIGHTWEIGHT: Only essential database operations in webhook
@@ -371,24 +389,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
 
           // 🚀 QUEUE PROCESSING: All AI processing moved to queue workers
           try {
-            // Initialize queue manager for this request
-            const qLogger = {
-              info: (...args: unknown[]) => log.info(String(args[0] ?? 'info'), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
-              warn: (...args: unknown[]) => log.warn(String(args[0] ?? 'warn'), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
-              error: (...args: unknown[]) => log.error(String(args[0] ?? 'error'), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
-              debug: (...args: unknown[]) => log.debug(String(args[0] ?? 'debug'), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
-            };
-            queueManager = new ProductionQueueManager(
-              qLogger,
-              RedisEnvironment.PRODUCTION,
-              pool,
-              'ai-sales-production'
-            );
-            
-            const initResult = await queueManager.initialize();
-            if (!initResult.success) {
-              throw new Error(`Queue initialization failed: ${initResult.error}`);
-            }
+            // Use singleton queue manager (avoid per-request init/close)
+            queueManager = await getQueueManager(pool);
 
             // Generate unique event ID for this processing
             const eventId = `manychat_${Date.now()}_${sanitizedMerchantId.slice(-8)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -461,14 +463,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
               }
             });
           } finally {
-            // Cleanup queue manager
-            if (queueManager) {
-              try {
-                await queueManager.close();
-              } catch (closeErr) {
-                log.warn('Failed to close queue manager', { error: String(closeErr) });
-              }
-            }
+            // Do not close queue manager here — kept as singleton
           }
         } catch (error) {
           log.error('❌ ManyChat webhook processing error', { 
