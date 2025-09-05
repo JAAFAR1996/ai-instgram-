@@ -1,5 +1,5 @@
 import { Queue, Worker, QueueEvents } from 'bullmq';
-import type { Job, RedisClient } from 'bullmq';
+import type { Job } from 'bullmq';
 import { Redis, ReplyError } from 'ioredis';
 import { Pool } from 'pg';
 import { withWebhookTenantJob, withAITenantJob, withTenantJob } from '../isolation/context.js';
@@ -127,6 +127,21 @@ type Logger = {
   debug: (...args: unknown[]) => void;
 };
 
+// Create Redis connection suitable for BullMQ (no commandTimeout, maxRetriesPerRequest=null)
+function makeBullRedis(): Redis {
+  const url = process.env.REDIS_URL ?? '';
+  const isSecure = url.startsWith('rediss://');
+  return new Redis(url, {
+    // Important for BullMQ
+    maxRetriesPerRequest: null as unknown as number | null,
+    enableReadyCheck: true,
+    // Do not set commandTimeout to avoid blocking command timeouts (e.g., XREAD)
+    connectTimeout: 10_000,
+    keepAlive: 10_000,
+    ...(isSecure ? { tls: {} } : {}),
+  });
+}
+
 // ===== أنواع ومساعدات صغيرة آمنة =====
 type U<T> = T | undefined;
 
@@ -176,18 +191,11 @@ export class ProductionQueueManager {
 
   async initialize(): Promise<QueueInitResult> {
     try {
-      this.logger.info('🔄 بدء تهيئة مدير الطوابير الإنتاجي...');
-
-      // 1. الحصول على اتصال Redis من connectionManager
-      const connection = await this.connectionManager.getConnection(RedisUsageType.QUEUE_SYSTEM);
-      
-      this.logger.info('✅ تم الحصول على اتصال Redis للطوابير');
-
-      // 2. إنشاء BullMQ Queue
-      this.queueConnection = connection;
+      this.logger.info('🔄 بدء تهيئة مدير الطوابير الإنتاجي...');      // 1. ????? BullMQ Queue\n      إنشاء BullMQ Queue
+      this.queueConnection = makeBullRedis();
       
       this.queue = new Queue(this.queueName, {
-        connection,
+        connection: this.queueConnection,
         prefix: 'ai-sales',
         defaultJobOptions: {
           removeOnComplete: { age: 86400, count: 200 },
@@ -205,7 +213,7 @@ export class ProductionQueueManager {
       this.logger.info('🔧 بدء إعداد معالجات الأحداث والمهام...');
       await this.setupEventHandlers();
       this.logger.info('📡 تم إعداد معالجات الأحداث');
-      await this.setupJobProcessors(connection);
+      await this.setupJobProcessors();
       this.logger.info('⚙️ تم إعداد معالجات المهام');
 
       // 4. تنظيف أولي وبدء المراقبة
@@ -230,7 +238,7 @@ export class ProductionQueueManager {
           metrics: {}
         },
         diagnostics: {
-          redisConnection: connection,
+          redisConnection: this.queueConnection,
           queueHealth: {
             connected: true,
             responseTime: 0,
@@ -265,8 +273,7 @@ export class ProductionQueueManager {
     if (!this.queue) return;
 
     // استخدم QueueEvents بدلاً من الاستماع مباشرة على queue
-    const client: RedisClient = await this.queue.client;
-    const events = new QueueEvents(this.queueName, { connection: client, prefix: 'ai-sales' });
+    const events = new QueueEvents(this.queueName, { connection: makeBullRedis(), prefix: 'ai-sales', blockingTimeout: 30000 });
     void events.waitUntilReady();
 
     events.on('error', (error) => {
@@ -308,7 +315,7 @@ export class ProductionQueueManager {
     });
   }
 
-  private async setupJobProcessors(connection: Redis): Promise<void> {
+  private async setupJobProcessors(): Promise<void> {
     this.logger.info('🔍 [DEBUG] setupJobProcessors() - بدء دالة إعداد المعالجات');
     
     if (!this.queue) {
@@ -434,7 +441,7 @@ export class ProductionQueueManager {
         } };
         return webhookProcessor(adapted);
       },
-      { connection, concurrency: 5, prefix: 'ai-sales' }
+      { connection: this.queueConnection, concurrency: 5, prefix: 'ai-sales' }
     );
     this.workers['process-webhook'] = webhookWorker;
 
@@ -516,7 +523,7 @@ export class ProductionQueueManager {
         } };
         return aiProcessor(adapted);
       },
-      { connection, concurrency: 3, prefix: 'ai-sales' }
+      { connection: this.queueConnection, concurrency: 3, prefix: 'ai-sales' }
     );
     this.workers['ai-response'] = aiWorker;
 
@@ -539,7 +546,7 @@ export class ProductionQueueManager {
           throw processedError;
         }
       },
-      { connection, concurrency: 1, prefix: 'ai-sales' }
+      { connection: this.queueConnection, concurrency: 1, prefix: 'ai-sales' }
     );
     this.workers['cleanup'] = cleanupWorker;
 
@@ -561,7 +568,7 @@ export class ProductionQueueManager {
           throw error as Error;
         }
       },
-      { connection, concurrency: 2, prefix: 'ai-sales' }
+      { connection: this.queueConnection, concurrency: 2, prefix: 'ai-sales' }
     );
     this.workers['notification'] = notificationWorker;
 
@@ -583,7 +590,7 @@ export class ProductionQueueManager {
           throw error as Error;
         }
       },
-      { connection, concurrency: 3, prefix: 'ai-sales' }
+      { connection: this.queueConnection, concurrency: 3, prefix: 'ai-sales' }
     );
     this.workers['message-delivery'] = messageDeliveryWorker;
 
@@ -678,7 +685,7 @@ export class ProductionQueueManager {
         } };
         return manyChatProcessor(adapted);
       },
-      { connection, concurrency: 4, prefix: 'ai-sales' } // 4 concurrent ManyChat jobs
+      { connection: this.queueConnection, concurrency: 4, prefix: 'ai-sales' } // 4 concurrent ManyChat jobs
     );
     this.workers['manychat-processing'] = manyChatWorker;
 
@@ -2802,3 +2809,4 @@ export class ProductionQueueManager {
 }
 
 export default ProductionQueueManager;
+
