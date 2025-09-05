@@ -264,6 +264,16 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           let conversationId: string;
           let sessionData: Record<string, unknown> = {};
           try {
+            // Persist ManyChat mapping early to guarantee username→subscriber_id resolution for sending
+            try {
+              if (subscriber_id) {
+                const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
+                await upsertManychatMapping(sanitizedMerchantId, sanitizedUsername, subscriber_id);
+                log.debug('ManyChat mapping upserted before enqueue', { sanitizedMerchantId, sanitizedUsername, subscriber_id });
+              }
+            } catch (mapErr) {
+              log.warn('Failed to upsert ManyChat mapping before enqueue (will retry later)', { error: String(mapErr) });
+            }
             const existingConversations = await withRetry(() => pool.query(`
               SELECT id, message_count, session_data FROM conversations 
               WHERE merchant_id = $1 AND customer_instagram = $2
