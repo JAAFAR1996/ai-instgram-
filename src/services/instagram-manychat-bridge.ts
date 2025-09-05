@@ -649,13 +649,13 @@ export class InstagramManyChatBridge {
    */
   private async checkMessageWindow(merchantId: string, customerId: string): Promise<boolean> {
     try {
-      // Get last interaction time from database
-      const lastInteraction = await this.db.query(
-        `SELECT created_at FROM messages 
-         WHERE merchant_id = $1 AND sender_id = $2 AND platform = 'instagram'
-         ORDER BY created_at DESC LIMIT 1`,
-        [merchantId, customerId]
-      );
+      // Get last interaction time from database (use safe SQL tag)
+      const sql = this.db.getSQL();
+      const lastInteraction = await sql<{ created_at: string | Date }>`
+        SELECT created_at FROM messages 
+        WHERE merchant_id = ${merchantId} AND sender_id = ${customerId} AND platform = 'instagram'
+        ORDER BY created_at DESC LIMIT 1
+      `;
 
       if (!lastInteraction?.length) {
         return false; // No previous interactions
@@ -681,21 +681,16 @@ export class InstagramManyChatBridge {
    */
   private async scheduleForFollowUp(data: BridgeMessageData): Promise<void> {
     try {
-      await this.db.query(
-        `INSERT INTO message_followups (
+      const sql = this.db.getSQL();
+      await sql`
+        INSERT INTO message_followups (
           merchant_id, customer_id, message, interaction_type, platform, 
           scheduled_for, created_at, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')`,
-        [
-          data.merchantId,
-          data.customerId,
-          data.message,
-          data.interactionType,
-          data.platform,
-          new Date(Date.now() + 24 * 60 * 60 * 1000), // Schedule for 24 hours later
-          new Date(),
-        ]
-      );
+        ) VALUES (
+          ${data.merchantId}::uuid, ${data.customerId}, ${data.message}, ${data.interactionType}, ${data.platform},
+          ${new Date(Date.now() + 24 * 60 * 60 * 1000)}, ${new Date()}, 'pending'
+        )
+      `;
 
       this.logger.info('📅 Message scheduled for follow-up', {
         merchantId: data.merchantId,
@@ -740,24 +735,20 @@ export class InstagramManyChatBridge {
     aiResponse: string
   ): Promise<void> {
     try {
-      await this.db.query(
-        `INSERT INTO manychat_logs (
+      const sql = this.db.getSQL();
+      await sql`
+        INSERT INTO manychat_logs (
           merchant_id, subscriber_id, message_id, action, status, response_data, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-          data.merchantId,
-          ((manyChatResult as { mcId?: string }).mcId) || data.customerId,
-          manyChatResult.messageId,
-          'send_message',
-          manyChatResult.success ? 'success' : 'failed',
-          JSON.stringify({
-            aiResponse,
-            manyChatResult,
-            interactionType: data.interactionType
-          }),
-          new Date()
-        ]
-      );
+        ) VALUES (
+          ${data.merchantId}::uuid,
+          ${((manyChatResult as { mcId?: string }).mcId) || data.customerId},
+          ${manyChatResult.messageId},
+          ${'send_message'},
+          ${manyChatResult.success ? 'success' : 'failed'},
+          ${JSON.stringify({ aiResponse, manyChatResult, interactionType: data.interactionType })}::jsonb,
+          ${new Date()}
+        )
+      `;
     } catch (error) {
       this.logger.warn('Failed to log ManyChat interaction', {
         error: error instanceof Error ? error.message : String(error)
