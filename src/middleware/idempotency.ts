@@ -59,31 +59,28 @@ async function generateIdempotencyKey(
   
   // Hash merchant ID and request body for uniqueness
   if (config.hashMerchantAndBody && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-    let rawBody: string | undefined;
     try {
-      const clonedRequest = c.req.raw.clone();
-      rawBody = await clonedRequest.text();
-      if (rawBody) {
-        const bodyHash = crypto
-          .createHash('sha256')
-          .update(rawBody)
-          .digest('hex')
-          .substring(0, 16);
+      const rawBuf = (c as unknown as { rawBody?: Buffer }).rawBody;
+      if (rawBuf && rawBuf.length > 0) {
+        const head = rawBuf.length > 4096 ? rawBuf.subarray(0, 4096) : rawBuf;
+        const bodyHash = crypto.createHash('sha256').update(head).digest('hex').substring(0, 16);
         keyData += `:${bodyHash}`;
+      } else {
+        // Avoid consuming the body stream here; missing rawBody means we skip body hash
+        logger.debug?.('No pre-captured rawBody; skipping body hash in idempotency key', {
+          requestPath: c.req.path,
+          requestMethod: c.req.method,
+          merchantId
+        });
       }
     } catch (error) {
-      // If body parsing fails, log and continue without body hash
-      logger.warn('Body parsing failed while generating idempotency key; continuing without body hash', {
+      // If body handling fails, log and continue without body hash
+      logger.warn('Body handling failed while generating idempotency key; continuing without body hash', {
         error: error instanceof Error ? { message: error.message, name: error.name, stack: error.stack } : { message: String(error) },
         requestPath: c.req.path,
         requestMethod: c.req.method,
         merchantId
       });
-    }
-
-    // Restore original request body so downstream handlers can read it
-    if (rawBody !== undefined) {
-      c.req.raw = new Request(c.req.raw, { body: rawBody });
     }
   }
   
