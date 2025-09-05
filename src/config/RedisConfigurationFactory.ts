@@ -178,7 +178,6 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       connectTimeout: this.getTimeoutByEnvironment(10000, 15000),
       lazyConnect: true,
       family: 4,
-      keyPrefix: `${baseConfig.keyPrefix}queue:`,
       commandTimeout: 8000,
       enableOfflineQueue: true,
       // Upstash rate limit configuration

@@ -188,6 +188,7 @@ export class ProductionQueueManager {
       
       this.queue = new Queue(this.queueName, {
         connection,
+        prefix: 'ai-sales',
         defaultJobOptions: {
           removeOnComplete: { age: 86400, count: 200 },
           removeOnFail:    { age: 259200, count: 100 },
@@ -265,7 +266,7 @@ export class ProductionQueueManager {
 
     // استخدم QueueEvents بدلاً من الاستماع مباشرة على queue
     const client: RedisClient = await this.queue.client;
-    const events = new QueueEvents(this.queueName, { connection: client });
+    const events = new QueueEvents(this.queueName, { connection: client, prefix: 'ai-sales' });
     void events.waitUntilReady();
 
     events.on('error', (error) => {
@@ -433,7 +434,7 @@ export class ProductionQueueManager {
         } };
         return webhookProcessor(adapted);
       },
-      { connection, concurrency: 5 }
+      { connection, concurrency: 5, prefix: 'ai-sales' }
     );
     this.workers['process-webhook'] = webhookWorker;
 
@@ -515,7 +516,7 @@ export class ProductionQueueManager {
         } };
         return aiProcessor(adapted);
       },
-      { connection, concurrency: 3 }
+      { connection, concurrency: 3, prefix: 'ai-sales' }
     );
     this.workers['ai-response'] = aiWorker;
 
@@ -538,7 +539,7 @@ export class ProductionQueueManager {
           throw processedError;
         }
       },
-      { connection, concurrency: 1 }
+      { connection, concurrency: 1, prefix: 'ai-sales' }
     );
     this.workers['cleanup'] = cleanupWorker;
 
@@ -560,7 +561,7 @@ export class ProductionQueueManager {
           throw error as Error;
         }
       },
-      { connection, concurrency: 2 }
+      { connection, concurrency: 2, prefix: 'ai-sales' }
     );
     this.workers['notification'] = notificationWorker;
 
@@ -582,7 +583,7 @@ export class ProductionQueueManager {
           throw error as Error;
         }
       },
-      { connection, concurrency: 3 }
+      { connection, concurrency: 3, prefix: 'ai-sales' }
     );
     this.workers['message-delivery'] = messageDeliveryWorker;
 
@@ -677,7 +678,7 @@ export class ProductionQueueManager {
         } };
         return manyChatProcessor(adapted);
       },
-      { connection, concurrency: 4 } // 4 concurrent ManyChat jobs
+      { connection, concurrency: 4, prefix: 'ai-sales' } // 4 concurrent ManyChat jobs
     );
     this.workers['manychat-processing'] = manyChatWorker;
 
