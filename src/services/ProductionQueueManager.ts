@@ -248,7 +248,7 @@ export class ProductionQueueManager {
         }
       };
 
-    } catch (error) {
+    } catch (error: any) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       
       this.logger.error('💥 فشل في تهيئة مدير الطوابير', {
@@ -306,7 +306,7 @@ export class ProductionQueueManager {
           : 'unknown'
         : 'unknown';
       
-      telemetry.counter('queue_dlq_by_error_type_total', 'DLQ jobs by error type').add(1, {
+      telemetry.counter('queue_dlq_byerroror_type_total', 'DLQ jobs by error type').add(1, {
         error_type: errorType,
         queue: this.queueName
       });
@@ -343,6 +343,49 @@ export class ProductionQueueManager {
       });
       clearTimeout(workerInitTimeout);
     }, 100);
+
+    // Unified dispatcher to avoid job loss when multiple workers share the same queue
+    const self = this;
+    async function handleJob(job: Job): Promise<unknown> {
+      try {
+        const name = job.name;
+        self.logger.debug('🧭 [DISPATCH] Received job', { jobId: job.id, jobName: name });
+
+        const adapt = () => ({
+          id: String(job.id),
+          name: job.name,
+          data: job.data,
+          moveToFailed: async (err: Error, _retry: boolean) => {
+            const fn = job.moveToFailed as unknown as (e: Error, token: string) => Promise<void>;
+            await fn(err, 'token');
+          }
+        });
+
+        switch (name) {
+          case 'process-webhook':
+            return webhookProcessor(adapt());
+          case 'ai-response':
+            return aiProcessor(adapt());
+          case 'cleanup': {
+            const { type, olderThanDays } = job.data as { type: string; olderThanDays: number };
+            await self.performCleanup(type, olderThanDays);
+            return { cleaned: true, type, olderThanDays } as const;
+          }
+          case 'notification':
+            return self.processNotificationJob(job.data as Record<string, unknown>);
+          case 'message-delivery':
+            return self.processMessageDeliveryJob(job.data as Record<string, unknown>);
+          case 'manychat-processing':
+            return manyChatProcessor(adapt());
+          default:
+            self.logger.warn('Unknown job name received', { jobId: job.id, jobName: name });
+            throw new Error('UNKNOWN_JOB_NAME');
+        }
+      } catch (error: any) {
+        self.logger.error('❌ [DISPATCH] Job handling failed', { jobId: job.id, jobName: job.name, error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
+    }
 
     // 🎯 معالج مخصص للويب هوك - الأساسي للمعالجة
     this.logger.info('🔧 [DEBUG] تسجيل معالج process-webhook...');
@@ -408,7 +451,7 @@ export class ProductionQueueManager {
             processingTime: duration
           };
           
-        } catch (error) {
+        } catch (error: any) {
           const duration = Date.now() - startTime;
           const errorMessage = error instanceof Error ? error.message : String(error);
           
@@ -436,7 +479,7 @@ export class ProductionQueueManager {
       async (job: Job) => {
         // 🔍 DEBUG: Log every job that comes to webhook worker  
         this.logger.info('📨 [WEBHOOK-WORKER] استلام job', { jobId: job.id, jobName: job.name });
-        if (job.name !== 'process-webhook') return;
+        return handleJob(job);
         const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: async (err: Error, _retry: boolean) => {
           const fn = job.moveToFailed as unknown as (e: Error, token: string) => Promise<void>;
           await fn(err, 'token');
@@ -493,7 +536,7 @@ export class ProductionQueueManager {
             processingTime: duration
           };
           
-        } catch (error) {
+        } catch (error: any) {
           const duration = Date.now() - startTime;
           const errorMessage = error instanceof Error ? error.message : String(error);
           
@@ -518,7 +561,7 @@ export class ProductionQueueManager {
     const aiWorker = new Worker(
       this.queueName,
       async (job: Job) => {
-        if (job.name !== 'ai-response') return;
+        return handleJob(job);
         const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: async (err: Error, _retry: boolean) => {
           const fn = job.moveToFailed as unknown as (e: Error, token: string) => Promise<void>;
           await fn(err, 'token');
@@ -533,12 +576,12 @@ export class ProductionQueueManager {
     const cleanupWorker = new Worker(
       this.queueName,
       async (job: Job) => {
-        if (job.name !== 'cleanup') return;
+        return handleJob(job);
         const { type, olderThanDays } = job.data as { type: string; olderThanDays: number };
         try {
           await this.performCleanup(type, olderThanDays);
           return { cleaned: true, type, olderThanDays } as const;
-        } catch (error) {
+        } catch (error: any) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           this.logger.error('فشل في تنظيف الطابور', { 
             type, 
@@ -556,13 +599,13 @@ export class ProductionQueueManager {
     const notificationWorker = new Worker(
       this.queueName,
       async (job: Job) => {
-        if (job.name !== 'notification') return;
+        return handleJob(job);
         this.logger.info('🔔 [NOTIFICATION] بدء معالجة إشعار', { jobId: job.id });
         try {
           const result = await this.processNotificationJob(job.data as Record<string, unknown>);
           this.logger.info('✅ [NOTIFICATION] تم إرسال الإشعار بنجاح', { jobId: job.id });
           return result;
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error('❌ [NOTIFICATION] فشل في إرسال الإشعار', { 
             jobId: job.id, 
             error: error instanceof Error ? error.message : String(error) 
@@ -578,13 +621,13 @@ export class ProductionQueueManager {
     const messageDeliveryWorker = new Worker(
       this.queueName,
       async (job: Job) => {
-        if (job.name !== 'message-delivery') return;
+        return handleJob(job);
         this.logger.info('📤 [MESSAGE-DELIVERY] بدء تسليم رسالة', { jobId: job.id });
         try {
           const result = await this.processMessageDeliveryJob(job.data as Record<string, unknown>);
           this.logger.info('✅ [MESSAGE-DELIVERY] تم تسليم الرسالة بنجاح', { jobId: job.id });
           return result;
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error('❌ [MESSAGE-DELIVERY] فشل في تسليم الرسالة', { 
             jobId: job.id, 
             error: error instanceof Error ? error.message : String(error) 
@@ -662,7 +705,7 @@ export class ProductionQueueManager {
               totalTime: Date.now() - manyChatData.metadata.processingStartTime
             };
             
-          } catch (error) {
+          } catch (error: any) {
             const duration = Date.now() - startTime;
             const errorMessage = error instanceof Error ? error.message : String(error);
             
@@ -742,7 +785,7 @@ export class ProductionQueueManager {
             attempts: 1
           });
           this.logger.info('🔍 [BULL-TEST] تم إضافة test job:', testJob.id);
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error('🔍 [BULL-TEST] فشل في إضافة test job:', error);
         }
       }, 1000);
@@ -933,7 +976,7 @@ export class ProductionQueueManager {
         } else {
           this.logger.debug('🔍 [MANUAL-POLLING] لا توجد waiting jobs');
         }
-      } catch (error) {
+      } catch (error: any) {
         if (
           error instanceof ReplyError &&
           (error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()).includes('max requests limit exceeded')
@@ -1091,7 +1134,7 @@ export class ProductionQueueManager {
         queuePosition
       };
 
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('فشل في إضافة مهمة للطابور', { 
         eventId,
         merchantId,
@@ -1146,7 +1189,7 @@ export class ProductionQueueManager {
 
       return { success: true, jobId: String(job.id ?? '') };
 
-    } catch (error) {
+    } catch (error: any) {
       return { 
         success: false, 
         error: error instanceof Error ? error.message : String(error)
@@ -1247,7 +1290,7 @@ export class ProductionQueueManager {
         queuePosition
       };
 
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('فشل في إضافة مهمة ManyChat للطابور', { 
         eventId,
         merchantId,
@@ -1299,7 +1342,7 @@ export class ProductionQueueManager {
       };
       return this.lastProcessedAt ? { ...base, lastProcessedAt: this.lastProcessedAt } : base;
 
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('فشل في الحصول على إحصائيات الطابور', { error });
       throw error;
     }
@@ -1332,7 +1375,7 @@ export class ProductionQueueManager {
 
       return { success: true, retriedCount };
 
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('فشل في إعادة محاولة المهام الفاشلة', { error });
       return { 
         success: false, 
@@ -1389,7 +1432,7 @@ export class ProductionQueueManager {
 
       return result;
 
-    } catch (error) {
+    } catch (error: any) {
       const duration = Date.now() - startTime;
       
       this.logger.error('💥 [WEBHOOK-ERROR] خطأ في معالجة webhook', {
@@ -1443,7 +1486,7 @@ export class ProductionQueueManager {
       });
 
       return result;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('❌ [INSTAGRAM-WEBHOOK] خطأ في معالجة Instagram webhook', {
         eventId: jobData.eventId,
         merchantId: jobData.merchantId,
@@ -1528,7 +1571,7 @@ export class ProductionQueueManager {
       result.eventsProcessed = Array.isArray(event.entry) ? event.entry.length : 1;
       result.success = true;
       return result;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('❌ [WHATSAPP-WEBHOOK] خطأ في معالجة WhatsApp webhook', {
         eventId: jobData.eventId,
         merchantId: jobData.merchantId,
@@ -1666,7 +1709,7 @@ export class ProductionQueueManager {
 
       return result as Record<string, unknown>;
 
-    } catch (error) {
+    } catch (error: any) {
       const duration = Date.now() - startTime;
       
       this.logger.error('💥 [AI-ERROR] خطأ في معالجة AI', {
@@ -1693,7 +1736,7 @@ export class ProductionQueueManager {
       await this.queue.clean(3 * 24 * 60 * 60 * 1000, 1000, 'failed');
 
       this.logger.info('تم تنظيف الطابور الأولي');
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn({ err: error }, 'فشل في التنظيف الأولي');
     }
   }
@@ -1741,11 +1784,11 @@ export class ProductionQueueManager {
         telemetry.gauge('queue_monitoring_failed_jobs', 'Failed jobs count').record(stats.failed);
         telemetry.gauge('queue_monitoring_completed_jobs', 'Completed jobs count').record(stats.completed);
         telemetry.gauge('queue_monitoring_delayed_jobs', 'Delayed jobs count').record(stats.delayed);
-        telemetry.gauge('queue_monitoring_error_rate', 'Queue error rate percentage').record(stats.errorRate);
+        telemetry.gauge('queue_monitoringerroror_rate', 'Queue error rate percentage').record(stats.errorRate);
         
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error('Queue monitoring error', { error });
-        telemetry.counter('queue_monitoring_errors_total', 'Queue monitoring errors').add(1);
+        telemetry.counter('queue_monitoringerrorors_total', 'Queue monitoring errors').add(1);
       }
     }, 30000);
 
@@ -1757,7 +1800,7 @@ export class ProductionQueueManager {
     this.workerHealthInterval = setInterval(async () => {
       try {
         await this.checkWorkerHealth();
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error('Worker health monitoring error', { error });
       }
     }, 60000);
@@ -1835,7 +1878,7 @@ export class ProductionQueueManager {
         });
       }
 
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Worker health check failed', { error });
     }
   }
@@ -1873,7 +1916,7 @@ export class ProductionQueueManager {
         });
       }
 
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Queue health check failed', { error });
     }
   }
@@ -1980,7 +2023,7 @@ export class ProductionQueueManager {
         recommendations: recommendations.length > 0 ? recommendations : ['✅ النظام والمعالجات تعمل بشكل مثالي']
       };
 
-    } catch (error) {
+    } catch (error: any) {
       return {
         healthy: false,
         stats: {
@@ -2028,7 +2071,7 @@ export class ProductionQueueManager {
 
         this.logger.info('✅ تم إغلاق الطابور بأمان');
 
-      } catch (error) {
+      } catch (error: any) {
         this.logger.warn({ err: error }, 'فشل في الانتظار لإكمال المهام، إغلاق قسري');
         if (this.queue) {
           await this.queue.close();
@@ -2141,7 +2184,7 @@ export class ProductionQueueManager {
         default:
           return { success: false, error: `Unsupported platform: ${platform}` };
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('❌ Message delivery error:', error);
       return {
         success: false,
@@ -2181,7 +2224,7 @@ export class ProductionQueueManager {
         ...(result.id ? { platformMessageId: result.id } : {}),
         ...(result.error ? { error: result.error } : {})
       } as { success: boolean; platformMessageId?: string; error?: string };
-    } catch (error) {
+    } catch (error: any) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Instagram delivery failed'
@@ -2242,7 +2285,7 @@ export class ProductionQueueManager {
         throw new Error(result.error || 'Notification delivery failed');
       }
 
-    } catch (error) {
+    } catch (error: any) {
       const duration = Date.now() - startTime;
       
       this.logger.error('💥 [NOTIFICATION-ERROR] خطأ في إرسال الإشعار', {
@@ -2296,7 +2339,7 @@ export class ProductionQueueManager {
       telemetry.gauge('queue_depth', 'Current queue depth').record(queueStats.waiting + queueStats.active);
       telemetry.gauge('queue_active_jobs', 'Active jobs count').record(queueStats.active);
       telemetry.gauge('queue_waiting_jobs', 'Waiting jobs count').record(queueStats.waiting);
-      telemetry.gauge('queue_error_rate_percent', 'Queue error rate percentage').record(queueStats.errorRate);
+      telemetry.gauge('queueerroror_rate_percent', 'Queue error rate percentage').record(queueStats.errorRate);
       
       this.logger.info('📬 [MANYCHAT-PROCESS] بدء معالجة ManyChat job متقدمة', {
         eventId: jobData.eventId,
@@ -2426,7 +2469,7 @@ export class ProductionQueueManager {
         processingTime: totalDuration
       };
 
-    } catch (error) {
+    } catch (error: any) {
       const duration = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
       
@@ -2441,7 +2484,7 @@ export class ProductionQueueManager {
       });
       
       // 🚨 Error classification counter
-      telemetry.counter('manychat_processing_errors_total', 'ManyChat processing errors').add(1, {
+      telemetry.counter('manychat_processingerrorors_total', 'ManyChat processing errors').add(1, {
         error_type: error instanceof Error ? error.constructor.name : 'Unknown',
         merchant_id: jobData.merchantId,
         has_message: String(Boolean(jobData.messageText)),
@@ -2884,7 +2927,7 @@ export class ProductionQueueManager {
         throw new Error(sendResult.error || 'Message delivery failed');
       }
 
-    } catch (error) {
+    } catch (error: any) {
       const duration = Date.now() - startTime;
       
       // ❌ تحديث حالة الرسالة كفاشلة
@@ -2909,4 +2952,9 @@ export class ProductionQueueManager {
 }
 
 export default ProductionQueueManager;
+
+
+
+
+
 
