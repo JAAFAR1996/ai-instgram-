@@ -122,9 +122,13 @@ export class ManyChatService {
       }
     );
 
+    // Validate token format on initialization
+    this.validateTokenFormat();
+
     this.logger.info('✅ ManyChat Service initialized', {
       baseUrl: this.baseUrl,
       hasApiKey: !!this.apiKey,
+      tokenFormat: this.getTokenFormatInfo(),
       serviceName: 'ManyChatAPI'
     });
   }
@@ -558,6 +562,25 @@ export class ManyChatService {
 
       if (!response.ok) {
         const errorData = (data as Record<string, unknown>);
+        
+        // Special handling for token format errors
+        if (response.status === 400 && errorData.message === 'Wrong format token') {
+          this.logger.error('❌ ManyChat API Token Format Error', {
+            error: 'Wrong format token',
+            status: response.status,
+            endpoint,
+            tokenLength: this.apiKey?.length || 0,
+            tokenPreview: this.apiKey?.substring(0, 10) + '...' || 'missing',
+            suggestion: 'Check MANYCHAT_API_KEY format - should be valid ManyChat API token'
+          });
+          
+          throw new ManyChatAPIError(
+            `ManyChat API Token Format Error: The provided API token has wrong format. Please check MANYCHAT_API_KEY environment variable.`,
+            response.status,
+            { status: String(response.status), message: 'Token format validation failed', error: 'Wrong format token', details: { suggestion: 'Verify token format with ManyChat documentation' } }
+          );
+        }
+        
         throw new ManyChatAPIError(
           `HTTP ${response.status}: ${errorData.error || 'Unknown error'}`,
           response.status,
@@ -679,6 +702,90 @@ export class ManyChatService {
     this.logger.info('🔄 Circuit Breaker reset manually', {
       serviceName: 'ManyChatAPI'
     });
+  }
+
+  /**
+   * Validate ManyChat API token format
+   */
+  private validateTokenFormat(): void {
+    if (!this.apiKey) {
+      throw new Error('MANYCHAT_API_KEY is required but not provided');
+    }
+
+    // Basic validation - ManyChat tokens are usually long alphanumeric strings
+    if (this.apiKey.length < 20) {
+      this.logger.warn('⚠️ ManyChat API token seems too short', {
+        tokenLength: this.apiKey.length,
+        expected: 'Usually 40+ characters'
+      });
+    }
+
+    // Check for common token format issues
+    if (this.apiKey.includes(' ') || this.apiKey.includes('\n') || this.apiKey.includes('\t')) {
+      this.logger.error('❌ ManyChat API token contains whitespace characters', {
+        tokenPreview: this.apiKey.substring(0, 10) + '...',
+        issue: 'Token contains spaces, newlines, or tabs'
+      });
+      throw new Error('ManyChat API token contains invalid whitespace characters');
+    }
+
+    this.logger.debug('✅ ManyChat API token format validation passed', {
+      tokenLength: this.apiKey.length,
+      format: this.getTokenFormatInfo()
+    });
+  }
+
+  /**
+   * Get token format information for debugging
+   */
+  private getTokenFormatInfo(): { length: number; preview: string; hasSpecialChars: boolean } {
+    if (!this.apiKey) {
+      return { length: 0, preview: 'missing', hasSpecialChars: false };
+    }
+
+    return {
+      length: this.apiKey.length,
+      preview: this.apiKey.substring(0, 10) + '...',
+      hasSpecialChars: /[^a-zA-Z0-9]/.test(this.apiKey)
+    };
+  }
+
+  /**
+   * Test ManyChat API connection and token validity
+   */
+  public async testConnection(): Promise<{ success: boolean; error?: string; details?: unknown }> {
+    try {
+      this.logger.info('🔍 Testing ManyChat API connection', {
+        baseUrl: this.baseUrl,
+        tokenFormat: this.getTokenFormatInfo()
+      });
+
+      // Try to make a simple API call to test the connection
+      const response = await this.makeAPIRequest('/fb/page/getInfo', {
+        method: 'GET'
+      });
+
+      this.logger.info('✅ ManyChat API connection test successful', {
+        response: response
+      });
+
+      return { success: true };
+
+    } catch (error) {
+      const errorDetails = {
+        message: error instanceof Error ? error.message : String(error),
+        tokenFormat: this.getTokenFormatInfo(),
+        suggestion: 'Verify MANYCHAT_API_KEY in environment variables'
+      };
+
+      this.logger.error('❌ ManyChat API connection test failed', errorDetails);
+
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        details: errorDetails
+      };
+    }
   }
 
   /**

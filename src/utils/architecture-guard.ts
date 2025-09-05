@@ -17,9 +17,9 @@ const logger = getLogger({ component: 'ArchitectureGuard' });
 const FORBIDDEN_PATTERNS = [
   'instagram_user_id',
   'igUserId', 
-  'sender.id',
-  'event.sender.id',
-  'event.value.from.id',
+  'sender\\.id',            // literal 'sender.id' (Messenger-style), not 'sender_id'
+  'event\\.sender\\.id',
+  'event\\.value\\.from\\.id',
   'recipientId', // For direct Instagram API calls
   'user_\\d+', // Fallback username patterns
   'IG\\d+' // Seed data ID patterns
