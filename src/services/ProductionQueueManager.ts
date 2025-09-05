@@ -434,6 +434,8 @@ export class ProductionQueueManager {
     const webhookWorker = new Worker(
       this.queueName,
       async (job: Job) => {
+        // 🔍 DEBUG: Log every job that comes to webhook worker  
+        this.logger.info('📨 [WEBHOOK-WORKER] استلام job', { jobId: job.id, jobName: job.name });
         if (job.name !== 'process-webhook') return;
         const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: async (err: Error, _retry: boolean) => {
           const fn = job.moveToFailed as unknown as (e: Error, token: string) => Promise<void>;
