@@ -71,8 +71,10 @@ export async function withDbTenant<T>(
     await client.query('BEGIN');
     
     // Set tenant context for RLS policies within transaction
-    await client.query('SET LOCAL app.current_merchant_id = $1', [merchantId]);
-    await client.query('SET LOCAL app.admin_mode = $1', ['false']);
+    // Note: Postgres does not accept parameters in SET/SET LOCAL statements.
+    // Using set_config(name, value, is_local) safely with placeholders instead.
+    await client.query("SELECT set_config('app.current_merchant_id', $1, true)", [merchantId]);
+    await client.query("SELECT set_config('app.admin_mode', $1, true)", ['false']);
     
     // Execute function within tenant context with same client
     const result = await fn(client);

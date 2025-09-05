@@ -396,6 +396,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
     }
 
     // 4. RLS policies validation
+    const requiredRLSTables = ['merchants', 'conversations', 'message_logs', 'products', 'orders'];
     const rlsPolicies = await sql<{ 
       tablename: string; 
       policyname: string;
@@ -409,10 +410,8 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
         cmd
       FROM pg_policies 
       WHERE schemaname = 'public'
-      AND tablename = ANY(ARRAY['merchants', 'conversations', 'message_logs', 'products', 'orders'])
+      AND tablename = ANY(${requiredRLSTables})
     `;
-
-    const requiredRLSTables = ['merchants', 'conversations', 'message_logs', 'products', 'orders'];
     const tablesWithRLS = Array.from(new Set(rlsPolicies.map(p => p.tablename)));
     const tablesWithoutRLS = requiredRLSTables.filter(table => !tablesWithRLS.includes(table));
 
