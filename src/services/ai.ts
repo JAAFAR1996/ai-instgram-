@@ -538,15 +538,7 @@ export class AIService {
     const productInfo = this.formatProductsForPrompt(relevantProducts);
     const newSystemPrompt = `أنت مساعد مبيعات خبير لمتجر ${businessName} (${catLabel}).\n\n📦 المنتجات المتوفرة حالياً (الأكثر صلة):\n${productInfo}\n\n🎯 مهمتك:\n- اربط استفسار العميل بالمنتجات الفعلية المتوفرة\n- اذكر الأسعار الحقيقية والمخزون المتوفر\n- اقترح بدائل مناسبة إذا لم يجد ما يريد\n- لا تختلق معلومات غير صحيحة`;
 
-    const systemPrompt = `أنت مساعد مبيعات ذكي لمتجر ${persona.businessCategory || 'عام'}.
-قواعد صارمة:
-- اللغة: عربية بسيطة بلهجة عراقية.
-- التزم بنبرة ${persona.tone || 'لطيفة ومهنية'}.
-- لا تختلق أسعار/منتجات؛ عند النقص قل: "أحتاج أتأكد".
-- رد قصير جدًا (سطر واحد أو سطران).
-- لا تكرر جملًا.
-- اسأل سؤال متابعة واحد محدد يملأ أقرب خانة ناقصة (الفئة، المقاس، اللون، النوع).
-- إذا أرسل المستخدم صورة: حلّل باختصار ما يفيد الشراء (اللون/الموديل/العيوب).`;
+    // legacy prompt kept for reference was replaced by newSystemPrompt
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: newSystemPrompt },
@@ -639,17 +631,28 @@ export class AIService {
   }
 
   /** Fetch merchant persona (tone/category) from DB */
-  private async getMerchantPersona(merchantId: string): Promise<{ tone: string; businessCategory: string }> {
+  private async getMerchantPersona(merchantId: string): Promise<{ tone: string; businessCategory: string; salesStyle: string }> {
     try {
       const rows = await this.db.query(
-        `SELECT COALESCE(business_category,'other') as business_category FROM merchants WHERE id = $1 LIMIT 1`,
+        `SELECT COALESCE(business_category,'other') as business_category, COALESCE(sales_style,'neutral') as sales_style FROM merchants WHERE id = $1 LIMIT 1`,
         [merchantId]
-      ) as Array<{ business_category: string }>;
+      ) as Array<{ business_category: string; sales_style: string }>;
       const bc = (rows[0]?.business_category || 'other').toLowerCase();
-      const tone = bc === 'fashion' ? 'عصرية وودودة' : bc === 'electronics' ? 'احترافية وواضحة' : 'لطيفة ومهنية';
-      return { tone, businessCategory: bc };
+      const salesStyle = rows[0]?.sales_style || 'neutral';
+      
+      // Default tone based on category, but can be overridden by sales_style
+      let tone = bc === 'fashion' ? 'عصرية وودودة' : bc === 'electronics' ? 'احترافية وواضحة' : 'لطيفة ومهنية';
+      
+      // Override tone based on sales_style
+      if (salesStyle === 'friendly') tone = 'ودودة ومرحبة';
+      else if (salesStyle === 'professional') tone = 'احترافية ومهنية';
+      else if (salesStyle === 'casual') tone = 'عفوية ومريحة';
+      else if (salesStyle === 'enthusiastic') tone = 'متحمسة ونشطة';
+      else if (salesStyle === 'persuasive') tone = 'مقنعة ومؤثرة';
+      
+      return { tone, businessCategory: bc, salesStyle };
     } catch {
-      return { tone: 'لطيفة ومهنية', businessCategory: 'other' };
+      return { tone: 'لطيفة ومهنية', businessCategory: 'other', salesStyle: 'neutral' };
     }
   }
 

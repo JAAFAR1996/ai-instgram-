@@ -10,8 +10,8 @@
                 },
     "scripts":  {
                     "dev":  "cross-env NODE_ENV=development tsx src/production-index.ts",
-                    "build":  "cross-env NODE_ENV=production node scripts/build.mjs",
-                    "build:production":  "cross-env NODE_ENV=production node scripts/build.mjs",
+                    "build":  "node scripts/build.mjs",
+                    "build:production":  "tsc -p tsconfig.json",
                     "build:tsc":  "tsc -p tsconfig.json",
                     "prestart":  "node -e \"if(process.versions.bun) process.exit(1)\" || true",
                     "start":  "node dist/production-index.js",

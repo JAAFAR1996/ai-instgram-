@@ -3,7 +3,7 @@ import type { MessageHistory } from '../ai.js';
 import type { MerchantCatalogProfile } from '../catalog/merchant-catalog.service.js';
 
 export interface RecommendedProduct {
-  is_featured?: boolean;
+  is_featured?: boolean | null;
   stock_quantity?: number;
   [key: string]: unknown;
 }

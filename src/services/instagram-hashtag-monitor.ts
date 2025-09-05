@@ -124,7 +124,7 @@ export class InstagramHashtagMonitor {
           ON CONFLICT (message_id, hashtag) DO NOTHING
         `;
         inserted += 1;
-        await this.updateDailyTrend(input.merchantId, tag, input.userId);
+        await this.updateDailyTrend(input.merchantId, tag);
       } catch (e) {
         this.log.warn('insert hashtag_mentions failed (hashtag)', { error: String(e) });
       }
@@ -151,7 +151,7 @@ export class InstagramHashtagMonitor {
   }
 
   // Upsert today's hashtag_trends counters and sentiment breakdown from hashtag_mentions
-  private async updateDailyTrend(merchantId: string, hashtag: string, userId: string): Promise<void> {
+  private async updateDailyTrend(merchantId: string, hashtag: string): Promise<void> {
     const sql = this.db.getSQL();
     try {
       await sql`

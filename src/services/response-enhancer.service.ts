@@ -9,9 +9,7 @@ import { getDatabase } from '../db/adapter.js';
 import { getLogger } from './logger.js';
 import { telemetry } from './telemetry.js';
 import { SelfLearningSystem } from './learning-analytics.js';
-import { computeSuccessPatterns } from '../utils/pattern-matcher.js';
-import type { SuccessPatterns, LearningOutcome } from '../types/learning.js';
-import type { DatabaseRow } from '../types/db.js';
+import type { SuccessPatterns } from '../types/learning.js';
 
 export interface ResponseEnhancementContext {
   merchantId: string;
@@ -102,14 +100,13 @@ export class ResponseEnhancerService {
 
       // 3. Apply Intent-Specific Patterns
       if (context.aiIntent) {
-        const ps = patterns as Record<string, unknown>;
+        const ps = (patterns as unknown) as Record<string, unknown>;
         const is = ps.intentSuccess as Record<string, unknown> | undefined;
         if (is && Object.prototype.hasOwnProperty.call(is, String(context.aiIntent))) {
         const intentResult = this.applyIntentPatterns(
           enhancedResponse, 
           patterns, 
-          context.aiIntent, 
-          context
+          context.aiIntent
         );
         
           if (intentResult.enhanced) {
@@ -122,7 +119,7 @@ export class ResponseEnhancerService {
       }
 
       // 4. Apply Top Performing Phrases
-      const phraseResult = this.applySuccessfulPhrases(enhancedResponse, patterns, context);
+      const phraseResult = this.applySuccessfulPhrases(enhancedResponse, patterns);
       if (phraseResult.enhanced) {
         enhancedResponse = phraseResult.response;
         appliedPatterns.push('successful_phrases');
@@ -134,7 +131,6 @@ export class ResponseEnhancerService {
       if (context.customerProfile) {
         const profileResult = this.applyCustomerProfileOptimization(
           enhancedResponse, 
-          patterns, 
           context.customerProfile
         );
         
@@ -199,52 +195,7 @@ export class ResponseEnhancerService {
     }
   }
 
-  /**
-   * Apply time-of-day optimization based on successful time slots
-   */
-  private applyTimeOptimization(
-    response: string, 
-    patterns: SuccessPatterns, 
-    currentHour: number
-  ): { enhanced: boolean; response: string } {
-    
-    if (!patterns.timeSlots.length) {
-      return { enhanced: false, response };
-    }
-
-    // Find the most successful time slot for current hour
-    const relevantSlot = patterns.timeSlots.find(slot => {
-      const slotHour = parseInt(slot.hour);
-      return Math.abs(slotHour - currentHour) <= 2; // ±2 hours tolerance
-    });
-
-    if (!relevantSlot || relevantSlot.avgScore < 0.7) {
-      return { enhanced: false, response };
-    }
-
-    // Apply time-specific optimizations
-    let optimizedResponse = response;
-
-    if (currentHour >= 6 && currentHour <= 12) {
-      // Morning optimization - more energetic
-      if (!response.includes('صباح') && !response.includes('morning')) {
-        optimizedResponse = `صباح الخير! ${response}`;
-      }
-    } else if (currentHour >= 13 && currentHour <= 17) {
-      // Afternoon - professional
-      optimizedResponse = response.replace(/!+/g, '.');
-    } else if (currentHour >= 18 && currentHour <= 23) {
-      // Evening - warmer tone
-      if (!response.includes('مساء') && !response.includes('evening')) {
-        optimizedResponse = `مساء الخير! ${response}`;
-      }
-    }
-
-    return { 
-      enhanced: optimizedResponse !== response, 
-      response: optimizedResponse 
-    };
-  }
+  // removed unused applyTimeOptimization (replaced by applyTimeOptimizationSafe)
 
   // Safe version aligned with SuccessPatterns shape
   private applyTimeOptimizationSafe(
@@ -290,11 +241,10 @@ export class ResponseEnhancerService {
   private applyIntentPatterns(
     response: string,
     patterns: SuccessPatterns,
-    intent: string,
-    context: ResponseEnhancementContext
+    intent: string
   ): { enhanced: boolean; response: string; boost: number } {
     
-    const is = (patterns as Record<string, unknown>).intentSuccess as Record<string, unknown> | undefined; const intentData = is ? (is[String(intent)] as { avgScore?: number }) : undefined; const avg = intentData?.avgScore ?? 0;
+    const is = ((patterns as unknown) as Record<string, unknown>).intentSuccess as Record<string, unknown> | undefined; const intentData = is ? (is[String(intent)] as { avgScore?: number }) : undefined; const avg = intentData?.avgScore ?? 0;
     if (!intentData || avg < 0.6) {
       return { enhanced: false, response, boost: 0 };
     }
@@ -350,8 +300,7 @@ export class ResponseEnhancerService {
    */
   private applySuccessfulPhrases(
     response: string,
-    patterns: SuccessPatterns,
-    context: ResponseEnhancementContext
+    patterns: SuccessPatterns
   ): { enhanced: boolean; response: string; phrasesAdded: number } {
     
     if (!patterns.topPhrases.length) {
@@ -370,8 +319,7 @@ export class ResponseEnhancerService {
       // Intelligent phrase integration based on context
       const integrationResult = this.integratePhrase(
         optimizedResponse, 
-        phraseData.phrase, 
-        context
+        phraseData.phrase
       );
       
       if (integrationResult.integrated) {
@@ -392,8 +340,7 @@ export class ResponseEnhancerService {
    */
   private integratePhrase(
     response: string,
-    phrase: string,
-    context: ResponseEnhancementContext
+    phrase: string
   ): { integrated: boolean; response: string } {
     
     // Don't integrate if response is already long
@@ -426,7 +373,6 @@ export class ResponseEnhancerService {
    */
   private applyCustomerProfileOptimization(
     response: string,
-    patterns: SuccessPatterns,
     profile: NonNullable<ResponseEnhancementContext['customerProfile']>
   ): { enhanced: boolean; response: string; boost: number; optimizations: string[] } {
     
@@ -526,7 +472,7 @@ export class ResponseEnhancerService {
 
     // Intent match bonus
     if (context.aiIntent) { 
-      const is2 = (patterns as Record<string, unknown>).intentSuccess as Record<string, unknown> | undefined; 
+      const is2 = ((patterns as unknown) as Record<string, unknown>).intentSuccess as Record<string, unknown> | undefined; 
       const d = is2 ? (is2[String(context.aiIntent)] as { avgScore?: number }) : undefined; 
       if ((d?.avgScore ?? 0) > 0.7) {
         qualityScore += 0.15;
@@ -642,10 +588,10 @@ export class ResponseEnhancerService {
       reasoningChain: reasoning,
       metadata: {
         patternsUsed: patterns.length,
-        timeOptimized: metadata.timeOptimized ?? false,
-        phraseIntegrated: metadata.phraseIntegrated ?? false,
-        intentOptimized: metadata.intentOptimized ?? false,
-        qualityPrediction: metadata.qualityPrediction ?? 0.5
+        timeOptimized: Boolean((metadata as any).timeOptimized),
+        phraseIntegrated: Boolean((metadata as any).phraseIntegrated),
+        intentOptimized: Boolean((metadata as any).intentOptimized),
+        qualityPrediction: Number((metadata as any).qualityPrediction ?? 0.5)
       }
     };
   }

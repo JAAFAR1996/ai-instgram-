@@ -1,7 +1,12 @@
 import { telemetry } from '../services/telemetry.js';
 import { pushDLQ } from '../queue/dead-letter.js';
 
-type LoggerLike = { warn?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void; info?: (...args: unknown[]) => void };
+export type LoggerLike = {
+  warn?: (message: string, meta?: Record<string, unknown>) => void;
+  error?: (message: string, meta?: Record<string, unknown>) => void;
+  info?: (message: string, meta?: Record<string, unknown>) => void;
+  debug?: (message: string, meta?: Record<string, unknown>) => void;
+};
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));

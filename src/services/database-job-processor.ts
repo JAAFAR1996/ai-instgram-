@@ -4,8 +4,10 @@
  */
 
 import { getDatabaseJobSpool } from '../queue/db-spool.js';
+import type { SpooledJob } from '../queue/db-spool.js';
 import { getLogger } from './logger.js';
 import { getInstagramWebhookHandler } from './instagram-webhook.js';
+import type { InstagramWebhookHandler, ProcessedWebhookResult, InstagramWebhookEvent } from './instagram-webhook.js';
 
 const logger = getLogger({ component: 'DatabaseJobProcessor' });
 let processingInterval: NodeJS.Timeout | null = null;
@@ -68,14 +70,7 @@ export function isDatabaseJobProcessorRunning(): boolean {
   return isRunning && processingInterval !== null;
 }
 
-interface WebhookJob {
-  jobId: string;
-  merchantId: string;
-  priority: number;
-  data: Record<string, unknown>;
-}
-
-async function processWebhookFromDatabase(job: WebhookJob) {
+async function processWebhookFromDatabase(job: SpooledJob) {
   try {
     logger.info('🔄 Processing webhook job from database', {
       jobId: job.jobId,
@@ -84,7 +79,7 @@ async function processWebhookFromDatabase(job: WebhookJob) {
     });
 
     // إضافة فحص قاعدة البيانات قبل الاستخدام
-    let webhookHandler: { processWebhook?: (data: Record<string, unknown>) => Promise<void> };
+    let webhookHandler: InstagramWebhookHandler;
     try {
       webhookHandler = await getInstagramWebhookHandler();
     } catch (error) {
@@ -96,18 +91,18 @@ async function processWebhookFromDatabase(job: WebhookJob) {
     if (!job.jobData) {
       throw new Error('Invalid webhook job data: jobData is null or undefined');
     }
-    
-    if (!job.jobData.payload) {
+    const jobData = (job.jobData as unknown) as Record<string, unknown>;
+    if (!(jobData as Record<string, unknown>).payload) {
       logger.error('Webhook job missing payload', {
         jobId: job.jobId,
-        jobDataKeys: Object.keys(job.jobData || {})
+        jobDataKeys: Object.keys(jobData || {})
       });
       throw new Error('Webhook job missing payload');
     }
 
     // معالجة الويبهوك بشكل آمن
-    const result = await webhookHandler.processWebhook(
-      job.jobData.payload,
+    const result: ProcessedWebhookResult = await webhookHandler.processWebhook(
+      ((jobData as { payload: unknown }).payload as unknown as InstagramWebhookEvent),
       job.merchantId
     );
 

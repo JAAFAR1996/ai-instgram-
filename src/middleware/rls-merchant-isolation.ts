@@ -380,7 +380,7 @@ export function createMerchantIsolationMiddleware(
  * Helper function to get current merchant ID from context
  */
 export function getCurrentMerchantId(c: Context): string | undefined {
-  return c.get('merchantId');
+  return (c as any).get('merchantId') as string | undefined;
 }
 
 /**

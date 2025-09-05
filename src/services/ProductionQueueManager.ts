@@ -1,8 +1,8 @@
 import { Queue, Worker, QueueEvents } from 'bullmq';
-import type { Job, RedisClient, JobsOptions } from 'bullmq';
+import type { Job, RedisClient } from 'bullmq';
 import { Redis, ReplyError } from 'ioredis';
 import { Pool } from 'pg';
-import { withWebhookTenantJob, withAITenantJob } from '../isolation/context.js';
+import { withWebhookTenantJob, withAITenantJob, withTenantJob } from '../isolation/context.js';
 import { telemetry } from './telemetry.js';
 
 function settleOnce<T>() {
@@ -44,6 +44,7 @@ import * as crypto from 'node:crypto';
 import { serr } from '../isolation/context.js';
 import { performHealthCheck } from './RedisSimpleHealthCheck.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
+import { withRetry } from '../utils/retry.js';
 
 import { getInstagramWebhookHandler } from './instagram-webhook.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
@@ -129,16 +130,7 @@ type Logger = {
 type U<T> = T | undefined;
 
 // تحسين Type Safety - إضافة interfaces للـ Job
-interface JobWithAttempts {
-  id: string;
-  name: string;
-  data: unknown;
-  attemptsMade?: number;
-  opts?: JobsOptions;
-  processedOn?: number;
-  timestamp?: number;
-  remove(): Promise<void>;
-}
+// removed JobWithAttempts (unused)
 
 export class ProductionQueueManager {
   private connectionManager: RedisConnectionManager;
@@ -434,7 +426,10 @@ export class ProductionQueueManager {
       this.queueName,
       async (job: Job) => {
         if (job.name !== 'process-webhook') return;
-        const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: (err: Error, retry: boolean) => job.moveToFailed(err, retry) };
+        const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: async (err: Error, _retry: boolean) => {
+          const fn = job.moveToFailed as unknown as (e: Error, token: string) => Promise<void>;
+          await fn(err, 'token');
+        } };
         return webhookProcessor(adapted);
       },
       { connection, concurrency: 5 }
@@ -513,7 +508,10 @@ export class ProductionQueueManager {
       this.queueName,
       async (job: Job) => {
         if (job.name !== 'ai-response') return;
-        const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: (err: Error, retry: boolean) => job.moveToFailed(err, retry) };
+        const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: async (err: Error, _retry: boolean) => {
+          const fn = job.moveToFailed as unknown as (e: Error, token: string) => Promise<void>;
+          await fn(err, 'token');
+        } };
         return aiProcessor(adapted);
       },
       { connection, concurrency: 3 }
@@ -590,22 +588,23 @@ export class ProductionQueueManager {
     // 💬 معالج ManyChat المتقدم - العمليات الثقيلة
     this.logger.info('🔧 [DEBUG] تسجيل معالج manychat-processing...');
     
-    const manyChatProcessor = withAITenantJob(
+    // Use generic tenant wrapper; ManyChatJob has its own shape
+    const manyChatProcessor = withTenantJob(
       this.dbPool,
       this.logger,
-      async (job, data, _client) => {
+      async (job, _data, _client) => {
         this.logger.info('💬 [MANYCHAT-WORKER-START] معالج ManyChat استقبل job!', { 
           jobId: job.id, 
           jobName: job.name,
-          merchantId: (typeof (data as Record<string, unknown>).merchantId === "string" ? (data as Record<string, unknown>).merchantId as string : undefined),
-          username: (typeof (data as Record<string, unknown>).username === "string" ? (data as Record<string, unknown>).username as string : undefined) 
+          merchantId: (typeof ((job.data as Record<string, unknown>)?.merchantId) === "string" ? (job.data as Record<string, unknown>).merchantId as string : undefined),
+          username: (typeof ((job.data as Record<string, unknown>)?.username) === "string" ? (job.data as Record<string, unknown>).username as string : undefined) 
         });
         
         clearTimeout(workerInitTimeout);
         
         const manyChatWorkerId = `manychat-worker-${crypto.randomUUID().slice(0, 8)}`;
         const startTime = Date.now();
-        const manyChatData = data as ManyChatJob;
+        const manyChatData = job.data as unknown as ManyChatJob;
       
         return await this.circuitBreaker.execute(async () => {
           try {
@@ -671,7 +670,10 @@ export class ProductionQueueManager {
       this.queueName,
       async (job: Job) => {
         if (job.name !== 'manychat-processing') return;
-        const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: (err: Error, retry: boolean) => job.moveToFailed(err, retry) };
+        const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: async (err: Error, _retry: boolean) => {
+          const fn = job.moveToFailed as unknown as (e: Error, token: string) => Promise<void>;
+          await fn(err, 'token');
+        } };
         return manyChatProcessor(adapted);
       },
       { connection, concurrency: 4 } // 4 concurrent ManyChat jobs
@@ -1557,7 +1559,7 @@ export class ProductionQueueManager {
 
       const aiResponse = await this.aiOrchestrator.generatePlatformResponse(
         jobData.message as string,
-        (aiContext as InstagramContext),
+        (aiContext as unknown as InstagramContext),
         'instagram' // تثبيت على instagram حالياً
       );
 
@@ -2176,7 +2178,9 @@ export class ProductionQueueManager {
       const result = await this.notification.send({
         type: jobData.type as string,
         recipient: jobData.recipient as string,
-        content: (jobData as { data?: unknown; payload?: unknown }).data || (jobData as { payload?: unknown }).payload || { message: 'Notification' }
+        content: ((
+          (jobData as { data?: unknown }).data ?? (jobData as { payload?: unknown }).payload ?? { message: 'Notification' }
+        ) as unknown as Record<string, unknown>)
       });
 
       const duration = Date.now() - startTime;
@@ -2506,11 +2510,11 @@ export class ProductionQueueManager {
             decisionPath.push(`image_analysis=${imageAnalysisResults.length}`, 
               `ocr=${Boolean(combinedOCRText)}`, 
               `products=${productMatches.length}`);
-            if (
-              igResp.stage === 'AWARE' || igResp.stage === 'BROWSE' || igResp.stage === 'INTENT' ||
-              igResp.stage === 'OBJECTION' || igResp.stage === 'CLOSE'
-            ) {
-              stage = igResp.stage;
+            {
+              const s = String((igResp as any).stage);
+              if (s === 'AWARE' || s === 'BROWSE' || s === 'INTENT' || s === 'OBJECTION' || s === 'CLOSE') {
+                stage = s as typeof stage;
+              }
             }
             
             // Store enhanced analysis for future reference
@@ -2548,11 +2552,11 @@ export class ProductionQueueManager {
             aiIntent = igResp.intent || 'IMAGE_INQUIRY';
             aiConfidence = igResp.confidence ?? 0.7;
             decisionPath.push('vision=fallback');
-            if (
-              igResp.stage === 'AWARE' || igResp.stage === 'BROWSE' || igResp.stage === 'INTENT' ||
-              igResp.stage === 'OBJECTION' || igResp.stage === 'CLOSE'
-            ) {
-              stage = igResp.stage;
+            {
+              const s = String((igResp as any).stage);
+              if (s === 'AWARE' || s === 'BROWSE' || s === 'INTENT' || s === 'OBJECTION' || s === 'CLOSE') {
+                stage = s as typeof stage;
+              }
             }
           }
         } else {
@@ -2677,7 +2681,7 @@ export class ProductionQueueManager {
       const { PredictiveAnalyticsEngine } = await import('../services/predictive-analytics.js');
       const predictiveEngine = new PredictiveAnalyticsEngine();
       // تشغيل غير متزامن
-      predictiveEngine.runPredictions(jobData.merchantId, jobData.username).catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
+          predictiveEngine.predictSizeIssues(jobData.merchantId, jobData.username).catch((e) => { console.error('[hardening:no-silent-catch]', e); throw e instanceof Error ? e : new Error(String(e)); });
     } catch {}
 
     return {
@@ -2796,7 +2800,3 @@ export class ProductionQueueManager {
 }
 
 export default ProductionQueueManager;
-
-
-
-

@@ -29,7 +29,7 @@ export async function getTopProductsByMerchant(
     LIMIT ${limit}
   `;
 
-  return rows.map((r: { id: string; sku: string; name_ar: string; price_usd: number; category: string; description_ar?: string; image_urls: string[] }) => ({
+  return rows.map((r: { id: string; sku: string; name_ar: string; category: string | null; price_amount: number | null; sale_price_amount: number | null; price_currency?: string | null; stock_quantity: number }) => ({
     id: String(r.id),
     sku: String(r.sku),
     name_ar: String(r.name_ar),

@@ -151,7 +151,7 @@ export function rateLimitMiddleware(limiterType: string = 'general') {
  */
 export function merchantRateLimitMiddleware() {
   return async (c: Context, next: Next): Promise<Response | void> => {
-    const merchantId = c.get('merchantId') ?? c.req.query('merchantId');
+    const merchantId = ((c as any).get('merchantId') as string | undefined) ?? c.req.query('merchantId');
     
     if (!merchantId) {
       return c.json({
@@ -185,7 +185,7 @@ export function merchantRateLimitMiddleware() {
  */
 export function windowEnforcementMiddleware() {
   return async (c: Context, next: Next): Promise<Response | void> => {
-    const merchantId = c.get('merchantId') ?? c.req.query('merchantId');
+    const merchantId = ((c as any).get('merchantId') as string | undefined) ?? c.req.query('merchantId');
     const platform = (c.req.query('platform') ?? 'instagram') as Platform;
     
     const body = await c.req.json().catch(() => ({}));
@@ -314,8 +314,8 @@ export function securityContextMiddleware() {
  */
 export function auditLogMiddleware() {
   return async (c: Context, next: Next) => {
-    const securityContext: SecurityContext = c.get('securityContext');
-    const merchantId = c.get('merchantId');
+    const securityContext: SecurityContext = (c as any).get('securityContext') as SecurityContext;
+    const merchantId = ((c as any).get('merchantId') as string | undefined);
     
     // Execute the request
     await next();

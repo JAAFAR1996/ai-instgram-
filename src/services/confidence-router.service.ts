@@ -5,17 +5,14 @@
  * ===============================================
  */
 
-import { getDatabase } from '../db/adapter.js';
+// removed unused getDatabase import
 import { getLogger } from './logger.js';
 import { telemetry } from './telemetry.js';
-import MessageEnhancementService from './message-enhancement.service.js';
+// removed unused MessageEnhancementService import
 import ResponseEnhancerService from './response-enhancer.service.js';
 import ExtendedThinkingService from './extended-thinking.js';
 import { ConstitutionalAI } from './constitutional-ai.js';
-import type { 
-  EnhancementContext, 
-  QualityThresholds 
-} from './message-enhancement.service.js';
+// removed unused types import
 import type { 
   ResponseEnhancementContext, 
   EnhancedResponseData 
@@ -71,11 +68,11 @@ export interface RoutedResponse {
 }
 
 export class ConfidenceRouterService {
-  private db = getDatabase();
+  // removed unused DB handle
   private logger = getLogger({ component: 'confidence-router' });
   
   // Service dependencies
-  private messageEnhancer = new MessageEnhancementService();
+  // private messageEnhancer = new MessageEnhancementService();
   private responseEnhancer = new ResponseEnhancerService();
   private thinkingService = new ExtendedThinkingService();
   private constitutionalAI = new ConstitutionalAI();
@@ -375,7 +372,6 @@ export class ConfidenceRouterService {
       customerMessage: context.customerMessage,
       aiIntent: context.aiIntent,
       aiConfidence: context.aiConfidence,
-      conversationId: context.conversationHistory?.[0]?.conversation_id,
       platform: context.platform,
       timeOfDay: new Date().getHours(),
       customerProfile: context.customerProfile
@@ -621,7 +617,9 @@ export class ConfidenceRouterService {
         averageProcessingTime: 0,
         averageQualityImprovement: 0,
         fallbackUsage: 0,
-        performanceData: Object.fromEntries(this.routePerformance.entries())
+        performanceData: Object.fromEntries(this.routePerformance.entries()),
+        requestedMerchantId: merchantId,
+        windowDays: days
       };
 
       // Get database stats would require message_logs analysis

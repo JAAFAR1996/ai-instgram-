@@ -905,7 +905,7 @@ export class InstagramAIService {
       if (img.caption) parts.push({ type: 'text', text: `تفاصيل الصورة: ${img.caption}` });
     }
     // OpenAI Chat Completions supports multimodal content via array parts on supported models
-    return { role: 'user', content: parts as OpenAI.Chat.Completions.ChatCompletionMessageParam['content'] };
+    return { role: 'user', content: parts as any } as any;
   }
 
   private toDataUrlOrPass(img: ImageData): string | null {
@@ -1072,7 +1072,17 @@ export class InstagramAIService {
     // Cache key for identical searches for 2 minutes
     const ck = `psearch:${merchantId}:${tokens.join('-')}:${filters.sizes.join(',')}:${filters.colors.join(',')}`;
     const cached = await this.cache.get<Array<Record<string, unknown>>>(ck, { prefix: 'ctx' });
-    if (cached) return cached as Array<Record<string, unknown>>;
+    if (cached) return cached as unknown as Array<{
+      id: string;
+      sku: string;
+      name_ar: string;
+      effective_price: number;
+      price_currency: string;
+      stock_quantity: number;
+      attributes: Record<string, unknown>;
+      variants: Array<Record<string, unknown>>;
+      category: string;
+    }>;
 
     // Build dynamic WHERE parts
     const ilikes = tokens.map(t => `%${t}%`);
@@ -1095,7 +1105,7 @@ export class InstagramAIService {
         price_currency: string;
         stock_quantity: number;
         attributes: Record<string, unknown>;
-        variants: Record<string, unknown>;
+        variants: Array<Record<string, unknown>>;
         category: string;
       }>`
         SELECT p.id, p.sku, p.name_ar, p.attributes, p.variants, p.category,
@@ -1347,7 +1357,7 @@ ${productsText}
       );
       
       const batchResults = await Promise.all(batchPromises);
-      batchResults.forEach(batch => allProducts.push(...(batch as Product[])));
+      batchResults.forEach(batch => allProducts.push(...(batch as unknown as Product[])));
       
       return allProducts;
     } catch (error) {

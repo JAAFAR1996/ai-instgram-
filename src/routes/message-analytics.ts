@@ -13,6 +13,7 @@ import MessageEnhancementService from '../services/message-enhancement.service.j
 import ResponseEnhancerService from '../services/response-enhancer.service.js';
 import ConfidenceRouterService from '../services/confidence-router.service.js';
 import { SelfLearningSystem } from '../services/learning-analytics.js';
+import type { SuccessPatterns } from '../types/learning.js';
 
 const app = new Hono();
 const logger = getLogger({ component: 'message-analytics-api' });
@@ -96,7 +97,7 @@ app.get('/overview/:merchantId', async (c) => {
     `;
 
     // Success patterns summary
-    const patterns = await learningSystem.analyzeSuccessPatterns(merchantId, timeRange === '30d' ? 30 : 7);
+    const patterns: SuccessPatterns | null = await learningSystem.analyzeSuccessPatterns(merchantId, timeRange === '30d' ? 30 : 7);
 
     const processingTime = Date.now() - startTime;
 
@@ -274,7 +275,7 @@ app.get('/success-patterns/:merchantId', async (c) => {
     const days = parseInt(c.req.query('days') || '14');
     
     // Get comprehensive success patterns
-    const patterns = await learningSystem.analyzeSuccessPatterns(merchantId, days);
+    const patterns: SuccessPatterns | null = await learningSystem.analyzeSuccessPatterns(merchantId, days);
     
     const sql = db.getSQL();
     
@@ -318,7 +319,10 @@ app.get('/success-patterns/:merchantId', async (c) => {
         patterns: patterns || {},
         patternEffectiveness,
         optimizationOpportunities: opportunities,
-        recommendations: generateRecommendations(patterns, opportunities),
+        recommendations: generateRecommendations(patterns || { merchantId, topPhrases: [], timeSlots: [], followupDelaySec: 0, preferenceSignals: [], sampleSize: 0 }, opportunities.map(o => ({
+          ai_intent: String((o as Record<string, unknown>).ai_intent ?? 'UNKNOWN'),
+          low_confidence_count: parseInt(String((o as Record<string, unknown>).low_confidence_count ?? '0')) || 0
+        }))),
         analysisWindow: `${days} days`
       }
     });
@@ -383,8 +387,8 @@ app.post('/simulate-enhancement', async (c) => {
       simulation: {
         original: {
           response: currentResponse,
-          confidence: context.aiConfidence,
-          intent: context.aiIntent
+          confidence: enhancementContext.aiConfidence,
+          intent: enhancementContext.aiIntent
         },
         enhancement: {
           enhanced: enhancementResult.enhanced,
@@ -463,30 +467,30 @@ app.get('/real-time-stats/:merchantId', async (c) => {
 });
 
 // Helper function to generate recommendations
-function generateRecommendations(patterns: Record<string, unknown>, opportunities: Array<Record<string, unknown>>): string[] {
+function generateRecommendations(patterns: SuccessPatterns, opportunities: Array<{ ai_intent: string; low_confidence_count: number }>): string[] {
   const recommendations: string[] = [];
 
   // Pattern-based recommendations
-  if (patterns?.topPhrases?.length > 0) {
-    const topPhrase = patterns.topPhrases[0];
-    if (topPhrase.score > 0.8) {
+  if (patterns && (patterns.topPhrases?.length ?? 0) > 0) {
+    const topPhrase = patterns.topPhrases[0]!;
+    if ((topPhrase.score ?? 0) > 0.8) {
       recommendations.push(`Consider using the phrase "${topPhrase.phrase}" more frequently - it has a ${(topPhrase.score * 100).toFixed(1)}% success rate`);
     }
   }
 
   // Intent-based recommendations
-  if (opportunities?.length > 0) {
-    const topOpportunity = opportunities[0];
+  if (opportunities && opportunities.length > 0) {
+    const topOpportunity = opportunities[0]!;
     if (topOpportunity.low_confidence_count > 10) {
       recommendations.push(`Focus on improving ${topOpportunity.ai_intent} responses - ${topOpportunity.low_confidence_count} low-confidence messages detected`);
     }
   }
 
   // Time-based recommendations
-  if (patterns?.timeSlots?.length > 0) {
-    const bestTimeSlot = patterns.timeSlots[0];
-    if (bestTimeSlot.avgScore > 0.8) {
-      recommendations.push(`Peak performance time: ${bestTimeSlot.hour}:00 with ${(bestTimeSlot.avgScore * 100).toFixed(1)}% success rate`);
+  if (patterns && (patterns.timeSlots?.length ?? 0) > 0) {
+    const bestTimeSlot = patterns.timeSlots[0]!;
+    if ((bestTimeSlot.score ?? 0) > 0.8) {
+      recommendations.push(`Peak performance time slot: ${bestTimeSlot.slot} with ${(bestTimeSlot.score * 100).toFixed(1)}% success rate`);
     }
   }
 

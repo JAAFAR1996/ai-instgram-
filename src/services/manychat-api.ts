@@ -561,7 +561,7 @@ export class ManyChatService {
         throw new ManyChatAPIError(
           `HTTP ${response.status}: ${errorData.error || 'Unknown error'}`,
           response.status,
-          errorData
+          { status: String(response.status), message: String(errorData.message || ''), error: String(errorData.error || ''), details: (errorData.details as any) }
         );
       }
 
@@ -645,7 +645,7 @@ export class ManyChatService {
    */
   public async getHealthStatus(): Promise<{
     status: 'healthy' | 'degraded' | 'unhealthy';
-    circuitBreaker: { isOpen?: () => boolean } | undefined;
+    circuitBreaker: any;
     rateLimit: { current: number; limit: number };
   }> {
     const circuitBreakerStats = this.circuitBreaker.getStats();

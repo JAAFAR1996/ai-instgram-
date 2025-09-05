@@ -10,6 +10,7 @@ import {
   performHealthCheck 
 } from './RedisSimpleHealthCheck.js';
 import { withRetry } from '../utils/retry.js';
+import type { LoggerLike } from '../utils/retry.js';
 // Removed unused import: RedisErrorHandler
 
 export interface ConnectionInfo {
@@ -56,7 +57,7 @@ export class RedisConnectionManager {
   constructor(
     private redisUrl: string,
     private environment: Environment,
-    private logger?: { info?: Function; warn?: Function; error?: Function; debug?: Function },
+    private logger?: LoggerLike,
     poolConfig?: Partial<ConnectionPoolConfig>
   ) {
     this.configFactory = new ProductionRedisConfigurationFactory();
@@ -190,7 +191,7 @@ export class RedisConnectionManager {
     };
 
     try {
-      this.logger?.info('Creating Redis connection', { usageType });
+      this.logger?.info?.('Creating Redis connection', { usageType });
 
       // Get configuration for this usage type
       const config = this.configFactory.createConfiguration(usageType, this.environment, this.redisUrl);
@@ -243,7 +244,7 @@ export class RedisConnectionManager {
       delete info.lastError;
       info.healthScore = 100;
 
-      this.logger?.info('Redis connection established successfully', {
+      this.logger?.info?.('Redis connection established successfully', {
         usageType,
         host: config.host,
         port: config.port,
@@ -260,7 +261,7 @@ export class RedisConnectionManager {
         this.redisEnabled = false;
         this.setRateLimitReset();
         
-        this.logger?.warn('Redis rate limit exceeded - disabling Redis', {
+        this.logger?.warn?.('Redis rate limit exceeded - disabling Redis', {
           usageType,
           retryAt: this.rateLimitResetAt?.toISOString()
         });
@@ -271,7 +272,7 @@ export class RedisConnectionManager {
       // Handle max retries errors
       if (errorMessage.includes('MaxRetriesPerRequestError') || 
           errorMessage.includes('max retries per request limit')) {
-        this.logger?.warn('Redis max retries exceeded - will retry later', {
+        this.logger?.warn?.('Redis max retries exceeded - will retry later', {
           usageType,
           error: errorMessage
         });
@@ -281,7 +282,7 @@ export class RedisConnectionManager {
 
       // Handle connection reset errors
       if (errorMessage.includes('ECONNRESET')) {
-        this.logger?.warn('Redis connection reset - will retry later', {
+        this.logger?.warn?.('Redis connection reset - will retry later', {
           usageType,
           error: errorMessage
         });
@@ -294,7 +295,7 @@ export class RedisConnectionManager {
       info.lastError = errorMessage;
       info.healthScore = 0;
 
-      this.logger?.error('Failed to create Redis connection', {
+      this.logger?.error?.('Failed to create Redis connection', {
         usageType,
         error: errorMessage
       });
@@ -314,7 +315,7 @@ export class RedisConnectionManager {
       info.status = 'connected';
       info.connectedAt = new Date();
       info.healthScore = 100;
-      this.logger?.info('Redis connection established', { usageType });
+      this.logger?.info?.('Redis connection established', { usageType });
     });
 
     connection.on('error', (error) => {
@@ -327,12 +328,12 @@ export class RedisConnectionManager {
           error.message.includes('max retries per request limit') ||
           error.message.includes('ECONNRESET') ||
           error.message.includes('Connection timeout')) {
-        this.logger?.warn('Redis connection error (will retry)', {
+        this.logger?.warn?.('Redis connection error (will retry)', {
           usageType,
           error: error.message
         });
       } else {
-        this.logger?.error('Redis connection error', {
+        this.logger?.error?.('Redis connection error', {
           usageType,
           error: error.message
         });
@@ -342,13 +343,13 @@ export class RedisConnectionManager {
     connection.on('close', () => {
       info.status = 'disconnected';
       info.healthScore = 0;
-      this.logger?.warn('Redis connection closed', { usageType });
+      this.logger?.warn?.('Redis connection closed', { usageType });
     });
 
     connection.on('reconnecting', () => {
       info.status = 'connecting';
       info.reconnectAttempts++;
-      this.logger?.info('Redis reconnecting', { 
+      this.logger?.info?.('Redis reconnecting', { 
         usageType, 
         attempts: info.reconnectAttempts 
       });
@@ -416,7 +417,7 @@ export class RedisConnectionManager {
           errorMessage.includes('MaxRetriesPerRequestError') ||
           errorMessage.includes('max retries per request limit')) {
         
-        this.logger?.warn('Redis not available, skipping operation', {
+        this.logger?.warn?.('Redis not available, skipping operation', {
           usageType,
           error: errorMessage
         });
@@ -467,7 +468,7 @@ export class RedisConnectionManager {
         info.healthScore = 0;
       }
       
-      this.logger?.info('Redis connection closed', { usageType });
+      this.logger?.info?.('Redis connection closed', { usageType });
     }
   }
 
@@ -484,11 +485,14 @@ export class RedisConnectionManager {
     // Check for connection close failures
     const fails = results.filter(r => r.status === 'rejected');
     if (fails.length) {
-      this.logger.error({ 
-        fails: fails.length, 
-        sample: fails.slice(0,3).map(f => f.status === 'rejected' ? String(f.reason) : 'unknown'),
-        totalConnections: closePromises.length 
-      }, "Redis connection close failures");
+      this.logger?.error?.(
+        "Redis connection close failures",
+        { 
+          fails: fails.length, 
+          sample: fails.slice(0,3).map(f => f.status === 'rejected' ? String(f.reason) : 'unknown'),
+          totalConnections: closePromises.length 
+        }
+      );
       
       // Note: Connection close failures are not retryable in shutdown context
       // Just ensure we track them for monitoring
@@ -500,7 +504,7 @@ export class RedisConnectionManager {
       this.healthCheckInterval = undefined;
     }
     
-    this.logger?.info('All Redis connections closed');
+    this.logger?.info?.('All Redis connections closed');
   }
 
   /**

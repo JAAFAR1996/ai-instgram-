@@ -442,7 +442,8 @@ export class InstagramManyChatBridge {
     
     try {
       // Send using the ManyChat subscriber ID, not the Instagram ID
-      const result = await this.manyChatService.sendText(merchantId, mcId, message, { tag: options?.messageTag });
+      const tag = ((options as { messageTag?: string } | undefined)?.messageTag);
+      const result = await this.manyChatService.sendText(merchantId, mcId, message, { tag });
       return { ...result, mcId };
       
     } catch (error) {
@@ -470,7 +471,8 @@ export class InstagramManyChatBridge {
           if (found) {
             // Update our mapping and retry
             await upsertManychatMapping(merchantId, username, found.subscriber_id);
-            return await this.manyChatService.sendText(merchantId, found.subscriber_id, message, { tag: options?.messageTag });
+            const tag = ((options as { messageTag?: string } | undefined)?.messageTag);
+            return await this.manyChatService.sendText(merchantId, found.subscriber_id, message, { tag });
           } else {
             // Still no subscriber - throw error to trigger fallback
             const fallbackError = new Error('Instagram subscriber still not found in ManyChat after resync') as Error & { code: string };
@@ -642,7 +644,7 @@ export class InstagramManyChatBridge {
         return false; // No previous interactions
       }
 
-      const lastInteractionTime = new Date((lastInteraction[0] as unknown).created_at);
+      const lastInteractionTime = new Date((lastInteraction[0] as { created_at: string | Date }).created_at);
       const now = new Date();
       const hoursDiff = (now.getTime() - lastInteractionTime.getTime()) / (1000 * 60 * 60);
 
@@ -727,7 +729,7 @@ export class InstagramManyChatBridge {
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           data.merchantId,
-          (manyChatResult as unknown).mcId || data.customerId,
+          ((manyChatResult as { mcId?: string }).mcId) || data.customerId,
           manyChatResult.messageId,
           'send_message',
           manyChatResult.success ? 'success' : 'failed',
@@ -755,6 +757,7 @@ export class InstagramManyChatBridge {
     aiResponse: string
   ): Promise<void> {
     try {
+      const sr = (sendResult as { messageId?: string; success?: boolean });
       await this.db.query(
         `INSERT INTO manychat_logs (
           merchant_id, subscriber_id, message_id, action, status, response_data, created_at
@@ -762,9 +765,9 @@ export class InstagramManyChatBridge {
         [
           data.merchantId,
           data.customerId,
-          sendResult.messageId,
+          sr.messageId,
           'local_ai_response',
-          sendResult.success ? 'success' : 'failed',
+          sr.success ? 'success' : 'failed',
           JSON.stringify({
             aiResponse,
             sendResult,
@@ -790,6 +793,7 @@ export class InstagramManyChatBridge {
     fallbackResponse: string
   ): Promise<void> {
     try {
+      const sr = (sendResult as { messageId?: string; success?: boolean });
       await this.db.query(
         `INSERT INTO manychat_logs (
           merchant_id, subscriber_id, message_id, action, status, response_data, created_at
@@ -797,9 +801,9 @@ export class InstagramManyChatBridge {
         [
           data.merchantId,
           data.customerId,
-          sendResult.messageId,
+          sr.messageId,
           'fallback_response',
-          sendResult.success ? 'success' : 'failed',
+          sr.success ? 'success' : 'failed',
           JSON.stringify({
             fallbackResponse,
             sendResult,

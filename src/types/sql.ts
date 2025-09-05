@@ -3,15 +3,11 @@
  * Re-export types from postgres library
  */
 
-// Import SqlFunction from our custom implementation
-import type { SqlFunction } from '../db/sql-template.js';
+// Import SqlFunction and SqlFragment from our custom implementation
 export type { SqlFunction as Sql } from '../db/sql-template.js';
+export type { SqlFragment } from '../infrastructure/db/sql-compat.js';
 
-// Define proper Fragment type for our SqlFunction
-// SqlFragments are SQL template literals that can be composed
-export type SqlFragment = ReturnType<SqlFunction>;
-
-// Re-export postgres Fragment for compatibility
+// Re-export postgres Fragment for compatibility (type only)
 export type { Fragment } from 'postgres';
 
 // Database row types

@@ -9,7 +9,7 @@ import { getDatabase } from '../db/adapter.js';
 import { getLogger } from './logger.js';
 import { telemetry } from './telemetry.js';
 import type { MediaContent } from '../types/social.js';
-import { getAIService } from './ai.js';
+// removed unused getAIService import
 import ImageAnalysisService, { type ImageAnalysisResult, type ImageLabel } from './image-analysis.js';
 
 /**
@@ -195,6 +195,7 @@ export class InstagramMediaManager {
         await this.generateTemplateCaption(template, merchantId) : 
         'شاهد هذا المحتوى الجديد! 🌟'
       );
+      this.logger.info('Prepared media caption', { length: caption.length, hasTemplate: Boolean(template) });
 
       // Use template URL or provided URL
       const finalMediaUrl = mediaUrl || template?.templateUrl;
@@ -339,10 +340,13 @@ export class InstagramMediaManager {
     mediaUrl?: string;
     productIds?: string[];
   }> {
+    // Reference merchantId for audit trail
+    this.logger.debug?.('Generating suggested response', { merchantId });
     
     // If product matches found, suggest catalog
-    if (analysis.productMatches?.length > 0) {
-      const productIds = analysis.productMatches.slice(0, 3).map((m) => m.productId);
+    const matches = analysis.productMatches ?? [];
+    if (matches.length > 0) {
+      const productIds = matches.slice(0, 3).map((m) => m.productId);
       return {
         type: 'product_catalog',
         content: 'وجدت منتجات مشابهة لصورتك! شاهد هذه الخيارات:',
@@ -394,7 +398,8 @@ export class InstagramMediaManager {
     let score = 0;
     
     // Product-related content gets high value
-    if (analysis.productMatches?.length > 0) score += 3;
+    const pmLen = analysis.productMatches?.length ?? 0;
+    if (pmLen > 0) score += 3;
     if (analysis.contentType?.category === 'product') score += 2;
     
     // Quality and engagement indicators
@@ -473,7 +478,7 @@ export class InstagramMediaManager {
           width, height, size_bytes, content_hash,
           ocr_text, labels, created_at
         ) VALUES (
-          ${`media_${Date.now()}`},
+          ${`${conversationId}_${Date.now()}`},
           ${merchantId}::uuid,
           ${userId},
           'image/jpeg',
@@ -514,7 +519,9 @@ export class InstagramMediaManager {
         conversationId,
         responseType: analysis.suggestedResponse.type,
         isProductInquiry: analysis.isProductInquiry,
-        marketingValue: analysis.marketingValue
+        marketingValue: analysis.marketingValue,
+        merchantId,
+        userId
       });
 
       return true;
@@ -531,6 +538,7 @@ export class InstagramMediaManager {
     try {
       // This would query the database for media templates
       // For now, return null (template system not implemented)
+      this.logger.debug?.('getMediaTemplate called', { templateId, merchantId });
       return null;
     } catch (error) {
       this.logger.warn('Failed to get media template', { error: String(error) });
@@ -544,6 +552,7 @@ export class InstagramMediaManager {
   private async generateTemplateCaption(template: MediaTemplate, merchantId: string): Promise<string> {
     // This would use AI to generate personalized captions
     // For now, return a simple caption
+    this.logger.debug?.('generateTemplateCaption', { template: template.name, merchantId });
     return `${template.name} - محتوى مميز من متجرنا! 🌟`;
   }
 

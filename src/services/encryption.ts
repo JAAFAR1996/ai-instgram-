@@ -7,6 +7,7 @@
 
 import * as crypto from 'node:crypto';
 import { getLogger } from './logger.js';
+const logger = getLogger({ component: 'encryption' });
 
 // ✅ Safe environment access without config dependency
 function getEnvVar(name: string, defaultValue?: string): string {

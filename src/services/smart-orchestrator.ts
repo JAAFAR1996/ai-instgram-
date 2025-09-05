@@ -392,4 +392,13 @@ export async function orchestrate(
           stage: 'BROWSE'
         }));
       }
+      // Default fallback when no smart hits
+      const fallbackText = `وصلت رسالتك ${username}. ممكن توضح لي أكثر حتى أساعدك بسرعة؟`;
+      return withThinking(await postProcess({
+        text: fallbackText,
+        intent: analysis.intent,
+        confidence: analysis.confidence,
+        entities: analysis.entities,
+        decision_path: decision
+      }));
   }

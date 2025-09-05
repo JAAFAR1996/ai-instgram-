@@ -365,8 +365,8 @@ export class CrossPlatformConversationManager {
       }
 
       // Select primary conversation based on strategy
-      const primaryConversation = this.selectPrimaryConversation(conversations as ConversationRow[], mergeStrategy);
-      const secondaryConversations = conversations.filter(c => c.id !== primaryConversation.id) as ConversationRow[];
+      const primaryConversation = this.selectPrimaryConversation((conversations as unknown as ConversationRow[]), mergeStrategy);
+      const secondaryConversations = (conversations.filter(c => c.id !== primaryConversation.id) as unknown as ConversationRow[]);
 
       // Merge contexts
       const mergedContext = await this.mergeConversationContexts(
@@ -824,7 +824,7 @@ export class CrossPlatformConversationManager {
       return preservedFields.length / sourceFields.length;
     } catch (e: unknown) {
       const err = e instanceof Error ? e : new Error(String(e));
-      this.logger.warn({ err }, "Data preservation parsing failed");
+      logger.warn("Data preservation parsing failed", { err });
       return 0.5; // Partial success if parsing fails
     }
   }

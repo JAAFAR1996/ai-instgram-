@@ -33,6 +33,7 @@ async function main() {
     platform: 'node',
     target: ['node20'],
     sourcemap: true,
+    minify: process.env.NODE_ENV === 'production',
     logLevel: 'info',
     tsconfig: 'tsconfig.json',
     bundle: false,
@@ -66,4 +67,3 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-

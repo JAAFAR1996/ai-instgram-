@@ -11,13 +11,11 @@ import { telemetry } from './telemetry.js';
 import { ConstitutionalAI } from './constitutional-ai.js';
 import { SelfLearningSystem } from './learning-analytics.js';
 import ExtendedThinkingService from './extended-thinking.js';
-import { computeSuccessPatterns } from '../utils/pattern-matcher.js';
 import type { 
   ResponseContext, 
   CritiqueResult
 } from '../types/constitutional-ai.js';
-import type { LearningOutcome, SuccessPatterns } from '../types/learning.js';
-import type { DatabaseRow } from '../types/db.js';
+import type { SuccessPatterns } from '../types/learning.js';
 
 export interface EnhancementContext {
   messageId: string;
@@ -300,18 +298,19 @@ export class MessageEnhancementService {
       let optimizedResponse = response;
 
       // Apply successful phrases for the intent
-      if (context.aiIntent && (patterns as Record<string, unknown>).intentSuccess && (patterns as Record<string, unknown>).intentSuccess[context.aiIntent]) {
-        const intentData = (patterns as Record<string, unknown>).intentSuccess[context.aiIntent];
-        if (intentData.avgScore > 0.7) {
+      if (context.aiIntent) {
+        const intentSuccess = (patterns as unknown as { intentSuccess?: Record<string, { avgScore?: number }> }).intentSuccess;
+        const intentData = intentSuccess ? intentSuccess[context.aiIntent] : undefined;
+        if ((intentData?.avgScore ?? 0) > 0.7) {
           // This intent generally performs well, apply its successful patterns
-          optimizations.push(`intent_optimized:${intentData.count}`);
+          optimizations.push('intent_optimized');
         }
       }
 
       // Apply top performing phrases if response is short
       if (optimizedResponse.length < 100 && patterns.topPhrases.length > 0) {
-        const bestPhrase = patterns.topPhrases[0] as unknown;
-        if (bestPhrase && typeof bestPhrase.phrase === 'string' && bestPhrase.score > 0.8 && !optimizedResponse.includes(bestPhrase.phrase)) {
+        const bestPhrase = patterns.topPhrases[0] as { phrase?: string; score?: number };
+        if (bestPhrase && typeof bestPhrase.phrase === 'string' && (bestPhrase.score ?? 0) > 0.8 && !optimizedResponse.includes(bestPhrase.phrase)) {
           // Intelligently integrate successful phrase
           if (bestPhrase.phrase.includes('???') || bestPhrase.phrase.includes('thank')) {
             optimizedResponse += ` ${bestPhrase.phrase}`;

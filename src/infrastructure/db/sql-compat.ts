@@ -100,7 +100,7 @@ export interface SqlFunction {
   transaction: <T = unknown>(fn: (sql: SqlFunction) => Promise<T>) => Promise<T>;
 }
 
-interface PromiseWithProperties extends Record<string, unknown> {
+interface PromiseWithProperties {
   [SQL_FRAGMENT_SYMBOL]: boolean;
   text: string;
   values: unknown[];
@@ -112,7 +112,7 @@ function decoratePromiseWithFragment<T extends DatabaseRow = DatabaseRow>(
   params: unknown[]
 ): Promise<T[]> & SqlFragment {
   const p = promise as Promise<T[]> & SqlFragment;
-  const promiseWithProps = p as PromiseWithProperties;
+  const promiseWithProps = (p as unknown) as PromiseWithProperties;
   promiseWithProps[SQL_FRAGMENT_SYMBOL] = true;
   promiseWithProps.text = text;
   promiseWithProps.values = params;

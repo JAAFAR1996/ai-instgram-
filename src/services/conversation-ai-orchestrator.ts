@@ -183,7 +183,7 @@ export class ConversationAIOrchestrator {
           const thinking = await thinkingService.processWithThinking(customerMessage, {
             merchantId: context.merchantId,
             username: context.customerId,
-            session: (context as { session?: Record<string, unknown> } | undefined)?.(session ?? {}) || {},
+            session: ((context as { session?: Record<string, unknown> }).session || {}),
             nlp: undefined,
             hints: {}
           }, false);

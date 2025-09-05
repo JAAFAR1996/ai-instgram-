@@ -124,6 +124,10 @@ const CurrencySchema = z.object({
   currency: z.string().length(3)
 });
 
+const SalesStyleSchema = z.object({
+  salesStyle: z.string().min(1).max(50)
+});
+
 export function registerMerchantAdminRoutes(app: Hono) {
   const db = getDatabase();
   const sql = db.getSQL();
@@ -151,10 +155,11 @@ export function registerMerchantAdminRoutes(app: Hono) {
         id: string;
         business_name: string;
         currency: string | null;
+        sales_style: string | null;
         settings: Record<string, unknown> | null;
         ai_config: Record<string, unknown> | null;
       }>`
-        SELECT id, business_name, currency, settings, ai_config
+        SELECT id, business_name, currency, sales_style, settings, ai_config
         FROM merchants
         WHERE id = ${merchantId}::uuid
         LIMIT 1
@@ -245,6 +250,32 @@ export function registerMerchantAdminRoutes(app: Hono) {
       return c.json({ ok: true, currency: rows[0]?.currency ?? currency });
     } catch (error) {
       log.error('Update merchant currency failed', { error: String(error) });
+      return c.json({ ok: false, error: 'internal_error' }, 500);
+    }
+  });
+
+  // Update merchant sales style
+  app.patch('/api/merchant/sales-style', async (c) => {
+    try {
+      const merchantId = requireMerchantId(c);
+      await activateRLS(merchantId);
+      const body = await c.req.json();
+      const parsed = SalesStyleSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json({ ok: false, error: 'validation_error', details: parsed.error.issues }, 400);
+      }
+      const salesStyle = parsed.data.salesStyle;
+      const rows = await sql<{ sales_style: string }>`
+        UPDATE merchants
+        SET sales_style = ${salesStyle}, updated_at = NOW()
+        WHERE id = ${merchantId}::uuid
+        RETURNING sales_style
+      `;
+
+      await invalidateMerchantCache(merchantId);
+      return c.json({ ok: true, salesStyle: rows[0]?.sales_style ?? salesStyle });
+    } catch (error) {
+      log.error('Update merchant sales style failed', { error: String(error) });
       return c.json({ ok: false, error: 'internal_error' }, 500);
     }
   });
@@ -625,7 +656,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
     const startTime = Date.now();
     
     try {
-      const merchantId = c.get('merchantId');
+      const merchantId = (c as any).get('merchantId') as string | undefined;
       if (!merchantId) {
         log.warn('Product analytics overview - missing merchant ID', { requestId });
         return c.json({ error: 'Merchant ID required', requestId }, 401);
@@ -642,13 +673,10 @@ export function registerMerchantAdminRoutes(app: Hono) {
       // Check cache first for production performance
       const cache = getCache();
       const cacheKey = CACHE_CONFIG.overview.key(merchantId, period);
-      let cached = false;
-      
       try {
-        const cachedResult = await cache.get(cacheKey);
+        const cachedResult = await cache.get<ProductAnalyticsOverview>(cacheKey);
         if (cachedResult) {
-          cached = true;
-          const result = JSON.parse(cachedResult) as ProductAnalyticsOverview;
+          const result = cachedResult;
           log.info('Product analytics overview served from cache', { merchantId, period, requestId, cacheHit: true });
           return c.json({ success: true, data: result, cached: true }, 200);
         }
@@ -774,7 +802,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
 
       // Cache the result for future requests
       try {
-        await cache.set(cacheKey, JSON.stringify(result), { ttl: CACHE_CONFIG.overview.ttl });
+        await cache.set(cacheKey, result, { ttl: CACHE_CONFIG.overview.ttl });
         log.debug('Product analytics overview cached', { merchantId, period, requestId, ttl: CACHE_CONFIG.overview.ttl });
       } catch (cacheError) {
         log.warn('Failed to cache product analytics overview', { merchantId, requestId, error: String(cacheError) });
@@ -789,7 +817,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
     } catch (error) {
       const queryTime = Date.now() - startTime;
       log.error('Product analytics overview failed', { 
-        merchantId: c.get('merchantId'), 
+        merchantId: ((c as any).get('merchantId') as string | undefined), 
         requestId, 
         error: String(error), 
         queryTimeMs: queryTime,
@@ -808,7 +836,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
     const startTime = Date.now();
     
     try {
-      const merchantId = c.get('merchantId');
+      const merchantId = (c as any).get('merchantId') as string | undefined;
       if (!merchantId) {
         log.warn('Top performers analytics - missing merchant ID', { requestId });
         return c.json({ error: 'Merchant ID required', requestId }, 401);
@@ -837,9 +865,9 @@ export function registerMerchantAdminRoutes(app: Hono) {
       const cacheKey = CACHE_CONFIG.topPerformers.key(merchantId, period) + `:${limit}:${category || 'all'}:${sort}:${order}`;
       
       try {
-        const cachedResult = await cache.get(cacheKey);
+        const cachedResult = await cache.get<{ products: TopPerformingProduct[]; metadata: Record<string, unknown> }>(cacheKey);
         if (cachedResult) {
-          const result = JSON.parse(cachedResult) as { products: TopPerformingProduct[], metadata: Record<string, unknown> };
+          const result = cachedResult;
           log.info('Top performers served from cache', { merchantId, requestId, cacheHit: true });
           return c.json({ success: true, data: result.products, metadata: { ...result.metadata, cached: true } }, 200);
         }
@@ -946,7 +974,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
 
       // Cache the result
       try {
-        await cache.set(cacheKey, JSON.stringify(result), { ttl: CACHE_CONFIG.topPerformers.ttl });
+        await cache.set(cacheKey, result, { ttl: CACHE_CONFIG.topPerformers.ttl });
         log.debug('Top performers cached', { merchantId, requestId, ttl: CACHE_CONFIG.topPerformers.ttl });
       } catch (cacheError) {
         log.warn('Failed to cache top performers', { merchantId, requestId, error: String(cacheError) });
@@ -960,7 +988,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
     } catch (error) {
       const queryTime = Date.now() - startTime;
       log.error('Top performers analytics failed', { 
-        merchantId: c.get('merchantId'), 
+        merchantId: ((c as any).get('merchantId') as string | undefined), 
         requestId, 
         error: String(error), 
         queryTimeMs: queryTime,
@@ -979,7 +1007,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
     const startTime = Date.now();
     
     try {
-      const merchantId = c.get('merchantId');
+      const merchantId = (c as any).get('merchantId') as string | undefined;
       if (!merchantId) {
         log.warn('Inventory alerts - missing merchant ID', { requestId });
         return c.json({ error: 'Merchant ID required', requestId }, 401);
@@ -992,9 +1020,9 @@ export function registerMerchantAdminRoutes(app: Hono) {
       const cacheKey = CACHE_CONFIG.alerts.key(merchantId);
       
       try {
-        const cachedResult = await cache.get(cacheKey);
+        const cachedResult = await cache.get<{ alerts: InventoryAlert[]; metadata: Record<string, unknown> }>(cacheKey);
         if (cachedResult) {
-          const result = JSON.parse(cachedResult) as { alerts: InventoryAlert[], metadata: Record<string, unknown> };
+          const result = cachedResult;
           log.info('Inventory alerts served from cache', { merchantId, requestId, cacheHit: true });
           return c.json({ success: true, data: result.alerts, metadata: { ...result.metadata, cached: true } }, 200);
         }
@@ -1115,7 +1143,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
 
       // Cache the result
       try {
-        await cache.set(cacheKey, JSON.stringify(result), { ttl: CACHE_CONFIG.alerts.ttl });
+        await cache.set(cacheKey, result, { ttl: CACHE_CONFIG.alerts.ttl });
         log.debug('Inventory alerts cached', { merchantId, requestId, ttl: CACHE_CONFIG.alerts.ttl });
       } catch (cacheError) {
         log.warn('Failed to cache inventory alerts', { merchantId, requestId, error: String(cacheError) });
@@ -1131,7 +1159,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
     } catch (error) {
       const queryTime = Date.now() - startTime;
       log.error('Inventory alerts failed', { 
-        merchantId: c.get('merchantId'), 
+        merchantId: ((c as any).get('merchantId') as string | undefined), 
         requestId, 
         error: String(error), 
         queryTimeMs: queryTime,

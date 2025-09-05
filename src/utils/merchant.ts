@@ -49,16 +49,16 @@ export function requireMerchantId(
   const { strict = true, fallback, logDebug = false } = options;
   
   // Extract from multiple sources in priority order
-  const tenantContext = c?.get('tenantContext') as { merchantId?: string } | undefined;
+  const tenantContext = c ? ((c as any).get('tenantContext') as { merchantId?: string } | undefined) : undefined;
   const merchantId = 
-    c?.get('merchantId') ||
+    (c ? (c as any).get('merchantId') : undefined) ||
     tenantContext?.merchantId ||
     c?.req?.header('x-merchant-id') ||
     c?.req?.query('merchantId');
 
   if (logDebug) {
     logger.debug('Merchant ID extraction attempt', {
-      contextMerchantId: c?.get('merchantId'),
+      contextMerchantId: c ? (c as any).get('merchantId') : undefined,
       tenantContextMerchantId: tenantContext?.merchantId,
       headerMerchantId: c?.req?.header('x-merchant-id'),
       queryMerchantId: c?.req?.query('merchantId'),
@@ -129,7 +129,7 @@ export function setMerchantContext(c: Context, merchantId: string): void {
   c.set('merchantId', merchantId);
   
   // Also set in tenant context for compatibility
-  const tenantContext = c.get('tenantContext') as Record<string, unknown> || {};
+  const tenantContext = (c as any).get('tenantContext') as Record<string, unknown> || {};
   tenantContext.merchantId = merchantId;
   c.set('tenantContext', tenantContext);
 }
@@ -143,7 +143,7 @@ export function clearMerchantContext(c: Context): void {
   c.set('merchantId', undefined);
   
   // Also clear from tenant context
-  const tenantContext = c.get('tenantContext') as Record<string, unknown> || {};
+  const tenantContext = (c as any).get('tenantContext') as Record<string, unknown> || {};
   delete tenantContext.merchantId;
   c.set('tenantContext', tenantContext);
 }

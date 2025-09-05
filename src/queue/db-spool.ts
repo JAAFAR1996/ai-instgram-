@@ -81,7 +81,7 @@ export class DatabaseJobSpool {
     
     try {
       const sql = this.getSQL();
-      const result = await sql`
+      const result = await sql<{ id: string; job_id: string; job_type: string; job_data: string | object; priority: 'low' | 'normal' | 'high' | 'urgent'; merchant_id: string; scheduled_at: string | Date; created_at: string | Date; processed_at?: string | Date }>`
         INSERT INTO job_spool (
           job_id, job_type, job_data, priority, merchant_id, scheduled_at
         ) VALUES (
@@ -127,7 +127,7 @@ export class DatabaseJobSpool {
     await sql`SELECT set_config('app.admin_mode', 'true', true)`;
     
     try {
-      const result = await sql`
+      const result = await sql<{ id: string; job_id: string; job_type: string; job_data: string | object; priority: 'low' | 'normal' | 'high' | 'urgent'; merchant_id: string; scheduled_at: string | Date; created_at: string | Date; processed_at?: string | Date }>`
         UPDATE job_spool 
         SET processed_at = NOW()
         WHERE id = ANY(

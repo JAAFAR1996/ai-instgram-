@@ -109,7 +109,7 @@ export function registerUtilityMessageRoutes(app: Hono): void {
       return c.json({
         success: false,
         error: 'خطأ في إرسال الرسالة',
-        details: error.message
+        details: error instanceof Error ? error.message : String(error)
       }, 500);
     }
   });
@@ -164,7 +164,7 @@ export function registerUtilityMessageRoutes(app: Hono): void {
       return c.json({
         success: false,
         error: 'خطأ في إنشاء القالب',
-        details: error.message
+        details: error instanceof Error ? error.message : String(error)
       }, 500);
     }
   });
@@ -201,7 +201,7 @@ export function registerUtilityMessageRoutes(app: Hono): void {
       return c.json({
         success: false,
         error: 'خطأ في جلب القوالب',
-        details: error.message
+        details: error instanceof Error ? error.message : String(error)
       }, 500);
     }
   });
@@ -241,7 +241,7 @@ export function registerUtilityMessageRoutes(app: Hono): void {
       return c.json({
         success: false,
         error: 'خطأ في جلب تاريخ الرسائل',
-        details: error.message
+        details: error instanceof Error ? error.message : String(error)
       }, 500);
     }
   });
@@ -266,7 +266,7 @@ export function registerUtilityMessageRoutes(app: Hono): void {
       return c.json({
         status: 'degraded',
         service: 'utility-messages',
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
         timestamp: new Date().toISOString()
       }, 503);
     }

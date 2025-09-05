@@ -8,10 +8,11 @@
 import { Hono } from 'hono';
 import type { Pool } from 'pg';
 import { getLogger } from '../services/logger.js';
-import { telemetry } from '../services/telemetry.js';
+// import { telemetry } from '../services/telemetry.js';
 import { z } from 'zod';
 import { createHmac } from 'node:crypto';
 import { getPool } from '../db/index.js';
+import { withRetry } from '../utils/retry.js';
 import { getEnv } from '../config/env.js';
 import type { ConversationMsg } from '../services/conversation-manager.js';
 import { MCEvent as MCEventSchema, type MCEvent as MCEventType } from '../types/manychat.js';
@@ -78,7 +79,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         log.warn('Instagram webhook verification failed - invalid mode', { mode });
         try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_mode', mode }); } catch (e: unknown) {
           const err = e instanceof Error ? e : new Error(String(e));
-          log.warn({ err }, "Failed to log compliance event for invalid mode");
+          log.warn("Failed to log compliance event for invalid mode", { err });
         }
         return c.text('Bad Request', 400);
       }
@@ -91,7 +92,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         });
         try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_token' }); } catch (e: unknown) {
           const err = e instanceof Error ? e : new Error(String(e));
-          log.warn({ err }, "Failed to log compliance event for invalid token");
+          log.warn("Failed to log compliance event for invalid token", { err });
         }
         return c.text('Forbidden', 403);
       }
@@ -99,14 +100,14 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       log.info('Instagram webhook verification successful', { challenge });
       try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'SUCCESS', { endpoint: 'instagram', challenge }); } catch (e: unknown) {
         const err = e instanceof Error ? e : new Error(String(e));
-        log.warn({ err }, "Failed to log compliance event for successful verification");
+        log.warn("Failed to log compliance event for successful verification", { err });
       }
       return c.text(challenge);
     } catch (error: unknown) {
       log.error('Instagram webhook verification error:', error instanceof Error ? { message: error.message } : { error });
       try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { error: String(error) }); } catch (e: unknown) {
         const err = e instanceof Error ? e : new Error(String(e));
-        log.warn({ err }, "Failed to log compliance event for verification error");
+        log.warn("Failed to log compliance event for verification error", { err });
       }
       return c.text('Internal Server Error', 500);
     }
@@ -308,8 +309,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           }
 
           // Load recent messages as conversation history (oldest -> newest)
-          let historyIds: string[] = [];
-          let preSessionPatch: Record<string, unknown> | undefined;
+          
           try {
             const historyResult = await pool.query(
               `SELECT id, content, direction, created_at
@@ -319,7 +319,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                LIMIT 20`,
               [conversationId]
             );
-            historyIds = historyResult.rows.map((r: { id: string }) => r.id);
+            // collect last messages ids (unused)
             // Optimize long history into a short summary for sessionData (kept small for tokens)
             try {
               const msgs: ConversationMsg[] = historyResult.rows
@@ -333,7 +333,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
               const cm = new ConversationManager();
               const opt = await cm.optimizeHistory(sanitizedMerchantId, sanitizedUsername, msgs, 6);
               if (opt.sessionPatch && Object.keys(opt.sessionPatch).length) {
-                preSessionPatch = opt.sessionPatch;
                 sessionData = { ...(opt.sessionPatch || {}), ...(sessionData || {}) };
               }
             } catch {}
@@ -365,8 +364,14 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           // 🚀 QUEUE PROCESSING: All AI processing moved to queue workers
           try {
             // Initialize queue manager for this request
+            const qLogger = {
+              info: (...args: unknown[]) => log.info(String(args[0] ?? 'info'), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
+              warn: (...args: unknown[]) => log.warn(String(args[0] ?? 'warn'), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
+              error: (...args: unknown[]) => log.error(String(args[0] ?? 'error'), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
+              debug: (...args: unknown[]) => log.debug(String(args[0] ?? 'debug'), typeof args[1] === 'object' ? args[1] as Record<string, unknown> : undefined),
+            };
             queueManager = new ProductionQueueManager(
-              log,
+              qLogger,
               RedisEnvironment.PRODUCTION,
               pool,
               'ai-sales-production'
