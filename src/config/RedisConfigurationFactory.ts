@@ -192,7 +192,6 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
         if (err.message.includes('max requests limit exceeded')) return false;
         return /READONLY|ECONNRESET|ETIMEDOUT/.test(err.message) ? 2 : false;
         }
-      })
     };
   }
 
