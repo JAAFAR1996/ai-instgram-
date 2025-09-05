@@ -42,7 +42,7 @@ function createPoolConfig(): PoolConfig {
   const isProduction = process.env.NODE_ENV === 'production';
   const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
   
-  // TLS configuration
+  // TLS configuration - FORCE SSL for Render
   let sslConfig: boolean | TLSConnectionOptions = false;
   const dbUrl = config.database.url;
   const ca = process.env.DB_SSL_CA;
@@ -54,7 +54,11 @@ function createPoolConfig(): PoolConfig {
   const defaultStrict = config.database.ssl === true || isProduction || isRender;
   const strict = typeof strictEnv === 'string' ? (strictEnv === 'true') : defaultStrict;
 
-  if (overrideRejectUnauth) {
+  // FORCE SSL for production/Render - fix "SSL/TLS required" errors
+  if (isProduction || isRender || dbUrl.includes('render.com')) {
+    sslConfig = ca ? { rejectUnauthorized: false, ca } : { rejectUnauthorized: false };
+    log.info('🔐 FORCED SSL for production/Render environment', { isProduction, isRender, hasCA: !!ca });
+  } else if (overrideRejectUnauth) {
     sslConfig = ca ? { rejectUnauthorized: false, ca } : { rejectUnauthorized: false };
     log.warn('🔐 Using SSL with rejectUnauthorized=false for PostgreSQL', { reason: sslModeRequire ? 'sslmode=require' : 'env_override', hasCA: !!ca });
   } else if (strict) {
