@@ -613,7 +613,7 @@ export class ResponseEnhancerService {
           AVG(CAST(metadata->'enhancement'->'metadata'->>'qualityPrediction' AS FLOAT)) as avg_quality_prediction
         FROM message_logs
         WHERE merchant_id = ${merchantId}::uuid
-          AND created_at > NOW() - INTERVAL '${days} days'
+          AND created_at > NOW() - (${days}::int * INTERVAL '1 day')
           AND metadata->'enhancement' IS NOT NULL
       `;
 

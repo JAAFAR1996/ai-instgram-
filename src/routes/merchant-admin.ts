@@ -530,7 +530,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
         }>`
           SELECT model_type, accuracy_score, training_data_size, evaluation_date, model_version
           FROM ml_model_performance
-          WHERE evaluation_date >= NOW() - INTERVAL '${days} days'
+          WHERE evaluation_date >= NOW() - (${days}::int * INTERVAL '1 day')
             AND model_type = ${modelParam}
           ORDER BY evaluation_date DESC
           LIMIT 1000
@@ -542,7 +542,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
         }>`
           SELECT model_type, accuracy_score, training_data_size, evaluation_date, model_version
           FROM ml_model_performance
-          WHERE evaluation_date >= NOW() - INTERVAL '${days} days'
+          WHERE evaluation_date >= NOW() - (${days}::int * INTERVAL '1 day')
           ORDER BY evaluation_date DESC
           LIMIT 1000
         `;
@@ -569,7 +569,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
         SELECT id, compliance_type, status, event_data, created_at
         FROM compliance_logs
         WHERE merchant_id = ${merchantId}::uuid
-          AND created_at >= NOW() - INTERVAL '${days} days'
+          AND created_at >= NOW() - (${days}::int * INTERVAL '1 day')
         ORDER BY created_at DESC
         LIMIT 1000
       `;
@@ -718,7 +718,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
           JOIN order_items oi ON o.id = oi.order_id
           JOIN products p ON oi.product_id = p.id
           WHERE o.merchant_id = ${merchantId}::uuid
-            AND o.created_at >= NOW() - INTERVAL '${periodDays} days'
+            AND o.created_at >= NOW() - (${periodDays}::int * INTERVAL '1 day')
             AND o.status NOT IN ('cancelled', 'refunded')
         ),
         best_seller AS (
@@ -729,7 +729,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
           JOIN order_items oi ON p.id = oi.product_id
           JOIN orders o ON oi.order_id = o.id
           WHERE o.merchant_id = ${merchantId}::uuid
-            AND o.created_at >= NOW() - INTERVAL '${periodDays} days'
+            AND o.created_at >= NOW() - (${periodDays}::int * INTERVAL '1 day')
             AND o.status NOT IN ('cancelled', 'refunded')
             AND p.deleted_at IS NULL
           GROUP BY p.name
@@ -754,8 +754,8 @@ export function registerMerchantAdminRoutes(app: Hono) {
                   FROM orders o
                   JOIN order_items oi ON o.id = oi.order_id
                   WHERE o.merchant_id = ${merchantId}::uuid
-                    AND o.created_at >= NOW() - INTERVAL '${periodDays * 2} days'
-                    AND o.created_at < NOW() - INTERVAL '${periodDays} days'
+                    AND o.created_at >= NOW() - ((${periodDays}::int * 2) * INTERVAL '1 day')
+                    AND o.created_at < NOW() - (${periodDays}::int * INTERVAL '1 day')
                     AND o.status NOT IN ('cancelled', 'refunded')
                 ) prev
               )
@@ -893,7 +893,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
           JOIN order_items oi ON o.id = oi.order_id
           JOIN products p ON oi.product_id = p.id
           WHERE o.merchant_id = ${merchantId}::uuid
-            AND o.created_at >= NOW() - INTERVAL '${periodDays} days'
+            AND o.created_at >= NOW() - (${periodDays}::int * INTERVAL '1 day')
             AND o.status NOT IN ('cancelled', 'refunded')
             AND p.deleted_at IS NULL
         ),
@@ -913,7 +913,7 @@ export function registerMerchantAdminRoutes(app: Hono) {
           FROM products p
           LEFT JOIN order_items oi ON p.id = oi.product_id
           LEFT JOIN orders o ON oi.order_id = o.id 
-            AND o.created_at >= NOW() - INTERVAL '${periodDays} days'
+            AND o.created_at >= NOW() - (${periodDays}::int * INTERVAL '1 day')
             AND o.status NOT IN ('cancelled', 'refunded')
           WHERE p.merchant_id = ${merchantId}::uuid
             AND p.deleted_at IS NULL

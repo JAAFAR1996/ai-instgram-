@@ -451,7 +451,7 @@ export class MessageEnhancementService {
           COUNT(*) FILTER (WHERE metadata->'enhancement'->>'type' = 'hybrid') as hybrid_count
         FROM message_logs
         WHERE merchant_id = ${merchantId}::uuid
-          AND created_at > NOW() - INTERVAL '${days} days'
+          AND created_at > NOW() - (${days}::int * INTERVAL '1 day')
           AND metadata->'enhancement' IS NOT NULL
       `;
 

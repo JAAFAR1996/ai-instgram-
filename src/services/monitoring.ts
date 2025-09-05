@@ -336,7 +336,7 @@ export class MonitoringService {
         FROM quality_metrics
         WHERE merchant_id = ${merchantId}::uuid
         AND platform = ${platform}
-        AND created_at >= NOW() - INTERVAL '${days} days'
+        AND created_at >= NOW() - (${days}::int * INTERVAL '1 day')
         ORDER BY created_at DESC
       `;
 

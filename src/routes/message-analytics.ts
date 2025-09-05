@@ -39,12 +39,13 @@ app.get('/overview/:merchantId', async (c) => {
     const sql = db.getSQL();
     
     // Get time interval for query
-    const intervals = {
-      '1h': '1 hour',
-      '24h': '24 hours', 
-      '7d': '7 days',
-      '30d': '30 days'
-    };
+    // Map to minutes to avoid quoting interval strings in SQL
+    const rangeMinutes = (
+      timeRange === '1h' ? 60 :
+      timeRange === '24h' ? 24 * 60 :
+      timeRange === '7d' ? 7 * 24 * 60 :
+      30 * 24 * 60
+    );
     
     // Core metrics query
     const overview = await sql`
@@ -78,7 +79,7 @@ app.get('/overview/:merchantId', async (c) => {
         
       FROM message_logs 
       WHERE merchant_id = ${merchantId}::uuid
-        AND created_at > NOW() - INTERVAL '${intervals[timeRange as keyof typeof intervals]}'
+        AND created_at > NOW() - (${rangeMinutes}::int * INTERVAL '1 minute')
         AND direction = 'OUTGOING'
     `;
 
@@ -92,7 +93,7 @@ app.get('/overview/:merchantId', async (c) => {
         MAX(CAST(metadata->'enhancement'->'metadata'->>'improvement' AS FLOAT)) as max_improvement
       FROM message_logs
       WHERE merchant_id = ${merchantId}::uuid
-        AND created_at > NOW() - INTERVAL '${intervals[timeRange as keyof typeof intervals]}'
+        AND created_at > NOW() - (${rangeMinutes}::int * INTERVAL '1 minute')
         AND metadata->'enhancement' IS NOT NULL
     `;
 
@@ -156,12 +157,12 @@ app.get('/confidence-trends/:merchantId', async (c) => {
       ? "DATE_TRUNC('hour', created_at)"
       : "DATE_TRUNC('day', created_at)";
     
-    const intervals = {
-      '1h': '1 hour',
-      '24h': '24 hours',
-      '7d': '7 days', 
-      '30d': '30 days'
-    };
+    const rangeMinutes = (
+      timeRange === '1h' ? 60 :
+      timeRange === '24h' ? 24 * 60 :
+      timeRange === '7d' ? 7 * 24 * 60 :
+      30 * 24 * 60
+    );
 
     const trends = await sql`
       SELECT 
@@ -174,7 +175,7 @@ app.get('/confidence-trends/:merchantId', async (c) => {
         AVG(CAST(metadata->'enhancement'->>'confidenceBoost' AS FLOAT)) as avg_confidence_boost
       FROM message_logs
       WHERE merchant_id = ${merchantId}::uuid
-        AND created_at > NOW() - INTERVAL '${intervals[timeRange as keyof typeof intervals]}'
+        AND created_at > NOW() - (${rangeMinutes}::int * INTERVAL '1 minute')
         AND direction = 'OUTGOING'
       GROUP BY time_bucket
       ORDER BY time_bucket ASC
@@ -223,7 +224,7 @@ app.get('/enhancement-performance/:merchantId', async (c) => {
         STDDEV(CAST(metadata->'enhancement'->>'qualityScore' AS FLOAT)) as quality_score_stddev
       FROM message_logs
       WHERE merchant_id = ${merchantId}::uuid
-        AND created_at > NOW() - INTERVAL '${days} days'
+        AND created_at > NOW() - (${days}::int * INTERVAL '1 day')
         AND metadata->'enhancement' IS NOT NULL
         AND (metadata->'enhancement'->>'enhanced')::boolean = true
       GROUP BY enhancement_type
@@ -240,7 +241,7 @@ app.get('/enhancement-performance/:merchantId', async (c) => {
         AVG(ai_confidence) as avg_confidence
       FROM message_logs
       WHERE merchant_id = ${merchantId}::uuid
-        AND created_at > NOW() - INTERVAL '${days} days'
+        AND created_at > NOW() - (${days}::int * INTERVAL '1 day')
         AND ai_intent IS NOT NULL
         AND direction = 'OUTGOING'
       GROUP BY ai_intent
@@ -288,7 +289,7 @@ app.get('/success-patterns/:merchantId', async (c) => {
         AVG(CAST(metadata->'enhancement'->'metadata'->>'improvement' AS FLOAT)) as avg_improvement
       FROM message_logs
       WHERE merchant_id = ${merchantId}::uuid
-        AND created_at > NOW() - INTERVAL '${days} days'
+        AND created_at > NOW() - (${days}::int * INTERVAL '1 day')
         AND metadata->'enhancement'->'appliedPatterns' IS NOT NULL
         AND jsonb_array_length(metadata->'enhancement'->'appliedPatterns') > 0
       GROUP BY pattern_name
@@ -306,7 +307,7 @@ app.get('/success-patterns/:merchantId', async (c) => {
         COUNT(*) FILTER (WHERE (metadata->'enhancement'->>'enhanced')::boolean = false) as unenhanced_count
       FROM message_logs
       WHERE merchant_id = ${merchantId}::uuid
-        AND created_at > NOW() - INTERVAL '${days} days'
+        AND created_at > NOW() - (${days}::int * INTERVAL '1 day')
         AND ai_confidence < 0.7
         AND direction = 'OUTGOING'
       GROUP BY ai_intent
