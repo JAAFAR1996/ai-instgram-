@@ -766,25 +766,20 @@ export class InstagramManyChatBridge {
   ): Promise<void> {
     try {
       const sr = (sendResult as { messageId?: string; success?: boolean });
-      await this.db.query(
-        `INSERT INTO manychat_logs (
+      const sql = this.db.getSQL();
+      await sql`
+        INSERT INTO manychat_logs (
           merchant_id, subscriber_id, message_id, action, status, response_data, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-          data.merchantId,
-          data.customerId,
-          sr.messageId,
-          'local_ai_response',
-          sr.success ? 'success' : 'failed',
-          JSON.stringify({
-            aiResponse,
-            sendResult,
-            interactionType: data.interactionType,
-            fallbackUsed: true
-          }),
-          new Date()
-        ]
-      );
+        ) VALUES (
+          ${data.merchantId}::uuid,
+          ${data.customerId},
+          ${sr.messageId},
+          ${'local_ai_response'},
+          ${sr.success ? 'success' : 'failed'},
+          ${JSON.stringify({ aiResponse, sendResult, interactionType: data.interactionType, fallbackUsed: true })}::jsonb,
+          ${new Date()}
+        )
+      `;
     } catch (error) {
       this.logger.warn('Failed to log local AI interaction', {
         error: error instanceof Error ? error.message : String(error)
@@ -802,25 +797,20 @@ export class InstagramManyChatBridge {
   ): Promise<void> {
     try {
       const sr = (sendResult as { messageId?: string; success?: boolean });
-      await this.db.query(
-        `INSERT INTO manychat_logs (
+      const sql = this.db.getSQL();
+      await sql`
+        INSERT INTO manychat_logs (
           merchant_id, subscriber_id, message_id, action, status, response_data, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-          data.merchantId,
-          data.customerId,
-          sr.messageId,
-          'fallback_response',
-          sr.success ? 'success' : 'failed',
-          JSON.stringify({
-            fallbackResponse,
-            sendResult,
-            interactionType: data.interactionType,
-            fallbackUsed: true
-          }),
-          new Date()
-        ]
-      );
+        ) VALUES (
+          ${data.merchantId}::uuid,
+          ${data.customerId},
+          ${sr.messageId},
+          ${'fallback_response'},
+          ${sr.success ? 'success' : 'failed'},
+          ${JSON.stringify({ fallbackResponse, sendResult, interactionType: data.interactionType, fallbackUsed: true })}::jsonb,
+          ${new Date()}
+        )
+      `;
     } catch (error) {
       this.logger.warn('Failed to log fallback interaction', {
         error: error instanceof Error ? error.message : String(error)
