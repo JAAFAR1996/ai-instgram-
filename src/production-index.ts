@@ -418,7 +418,8 @@ async function bootstrap() {
     
     serve({
       fetch: app.fetch,
-      port
+      port,
+      hostname: '0.0.0.0'
     }, (info) => {
       log.info(`AI Sales Platform ready on :${info.port}`);
       

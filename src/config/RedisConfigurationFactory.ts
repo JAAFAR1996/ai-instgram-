@@ -175,21 +175,24 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       host: baseConfig.host || 'localhost',
       port: baseConfig.port || 6379,
       ...(baseConfig.password && { password: baseConfig.password }),
+      ...baseConfig.tls && { tls: baseConfig.tls },
       connectTimeout: this.getTimeoutByEnvironment(10000, 15000),
       lazyConnect: true,
       family: 4,
       commandTimeout: 8000,
       enableOfflineQueue: true,
-      // Upstash rate limit configuration
-      maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || (isUpstash ? 3 : 5)),
+      enableReadyCheck: true,
+      keepAlive: 15000,
+      // Upstash optimized configuration
+      maxRetriesPerRequest: null, // Required for BullMQ with Upstash
       autoResendUnfulfilledCommands: isUpstash ? false : true,
-      ...(isUpstash && {
-        reconnectOnError: (err: Error) => {
-          // Return false for rate limit errors to prevent reconnection spinning
-          return err.message.includes('max requests limit exceeded') ? false : 1;
+      retryStrategy: (times: number) => Math.min(1000 * Math.pow(2, times), 30000),
+      reconnectOnError: (err: Error) => {
+        // Enhanced error handling for Upstash
+        if (err.message.includes('max requests limit exceeded')) return false;
+        return /READONLY|ECONNRESET|ETIMEDOUT/.test(err.message) ? 2 : false;
         }
-      }),
-      ...(baseConfig.tls && { tls: baseConfig.tls })
+      })
     };
   }
 
