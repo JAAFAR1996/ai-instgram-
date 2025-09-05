@@ -9,7 +9,11 @@ docs/
 test/
 tests/
 coverage/
-scripts/
+scripts/*.sh
+scripts/ci/
+scripts/codemods/
+scripts/audit-*.mjs
+scripts/baseline-*.mjs
 *.log
 Dockerfile*
 docker-compose.*.yml
