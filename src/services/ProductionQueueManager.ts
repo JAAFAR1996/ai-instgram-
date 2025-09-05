@@ -609,6 +609,14 @@ export class ProductionQueueManager {
           username: (typeof ((job.data as Record<string, unknown>)?.username) === "string" ? (job.data as Record<string, unknown>).username as string : undefined) 
         });
         
+        // 🔍 ENHANCED DEBUG: Log more details about the job
+        this.logger.info('🔍 [DEBUG-MANYCHAT] تفاصيل Job كاملة', {
+          jobId: job.id,
+          jobName: job.name,
+          jobDataKeys: Object.keys(job.data as Record<string, unknown> || {}),
+          jobDataSample: JSON.stringify(job.data).slice(0, 500)
+        });
+        
         clearTimeout(workerInitTimeout);
         
         const manyChatWorkerId = `manychat-worker-${crypto.randomUUID().slice(0, 8)}`;
@@ -2246,6 +2254,18 @@ export class ProductionQueueManager {
     decisionPath?: string[];
   }> {
     const startTime = Date.now();
+    
+    // 🔍 ENHANCED DEBUG: Log processManyChatJob entry
+    this.logger.info('📬 [MANYCHAT-PROCESS] بدء معالجة ManyChat job متقدمة', {
+      eventId: jobData.eventId,
+      merchantId: jobData.merchantId,
+      username: jobData.username,
+      conversationId: jobData.conversationId,
+      messageLength: jobData.messageText.length,
+      hasImages: jobData.metadata.hasImages,
+      sessionKeys: Object.keys(jobData.sessionData || {}),
+      queueDelay: startTime - jobData.metadata.processingStartTime
+    });
     
     try {
       // 📊 Queue metrics: Record processing start
