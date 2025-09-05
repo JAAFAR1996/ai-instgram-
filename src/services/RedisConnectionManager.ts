@@ -206,14 +206,18 @@ export class RedisConnectionManager {
       }
 
       // Create Redis connection with proper error handling
+      // Remove commandTimeout from config to avoid breaking blocking commands (e.g., XREAD)
+      const { commandTimeout: _ignoredCommandTimeout, ...configSansCommandTimeout } = config as unknown as Record<string, unknown>;
+
       const connection = new Redis({
-        ...config,
+        ...(configSansCommandTimeout as object),
         lazyConnect: true,
-        maxRetriesPerRequest: Number(process.env.REDIS_MAX_RETRIES || 5),
+        // BullMQ requires null to disable per-command retry logic warning
+        maxRetriesPerRequest: null as unknown as number | null,
         connectTimeout: this.poolConfig.connectionTimeout,
-        commandTimeout: 10000, // إضافة timeout للcommands
+        // do NOT set commandTimeout here; leave undefined
         enableReadyCheck: true,
-        enableOfflineQueue: true, // تفعيل offline queue للسماح بإعادة المحاولة
+        enableOfflineQueue: true, // allow offline queue for retries
         reconnectOnError: (err) => {
           // Don't reconnect on rate limit errors
           if (err.message.includes('max requests limit exceeded')) {

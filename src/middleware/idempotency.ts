@@ -60,14 +60,13 @@ async function generateIdempotencyKey(
   // Hash merchant ID and request body for uniqueness
   if (config.hashMerchantAndBody && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
     try {
-      const rawBuf = (c as unknown as { rawBody?: Buffer }).rawBody;
-      if (rawBuf && rawBuf.length > 0) {
-        const head = rawBuf.length > 4096 ? rawBuf.subarray(0, 4096) : rawBuf;
+      const raw = (c.get as unknown as (k: string) => unknown)?.('rawBody') as string | undefined;
+      if (raw && raw.length > 0) {
+        const head = raw.length > 4096 ? raw.slice(0, 4096) : raw;
         const bodyHash = crypto.createHash('sha256').update(head).digest('hex').substring(0, 16);
         keyData += `:${bodyHash}`;
       } else {
-        // Avoid consuming the body stream here; missing rawBody means we skip body hash
-        logger.debug?.('No pre-captured rawBody; skipping body hash in idempotency key', {
+        logger.debug?.('No rawBody available; skipping body hash in idempotency key', {
           requestPath: c.req.path,
           requestMethod: c.req.method,
           merchantId
@@ -108,6 +107,24 @@ export function createIdempotencyMiddleware(
   
   return async (c: Context, next: Next): Promise<Response | void> => {
     try {
+      // Pre-read request body once (for text/json types) and store in context
+      const contentType = c.req.header('content-type') ?? '';
+      const isTextual = contentType.startsWith('application/json') || contentType.startsWith('text/');
+      let rawBody = '';
+      if (isTextual && (c.req.method === 'POST' || c.req.method === 'PUT' || c.req.method === 'PATCH')) {
+        try {
+          rawBody = await c.req.text();
+        } catch {}
+        if (rawBody) {
+          (c as unknown as { set: (k: string, v: unknown) => void }).set('rawBody', rawBody);
+          if (contentType.startsWith('application/json')) {
+            try {
+              (c as unknown as { set: (k: string, v: unknown) => void }).set('jsonBody', JSON.parse(rawBody));
+            } catch {}
+          }
+        }
+      }
+
       // Skip idempotency check for certain methods
       if (finalConfig.skipMethods?.includes(c.req.method)) {
         return await next();

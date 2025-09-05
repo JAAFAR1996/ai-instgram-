@@ -136,7 +136,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       log.info('📩 ManyChat webhook received');
       const processingStartTime = Date.now();
       
-      const rawBody = await c.req.text();
+      const rawBody = (c.get as any)?.('rawBody') ?? '';
       // HMAC verification when secret provided
       const signature = c.req.header('x-hub-signature-256') || c.req.header('x-signature-256') || c.req.header('x-signature') || c.req.header('signature');
       const webhookSecret = (getEnv('MANYCHAT_WEBHOOK_SECRET') ?? '').trim();
@@ -623,7 +623,7 @@ const dumpPath = path.join(dir, first.f);
   
   app.post('/api/test/manychat', async (c) => {
     try {
-      const body = await c.req.json();
+      const body = ((c.get as any)?.('jsonBody')) ?? await c.req.json();
       const { merchantId, customerId, message } = body;
       // RLS safety: ensure header/JWT merchant matches body merchant
       try {
@@ -705,5 +705,8 @@ const dumpPath = path.join(dir, first.f);
 
   log.info('Webhook routes registered successfully');
 }
+
+
+
 
 

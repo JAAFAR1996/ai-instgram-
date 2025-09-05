@@ -195,26 +195,16 @@ async function bootstrap() {
     // Global middleware
     app.use('*', securityHeaders);
     
-    // Raw body middleware for webhook routes only
-    app.use('/webhooks/*', async (c, next) => {
-      const contentType = c.req.header('content-type');
-      if (contentType?.includes('application/json')) {
-        const body = await c.req.arrayBuffer();
-        (c as { rawBody?: Buffer }).rawBody = Buffer.from(body);
-      }
-      await next();
-    });
-
-    // Rate limiting for webhooks
-    app.use('/webhooks/*', rateLimiter);
-
-    // Conditional Idempotency middleware loading
+    // Conditional Idempotency middleware loading (place BEFORE any body parsers for webhooks)
     if (redisStatus.success && redisStatus.mode === 'active') {
       app.use('/webhooks/*', createIdempotencyMiddleware({ ttlSeconds: 3600, keyPrefix: 'webhook' }));
       log.info('Idempotency middleware enabled');
     } else {
       log.info('Idempotency middleware disabled - Redis not available');
     }
+
+    // Rate limiting for webhooks (after idempotency)
+    app.use('/webhooks/*', rateLimiter);
 
     // RLS (Row Level Security) middleware for data isolation
     app.use('*', rlsMiddleware());
