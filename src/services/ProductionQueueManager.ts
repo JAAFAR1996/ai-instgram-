@@ -2815,9 +2815,20 @@ export class ProductionQueueManager {
 
       // تحديث stage المحادثة
       if (stage) {
-        await this.repositories.conversation.update(jobData.conversationId, {
-          conversationStage: stage
-        });
+        // Map AI stage to DB enum-compatible stage
+        const dbStageMap: Record<string, string> = {
+          AWARE: 'GREETING',
+          BROWSE: 'BROWSING',
+          INTENT: 'INTERESTED',
+          OBJECTION: 'NEGOTIATING',
+          CLOSE: 'COMPLETED',
+        };
+        const mapped = dbStageMap[String(stage)] || undefined;
+        if (mapped) {
+          await this.repositories.conversation.update(jobData.conversationId, {
+            conversationStage: mapped
+          });
+        }
       }
 
       this.logger.info('💾 [MESSAGE-SAVED] تم حفظ رسالة صادرة', { 

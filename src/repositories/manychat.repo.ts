@@ -8,12 +8,24 @@ export async function getManychatIdByInstagramUsername(
   username: string
 ): Promise<string | null> {
   const pool = getPool();
-  const { rows } = await pool.query<{ manychat_subscriber_id: string }>(
-    `select manychat_subscriber_id
-     from public.get_manychat_subscriber_by_instagram_username($1::uuid, $2::text)`,
-    [merchantId, username]
-  );
-  return rows[0]?.manychat_subscriber_id ?? null;
+  try {
+    const { rows } = await pool.query<{ manychat_subscriber_id: string }>(
+      `select manychat_subscriber_id
+       from public.get_manychat_subscriber_by_instagram_username($1::uuid, $2::text)`,
+      [merchantId, username]
+    );
+    return rows[0]?.manychat_subscriber_id ?? null;
+  } catch (e) {
+    // Fallback: query table directly in case function signature mismatches on the target DB
+    const { rows } = await pool.query<{ manychat_subscriber_id: string }>(
+      `select manychat_subscriber_id
+       from public.manychat_subscribers
+       where merchant_id = $1::uuid and lower(instagram_username) = lower($2)
+       limit 1`,
+      [merchantId, username]
+    );
+    return rows[0]?.manychat_subscriber_id ?? null;
+  }
 }
 
 /**
