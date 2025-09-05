@@ -1122,7 +1122,7 @@ export class InstagramAIService {
               OR ${ilikes.map(l => sql`p.category ILIKE ${l}`).reduce((a, b) => sql`${a} OR ${b}`)}
             )` : sql`TRUE`}
           )
-          AND (${matchedCats.length > 0 ? sql`p.category = ANY(${sql.array(matchedCats)})` : sql`TRUE`})
+          AND (${matchedCats.length > 0 ? sql`p.category = ANY(ARRAY[${matchedCats.map(c => `'${c}'`).join(', ')}])` : sql`TRUE`})
           AND (
             ${sizeFilter ? sql`(
               lower(p.attributes->>'size') = ${sizeFilter.toLowerCase()}
@@ -1349,7 +1349,7 @@ ${productsText}
                  COALESCE(price_amount, price_usd) as price_usd, -- temporary alias for generic pricing
                  category, description_ar, image_urls
           FROM products_priced
-          WHERE id = ANY(${sql.array(batch)}) 
+          WHERE id = ANY(${batch}) 
           AND merchant_id = ${merchantId}::uuid 
           AND status = 'ACTIVE'
           ORDER BY is_featured DESC

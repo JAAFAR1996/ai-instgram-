@@ -399,7 +399,7 @@ export class PredictiveAnalyticsEngine {
           SELECT name_ar, stock_quantity, id
           FROM products
           WHERE merchant_id = ${merchantId}::uuid
-            AND category = ANY(${sql.array(profile.preferences.categories)})
+            AND category = ANY(${profile.preferences.categories})
             AND stock_quantity > 0 AND stock_quantity <= 3
           ORDER BY stock_quantity ASC
           LIMIT 3

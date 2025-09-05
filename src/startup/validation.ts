@@ -330,7 +330,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
       FROM information_schema.tables 
       WHERE table_schema = 'public' 
       AND table_type = 'BASE TABLE'
-      AND table_name = ANY(${sql.array(requiredTables)})
+      AND table_name = ANY(ARRAY[${requiredTables.map(t => `'${t}'`).join(', ')}])
     `;
 
     const existingTableNames = existingTables.map(t => t.table_name);
@@ -345,7 +345,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
     const extensions: { extname: string }[] = await sql<{ extname: string }>`
       SELECT extname 
       FROM pg_extension 
-      WHERE extname = ANY(${sql.array(requiredExtensions)})
+      WHERE extname = ANY(ARRAY[${requiredExtensions.map(e => `'${e}'`).join(', ')}])
     `;
 
     const installedExtensions = extensions.map(ext => ext.extname);
@@ -376,7 +376,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
       SELECT tablename, indexname, indexdef
       FROM pg_indexes 
       WHERE schemaname = 'public'
-      AND tablename = ANY(${sql.array(criticalIndexes.map(idx => idx.table))})
+      AND tablename = ANY(ARRAY[${criticalIndexes.map(idx => `'${idx.table}'`).join(', ')}])
     `;
 
     const missingIndexes = [];
@@ -409,7 +409,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
         cmd
       FROM pg_policies 
       WHERE schemaname = 'public'
-      AND tablename = ANY(${sql.array(['merchants', 'conversations', 'message_logs', 'products', 'orders'])})
+      AND tablename = ANY(ARRAY['merchants', 'conversations', 'message_logs', 'products', 'orders'])
     `;
 
     const requiredRLSTables = ['merchants', 'conversations', 'message_logs', 'products', 'orders'];
@@ -432,7 +432,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
       FROM information_schema.routines
       WHERE routine_schema = 'public'
       AND routine_type = 'FUNCTION'
-      AND routine_name = ANY(${sql.array(requiredFunctions)})
+      AND routine_name = ANY(ARRAY[${requiredFunctions.map(f => `'${f}'`).join(', ')}])
     `;
 
     const existingFunctionNames = existingFunctions.map(f => f.routine_name);
