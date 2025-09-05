@@ -248,7 +248,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         if (messageText.length > 4000) {
           return c.json({
             version: "v2",
-            messages: [{ type: "text", text: "رسالتك طويلة جداً، يرجى إرسال رسالة أقصر." }],
             set_attributes: { ai_reply: "message_too_long" }
           });
         }
@@ -313,7 +312,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             log.error('❌ Database operation failed', { error: String(dbError) });
             return c.json({
               version: "v2", 
-              messages: [{ type: "text", text: "عذراً، حدث خطأ في النظام. يرجى المحاولة مرة أخرى." }],
               set_attributes: { ai_reply: "database_error" }
             });
           }
@@ -438,10 +436,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             // ⚡ IMMEDIATE RESPONSE: Return quickly while processing in background
             return c.json({
               version: "v2",
-              messages: [{ 
-                type: "text", 
-                text: "أهلاً! سأعود إليك بعد لحظات برد مفصل 😊" 
-              }],
               set_attributes: { 
                 ai_reply: "PROCESSING",
                 job_id: queueResult.jobId,
@@ -460,10 +454,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             // FALLBACK: Simple cached response when queue fails
             return c.json({
               version: "v2",
-              messages: [{ 
-                type: "text", 
-                text: "أهلاً بك! أحتاج لحظة لمعالجة طلبك، يرجى المحاولة مرة أخرى." 
-              }],
               set_attributes: { 
                 ai_reply: "QUEUE_ERROR_FALLBACK",
                 processing_time: Date.now() - processingStartTime,
@@ -489,7 +479,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           
           return c.json({
             version: "v2",
-            messages: [{ type: "text", text: "عذراً، حدث خطأ مؤقت. يرجى المحاولة مرة أخرى." }],
             set_attributes: { 
               ai_reply: "processing_error",
               processing_time: Date.now() - processingStartTime
@@ -715,6 +704,7 @@ const dumpPath = path.join(dir, first.f);
 
   log.info('Webhook routes registered successfully');
 }
+
 
 
 
