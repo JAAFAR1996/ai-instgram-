@@ -360,7 +360,7 @@ export async function getRecentActivity(
      FROM utility_message_logs l
      LEFT JOIN utility_message_templates t ON l.template_id::uuid = t.id
      WHERE l.merchant_id = $1::uuid
-       AND l.sent_at >= NOW() - INTERVAL '${hours} hours'
+       AND l.sent_at >= NOW() - (${hours}::int * INTERVAL '1 hour')
      ORDER BY l.sent_at DESC
      LIMIT 100`,
     [merchantId]

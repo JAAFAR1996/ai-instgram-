@@ -232,9 +232,8 @@ export class MessageRepository {
 
     if (fields.length === 1) return await this.findById(id);
 
-    const q = `UPDATE message_logs SET ${fields.join(', ')} WHERE id = $${i}::uuid RETURNING *`;
     params.push(id);
-    const rows = await sql.unsafe<MessageDbRow>(q, params);
+    const rows = await sql<MessageDbRow>`UPDATE message_logs SET ${sql.unsafe(fields.join(', '))} WHERE id = ${id}::uuid RETURNING *`;
     const row = rows[0];
     return row ? this.mapToMessage(row) : null;
   }

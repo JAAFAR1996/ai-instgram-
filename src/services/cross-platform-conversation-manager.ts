@@ -714,7 +714,7 @@ export class CrossPlatformConversationManager {
     const sql: Sql = this.db.getSQL();
 
     // ✅ أصلح شرط المنصة (كان يقارن المتغيّر نفسه بسلسلة ثابتة)
-          const conversations = await sql.unsafe<ConversationRow>(`
+          const conversations = await sql<ConversationRow>`
       SELECT * FROM conversations
       WHERE merchant_id = ${merchantId}::uuid
       AND platform = ${platform}
@@ -724,7 +724,7 @@ export class CrossPlatformConversationManager {
       )
       ORDER BY updated_at DESC
       LIMIT 1
-    `);
+    `;
 
           return (conversations as ConversationRow[])[0] ?? null;
   }

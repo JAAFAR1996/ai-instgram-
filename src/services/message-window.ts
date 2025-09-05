@@ -293,7 +293,7 @@ export class MessageWindowService {
       
       const result = await sql<DeleteCountRow>`
         DELETE FROM message_windows
-        WHERE window_expires_at < NOW() - (${olderThanDays} * INTERVAL '1 day')
+        WHERE window_expires_at < NOW() - (${olderThanDays}::int * INTERVAL '1 day')
       `;
 
       const count = ((result[0] as unknown) as DeleteCountRow)?.count ?? 0;
@@ -333,7 +333,7 @@ export class MessageWindowService {
           SUM(merchant_response_count) as total_merchant_responses
         FROM message_windows
         WHERE merchant_id = ${merchantId}::uuid
-        AND created_at >= NOW() - INTERVAL '${days} days'
+        AND created_at >= NOW() - (${days}::int * INTERVAL '1 day')
       `;
 
       const result = ((stats[0] as unknown) as WindowStatsRow);
@@ -382,7 +382,7 @@ export class MessageWindowService {
         FROM message_windows
         WHERE merchant_id = ${merchantId}::uuid
         AND window_expires_at > NOW()
-        AND window_expires_at <= NOW() + INTERVAL '${minutesUntilExpiry} minutes'
+        AND window_expires_at <= NOW() + (${minutesUntilExpiry}::int * INTERVAL '1 minute')
         ORDER BY window_expires_at ASC
       `;
         

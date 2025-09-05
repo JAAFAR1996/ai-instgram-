@@ -82,7 +82,7 @@ export class AdvancedAnalyticsService {
         JOIN conversations c ON c.id = ml.conversation_id
         WHERE c.merchant_id = ${merchantId}::uuid
           AND ml.direction = 'OUTGOING'
-          AND ml.created_at >= NOW() - INTERVAL ${String(windowDays)} || ' days'
+          AND ml.created_at >= NOW() - (${windowDays}::int * INTERVAL '1 day')
       )
       SELECT COUNT(*)::int AS total,
              COUNT(CASE WHEN q IS NOT NULL AND q >= 0.7 THEN 1 END)::int AS good
@@ -99,13 +99,13 @@ export class AdvancedAnalyticsService {
         FROM conversations c
         JOIN message_logs ml ON ml.conversation_id = c.id
         WHERE c.merchant_id = ${merchantId}::uuid
-          AND ml.created_at >= NOW() - INTERVAL ${String(windowDays)} || ' days'
+          AND ml.created_at >= NOW() - (${windowDays}::int * INTERVAL '1 day')
       ),
       buyers AS (
         SELECT DISTINCT o.customer_instagram AS cid
         FROM orders o
         WHERE o.merchant_id = ${merchantId}::uuid
-          AND o.created_at >= NOW() - INTERVAL ${String(windowDays)} || ' days'
+          AND o.created_at >= NOW() - (${windowDays}::int * INTERVAL '1 day')
       )
       SELECT (SELECT COUNT(*) FROM convs)::int AS convs,
              (SELECT COUNT(*) FROM convs c JOIN buyers b ON b.cid = c.cid)::int AS buyers
@@ -123,7 +123,7 @@ export class AdvancedAnalyticsService {
         FROM message_logs ml
         JOIN conversations c ON c.id = ml.conversation_id
         WHERE c.merchant_id = ${merchantId}::uuid
-          AND ml.created_at >= NOW() - INTERVAL ${String(windowDays)} || ' days'
+          AND ml.created_at >= NOW() - (${windowDays}::int * INTERVAL '1 day')
       )
       SELECT COUNT(CASE WHEN direction = 'INCOMING' AND prev_dir = 'OUTGOING' THEN 1 END)::int AS responses,
              COUNT(CASE WHEN direction = 'OUTGOING' THEN 1 END)::int AS sent,
@@ -152,4 +152,3 @@ export class AdvancedAnalyticsService {
 }
 
 export default AdvancedAnalyticsService;
-

@@ -889,12 +889,12 @@ export class InstagramAPICredentialsManager {
       const { getDatabase } = await import('../db/adapter.js');
       const sql = getDatabase().getSQL();
       
-      const result = await sql.unsafe<{ instagram_token_encrypted: string | null }>(`
+      const result = await sql<{ instagram_token_encrypted: string | null }>`
         SELECT instagram_token_encrypted
         FROM merchant_credentials
         WHERE merchant_id = ${merchantId}::uuid
         AND instagram_token_encrypted IS NOT NULL
-      `);
+      `;
 
       return (result as Array<{ instagram_token_encrypted: string | null }>).length > 0;
     } catch (error: unknown) {
