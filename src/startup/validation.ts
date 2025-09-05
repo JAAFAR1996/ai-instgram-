@@ -330,7 +330,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
       FROM information_schema.tables 
       WHERE table_schema = 'public' 
       AND table_type = 'BASE TABLE'
-      AND table_name = ANY(ARRAY[${requiredTables.map(t => `'${t}'`).join(', ')}])
+      AND table_name = ANY(${requiredTables})
     `;
 
     const existingTableNames = existingTables.map(t => t.table_name);
@@ -345,7 +345,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
     const extensions: { extname: string }[] = await sql<{ extname: string }>`
       SELECT extname 
       FROM pg_extension 
-      WHERE extname = ANY(ARRAY[${requiredExtensions.map(e => `'${e}'`).join(', ')}])
+      WHERE extname = ANY(${requiredExtensions})
     `;
 
     const installedExtensions = extensions.map(ext => ext.extname);
@@ -376,7 +376,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
       SELECT tablename, indexname, indexdef
       FROM pg_indexes 
       WHERE schemaname = 'public'
-      AND tablename = ANY(ARRAY[${criticalIndexes.map(idx => `'${idx.table}'`).join(', ')}])
+      AND tablename = ANY(${criticalIndexes.map(idx => idx.table)})
     `;
 
     const missingIndexes = [];
@@ -432,7 +432,7 @@ async function validateDatabaseSchema(): Promise<ValidationResult> {
       FROM information_schema.routines
       WHERE routine_schema = 'public'
       AND routine_type = 'FUNCTION'
-      AND routine_name = ANY(ARRAY[${requiredFunctions.map(f => `'${f}'`).join(', ')}])
+      AND routine_name = ANY(${requiredFunctions})
     `;
 
     const existingFunctionNames = existingFunctions.map(f => f.routine_name);

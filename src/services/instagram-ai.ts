@@ -1122,7 +1122,7 @@ export class InstagramAIService {
               OR ${ilikes.map(l => sql`p.category ILIKE ${l}`).reduce((a, b) => sql`${a} OR ${b}`)}
             )` : sql`TRUE`}
           )
-          AND (${matchedCats.length > 0 ? sql`p.category = ANY(ARRAY[${matchedCats.map(c => `'${c}'`).join(', ')}])` : sql`TRUE`})
+          AND (${matchedCats.length > 0 ? sql`p.category = ANY(${matchedCats})` : sql`TRUE`})
           AND (
             ${sizeFilter ? sql`(
               lower(p.attributes->>'size') = ${sizeFilter.toLowerCase()}
