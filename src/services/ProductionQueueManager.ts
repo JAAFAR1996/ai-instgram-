@@ -686,7 +686,25 @@ export class ProductionQueueManager {
     const manyChatWorker = new Worker(
       this.queueName,
       async (job: Job) => {
-        if (job.name !== 'manychat-processing') return;
+        // 🔍 DEBUG: Log every job that comes to ManyChat worker
+        this.logger.info('📨 [MANYCHAT-WORKER] استلام job في manyChatWorker', { 
+          jobId: job.id, 
+          jobName: job.name,
+          jobType: typeof job.name,
+          expected: 'manychat-processing'
+        });
+        
+        if (job.name !== 'manychat-processing') {
+          this.logger.info('❌ [MANYCHAT-WORKER] تجاهل job - اسم غير متطابق', { 
+            jobId: job.id, 
+            jobName: job.name,
+            expected: 'manychat-processing'
+          });
+          return;
+        }
+        
+        this.logger.info('✅ [MANYCHAT-WORKER] استدعاء manyChatProcessor...', { jobId: job.id });
+        
         const adapted = { id: String(job.id), name: job.name, data: job.data, moveToFailed: async (err: Error, _retry: boolean) => {
           const fn = job.moveToFailed as unknown as (e: Error, token: string) => Promise<void>;
           await fn(err, 'token');
