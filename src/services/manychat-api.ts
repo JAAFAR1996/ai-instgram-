@@ -150,12 +150,17 @@ export class ManyChatService {
           messageLength: message.length
         });
 
-        const payload: ManyChatSendContentPayload = {
+        const payload = {
           subscriber_id: subscriberId,
-          content: [{
-            type: 'text',
-            text: message
-          }],
+          data: {
+            version: "v2",
+            content: {
+              messages: [{
+                type: 'text',
+                text: message
+              }]
+            }
+          },
           message_tag: options?.messageTag || 'CUSTOMER_FEEDBACK',
         };
 
