@@ -1,0 +1,81 @@
+            }
+
+            const webhookDuration = Date.now() - processingStartTime;
+            log.info('⚡ [WEBHOOK-FAST] Enqueued ManyChat processing successfully', {
+              eventId,
+              jobId: queueResult.jobId,
+              queuePosition: queueResult.queuePosition,
+              webhookDuration: `${webhookDuration}ms`,
+              merchantId: sanitizedMerchantId,
+              username: sanitizedUsername,
+              conversationId,
+              messageLength: messageText.length,
+              hasImages
+            });
+
+            // ⚡ IMMEDIATE RESPONSE: Return quickly while processing in background
+            return c.json({
+              version: "v2",
+              set_attributes: { 
+                ai_reply: "PROCESSING",
+                job_id: queueResult.jobId,
+                event_id: eventId,
+                // Keep original key for backward-compatibility
+                webhook_time: webhookDuration,
+                // Add standardized key expected by ManyChat mapping
+                processing_time: webhookDuration,
+                queue_position: queueResult.queuePosition ?? 0,
+                conversation_id: conversationId
+              }
+            });
+
+          } catch (queueError) {
+            log.error('❌ Queue processing failed, falling back to direct processing', { 
+              error: String(queueError),
+              fallback: 'direct'
+            });
+            
+            // FALLBACK: Simple cached response when queue fails
+            return c.json({
+              version: "v2",
+              set_attributes: { 
+                ai_reply: "QUEUE_ERROR_FALLBACK",
+                processing_time: Date.now() - processingStartTime,
+                error: "queue_unavailable",
+                // conversation_id is available in this branch
+                conversation_id: conversationId
+              }
+            });
+          } finally {
+            // Do not close queue manager here — kept as singleton
+          }
+        } catch (error) {
+          log.error('❌ ManyChat webhook processing error', { 
+            error: error instanceof Error ? error.message : String(error),
+            merchantId: sanitizedMerchantId,
+            username: sanitizedUsername 
+          });
+          
+          return c.json({
+            version: "v2",
+            set_attributes: { 
+              ai_reply: "processing_error",
+              processing_time: Date.now() - processingStartTime,
+              // conversation_id may not be available on errors before creation
+              conversation_id: ""
+            }
+          });
+        }
+      }
+
+      // Handle non-message events (mapping updates, etc.)
+      if (finalMerchantId && incomingUsername && subscriber_id) {
+        try {
+          const { upsertManychatMapping } = await import('../repositories/manychat.repo.js');
+          await upsertManychatMapping(sanitizedMerchantId, sanitizedUsername, subscriber_id);
+          
+          log.info('✅ Updated ManyChat mapping', {
+            merchant_id: sanitizedMerchantId,
+            instagram_username: sanitizedUsername,
+            subscriber_id
+          });

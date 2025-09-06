@@ -4,7 +4,6 @@
  * Handles Instagram webhook endpoints with security
  * ===============================================
  */
-
 import { Hono } from 'hono';
 import type { Pool } from 'pg';
 import { getLogger } from '../services/logger.js';
@@ -18,7 +17,6 @@ import type { ConversationMsg } from '../services/conversation-manager.js';
 import { MCEvent as MCEventSchema, type MCEvent as MCEventType } from '../types/manychat.js';
 import { ProductionQueueManager } from '../services/ProductionQueueManager.js';
 import { RedisEnvironment } from '../config/RedisConfigurationFactory.js';
-
 // Zod schema for ManyChat webhook validation
 const ManyChatAttachmentSchema = z.object({
   url: z.string().url().optional(),
@@ -26,7 +24,6 @@ const ManyChatAttachmentSchema = z.object({
   image_url: z.string().url().optional(),
   src: z.string().url().optional()
 }).passthrough();
-
 const ManyChatWebhookSchema = z.object({
   merchant_id: z.string().uuid().optional(),
   instagram_username: z.string().optional(),
@@ -38,22 +35,17 @@ const ManyChatWebhookSchema = z.object({
     attachments: z.array(ManyChatAttachmentSchema).optional()
   }).optional()
 }).passthrough();
-
 type ManyChatWebhookBody = z.infer<typeof ManyChatWebhookSchema>;
-
 const log = getLogger({ component: 'webhooks-routes' });
-
 // Webhook validation schemas
 const InstagramWebhookVerificationSchema = z.object({
   'hub.mode': z.string(),
   'hub.verify_token': z.string(),
   'hub.challenge': z.string()
 });
-
 export interface WebhookDependencies {
   pool: Pool;
 }
-
 /**
  * Register webhook routes on the app
  */
@@ -74,9 +66,7 @@ async function getQueueManager(pool: Pool): Promise<ProductionQueueManager> {
   }
   return queueManagerSingleton;
 }
-
 export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): void {
-
   // Instagram webhook verification (GET)
   app.get('/webhooks/instagram', async (c) => {
     try {
@@ -90,9 +80,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         });
         return c.text('Bad Request', 400);
       }
-
       const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = validation.data;
-
       if (mode !== 'subscribe') {
         log.warn('Instagram webhook verification failed - invalid mode', { mode });
         try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_mode', mode }); } catch (e: unknown) {
@@ -101,7 +89,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         }
         return c.text('Bad Request', 400);
       }
-
       const expectedToken = (getEnv('IG_VERIFY_TOKEN') ?? '').trim();
       if (!expectedToken || token !== expectedToken) {
         log.warn('Instagram webhook verification failed - invalid token', { 
@@ -114,7 +101,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         }
         return c.text('Forbidden', 403);
       }
-
       log.info('Instagram webhook verification successful', { challenge });
       try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'SUCCESS', { endpoint: 'instagram', challenge }); } catch (e: unknown) {
         const err = e instanceof Error ? e : new Error(String(e));
@@ -130,14 +116,30 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       return c.text('Internal Server Error', 500);
     }
   });
-
   // Instagram direct webhook - DISABLED (using ManyChat flow only)
   app.post('/webhooks/instagram', async (c) => {
     return c.text('Use ManyChat flow: Instagram → ManyChat → Server → AI → Server → ManyChat → Instagram', 410);
   });
-
   // ManyChat webhook route - PRODUCTION with AI integration
-  app.post('/webhooks/manychat', async (c) => {
+  app.post('/webhooks/manychat', async (c) => {    // Prepare unified response context before entering try/catch
+    const processingStartTime = Date.now();
+    let conversationId: string = "";
+    let currentJobId: string = "";
+    let eventId: string = `manychat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const mcResponse = (attrs: Record<string, unknown>) => {
+      const duration = Date.now() - processingStartTime;
+      return {
+        version: "v2",
+        set_attributes: {
+          processing_time: duration,
+          webhook_time: duration, // kept for backward-compatibility
+          conversation_id: conversationId,
+          event_id: eventId,
+          job_id: currentJobId,
+          ...attrs,
+        }
+      };
+    };
     try {
       // 🔒 PRODUCTION: Bearer token authentication
       const authHeader = c.req.header('authorization');
@@ -152,8 +154,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       }
       
       log.info('📩 ManyChat webhook received');
-      const processingStartTime = Date.now();
-      
       const rawBody = (c.get as any)?.('rawBody') ?? '';
       // HMAC verification when secret provided
       const signature = c.req.header('x-hub-signature-256') || c.req.header('x-signature-256') || c.req.header('x-signature') || c.req.header('signature');
@@ -189,11 +189,11 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             errors: validation.error.errors,
             rawBodyLength: rawBody?.length ?? 0
           });
-          return c.json({ 
-            ok: false, 
+          return c.json(mcResponse({ 
+            ai_reply: 'invalid_payload_structure',
             error: 'invalid_payload_structure',
             details: validation.error.errors
-          }, 400);
+          } as Record<string, unknown>), 400);
         }
         
         body = validation.data;
@@ -202,35 +202,32 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           error: parseErr instanceof Error ? parseErr.message : String(parseErr),
           rawBodyLength: rawBody?.length ?? 0
         });
-        return c.json({ ok: false, error: 'invalid_json' }, 400);
+        return c.json(mcResponse({ ai_reply: 'invalid_json', error: 'invalid_json' }), 400);
       }
       const { merchant_id, instagram_username, merchant_username, subscriber_id, event_type, data } = body;
-
       // 🛡️ PRODUCTION: Input validation and sanitization - use fallback for merchant_id
       const finalMerchantId = (merchant_id ?? '').trim();
       
       const incomingUsername = (merchant_username ?? instagram_username) as string | undefined;
       const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       if (!incomingUsername || !finalMerchantId) {
-        return c.json({ 
-          ok: false, 
+        return c.json(mcResponse({ 
+          ai_reply: 'missing_context',
           error: 'username (merchant_username/instagram_username) required and merchant_id missing' 
-        }, 400);
+        }), 400);
       }
-
       const sanitizedUsername = String(incomingUsername).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
       const sanitizedMerchantId = String(finalMerchantId).trim();
       if (!UUID_REGEX.test(sanitizedMerchantId)) {
-        return c.json({ ok: false, error: 'context_error' }, 503);
+        return c.json(mcResponse({ ai_reply: 'context_error', error: 'context_error' }), 503);
       }
       
       if (!sanitizedUsername || sanitizedUsername.length < 2) {
-        return c.json({ 
-          ok: false, 
+        return c.json(mcResponse({ 
+          ai_reply: 'invalid_username',
           error: 'invalid username format' 
-        }, 400);
+        }), 400);
       }
-
       log.info('📩 ManyChat data', { 
         merchant_id: sanitizedMerchantId,
         instagram_username: sanitizedUsername,
@@ -238,7 +235,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         event_type,
         hasMessage: !!data?.text
       });
-
       // 🔍 PROCESS MESSAGE: If this is a message from user, process with AI
       // Set RLS merchant context for this request
       try {
@@ -249,9 +245,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       } catch (ctxErr) {
         log.error('Failed to set merchant context', ctxErr as Error);
         try { (await import('../services/compliance.js')).getComplianceService().logSecurity(sanitizedMerchantId, 'RLS_CONTEXT', 'FAILURE', { error: String(ctxErr) }); } catch {}
-        return c.json({ ok: false, error: 'context_error' }, 503);
+        return c.json(mcResponse({ ai_reply: 'context_error', error: 'context_error' }), 503);
       }
-
       // Normalize attachments (images) strictly to URL list
       const attachments = Array.isArray(data?.attachments) ? data.attachments : [];
       const images: Array<{ url: string }> = attachments
@@ -259,26 +254,20 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         .filter((u): u is string => typeof u === 'string' && /^https?:\/\//i.test(u))
         .map((url) => ({ url }));
       const hasImages = images.length > 0;
-
       if (event_type === 'message' && (data?.text || hasImages)) {
         const messageText = String(data?.text ?? '').trim();
         
         if (messageText.length > 4000) {
-          return c.json({
-            version: "v2",
-            set_attributes: { ai_reply: "message_too_long" }
-          });
+          return c.json(mcResponse({ ai_reply: "message_too_long" }));
         }
-
           // 🚀 QUEUE PROCESSING: All AI processing moved to queue workers
           let queueManager: ProductionQueueManager | null = null;
-
         try {
           // ⚡ LIGHTWEIGHT: Only essential database operations in webhook
           const pool = getPool();
           
           // Find or create conversation
-          let conversationId: string;
+          // conversationId is declared above and defaults to ""
           let sessionData: Record<string, unknown> = {};
           try {
             // Persist ManyChat mapping early to guarantee username→subscriber_id resolution for sending
@@ -328,10 +317,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             }
           } catch (dbError) {
             log.error('❌ Database operation failed', { error: String(dbError) });
-            return c.json({
-              version: "v2", 
-              set_attributes: { ai_reply: "database_error" }
-            });
+            return c.json(mcResponse({ ai_reply: 'database_error' }));
           }
 
           // Load recent messages as conversation history (oldest -> newest)
@@ -365,7 +351,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           } catch (histErr) {
             log.warn('Failed to load conversation history, proceeding without it', { error: String(histErr) });
           }
-
           // Store incoming message
           // Store incoming message and get id
           let incomingMessageId: string | null = null;
@@ -384,17 +369,13 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
               [conversationId, messageText || (hasImages ? 'IMAGE_MESSAGE' : '')]
             ), 'db_insert_message_fallback', { logger: log, payload: { conversationId } });
           }
-
           // ⚡ SKIP image metadata in webhook - moved to queue processing
-
           // 🚀 QUEUE PROCESSING: All AI processing moved to queue workers
           try {
             // Use singleton queue manager (avoid per-request init/close)
             queueManager = await getQueueManager(pool);
-
-            // Generate unique event ID for this processing
-            const eventId = `manychat_${Date.now()}_${sanitizedMerchantId.slice(-8)}_${Math.random().toString(36).slice(2, 8)}`;
-
+            // Generate unique event ID for this processing (update earlier id)
+            eventId = `manychat_${Date.now()}_${sanitizedMerchantId.slice(-8)}_${Math.random().toString(36).slice(2, 8)}`;
             // Enqueue all heavy processing
             // Build minimal MCEvent and validate
             const mcEventCandidate = {
@@ -405,7 +386,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
               images,
             } satisfies MCEventType;
             const mcEvent = MCEventSchema.parse(mcEventCandidate);
-
             const queueResult = await queueManager.addManyChatJob(
               eventId,
               mcEvent.merchantId,
@@ -417,36 +397,26 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
               sessionData,
               'high' // priority based on real-time user interaction
             );
-
             if (!queueResult.success) {
               throw new Error(`Failed to enqueue ManyChat job: ${queueResult.error}`);
             }
-
-            const webhookDuration = Date.now() - processingStartTime;
+            currentJobId = queueResult.jobId ?? "";
             log.info('⚡ [WEBHOOK-FAST] Enqueued ManyChat processing successfully', {
               eventId,
               jobId: queueResult.jobId,
               queuePosition: queueResult.queuePosition,
-              webhookDuration: `${webhookDuration}ms`,
+              webhookDuration: `${Date.now() - processingStartTime}ms`,
               merchantId: sanitizedMerchantId,
               username: sanitizedUsername,
               conversationId,
               messageLength: messageText.length,
               hasImages
             });
-
             // ⚡ IMMEDIATE RESPONSE: Return quickly while processing in background
-            return c.json({
-              version: "v2",
-              set_attributes: { 
-                ai_reply: "PROCESSING",
-                job_id: queueResult.jobId,
-                event_id: eventId,
-                webhook_time: webhookDuration,
-                queue_position: queueResult.queuePosition ?? 0
-              }
-            });
-
+            return c.json(mcResponse({
+              ai_reply: "PROCESSING",
+              queue_position: queueResult.queuePosition ?? 0
+            }));
           } catch (queueError) {
             log.error('❌ Queue processing failed, falling back to direct processing', { 
               error: String(queueError),
@@ -454,14 +424,10 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             });
             
             // FALLBACK: Simple cached response when queue fails
-            return c.json({
-              version: "v2",
-              set_attributes: { 
-                ai_reply: "QUEUE_ERROR_FALLBACK",
-                processing_time: Date.now() - processingStartTime,
-                error: "queue_unavailable"
-              }
-            });
+            return c.json(mcResponse({
+              ai_reply: "QUEUE_ERROR_FALLBACK",
+              error: "queue_unavailable"
+            }));
           } finally {
             // Do not close queue manager here — kept as singleton
           }
@@ -472,16 +438,9 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             username: sanitizedUsername 
           });
           
-          return c.json({
-            version: "v2",
-            set_attributes: { 
-              ai_reply: "processing_error",
-              processing_time: Date.now() - processingStartTime
-            }
-          });
+          return c.json(mcResponse({ ai_reply: "processing_error" }));
         }
       }
-
       // Handle non-message events (mapping updates, etc.)
       if (finalMerchantId && incomingUsername && subscriber_id) {
         try {
@@ -497,18 +456,13 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           log.warn('⚠️ ManyChat mapping failed', { error: String(mappingError) });
         }
       }
-
-      return c.json({ 
-        ok: true, 
-        timestamp: new Date().toISOString()
-      });
-
+      // Standard no-op response for non-message events
+      return c.json(mcResponse({ ai_reply: "ignored_event" }));
     } catch (error) {
       log.error('❌ ManyChat webhook error', error);
-      return c.json({ ok: true, error: 'acknowledged' });
+      return c.json(mcResponse({ ai_reply: 'internal_error', error: 'acknowledged' }));
     }
   });
-
   // WhatsApp webhook routes - DISABLED
   app.get('/webhooks/whatsapp', (c) => c.text('WhatsApp features disabled', 503));
   app.post('/webhooks/whatsapp', (c) => c.text('WhatsApp features disabled', 503));
@@ -525,7 +479,6 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       }
     });
   });
-
   // Development debug endpoint for signature verification
   if (getEnv('NODE_ENV') !== 'production') {
     app.get('/internal/debug/last-dump-hash', async (c) => {
@@ -533,10 +486,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         const fs = await import('fs');
         const path = await import('path');
         const dir = '/var/tmp';
-
         const files = (await fs.promises.readdir(dir))
           .filter(f => /^ig_\d+\.raw$/.test(f));
-
         const filesWithTime = await Promise.all(
           files.map(async (f) => ({
             f,
@@ -544,11 +495,9 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
           }))
         );
         const sorted = filesWithTime.sort((a, b) => b.t - a.t);
-
         if (!sorted.length) {
           return c.text('no dumps', 404);
         }
-
         const first = sorted?.[0];
 if (!first) throw new Error('No webhook files found to dump');
 const dumpPath = path.join(dir, first.f);
@@ -556,7 +505,6 @@ const dumpPath = path.join(dir, first.f);
         const exp = createHmac('sha256', (getEnv('META_APP_SECRET') ?? '').trim())
           .update(raw)
           .digest('hex');
-
         return c.text(`sha256=${exp}`);
       } catch (error: unknown) {
         log.error('Debug endpoint error:', error instanceof Error ? { message: error.message } : { error });
@@ -564,7 +512,6 @@ const dumpPath = path.join(dir, first.f);
       }
     });
   }
-
   // Secure production debug endpoint (opt-in via env)
   if (getEnv('ENABLE_PROD_DEBUG') === 'true') {
     app.get('/internal/prod/debug/last-dump-hash', async (c) => {
@@ -576,14 +523,12 @@ const dumpPath = path.join(dir, first.f);
           log.warn('Prod debug unauthorized');
           return c.text('unauthorized', 401);
         }
-
         const allowedIps = (getEnv('PROD_DEBUG_ALLOWED_IPS') ?? '').split(',').map(s => s.trim()).filter(Boolean);
         const remoteIp = (c.req.header('x-forwarded-for') ?? '').split(',')[0]?.trim() || (c.req.header('cf-connecting-ip') ?? '');
         if (allowedIps.length && remoteIp && !allowedIps.includes(remoteIp)) {
           log.warn('Prod debug IP not allowed', { remoteIp });
           return c.text('forbidden', 403);
         }
-
         const fs = await import('fs');
         const path = await import('path');
         const dir = '/var/tmp';
@@ -610,7 +555,6 @@ const dumpPath = path.join(dir, first.f);
       }
     });
   }
-
   // ===============================================
   // ManyChat Test Endpoint
   // ===============================================
@@ -634,11 +578,9 @@ const dumpPath = path.join(dir, first.f);
           error: 'Missing required fields: merchantId, customerId, message'
         }, 400);
       }
-
       // Import ManyChat Bridge
       const { getInstagramManyChatBridge } = await import('../services/instagram-manychat-bridge.js');
       const bridge = getInstagramManyChatBridge();
-
       // Test ManyChat processing
       const result = await bridge.processMessage({
         merchantId,
@@ -652,13 +594,11 @@ const dumpPath = path.join(dir, first.f);
         priority: 'normal',
         tags: ['test', 'api_test']
       });
-
       return c.json({
         success: true,
         result,
         message: 'ManyChat integration test completed successfully'
       });
-
     } catch (error) {
       log.error('ManyChat test endpoint error:', error);
       return c.json({
@@ -668,7 +608,6 @@ const dumpPath = path.join(dir, first.f);
       }, 500);
     }
   });
-
   // ManyChat Health Check Endpoint
   app.get('/api/health/manychat', async (c) => {
     try {
@@ -685,7 +624,6 @@ const dumpPath = path.join(dir, first.f);
         instagram: healthStatus.instagram,
         timestamp: new Date().toISOString()
       });
-
     } catch (error) {
       log.error('ManyChat health check error:', error);
       return c.json({
@@ -696,9 +634,11 @@ const dumpPath = path.join(dir, first.f);
       }, 500);
     }
   });
-
   log.info('Webhook routes registered successfully');
 }
+
+
+
 
 
 
