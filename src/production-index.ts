@@ -220,8 +220,11 @@ async function bootstrap() {
     };
     const queueManager = new ProductionQueueManager(queueLogger, RedisEnvironment.PRODUCTION, pool, 'ai-sales-production');
 
-    // Initialize queue if Redis is active
-    if (redisStatus.mode === 'active' && process.env.DISABLE_REDIS !== 'true') {
+    // Respect STARTUP_SKIP_QUEUE_AUTO for web-only deployments
+    const skipQueueAuto = process.env.STARTUP_SKIP_QUEUE_AUTO === 'true';
+
+    // Initialize queue if Redis is active and auto-start not skipped
+    if (!skipQueueAuto && redisStatus.mode === 'active' && process.env.DISABLE_REDIS !== 'true') {
       const qmInit = await queueManager.initialize();
 
       // Explicit production health check if not skipped
@@ -240,6 +243,8 @@ async function bootstrap() {
           throw new Error(`Redis not ready: ${err}`);
         }
       }
+    } else if (skipQueueAuto) {
+      log.info('Queue auto start skipped (STARTUP_SKIP_QUEUE_AUTO=true)');
     }
 
     // Register route modules with DI

@@ -127,54 +127,10 @@ type Logger = {
 };
 
 // Create Redis connection suitable for BullMQ (no commandTimeout, maxRetriesPerRequest=null)
+// Reuse a single shared Redis connection for BullMQ components
+import { redis as sharedRedis } from './redis.js';
 function makeBullRedis(): Redis {
-  const url = process.env.REDIS_URL ?? '';
-  const isSecure = url.startsWith('rediss://');
-  // Only use TLS when explicitly required:
-  // - URL uses rediss://
-  // - Known provider requires TLS (e.g., Upstash)
-  // - Explicit env override REDIS_FORCE_TLS=true
-  const forceTLS = isSecure || url.includes('upstash.io') || process.env.REDIS_FORCE_TLS === 'true';
-
-  // Ensure proper SNI and IPv4 to avoid ETIMEDOUT on some hosts/providers (e.g., Upstash)
-  let servername: string | undefined;
-  try {
-    const parsed = new URL(url);
-    servername = parsed.hostname;
-  } catch {
-    servername = undefined;
-  }
-
-  const redis = new Redis(url, {
-    // Important for BullMQ
-    maxRetriesPerRequest: null as unknown as number | null,
-    enableReadyCheck: true,
-    // Do not set commandTimeout to avoid blocking command timeouts (e.g., XREAD)
-    connectTimeout: 15_000,
-    keepAlive: 15_000,
-    family: 4, // Prefer IPv4 to avoid connectivity issues in some environments
-    enableOfflineQueue: true,
-    retryStrategy: (times) => Math.min(1000 * Math.pow(2, times), 30_000),
-    reconnectOnError: (err: Error) => {
-      if (err.message.includes('max requests limit exceeded')) return false;
-      return /READONLY|ECONNRESET|ETIMEDOUT/.test(err.message) ? 2 : false;
-    },
-    ...(forceTLS ? { tls: { rejectUnauthorized: false, ...(servername ? { servername } : {}) } } : {}),
-  });
-
-  // Optional: Attempt to set eviction policy only when explicitly allowed
-  if (process.env.ALLOW_REDIS_CONFIG_SET === 'true') {
-    redis.on('ready', async () => {
-      try {
-        await redis.config('SET', 'maxmemory-policy', 'noeviction');
-        console.log('✅ Redis eviction policy set to noeviction for queue reliability');
-      } catch (error) {
-        console.warn('⚠️ Could not set eviction policy (Redis may be managed):', (error as Error).message);
-      }
-    });
-  }
-
-  return redis;
+  return sharedRedis as unknown as Redis;
 }
 
 // ===== أنواع ومساعدات صغيرة آمنة =====
