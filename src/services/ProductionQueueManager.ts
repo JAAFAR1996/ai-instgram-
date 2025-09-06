@@ -130,6 +130,11 @@ type Logger = {
 function makeBullRedis(): Redis {
   const url = process.env.REDIS_URL ?? '';
   const isSecure = url.startsWith('rediss://');
+  // PRODUCTION FIX: Force TLS for production environments even without rediss://
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isRender = process.env.RENDER || process.env.RENDER_SERVICE_ID;
+  const forceTLS = isSecure || isProduction || isRender || url.includes('upstash.io');
+  
   const redis = new Redis(url, {
     // Important for BullMQ
     maxRetriesPerRequest: null as unknown as number | null,
@@ -137,7 +142,7 @@ function makeBullRedis(): Redis {
     // Do not set commandTimeout to avoid blocking command timeouts (e.g., XREAD)
     connectTimeout: 10_000,
     keepAlive: 10_000,
-    ...(isSecure ? { tls: {} } : {}),
+    ...(forceTLS ? { tls: { rejectUnauthorized: false } } : {}),
   });
 
   // PRODUCTION FIX: Set eviction policy immediately after connection

@@ -5,7 +5,7 @@
  * ===============================================
  */
 
-import { Pool } from 'pg';
+import { Pool, PoolConfig } from 'pg';
 import fs from 'fs';
 import path from 'path';
 import { getLogger } from '../services/logger.js';
@@ -26,16 +26,53 @@ export function initializePool(): Pool {
     throw new Error('DATABASE_URL environment variable is required');
   }
 
-  pool = new Pool({
+  // Build PoolConfig with robust SSL handling
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isRender = process.env.IS_RENDER === 'true' || process.env.RENDER === 'true';
+
+  // Decide whether to force SSL
+  const urlLower = databaseUrl.toLowerCase();
+  const sslModeRequire = urlLower.includes('sslmode=require') || urlLower.includes('ssl=true');
+  const forceSsl = (
+    process.env.DB_SSL_FORCE === 'true' ||
+    isProduction ||
+    isRender ||
+    /(neon\.tech|supabase\.co|render\.com|railway\.app|aws|amazonaws\.com)/i.test(databaseUrl)
+  );
+
+  // Configure TLS options
+  const ca = process.env.DB_SSL_CA; // optional PEM string
+  const strictEnv = process.env.DB_SSL_STRICT;
+  const strict = typeof strictEnv === 'string' ? (strictEnv === 'true') : false;
+  const rejectUnauthorized = strict ? true : process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true';
+
+  let ssl: PoolConfig['ssl'] = false;
+  if (sslModeRequire || forceSsl) {
+    // Default to rejectUnauthorized=false for broad managed-DB compatibility.
+    // Allow opting into strict validation via DB_SSL_STRICT=true or DB_SSL_REJECT_UNAUTHORIZED=true
+    const shouldReject = rejectUnauthorized === true;
+    ssl = ca
+      ? { rejectUnauthorized: shouldReject, ca }
+      : { rejectUnauthorized: shouldReject };
+    log.info('🔐 Enabling PostgreSQL SSL', {
+      reason: sslModeRequire ? 'sslmode=require/url' : 'forced_by_env/provider',
+      strict: shouldReject,
+      hasCA: !!ca
+    });
+  } else {
+    log.info('PostgreSQL SSL disabled (not required by URL/env)');
+  }
+
+  const cfg: PoolConfig = {
     connectionString: databaseUrl,
-    ssl: databaseUrl.includes('sslmode=require') ? {
-      rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false'
-    } : false,
+    ssl,
     max: Number(process.env.DB_MAX_CONNECTIONS || process.env.DATABASE_POOL_MAX || 20),
     min: Number(process.env.DATABASE_POOL_MIN || 2),
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT || 10000),
-  });
+  };
+
+  pool = new Pool(cfg);
 
   pool.on('error', (err) => {
     log.error('Unexpected database pool error:', err);
