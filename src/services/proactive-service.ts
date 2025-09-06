@@ -341,7 +341,7 @@ export class ProactiveCustomerService {
         manychatId = await getManychatIdByInstagramUsername(merchantId, customerId);
         if (manychatId) {
           const mc = new ManyChatService();
-          const res = await mc.sendMessage(merchantId, manychatId, message, { messageTag: 'POST_PURCHASE_UPDATE', outside24h: true });
+          const res = await mc.sendMessage(merchantId, manychatId, message);
           mcResult = { success: res.success };
           if (res.messageId) mcResult.messageId = res.messageId;
           if (res.error) mcResult.error = res.error;

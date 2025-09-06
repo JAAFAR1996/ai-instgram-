@@ -1422,6 +1422,23 @@ export class ProductionQueueManager {
     }
   }
 
+  /**
+   * Clean up stale failed jobs (e.g., outside 24h policy rejections)
+   */
+  async cleanupStaleMessages(): Promise<void> {
+    if (!this.queue) return;
+    try {
+      const failed = await this.queue.getFailed();
+      const stale = failed.filter(j => typeof j.failedReason === 'string' && /24[- ]?hour|outside 24|policy/i.test(j.failedReason ?? ''));
+      for (const job of stale) {
+        try { await job.remove(); } catch {}
+      }
+      this.logger.info('🧹 Cleaning stale messages from DLQ', { totalFailed: failed.length, cleaned: stale.length });
+    } catch (error) {
+      this.logger.warn('Failed to clean stale messages', { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   private async processWebhookJob(jobData: QueueJob): Promise<ProcessedWebhookResult> {
     const startTime = Date.now();
     

@@ -25,6 +25,7 @@ export interface ManyChatResponse {
   error?: string;
   timestamp: Date;
   platform?: string;
+  deliveryStatus?: string;
 }
 
 export interface ManyChatSubscriber {
@@ -135,9 +136,7 @@ export class ManyChatService {
     });
   }
 
-  private isAllowedTag(tag?: string): tag is ManyChatOptions['messageTag'] {
-    return tag === 'HUMAN_AGENT' || tag === 'POST_PURCHASE_UPDATE' || tag === 'ACCOUNT_UPDATE' || tag === 'CONFIRMED_EVENT_UPDATE';
-  }
+  // removed isAllowedTag: message tags are no longer used
 
   /**
    * Send message via ManyChat API
@@ -156,6 +155,25 @@ export class ManyChatService {
           messageLength: message.length
         });
 
+        // Instagram policy compliance: block outside 24h window
+        const hoursSinceLastInteraction = await this.getHoursSinceLastInteraction(subscriberId);
+        if (hoursSinceLastInteraction > 24) {
+          this.logger.warn('⏰ Message blocked - Instagram 24h policy compliance', {
+            merchantId,
+            subscriberId,
+            hoursSinceLastInteraction,
+            policy: 'instagram_24h_window'
+          });
+
+          return {
+            success: false,
+            error: 'Message blocked: Outside 24-hour window (Instagram policy)',
+            deliveryStatus: 'blocked_policy',
+            timestamp: new Date(),
+            platform: 'instagram'
+          } satisfies ManyChatResponse;
+        }
+
         const payload: Record<string, unknown> = {
           subscriber_id: subscriberId,
           data: {
@@ -169,10 +187,7 @@ export class ManyChatService {
           }
         };
 
-        // لا تضع أي message_tag إلا خارج نافذة 24 ساعة وبالتاغات المدعومة فقط
-        if (options?.outside24h && this.isAllowedTag(options.messageTag)) {
-          (payload as any).message_tag = options.messageTag;
-        }
+        // لا تستخدم message_tag لرسائل داخل نافذة 24 ساعة
 
         const response = await this.makeAPIRequest('/fb/sending/sendContent', {
           method: 'POST',
@@ -209,9 +224,25 @@ export class ManyChatService {
           payload: {
             subscriber_id: subscriberId,
             content: [{ type: 'text', text: message }],
-            ...(options?.outside24h && this.isAllowedTag(options.messageTag) ? { message_tag: options.messageTag } : {})
           }
         });
+
+        // Handle 24h policy errors explicitly - do not retry
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg.includes('more than 24 hours ago') || msg.includes('without a message tag')) {
+          this.logger.info('⏰ Instagram 24h policy: Message rejected', {
+            merchantId,
+            subscriberId,
+            compliance: 'instagram_policy'
+          });
+          return {
+            success: false,
+            error: 'Instagram policy: Outside 24-hour window',
+            deliveryStatus: 'policy_blocked',
+            timestamp: new Date(),
+            platform: 'instagram'
+          } satisfies ManyChatResponse;
+        }
 
         // Retry with exponential backoff
         return await this.retryMessage(merchantId, subscriberId, message, options);
@@ -227,6 +258,26 @@ export class ManyChatService {
     }
 
     return result.result as ManyChatResponse;
+  }
+
+  // دالة جديدة للتحقق من آخر تفاعل
+  private async getHoursSinceLastInteraction(subscriberId: string): Promise<number> {
+    try {
+      const response = await this.makeAPIRequest(
+        `/fb/subscriber/getInfo?subscriber_id=${subscriberId}`,
+        { method: 'GET' }
+      );
+      const ts = (response?.data?.last_interaction_at ?? response?.data?.lastInteractionAt) as string | undefined;
+      if (ts) {
+        const lastInteraction = new Date(ts);
+        const now = new Date();
+        return Math.floor((now.getTime() - lastInteraction.getTime()) / (1000 * 60 * 60));
+      }
+      return 25; // treat as outside window by default
+    } catch (error) {
+      this.logger.error('Error checking last interaction', { subscriberId, error: error instanceof Error ? error.message : String(error) });
+      return 25;
+    }
   }
 
   /**
