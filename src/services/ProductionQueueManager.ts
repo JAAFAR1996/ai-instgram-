@@ -2552,8 +2552,7 @@ export class ProductionQueueManager {
             const sendResult = await manyChatService.sendMessage(
               jobData.merchantId,
               subscriberId,
-              result.aiResponse,
-              { messageTag: 'CUSTOMER_FEEDBACK' }
+              result.aiResponse
             );
             
             if (sendResult.success) {

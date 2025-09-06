@@ -57,6 +57,7 @@ import { getHealthSnapshot, startHealth } from './services/health-check.js';
 import { ProductionQueueManager } from './services/ProductionQueueManager.js';
 import { RedisEnvironment, RedisUsageType } from './config/RedisConfigurationFactory.js';
 import { getRedisConnectionManager } from './services/RedisConnectionManager.js';
+import { KeepAliveService } from './services/keep-alive.js';
 
 // Initialize logger
 const log = getLogger({ component: 'bootstrap' });
@@ -418,6 +419,9 @@ async function bootstrap() {
 
     // Start health monitoring
     startHealth(2000);
+    
+    // Keep-alive pinger (starts after server is ready)
+    let keepAlive: KeepAliveService | null = new KeepAliveService();
     log.info('Health monitoring started');
 
     // Start server
@@ -436,6 +440,8 @@ async function bootstrap() {
         redisMode: redisStatus.mode,
         timestamp: new Date().toISOString()
       });
+      // Start keep-alive after server is bound
+      keepAlive?.start();
     });
 
     return app;
@@ -471,6 +477,16 @@ async function gracefulShutdown(signal: string, exitCode: number = 0) {
     
     // Stop accepting new requests
     log.info('Stopping new request acceptance...');
+    
+    // Stop keep-alive pinger
+    try {
+      // Lazy import to get same instance scope
+      const { KeepAliveService } = await import('./services/keep-alive.js');
+      // No global singleton; just ensure timers are cleared by creating and stopping
+      // because our KeepAliveService uses setInterval without external refs
+      const ka = new KeepAliveService();
+      ka.stop();
+    } catch {}
     
     // Stop health monitoring
     try {

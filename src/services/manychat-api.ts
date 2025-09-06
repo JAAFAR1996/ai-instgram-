@@ -13,7 +13,9 @@ import { withRetry } from '../utils/retry.js';
 
 // Types
 export interface ManyChatOptions {
-  messageTag?: string;
+  // Only use when outside the 24h window AND using an allowed tag
+  messageTag?: 'HUMAN_AGENT' | 'POST_PURCHASE_UPDATE' | 'ACCOUNT_UPDATE' | 'CONFIRMED_EVENT_UPDATE';
+  outside24h?: boolean;
   priority?: 'low' | 'normal' | 'high';
 }
 
@@ -133,6 +135,10 @@ export class ManyChatService {
     });
   }
 
+  private isAllowedTag(tag?: string): tag is ManyChatOptions['messageTag'] {
+    return tag === 'HUMAN_AGENT' || tag === 'POST_PURCHASE_UPDATE' || tag === 'ACCOUNT_UPDATE' || tag === 'CONFIRMED_EVENT_UPDATE';
+  }
+
   /**
    * Send message via ManyChat API
    */
@@ -150,7 +156,7 @@ export class ManyChatService {
           messageLength: message.length
         });
 
-        const payload = {
+        const payload: Record<string, unknown> = {
           subscriber_id: subscriberId,
           data: {
             version: "v2",
@@ -160,9 +166,13 @@ export class ManyChatService {
                 text: message
               }]
             }
-          },
-          message_tag: options?.messageTag || 'CUSTOMER_FEEDBACK',
+          }
         };
+
+        // لا تضع أي message_tag إلا خارج نافذة 24 ساعة وبالتاغات المدعومة فقط
+        if (options?.outside24h && this.isAllowedTag(options.messageTag)) {
+          (payload as any).message_tag = options.messageTag;
+        }
 
         const response = await this.makeAPIRequest('/fb/sending/sendContent', {
           method: 'POST',
@@ -199,7 +209,7 @@ export class ManyChatService {
           payload: {
             subscriber_id: subscriberId,
             content: [{ type: 'text', text: message }],
-            message_tag: options?.messageTag || 'CUSTOMER_FEEDBACK'
+            ...(options?.outside24h && this.isAllowedTag(options.messageTag) ? { message_tag: options.messageTag } : {})
           }
         });
 
@@ -808,10 +818,11 @@ export class ManyChatService {
     merchantId: string,
     subscriberId: string,
     message: string,
-    options?: { tag?: string }
+    options?: { tag?: ManyChatOptions['messageTag']; outside24h?: boolean }
   ): Promise<ManyChatResponse> {
     return this.sendMessage(merchantId, subscriberId, message, {
-      messageTag: options?.tag || 'CUSTOMER_FEEDBACK'
+      messageTag: options?.tag,
+      outside24h: options?.outside24h
     });
   }
 

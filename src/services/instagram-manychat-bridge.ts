@@ -242,12 +242,17 @@ export class InstagramManyChatBridge {
 
     // Step 2: Try to send through ManyChat first
     try {
+      // Determine 24-hour window
+      const withinWindow = await this.checkMessageWindow(data.merchantId, data.customerId);
+      const outside24h = !withinWindow;
+
       const manyChatResult = await this.sendToManyChat(
         data.merchantId,
         data.customerId,
         aiResponse,
         {
-          messageTag: this.getMessageTag(data.interactionType),
+          // استخدام tag فقط خارج نافذة 24 ساعة وبقيم مدعومة
+          messageTag: outside24h ? this.getMessageTag(data.interactionType) : undefined,
           priority: options.priority
         }
       );
@@ -459,8 +464,10 @@ export class InstagramManyChatBridge {
     
     try {
       // Send using the ManyChat subscriber ID, not the Instagram ID
-      const tag = ((options as { messageTag?: string } | undefined)?.messageTag);
-      const result = await this.manyChatService.sendText(merchantId, mcId, message, { tag });
+      const tag = ((options as { messageTag?: 'HUMAN_AGENT' | 'POST_PURCHASE_UPDATE' | 'ACCOUNT_UPDATE' | 'CONFIRMED_EVENT_UPDATE' } | undefined)?.messageTag);
+      // Pass outside24h only when tag is present
+      const within = await this.checkMessageWindow(merchantId, username);
+      const result = await this.manyChatService.sendText(merchantId, mcId, message, { tag, outside24h: !within });
       return { ...result, mcId };
       
     } catch (error) {
@@ -488,8 +495,9 @@ export class InstagramManyChatBridge {
           if (found) {
             // Update our mapping and retry
             await upsertManychatMapping(merchantId, username, found.subscriber_id);
-            const tag = ((options as { messageTag?: string } | undefined)?.messageTag);
-            return await this.manyChatService.sendText(merchantId, found.subscriber_id, message, { tag });
+            const tag = ((options as { messageTag?: 'HUMAN_AGENT' | 'POST_PURCHASE_UPDATE' | 'ACCOUNT_UPDATE' | 'CONFIRMED_EVENT_UPDATE' } | undefined)?.messageTag);
+            const within = await this.checkMessageWindow(merchantId, username);
+            return await this.manyChatService.sendText(merchantId, found.subscriber_id, message, { tag, outside24h: !within });
           } else {
             // Still no subscriber - throw error to trigger fallback
             const fallbackError = new Error('Instagram subscriber still not found in ManyChat after resync') as Error & { code: string };
@@ -628,19 +636,9 @@ export class InstagramManyChatBridge {
   /**
    * Get message tag for ManyChat
    */
-  private getMessageTag(interactionType: string): string {
-    switch (interactionType) {
-      case 'dm':
-        return 'CUSTOMER_FEEDBACK';
-      case 'comment':
-        return 'COMMENT_RESPONSE';
-      case 'story_reply':
-        return 'STORY_INTERACTION';
-      case 'story_mention':
-        return 'STORY_MENTION';
-      default:
-        return 'CUSTOMER_FEEDBACK';
-    }
+  private getMessageTag(_interactionType: string): 'HUMAN_AGENT' | 'POST_PURCHASE_UPDATE' | 'ACCOUNT_UPDATE' | 'CONFIRMED_EVENT_UPDATE' {
+    // افتراضي آمن: HUMAN_AGENT عند الحاجة خارج 24 ساعة
+    return 'HUMAN_AGENT';
   }
 
 
