@@ -158,23 +158,26 @@ export class ManyChatService {
           messageLength: message.length
         });
 
-        // Instagram policy compliance: block outside 24h window
-        const hoursSinceLastInteraction = await this.getHoursSinceLastInteraction(subscriberId);
-        if (hoursSinceLastInteraction > 24 && !options?.isResponseToNewMessage) {
-          this.logger.warn('⏰ Message blocked - Instagram 24h policy compliance', {
-            merchantId,
-            subscriberId,
-            hoursSinceLastInteraction,
-            policy: 'instagram_24h_window'
-          });
+        // Instagram policy compliance: block outside 24h window for automated messages only
+        // For direct replies to new incoming messages, skip the API check entirely to avoid stale timestamps
+        if (!options?.isResponseToNewMessage) {
+          const hoursSinceLastInteraction = await this.getHoursSinceLastInteraction(subscriberId);
+          if (hoursSinceLastInteraction > 24) {
+            this.logger.warn('⏰ Message blocked - Instagram 24h policy compliance', {
+              merchantId,
+              subscriberId,
+              hoursSinceLastInteraction,
+              policy: 'instagram_24h_window'
+            });
 
-          return {
-            success: false,
-            error: 'Message blocked: Outside 24-hour window (Instagram policy)',
-            deliveryStatus: 'blocked_policy',
-            timestamp: new Date(),
-            platform: 'instagram'
-          } satisfies ManyChatResponse;
+            return {
+              success: false,
+              error: 'Message blocked: Outside 24-hour window (Instagram policy)',
+              deliveryStatus: 'blocked_policy',
+              timestamp: new Date(),
+              platform: 'instagram'
+            } satisfies ManyChatResponse;
+          }
         }
 
         const payload: Record<string, unknown> = {
