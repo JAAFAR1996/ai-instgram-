@@ -236,6 +236,31 @@ export class ManyChatService {
         // Handle 24h policy errors explicitly - do not retry
         const msg = error instanceof Error ? error.message : String(error);
         if (msg.includes('more than 24 hours ago') || msg.includes('without a message tag')) {
+          // For direct replies, ManyChat may lag updating last_interaction_at.
+          // Try a couple of short retries to allow propagation, then give up.
+          if (options?.isResponseToNewMessage) {
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              await new Promise((r) => setTimeout(r, 500 * attempt));
+              try {
+                const retryResponse = await this.makeAPIRequest('/fb/sending/sendContent', {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    subscriber_id: subscriberId,
+                    data: { version: 'v2', content: { messages: [{ type: 'text', text: message }] } }
+                  })
+                });
+                if (retryResponse.status === 'success') {
+                  this.logger.info('✅ ManyChat message sent after short retry', { merchantId, subscriberId, attempt });
+                  return {
+                    success: true,
+                    messageId: retryResponse.message_id,
+                    timestamp: new Date(),
+                    platform: 'instagram'
+                  } satisfies ManyChatResponse;
+                }
+              } catch (_e) {}
+            }
+          }
           this.logger.info('⏰ Instagram 24h policy: Message rejected', {
             merchantId,
             subscriberId,
