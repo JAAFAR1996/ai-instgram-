@@ -51,16 +51,22 @@ export class PredictiveSchedulerService {
       });
     }, proactiveMessagesIntervalMs);
 
-    // Generate new predictions and analytics
+    // Generate new predictions and analytics with timeout
     setInterval(() => {
-      this.runPredictiveAnalytics().catch(err => {
+      Promise.race([
+        this.runPredictiveAnalytics(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Predictive analytics timeout after 4 minutes')), 240000))
+      ]).catch(err => {
         this.log.error('Predictive analytics failed', { error: String(err) });
       });
     }, predictionsIntervalMs);
 
-    // Cleanup old data
+    // Cleanup old data with timeout
     setInterval(() => {
-      this.cleanupOldData().catch(err => {
+      Promise.race([
+        this.cleanupOldData(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Data cleanup timeout after 2 minutes')), 120000))
+      ]).catch(err => {
         this.log.error('Data cleanup failed', { error: String(err) });
       });
     }, cleanupIntervalMs);

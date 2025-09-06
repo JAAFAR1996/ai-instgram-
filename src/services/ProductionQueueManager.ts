@@ -130,7 +130,7 @@ type Logger = {
 function makeBullRedis(): Redis {
   const url = process.env.REDIS_URL ?? '';
   const isSecure = url.startsWith('rediss://');
-  return new Redis(url, {
+  const redis = new Redis(url, {
     // Important for BullMQ
     maxRetriesPerRequest: null as unknown as number | null,
     enableReadyCheck: true,
@@ -139,6 +139,18 @@ function makeBullRedis(): Redis {
     keepAlive: 10_000,
     ...(isSecure ? { tls: {} } : {}),
   });
+
+  // PRODUCTION FIX: Set eviction policy immediately after connection
+  redis.on('ready', async () => {
+    try {
+      await redis.config('SET', 'maxmemory-policy', 'noeviction');
+      console.log('✅ Redis eviction policy set to noeviction for queue reliability');
+    } catch (error) {
+      console.warn('⚠️ Could not set eviction policy (Redis may be managed):', (error as Error).message);
+    }
+  });
+
+  return redis;
 }
 
 // ===== أنواع ومساعدات صغيرة آمنة =====
@@ -218,6 +230,14 @@ export class ProductionQueueManager {
           backoff: { type: 'exponential', delay: 2000 }
         }
       });
+
+      // PRODUCTION FIX: Clear any stuck failed jobs from old instances
+      try {
+        await this.queue.clean(0, 50, 'failed'); // Remove up to 50 failed jobs
+        this.logger.info('🧹 Cleaned stuck failed jobs from previous deployments');
+      } catch (cleanError) {
+        this.logger.warn('Could not clean failed jobs:', serializeError(cleanError));
+      }
 
       // 3. تهيئة webhook handler
       this.webhookHandler = await getInstagramWebhookHandler();

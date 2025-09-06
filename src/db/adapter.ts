@@ -427,6 +427,14 @@ export class DatabaseAdapter implements IDatabase {
         setTimeout(() => reject(new Error('Health check timeout')), 10000)
       );
       
+      // PRODUCTION OPTIMIZATION: Set query timeout for all connections
+      try {
+        await this.pool.query('SET statement_timeout = 30000'); // 30 seconds max per query
+        log.debug('Set statement_timeout to 30 seconds for query optimization');
+      } catch (err) {
+        log.warn('Could not set statement_timeout', { error: (err as Error).message });
+      }
+      
       const queryPromise = this.pool.query('SELECT 1 as test');
       await Promise.race([queryPromise, timeoutPromise]);
       
