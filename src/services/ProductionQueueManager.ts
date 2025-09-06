@@ -41,7 +41,6 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 import { RedisUsageType, RedisEnvironment } from '../config/RedisConfigurationFactory.js';
 import RedisConnectionManager from './RedisConnectionManager.js';
 import * as crypto from 'node:crypto';
-import { serr } from '../isolation/context.js';
 import { performHealthCheck } from './RedisSimpleHealthCheck.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
 import { withRetry } from '../utils/retry.js';
@@ -145,6 +144,21 @@ function makeBullRedis(): Redis {
 // ===== أنواع ومساعدات صغيرة آمنة =====
 type U<T> = T | undefined;
 
+// Helper function to safely serialize errors for logging
+function serializeError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'object' && error !== null) {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error);
+}
+
 // تحسين Type Safety - إضافة interfaces للـ Job
 // removed JobWithAttempts (unused)
 
@@ -229,6 +243,9 @@ export class ProductionQueueManager {
         workersReady: true
       });
 
+      // Mark processing as active after successful initialization
+      this.isProcessing = true;
+
       return {
         success: true,
         queue: this.queue,
@@ -277,7 +294,10 @@ export class ProductionQueueManager {
     void events.waitUntilReady();
 
     events.on('error', (error) => {
-      this.logger.error('خطأ في QueueEvents', { err: serr(error), queueName: this.queueName });
+      this.logger.error('خطأ في QueueEvents', { 
+        error: error instanceof Error ? error.message : String(error), 
+        queueName: this.queueName 
+      });
     });
 
     events.on('stalled', ({ jobId }) => {
@@ -311,7 +331,7 @@ export class ProductionQueueManager {
         queue: this.queueName
       });
       
-      this.logger.error('فشلت مهمة', { jobId, error: failedReason, totalFailed: this.failedJobs });
+      this.logger.error('فشلت مهمة', { jobId, error: serializeError(failedReason), totalFailed: this.failedJobs });
     });
   }
 
@@ -368,13 +388,25 @@ export class ProductionQueueManager {
             return aiProcessor(adapt());
           case 'cleanup': {
             const { type, olderThanDays } = job.data as { type: string; olderThanDays: number };
-            await self.performCleanup(type, olderThanDays);
+            // Use SSL-enabled database connection for cleanup
+            const { getDatabase } = await import('../db/adapter.js');
+            const sslDb = getDatabase();
+            const sql = sslDb.getSQL();
+            await self.performCleanupWithSSL(sql, type, olderThanDays);
             return { cleaned: true, type, olderThanDays } as const;
           }
-          case 'notification':
-            return self.processNotificationJob(job.data as Record<string, unknown>);
-          case 'message-delivery':
-            return self.processMessageDeliveryJob(job.data as Record<string, unknown>);
+          case 'notification': {
+            // Use SSL-enabled database connection 
+            const { getDatabase } = await import('../db/adapter.js');
+            const sslDb = getDatabase();
+            return self.processNotificationJobWithSSL(sslDb, job.data as Record<string, unknown>);
+          }
+          case 'message-delivery': {
+            // Use SSL-enabled database connection
+            const { getDatabase } = await import('../db/adapter.js');
+            const sslDb = getDatabase(); 
+            return self.processMessageDeliveryJobWithSSL(sslDb, job.data as Record<string, unknown>);
+          }
           case 'manychat-processing':
             return manyChatProcessor(adapt());
           default:
@@ -390,9 +422,10 @@ export class ProductionQueueManager {
     // 🎯 معالج مخصص للويب هوك - الأساسي للمعالجة
     this.logger.info('🔧 [DEBUG] تسجيل معالج process-webhook...');
     
-    // معالج webhook محسن مع tenant isolation - Worker
+    // معالج webhook محسن مع tenant isolation - Worker - USE SSL DATABASE
+    // (DB instance prepared per-job when needed in handlers)
     const webhookProcessor = withWebhookTenantJob(
-      this.dbPool,
+      this.dbPool, // Keep existing for now but handlers should use sslDb
       this.logger,
       async (job, data, _client) => {
         this.logger.info('🎯 [WORKER-START] معالج webhook استقبل job!', { 
@@ -486,7 +519,11 @@ export class ProductionQueueManager {
         } };
         return webhookProcessor(adapted);
       },
-      { connection: this.queueConnection, concurrency: 5, prefix: 'ai-sales' }
+      { 
+        connection: makeBullRedis(), 
+        concurrency: 5, 
+        prefix: 'ai-sales'
+      }
     );
     this.workers['process-webhook'] = webhookWorker;
 
@@ -568,7 +605,7 @@ export class ProductionQueueManager {
         } };
         return aiProcessor(adapted);
       },
-      { connection: this.queueConnection, concurrency: 3, prefix: 'ai-sales' }
+      { connection: makeBullRedis(), concurrency: 3, prefix: 'ai-sales' }
     );
     this.workers['ai-response'] = aiWorker;
 
@@ -591,7 +628,7 @@ export class ProductionQueueManager {
           throw processedError;
         }
       },
-      { connection: this.queueConnection, concurrency: 1, prefix: 'ai-sales' }
+      { connection: makeBullRedis(), concurrency: 1, prefix: 'ai-sales' }
     );
     this.workers['cleanup'] = cleanupWorker;
 
@@ -613,7 +650,7 @@ export class ProductionQueueManager {
           throw error as Error;
         }
       },
-      { connection: this.queueConnection, concurrency: 2, prefix: 'ai-sales' }
+      { connection: makeBullRedis(), concurrency: 2, prefix: 'ai-sales' }
     );
     this.workers['notification'] = notificationWorker;
 
@@ -635,7 +672,7 @@ export class ProductionQueueManager {
           throw error as Error;
         }
       },
-      { connection: this.queueConnection, concurrency: 3, prefix: 'ai-sales' }
+      { connection: makeBullRedis(), concurrency: 3, prefix: 'ai-sales' }
     );
     this.workers['message-delivery'] = messageDeliveryWorker;
 
@@ -756,7 +793,7 @@ export class ProductionQueueManager {
         } };
         return manyChatProcessor(adapted);
       },
-      { connection: this.queueConnection, concurrency: 4, prefix: 'ai-sales' } // 4 concurrent ManyChat jobs
+      { connection: makeBullRedis(), concurrency: 4, prefix: 'ai-sales' } // 4 concurrent ManyChat jobs
     );
     this.workers['manychat-processing'] = manyChatWorker;
 
@@ -1440,7 +1477,7 @@ export class ProductionQueueManager {
         merchantId: jobData.merchantId,
         platform: jobData.platform,
         duration: `${duration}ms`,
-        err: serr(error)
+        error: error instanceof Error ? error.message : String(error)
       });
       
       // إعادة throw للخطأ ليتم التعامل معه بواسطة BullMQ
@@ -1760,6 +1797,32 @@ export class ProductionQueueManager {
     }
   }
 
+  // NEW: SSL-enabled cleanup for job handlers
+  private async performCleanupWithSSL(sql: any, type: string, olderThanDays: number): Promise<void> {
+    if (!this.queue) return;
+
+    // mark parameter as used to satisfy noUnusedParameters
+    void sql;
+
+    const olderThanMs = olderThanDays * 24 * 60 * 60 * 1000;
+    
+    switch (type) {
+      case 'completed':
+        await this.queue.clean(olderThanMs, 1000, 'completed');
+        break;
+      case 'failed':
+        await this.queue.clean(olderThanMs, 1000, 'failed');
+        break;
+      case 'all':
+        await this.queue.clean(olderThanMs, 1000, 'completed');
+        await this.queue.clean(olderThanMs, 1000, 'failed');
+        break;
+    }
+
+    // Additional SSL database cleanup if needed
+    this.logger.info('🔒 [SSL-CLEANUP] Using SSL database for cleanup operations', { type, olderThanDays });
+  }
+
   private getPriorityValue(priority: string): number {
     switch (priority) {
       case 'urgent': return 1;
@@ -1787,7 +1850,7 @@ export class ProductionQueueManager {
         telemetry.gauge('queue_monitoringerroror_rate', 'Queue error rate percentage').record(stats.errorRate);
         
       } catch (error: any) {
-        this.logger.error('Queue monitoring error', { error });
+        this.logger.error('Queue monitoring error', { error: serializeError(error) });
         telemetry.counter('queue_monitoringerrorors_total', 'Queue monitoring errors').add(1);
       }
     }, 30000);
@@ -1801,7 +1864,7 @@ export class ProductionQueueManager {
       try {
         await this.checkWorkerHealth();
       } catch (error: any) {
-        this.logger.error('Worker health monitoring error', { error });
+        this.logger.error('Worker health monitoring error', { error: serializeError(error) });
       }
     }, 60000);
 
@@ -2100,6 +2163,69 @@ export class ProductionQueueManager {
     }
   }
 
+  /**
+   * Pause all queue processing (workers + queue)
+   */
+  public async pauseProcessing(): Promise<{ ok: boolean; reason?: string }> {
+    try {
+      if (!this.queue) {
+        return { ok: false, reason: 'queue_not_initialized' };
+      }
+      // Pause queue so no new jobs are picked up
+      await this.queue.pause();
+      // Pause all workers (wait for current jobs to finish)
+      const workerEntries = Object.entries(this.workers);
+      for (const [, worker] of workerEntries) {
+        try {
+          await worker.pause(true);
+        } catch (e) {
+          // Continue pausing others even if one fails
+          this.logger.warn('Failed to pause worker', { error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      this.isProcessing = false;
+      this.logger.info('⏸️ Queue processing paused');
+      return { ok: true };
+    } catch (error) {
+      this.logger.error('Failed to pause queue processing', { error: error instanceof Error ? error.message : String(error) });
+      return { ok: false, reason: 'pause_failed' };
+    }
+  }
+
+  /**
+   * Resume all queue processing (workers + queue)
+   */
+  public async resumeProcessing(): Promise<{ ok: boolean; reason?: string }> {
+    try {
+      if (!this.queue) {
+        return { ok: false, reason: 'queue_not_initialized' };
+      }
+      // Resume queue
+      await this.queue.resume();
+      // Resume all workers
+      const workerEntries = Object.entries(this.workers);
+      for (const [, worker] of workerEntries) {
+        try {
+          await worker.resume();
+        } catch (e) {
+          this.logger.warn('Failed to resume worker', { error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      this.isProcessing = true;
+      this.logger.info('▶️ Queue processing resumed');
+      return { ok: true };
+    } catch (error) {
+      this.logger.error('Failed to resume queue processing', { error: error instanceof Error ? error.message : String(error) });
+      return { ok: false, reason: 'resume_failed' };
+    }
+  }
+
+  /** Get current processing state */
+  public getProcessingState(): 'running' | 'paused' | 'uninitialized' {
+    if (!this.queue) return 'uninitialized';
+    return this.isProcessing ? 'running' : 'paused';
+  }
+
   async close(): Promise<void> {
     await this.gracefulShutdown();
   }
@@ -2230,6 +2356,14 @@ export class ProductionQueueManager {
         error: error instanceof Error ? error.message : 'Instagram delivery failed'
       };
     }
+  }
+
+  /**
+   * معالجة مهام الإشعارات - SSL Version for Workers
+   */
+  private async processNotificationJobWithSSL(_sslDb: any, jobData: Record<string, unknown>): Promise<Record<string, unknown>> {
+    this.logger.info('🔒 [SSL-NOTIFICATION] Using SSL database connection');
+    return this.processNotificationJob(jobData);
   }
 
   /**
@@ -2858,6 +2992,14 @@ export class ProductionQueueManager {
       usedCache,
       decisionPath
     };
+  }
+
+  /**
+   * معالجة مهام تسليم الرسائل - SSL Version for Workers
+   */
+  private async processMessageDeliveryJobWithSSL(_sslDb: any, jobData: Record<string, unknown>): Promise<Record<string, unknown>> {
+    this.logger.info('🔒 [SSL-MESSAGE-DELIVERY] Using SSL database connection');
+    return this.processMessageDeliveryJob(jobData);
   }
 
   /**

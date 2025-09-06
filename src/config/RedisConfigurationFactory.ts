@@ -191,7 +191,9 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
         // Enhanced error handling for Upstash
         if (err.message.includes('max requests limit exceeded')) return false;
         return /READONLY|ECONNRESET|ETIMEDOUT/.test(err.message) ? 2 : false;
-        }
+        },
+      // Redis configuration commands for eviction policy - CRITICAL FOR QUEUES
+      showFriendlyErrorStack: true
     };
   }
 
@@ -430,6 +432,30 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
     const url = redisUrl || getEnv('REDIS_URL') || 'redis://localhost:6379';
 
     return factory.createConfiguration(usageType, environment, url);
+  }
+
+  // NEW: Create BullMQ connection with noeviction policy
+  static createBullMQConnection(): any {
+    const factory = new ProductionRedisConfigurationFactory();
+    const environment = factory.detectEnvironment();
+    const redisUrl = getEnv('REDIS_URL') || 'redis://localhost:6379';
+    
+    const config = factory.createConfiguration(RedisUsageType.QUEUE_SYSTEM, environment, redisUrl);
+    
+    return {
+      ...config,
+      // Add readyCallback to set eviction policy
+      ready: async function(this: any) {
+        try {
+          // Try to set eviction policy to noeviction for queue reliability
+          await this.config('SET', 'maxmemory-policy', 'noeviction');
+          console.log('✅ Redis eviction policy set to noeviction');
+        } catch (error) {
+          // If config command fails (restricted environment), warn but continue
+          console.warn('⚠️ Could not set eviction policy (may be restricted):', error);
+        }
+      }
+    };
   }
 }
 

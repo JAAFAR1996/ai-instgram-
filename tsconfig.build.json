@@ -5,6 +5,7 @@
     "target": "ES2022", 
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "noEmit": false,
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,

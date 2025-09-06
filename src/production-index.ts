@@ -45,6 +45,7 @@ import rlsMiddleware from './middleware/rls-merchant-isolation.js';
 import { registerWebhookRoutes } from './routes/webhooks.js';
 import { registerMerchantAdminRoutes } from './routes/merchant-admin.js';
 import { registerAdminRoutes } from './routes/admin.js';
+import { registerQueueControlRoutes } from './routes/queue-admin.js';
 import { registerUtilityMessageRoutes } from './routes/utility-messages.js';
 import { registerImageSearchRoutes } from './routes/image-search.js';
 import { registerMessageAnalyticsRoutes } from './routes/message-analytics.js';
@@ -246,6 +247,7 @@ async function bootstrap() {
     registerWebhookRoutes(app, deps);
     registerMerchantAdminRoutes(app);
     registerAdminRoutes(app);
+    registerQueueControlRoutes(app, { queueManager });
     
     // Register utility messages routes
     try {
