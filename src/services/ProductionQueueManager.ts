@@ -130,19 +130,36 @@ type Logger = {
 function makeBullRedis(): Redis {
   const url = process.env.REDIS_URL ?? '';
   const isSecure = url.startsWith('rediss://');
-  // PRODUCTION FIX: Force TLS for production environments even without rediss://
-  const isProduction = process.env.NODE_ENV === 'production';
-  const isRender = process.env.RENDER || process.env.RENDER_SERVICE_ID;
-  const forceTLS = isSecure || isProduction || isRender || url.includes('upstash.io');
-  
+  // Only use TLS when explicitly required:
+  // - URL uses rediss://
+  // - Known provider requires TLS (e.g., Upstash)
+  // - Explicit env override REDIS_FORCE_TLS=true
+  const forceTLS = isSecure || url.includes('upstash.io') || process.env.REDIS_FORCE_TLS === 'true';
+
+  // Ensure proper SNI and IPv4 to avoid ETIMEDOUT on some hosts/providers (e.g., Upstash)
+  let servername: string | undefined;
+  try {
+    const parsed = new URL(url);
+    servername = parsed.hostname;
+  } catch {
+    servername = undefined;
+  }
+
   const redis = new Redis(url, {
     // Important for BullMQ
     maxRetriesPerRequest: null as unknown as number | null,
     enableReadyCheck: true,
     // Do not set commandTimeout to avoid blocking command timeouts (e.g., XREAD)
-    connectTimeout: 10_000,
-    keepAlive: 10_000,
-    ...(forceTLS ? { tls: { rejectUnauthorized: false } } : {}),
+    connectTimeout: 15_000,
+    keepAlive: 15_000,
+    family: 4, // Prefer IPv4 to avoid connectivity issues in some environments
+    enableOfflineQueue: true,
+    retryStrategy: (times) => Math.min(1000 * Math.pow(2, times), 30_000),
+    reconnectOnError: (err: Error) => {
+      if (err.message.includes('max requests limit exceeded')) return false;
+      return /READONLY|ECONNRESET|ETIMEDOUT/.test(err.message) ? 2 : false;
+    },
+    ...(forceTLS ? { tls: { rejectUnauthorized: false, ...(servername ? { servername } : {}) } } : {}),
   });
 
   // PRODUCTION FIX: Set eviction policy immediately after connection

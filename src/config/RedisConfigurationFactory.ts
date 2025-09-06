@@ -45,7 +45,8 @@ export interface QueueRedisConfig extends RedisOptions {
   connectTimeout: number;
   lazyConnect: boolean;
   family: number;
-  commandTimeout: number;
+  // Optional: avoid setting for BullMQ to prevent blocking command issues
+  commandTimeout?: number;
   retryDelayOnFailover?: number;
 }
 
@@ -179,7 +180,8 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
       connectTimeout: this.getTimeoutByEnvironment(10000, 15000),
       lazyConnect: true,
       family: 4,
-      commandTimeout: 8000,
+      // IMPORTANT: Do not set commandTimeout for BullMQ connections
+      // Blocking commands (e.g., XREAD) can be interrupted by commandTimeout
       enableOfflineQueue: true,
       enableReadyCheck: true,
       keepAlive: 15000,
