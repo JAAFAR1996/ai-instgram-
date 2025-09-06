@@ -17,6 +17,9 @@ export interface ManyChatOptions {
   messageTag?: 'HUMAN_AGENT' | 'POST_PURCHASE_UPDATE' | 'ACCOUNT_UPDATE' | 'CONFIRMED_EVENT_UPDATE';
   outside24h?: boolean;
   priority?: 'low' | 'normal' | 'high';
+  // When true, indicates this send is an immediate reply to a new user message
+  // which re-opens the 24-hour window and must be allowed
+  isResponseToNewMessage?: boolean;
 }
 
 export interface ManyChatResponse {
@@ -157,7 +160,7 @@ export class ManyChatService {
 
         // Instagram policy compliance: block outside 24h window
         const hoursSinceLastInteraction = await this.getHoursSinceLastInteraction(subscriberId);
-        if (hoursSinceLastInteraction > 24) {
+        if (hoursSinceLastInteraction > 24 && !options?.isResponseToNewMessage) {
           this.logger.warn('⏰ Message blocked - Instagram 24h policy compliance', {
             merchantId,
             subscriberId,
@@ -869,11 +872,12 @@ export class ManyChatService {
     merchantId: string,
     subscriberId: string,
     message: string,
-    options?: { tag?: ManyChatOptions['messageTag']; outside24h?: boolean }
+    options?: { tag?: ManyChatOptions['messageTag']; outside24h?: boolean; isResponseToNewMessage?: boolean }
   ): Promise<ManyChatResponse> {
     return this.sendMessage(merchantId, subscriberId, message, {
       messageTag: options?.tag,
-      outside24h: options?.outside24h
+      outside24h: options?.outside24h,
+      isResponseToNewMessage: options?.isResponseToNewMessage
     });
   }
 

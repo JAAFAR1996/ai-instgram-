@@ -461,7 +461,7 @@ export class InstagramManyChatBridge {
     
     try {
       // Send using the ManyChat subscriber ID, not the Instagram ID
-      const result = await this.manyChatService.sendText(merchantId, mcId, message);
+      const result = await this.manyChatService.sendText(merchantId, mcId, message, { isResponseToNewMessage: true });
       return { ...result, mcId };
       
     } catch (error) {
@@ -489,7 +489,7 @@ export class InstagramManyChatBridge {
           if (found) {
             // Update our mapping and retry
             await upsertManychatMapping(merchantId, username, found.subscriber_id);
-            return await this.manyChatService.sendText(merchantId, found.subscriber_id, message);
+            return await this.manyChatService.sendText(merchantId, found.subscriber_id, message, { isResponseToNewMessage: true });
           } else {
             // Still no subscriber - throw error to trigger fallback
             const fallbackError = new Error('Instagram subscriber still not found in ManyChat after resync') as Error & { code: string };
