@@ -162,15 +162,17 @@ function makeBullRedis(): Redis {
     ...(forceTLS ? { tls: { rejectUnauthorized: false, ...(servername ? { servername } : {}) } } : {}),
   });
 
-  // PRODUCTION FIX: Set eviction policy immediately after connection
-  redis.on('ready', async () => {
-    try {
-      await redis.config('SET', 'maxmemory-policy', 'noeviction');
-      console.log('✅ Redis eviction policy set to noeviction for queue reliability');
-    } catch (error) {
-      console.warn('⚠️ Could not set eviction policy (Redis may be managed):', (error as Error).message);
-    }
-  });
+  // Optional: Attempt to set eviction policy only when explicitly allowed
+  if (process.env.ALLOW_REDIS_CONFIG_SET === 'true') {
+    redis.on('ready', async () => {
+      try {
+        await redis.config('SET', 'maxmemory-policy', 'noeviction');
+        console.log('✅ Redis eviction policy set to noeviction for queue reliability');
+      } catch (error) {
+        console.warn('⚠️ Could not set eviction policy (Redis may be managed):', (error as Error).message);
+      }
+    });
+  }
 
   return redis;
 }

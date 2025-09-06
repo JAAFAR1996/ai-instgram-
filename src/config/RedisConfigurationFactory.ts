@@ -444,20 +444,20 @@ export class ProductionRedisConfigurationFactory implements RedisConfigurationFa
     
     const config = factory.createConfiguration(RedisUsageType.QUEUE_SYSTEM, environment, redisUrl);
     
-    return {
-      ...config,
-      // Add readyCallback to set eviction policy
-      ready: async function(this: any) {
-        try {
-          // Try to set eviction policy to noeviction for queue reliability
-          await this.config('SET', 'maxmemory-policy', 'noeviction');
-          console.log('✅ Redis eviction policy set to noeviction');
-        } catch (error) {
-          // If config command fails (restricted environment), warn but continue
-          console.warn('⚠️ Could not set eviction policy (may be restricted):', error);
+    const allowConfig = getEnv('ALLOW_REDIS_CONFIG_SET') === 'true';
+    return allowConfig
+      ? {
+          ...config,
+          ready: async function(this: any) {
+            try {
+              await this.config('SET', 'maxmemory-policy', 'noeviction');
+              console.log('✅ Redis eviction policy set to noeviction');
+            } catch (error) {
+              console.warn('⚠️ Could not set eviction policy (may be restricted):', error);
+            }
+          }
         }
-      }
-    };
+      : { ...config };
   }
 }
 
