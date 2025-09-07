@@ -196,10 +196,13 @@ export async function withTimeoutRetry<T>(
       }
 
       // Exponential backoff with jitter
-      const backoffMs = Math.min(
-        config.baseDelay * Math.pow(2, attempt - 1), 
+      const baseBackoff = Math.min(
+        config.baseDelay * Math.pow(2, attempt - 1),
         config.maxDelay
       );
+      // Add jitter to prevent thundering herd. Jitter is a random value up to the base delay.
+      const jitter = Math.random() * config.baseDelay;
+      const backoffMs = baseBackoff + jitter;
       await delay(backoffMs);
     }
   }
