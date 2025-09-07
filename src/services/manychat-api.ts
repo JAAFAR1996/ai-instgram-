@@ -176,37 +176,31 @@ export class ManyChatService {
   ): Promise<ManyChatResponse> {
     const result = await this.circuitBreaker.execute(async () => {
       try {
-        // Strict 24h guard using ManyChat only (fail-closed)
-        const apiHours = await this.getHoursSinceLastInteraction(subscriberId);
-        const inboundHours = typeof options?.incomingAtMs === 'number' ? (Date.now() - options.incomingAtMs) / 3_600_000 : null;
-        const allowedTags = new Set<NonNullable<ManyChatSendContentPayloadV2['message_tag']>>([
+        // Guard: معيار النافذة حسب آخر رسالة واردة (inboundHours)
+        const inboundHours = typeof options?.incomingAtMs === 'number'
+          ? (Date.now() - options.incomingAtMs) / 3_600_000
+          : Number.POSITIVE_INFINITY;
+        // سماح بوسم HUMAN_AGENT أو الوسوم المسموحة الأخرى
+        const allowedTags = new Set<string>([
+          'HUMAN_AGENT',
           'POST_PURCHASE_UPDATE',
           'ACCOUNT_UPDATE',
           'CONFIRMED_EVENT_UPDATE',
         ]);
-        const tagProvided = options?.messageTag && allowedTags.has(options.messageTag as any);
-        const willSend = apiHours < 24 || !!tagProvided;
+        const usingTag = !!(options?.messageTag && allowedTags.has(options.messageTag));
+        const willSend = inboundHours <= 24 || usingTag;
         this.logger.info('🕒 ManyChat 24h guard metrics', {
           subscriberId,
-          apiHours: Number.isFinite(apiHours) ? apiHours.toFixed(2) : 'inf',
-          inboundHours: inboundHours == null ? null : inboundHours.toFixed(2),
+          inboundHours: Number.isFinite(inboundHours) ? inboundHours.toFixed(2) : 'inf',
+          usingTag,
           willSend,
         });
         if (!willSend) {
-          this.logger.warn('⏸️ Blocked (strict 24h): not sending content', {
+          this.logger.warn('⏸️ Blocked (inbound>24h & no tag)', {
             merchantId,
             subscriberId,
-            apiHours: Number.isFinite(apiHours) ? apiHours.toFixed(2) : 'inf'
+            inboundHours: Number.isFinite(inboundHours) ? inboundHours.toFixed(2) : 'inf'
           });
-          // Best-effort: update custom fields for audit/debug
-          try {
-            await this.updateSubscriber(merchantId, subscriberId, {
-              custom_fields: {
-                last_send_status: 'blocked_24h_no_tag',
-                ai_reply_preview: (message || '').slice(0, 140)
-              }
-            });
-          } catch {}
           return { success: false, error: 'blocked_24h_no_tag', deliveryStatus: 'blocked_policy', timestamp: new Date(), platform: 'instagram' } satisfies ManyChatResponse;
         }
         this.logger.info('📤 Sending ManyChat message', {
@@ -224,7 +218,7 @@ export class ManyChatService {
         };
         // Include tag only when explicitly provided and allowed
         try {
-          if (options?.messageTag && allowedTags.has(options.messageTag as any)) {
+          if (options?.messageTag && allowedTags.has(options.messageTag)) {
             (payload as any).message_tag = options.messageTag;
           }
         } catch {}
@@ -297,24 +291,7 @@ export class ManyChatService {
   }
 
   // دالة جديدة للتحقق من آخر تفاعل
-  private async getHoursSinceLastInteraction(subscriberId: string): Promise<number> {
-    try {
-      const response = await this.makeAPIRequest(
-        `/fb/subscriber/getInfo?subscriber_id=${subscriberId}`,
-        { method: 'GET' }
-      );
-      const ts = (response?.data?.last_interaction_at ?? response?.data?.lastInteractionAt) as string | undefined;
-      if (ts) {
-        const lastInteraction = new Date(ts);
-        const now = new Date();
-        return Math.floor((now.getTime() - lastInteraction.getTime()) / (1000 * 60 * 60));
-      }
-      return 25; // treat as outside window by default
-    } catch (error) {
-      this.logger.error('Error checking last interaction', { subscriberId, error: error instanceof Error ? error.message : String(error) });
-      return 25;
-    }
-  }
+  // removed getHoursSinceLastInteraction: inboundHours now source-of-truth
 
   /**
    * Get subscriber information from ManyChat
@@ -1004,6 +981,7 @@ export function clearManyChatService(): void {
     manyChatServiceInstance = null;
   }
 }
+
 
 
 

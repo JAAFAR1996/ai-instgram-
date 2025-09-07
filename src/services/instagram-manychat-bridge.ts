@@ -254,26 +254,9 @@ export class InstagramManyChatBridge {
         }
       );
 
-      // Success - add tags and log
+      // Success - add tags and log (skip updateSubscriber to avoid HTML 403/404)
       await this.addRelevantTags(data, manyChatResult.mcId || data.customerId, aiResponse, options);
       await this.logManyChatInteraction(data, manyChatResult, aiResponse);
-      
-      // Best-effort: update ManyChat custom field with actual AI reply
-      try {
-        if (manyChatResult.mcId) {
-          await this.manyChatService.updateSubscriber(
-            data.merchantId,
-            manyChatResult.mcId,
-            { custom_fields: { ai_reply: aiResponse } }
-          );
-        }
-      } catch (e) {
-        this.logger.warn('Failed to update ManyChat custom field ai_reply', {
-          merchantId: data.merchantId,
-          username: data.customerId,
-          error: e instanceof Error ? e.message : String(e)
-        });
-      }
       
       return manyChatResult;
       
@@ -326,12 +309,12 @@ export class InstagramManyChatBridge {
     const aiResponse = await this.generateAIResponse(data);
 
     // Send directly via Instagram API
-    const sendResult = await this.instagramSender.sendTextMessage(
-      data.merchantId,
-      data.customerId,
-      aiResponse,
-      data.conversationId
-    );
+      const sendResult = await this.instagramSender.sendTextMessage(
+        data.merchantId,
+        data.customerId,
+        aiResponse,
+        data.conversationId
+      );
 
     // Log the interaction
     await this.logLocalAIInteraction(data, sendResult, aiResponse);
