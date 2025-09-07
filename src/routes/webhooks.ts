@@ -126,15 +126,16 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
     let conversationId: string = "";
     let currentJobId: string = "";
     let eventId: string = `manychat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const mcResponse = (attrs: Record<string, unknown>) => {
+    const mcResponse = (attrs: Record<string, unknown> = {}) => {
       const duration = Date.now() - processingStartTime;
-      const replyText = typeof (attrs as any)?.ai_reply === 'string' ? String((attrs as any).ai_reply) : '';
+      const anyAttrs = attrs as any;
+      const replyText = String(anyAttrs?.ai_reply || anyAttrs?.error || 'OK');
       return {
         version: "v2",
-        messages: replyText ? [{ type: 'text', text: replyText }] : [],
+        messages: [{ type: 'text', text: replyText }],
         set_attributes: {
           processing_time: duration,
-          webhook_time: duration, // kept for backward-compatibility
+          webhook_time: duration,
           conversation_id: conversationId,
           event_id: eventId,
           job_id: currentJobId,
@@ -247,7 +248,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
       } catch (ctxErr) {
         log.error('Failed to set merchant context', ctxErr as Error);
         try { (await import('../services/compliance.js')).getComplianceService().logSecurity(sanitizedMerchantId, 'RLS_CONTEXT', 'FAILURE', { error: String(ctxErr) }); } catch {}
-        return c.json(mcResponse({ ai_reply: '??? ??? ???????. ???? ??????.', status_code: 503, error: 'context_error' }), 503);
+        return c.json(mcResponse({ ai_reply: 'Service error. Please try later.', status_code: 503, error: 'context_error' }));
       }
       // Normalize attachments (images) strictly to URL list
       const attachments = Array.isArray(data?.attachments) ? data.attachments : [];
