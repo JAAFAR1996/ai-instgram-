@@ -2554,59 +2554,8 @@ export class ProductionQueueManager {
         decisionPathCount: result.decisionPath?.length ?? 0
       });
 
-      // 🚀 SEND FINAL RESPONSE: Send AI response back to user via ManyChat
-      if (result.aiResponse && result.aiResponse.trim()) {
-        try {
-          // Get subscriber_id from database
-          const { getManychatIdByInstagramUsername } = await import('../repositories/manychat.repo.js');
-          const subscriberId = await getManychatIdByInstagramUsername(jobData.merchantId, jobData.username);
-          
-          if (subscriberId) {
-            // Send the AI response via ManyChat
-            const { ManyChatService } = await import('./manychat-api.js');
-            const manyChatService = new ManyChatService();
-            
-            const sendResult = await manyChatService.sendMessage(
-              jobData.merchantId,
-              subscriberId,
-              result.aiResponse,
-              { isResponseToNewMessage: true, incomingAtMs: jobData.metadata.processingStartTime }
-            );
-            
-            if (sendResult.success) {
-              this.logger.info('📤 [MANYCHAT-RESPONSE] تم إرسال الرد النهائي بنجاح', {
-                eventId: jobData.eventId,
-                merchantId: jobData.merchantId,
-                username: jobData.username,
-                subscriberId,
-                messageId: sendResult.messageId,
-                responseLength: result.aiResponse.length
-              });
-            } else {
-              this.logger.warn('⚠️ [MANYCHAT-RESPONSE] فشل إرسال الرد النهائي', {
-                eventId: jobData.eventId,
-                merchantId: jobData.merchantId,
-                username: jobData.username,
-                subscriberId,
-                error: sendResult.error
-              });
-            }
-          } else {
-            this.logger.warn('⚠️ [MANYCHAT-RESPONSE] لم يتم العثور على subscriber_id', {
-              eventId: jobData.eventId,
-              merchantId: jobData.merchantId,
-              username: jobData.username
-            });
-          }
-        } catch (sendError) {
-          this.logger.error('❌ [MANYCHAT-RESPONSE] خطأ في إرسال الرد النهائي', {
-            eventId: jobData.eventId,
-            merchantId: jobData.merchantId,
-            username: jobData.username,
-            error: sendError instanceof Error ? sendError.message : String(sendError)
-          });
-        }
-      } else {
+      // 🚫 Server-side sending disabled: ManyChat flow will handle sending using ai_reply
+      if (!result.aiResponse || !result.aiResponse.trim()) {
         this.logger.debug('🔍 [MANYCHAT-RESPONSE] لا يوجد رد AI لإرساله', {
           eventId: jobData.eventId,
           hasResponse: !!result.aiResponse,

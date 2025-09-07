@@ -5,18 +5,17 @@
  * ===============================================
  */
 import { Hono } from 'hono';
-import type { Pool } from 'pg';
 import { getLogger } from '../services/logger.js';
 // import { telemetry } from '../services/telemetry.js';
 import { z } from 'zod';
 import { createHmac } from 'node:crypto';
 import { getPool } from '../db/index.js';
-import { withRetry } from '../utils/retry.js';
+// import { withRetry } from '../utils/retry.js';
 import { getEnv } from '../config/env.js';
 import type { ConversationMsg } from '../services/conversation-manager.js';
-import { MCEvent as MCEventSchema, type MCEvent as MCEventType } from '../types/manychat.js';
-import { ProductionQueueManager } from '../services/ProductionQueueManager.js';
-import { RedisEnvironment } from '../config/RedisConfigurationFactory.js';
+// import { MCEvent as MCEventSchema, type MCEvent as MCEventType } from '../types/manychat.js';
+// import { ProductionQueueManager } from '../services/ProductionQueueManager.js';
+// import { RedisEnvironment } from '../config/RedisConfigurationFactory.js';
 // Zod schema for ManyChat webhook validation
 const ManyChatAttachmentSchema = z.object({
   url: z.string().url().optional(),
@@ -43,81 +42,59 @@ const InstagramWebhookVerificationSchema = z.object({
   'hub.verify_token': z.string(),
   'hub.challenge': z.string()
 });
-export interface WebhookDependencies {
-  pool: Pool;
-}
+// WebhookDependencies not needed after removing queue usage
 /**
  * Register webhook routes on the app
  */
 // Queue manager singleton to avoid per-request init/close
-let queueManagerSingleton: ProductionQueueManager | null = null;
-async function getQueueManager(pool: Pool): Promise<ProductionQueueManager> {
-  if (!queueManagerSingleton) {
-    const qLogger = {
-      info: (...args: unknown[]) => log.info(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
-      warn: (...args: unknown[]) => log.warn(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
-      error: (...args: unknown[]) => log.error(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
-      debug: (...args: unknown[]) => log.debug?.(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
-    };
-    const qm = new ProductionQueueManager(qLogger as any, RedisEnvironment.PRODUCTION, pool, 'ai-sales-production');
-    const init = await qm.initialize();
-    if (!init.success) throw new Error(`Queue initialization failed: ${init.error}`);
-    queueManagerSingleton = qm;
-  }
-  return queueManagerSingleton;
-}
-export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): void {
+// Queue manager disabled for ManyChat webhook path (server won't send proactively)
+// let queueManagerSingleton: ProductionQueueManager | null = null;
+// async function getQueueManager(pool: Pool): Promise<ProductionQueueManager> {
+//   if (!queueManagerSingleton) {
+//     const qLogger = {
+//       info: (...args: unknown[]) => log.info(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
+//       warn: (...args: unknown[]) => log.warn(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
+//       error: (...args: unknown[]) => log.error(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
+//       debug: (...args: unknown[]) => log.debug?.(String(args[0] ?? ''), typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined),
+//     };
+//     const qm = new ProductionQueueManager(qLogger as any, RedisEnvironment.PRODUCTION, pool, 'ai-sales-production');
+//     const init = await qm.initialize();
+//     if (!init.success) throw new Error(`Queue initialization failed: ${init.error}`);
+//     queueManagerSingleton = qm;
+//   }
+//   return queueManagerSingleton;
+// }
+export function registerWebhookRoutes(app: Hono, _deps: any): void {
   // Instagram webhook verification (GET)
-  app.get('/webhooks/instagram', async (c) => {
+      app.get('/webhooks/instagram', async (c) => {
     try {
       const query = c.req.query();
       const validation = InstagramWebhookVerificationSchema.safeParse(query);
-      
       if (!validation.success) {
-        log.warn('Instagram webhook verification failed - invalid parameters', {
-          query,
-          errors: validation.error.errors
-        });
-        return c.text('Bad Request')
+        log.warn('Instagram webhook verification failed - invalid parameters', { query, errors: validation.error.errors });
+        return c.text('Bad Request');
       }
-      const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = validation.data;
+      const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = validation.data as any;
       if (mode !== 'subscribe') {
         log.warn('Instagram webhook verification failed - invalid mode', { mode });
-        try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_mode', mode }); } catch (e: unknown) {
-          const err = e instanceof Error ? e : new Error(String(e));
-          log.warn("Failed to log compliance event for invalid mode", { err });
-        }
-        return c.text('Bad Request')
+        try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_mode', mode }); } catch {}
+        return c.text('Bad Request');
       }
       const expectedToken = (getEnv('IG_VERIFY_TOKEN') ?? '').trim();
       if (!expectedToken || token !== expectedToken) {
-        log.warn('Instagram webhook verification failed - invalid token', { 
-          providedToken: token,
-          expectedExists: !!expectedToken
-        });
-        try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_token' }); } catch (e: unknown) {
-          const err = e instanceof Error ? e : new Error(String(e));
-          log.warn("Failed to log compliance event for invalid token", { err });
-        }
+        log.warn('Instagram webhook verification failed - invalid token', { providedToken: token, expectedExists: !!expectedToken });
+        try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { reason: 'invalid_token' }); } catch {}
         return c.text('Forbidden', 403);
       }
       log.info('Instagram webhook verification successful', { challenge });
-      try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'SUCCESS', { endpoint: 'instagram', challenge }); } catch (e: unknown) {
-        const err = e instanceof Error ? e : new Error(String(e));
-        log.warn("Failed to log compliance event for successful verification", { err });
-      }
+      try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'SUCCESS', { endpoint: 'instagram', challenge }); } catch {}
       return c.text(challenge);
-    } catch (error: unknown) {
+    } catch (error: any) {
       log.error('Instagram webhook verification error:', error instanceof Error ? { message: error.message } : { error });
-      try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { error: String(error) }); } catch (e: unknown) {
-        const err = e instanceof Error ? e : new Error(String(e));
-        log.warn("Failed to log compliance event for verification error", { err });
-      }
+      try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { error: String(error) }); } catch {}
       return c.text('Internal Server Error', 500);
     }
-  });
-  // Instagram direct webhook - DISABLED (using ManyChat flow only)
-  app.post('/webhooks/instagram', async (c) => {
+  });app.post('/webhooks/instagram', async (c) => {
     return c.text('Use ManyChat flow: Instagram → ManyChat → Server → AI → Server → ManyChat → Instagram', 410);
   });
   // ManyChat webhook route - PRODUCTION with AI integration
@@ -265,8 +242,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         if (messageText.length > 4000) {
           return c.json(mcResponse({ ai_reply: "Message too long. Please shorten.", status_code: 400 }));
         }
-          // 🚀 QUEUE PROCESSING: All AI processing moved to queue workers
-          let queueManager: ProductionQueueManager | null = null;
+          // 🚫 Stop server-side sending; generate AI reply synchronously for ManyChat to send
+          // Queue disabled for this endpoint
         try {
           // ⚡ LIGHTWEIGHT: Only essential database operations in webhook
           const pool = getPool();
@@ -285,11 +262,11 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             } catch (mapErr) {
               log.warn('Failed to upsert ManyChat mapping before enqueue (will retry later)', { error: String(mapErr) });
             }
-            const existingConversations = await withRetry(() => pool.query(`
+            const existingConversations = await pool.query(`
               SELECT id, message_count, session_data FROM conversations 
               WHERE merchant_id = $1 AND customer_instagram = $2
               ORDER BY created_at DESC LIMIT 1
-            `, [sanitizedMerchantId, sanitizedUsername]), 'db_select_conversation', { logger: log, payload: { merchantId: sanitizedMerchantId, username: sanitizedUsername } });
+            `, [sanitizedMerchantId, sanitizedUsername]);
             
             if (existingConversations.rows.length > 0) {
               conversationId = existingConversations.rows[0].id;
@@ -308,13 +285,13 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
                 }
               } catch {}
             } else {
-              const newConversation = await withRetry(() => pool.query(`
+              const newConversation = await pool.query(`
                 INSERT INTO conversations (
                   merchant_id, customer_instagram, platform, source_channel,
                   conversation_stage, session_data, message_count, created_at, updated_at
                 ) VALUES ($1, $2, 'instagram', 'manychat', 'GREETING', '{}', 0, NOW(), NOW())
                 RETURNING id
-              `, [sanitizedMerchantId, sanitizedUsername]), 'db_insert_conversation', { logger: log, payload: { merchantId: sanitizedMerchantId, username: sanitizedUsername } });
+              `, [sanitizedMerchantId, sanitizedUsername]);
               
               conversationId = newConversation.rows[0].id;
               sessionData = {};
@@ -357,84 +334,42 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             log.warn('Failed to load conversation history, proceeding without it', { error: String(histErr) });
           }
           // Store incoming message
-          // Store incoming message and get id
-          let incomingMessageId: string | null = null;
+          // Store incoming message
           try {
-            const ins = await withRetry(() => pool.query(
+            await pool.query(
               `INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, created_at)
                VALUES ($1, $2, $3, 'INCOMING', 'instagram', 'manychat', NOW()) RETURNING id`,
               [conversationId, messageText || (hasImages ? 'IMAGE_MESSAGE' : ''), hasImages ? 'IMAGE' : 'TEXT']
-            ), 'db_insert_message', { logger: log, payload: { conversationId } });
-            incomingMessageId = ins.rows?.[0]?.id ?? null;
+            );
           } catch (insErr) {
             log.warn('Failed to insert incoming message with RETURNING id; retrying plain insert', { error: String(insErr) });
-            await withRetry(() => pool.query(
+            await pool.query(
               `INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, created_at)
                VALUES ($1, $2, 'TEXT', 'INCOMING', 'instagram', 'manychat', NOW())`,
               [conversationId, messageText || (hasImages ? 'IMAGE_MESSAGE' : '')]
-            ), 'db_insert_message_fallback', { logger: log, payload: { conversationId } });
-          }
-          // ⚡ SKIP image metadata in webhook - moved to queue processing
-          // 🚀 QUEUE PROCESSING: All AI processing moved to queue workers
-          try {
-            // Use singleton queue manager (avoid per-request init/close)
-            queueManager = await getQueueManager(pool);
-            // Generate unique event ID for this processing (update earlier id)
-            eventId = `manychat_${Date.now()}_${sanitizedMerchantId.slice(-8)}_${Math.random().toString(36).slice(2, 8)}`;
-            // Enqueue all heavy processing
-            // Build minimal MCEvent and validate
-            const mcEventCandidate = {
-              merchantId: sanitizedMerchantId,
-              customerId: subscriber_id || sanitizedUsername,
-              username: sanitizedUsername,
-              text: messageText,
-              images,
-            } satisfies MCEventType;
-            const mcEvent = MCEventSchema.parse(mcEventCandidate);
-            const queueResult = await queueManager.addManyChatJob(
-              eventId,
-              mcEvent.merchantId,
-              mcEvent.username,
-              conversationId,
-              incomingMessageId,
-              mcEvent.text,
-              mcEvent.images,
-              sessionData,
-              'high' // priority based on real-time user interaction
             );
-            if (!queueResult.success) {
-              throw new Error(`Failed to enqueue ManyChat job: ${queueResult.error}`);
-            }
-            currentJobId = queueResult.jobId ?? "";
-            log.info('⚡ [WEBHOOK-FAST] Enqueued ManyChat processing successfully', {
-              eventId,
-              jobId: queueResult.jobId,
-              queuePosition: queueResult.queuePosition,
-              webhookDuration: `${Date.now() - processingStartTime}ms`,
+          }
+          // Generate AI response synchronously
+          try {
+            const { getConversationAIOrchestrator } = await import('../services/conversation-ai-orchestrator.js');
+            const orchestrator = getConversationAIOrchestrator();
+            const context = {
               merchantId: sanitizedMerchantId,
-              username: sanitizedUsername,
-              conversationId,
-              messageLength: messageText.length,
-              hasImages
-            });
-            // ⚡ IMMEDIATE RESPONSE: Return quickly while processing in background
-            return c.json(mcResponse({
-              ai_reply: "processing",
-              queue_position: queueResult.queuePosition ?? 0
-            }));
-          } catch (queueError) {
-            log.error('❌ Queue processing failed, falling back to direct processing', { 
-              error: String(queueError),
-              fallback: 'direct'
-            });
-            
-            // FALLBACK: Simple cached response when queue fails
-            return c.json(mcResponse({
-              ai_reply: "queue_unavailable",
-              error: "queue_unavailable"
-            }));
-          } finally {
-            // Do not close queue manager here — kept as singleton
+              customerId: sanitizedUsername,
+              platform: 'instagram',
+              stage: 'GREETING',
+              cart: [],
+              preferences: {},
+              conversationHistory: [],
+              interactionType: 'dm'
+            } as any;
+            const ai = await orchestrator.generatePlatformResponse(messageText, context, 'instagram');
+            const aiText = (ai?.response as any)?.message || '...';
+            // Respond with ManyChat-friendly JSON and attributes
+            return c.json(mcResponse({ ai_reply: aiText, in_24h: true }));
+          } catch (aiErr) {
+            log.error('❌ AI generation failed', { error: String(aiErr) });
+            return c.json(mcResponse({ ai_reply: 'عذرًا، حدث خطأ. حاول لاحقًا.', in_24h: true, status_code: 500 }));
           }
         } catch (error) {
           log.error('❌ ManyChat webhook processing error', { 
@@ -641,6 +576,10 @@ const dumpPath = path.join(dir, first.f);
   });
   log.info('Webhook routes registered successfully');
 }
+
+
+
+
 
 
 
