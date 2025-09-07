@@ -56,7 +56,8 @@ export interface ManyChatConfig {
   webhookSecret?: string;
 }
 
-export interface ManyChatSendContentPayload {
+// Legacy shape (v1) kept for reference only
+export interface ManyChatSendContentPayloadV1 {
   subscriber_id: string;
   content: Array<{
     type: 'text' | 'image' | 'video' | 'audio' | 'file';
@@ -65,6 +66,23 @@ export interface ManyChatSendContentPayload {
     caption?: string;
   }>;
   message_tag?: string;
+}
+
+// Current v2 content shape
+export interface ManyChatSendContentPayloadV2 {
+  subscriber_id: string;
+  data: {
+    version: 'v2';
+    content: {
+      messages: Array<{
+        type: 'text' | 'image' | 'video' | 'audio' | 'file';
+        text?: string;
+        url?: string;
+        caption?: string;
+      }>;
+    };
+  };
+  message_tag?: 'POST_PURCHASE_UPDATE' | 'ACCOUNT_UPDATE' | 'CONFIRMED_EVENT_UPDATE';
 }
 
 export interface ManyChatAPIErrorResponse {
@@ -158,42 +176,48 @@ export class ManyChatService {
           messageLength: message.length
         });
 
-        // Instagram policy compliance: block outside 24h window for automated messages only
-        // For direct replies to new incoming messages, skip the API check entirely to avoid stale timestamps
-        if (!options?.isResponseToNewMessage) {
-          const hoursSinceLastInteraction = await this.getHoursSinceLastInteraction(subscriberId);
-          if (hoursSinceLastInteraction > 24) {
-            this.logger.warn('⏰ Message blocked - Instagram 24h policy compliance', {
+        // Pre-send guard: always check last interaction
+        const hoursSinceLastInteraction = await this.getHoursSinceLastInteraction(subscriberId);
+
+        const allowedTags = new Set<NonNullable<ManyChatSendContentPayloadV2['message_tag']>>([
+          'ACCOUNT_UPDATE',
+          'POST_PURCHASE_UPDATE',
+          'CONFIRMED_EVENT_UPDATE',
+        ]);
+
+        const payload: ManyChatSendContentPayloadV2 = {
+          subscriber_id: subscriberId,
+          data: {
+            version: 'v2',
+            content: { messages: [{ type: 'text', text: message }] }
+          }
+        };
+
+        if (hoursSinceLastInteraction > 24) {
+          const requestedTag = options?.messageTag as ManyChatSendContentPayloadV2['message_tag'] | undefined;
+          if (requestedTag && allowedTags.has(requestedTag)) {
+            payload.message_tag = requestedTag;
+            this.logger.info('🔖 Using message_tag due to >24h window', {
               merchantId,
               subscriberId,
-              hoursSinceLastInteraction,
-              policy: 'instagram_24h_window'
+              tag: requestedTag,
+              hoursSinceLastInteraction
             });
-
+          } else {
+            this.logger.warn('⏰ Blocked: outside 24h window and no valid tag', {
+              merchantId,
+              subscriberId,
+              hoursSinceLastInteraction
+            });
             return {
               success: false,
-              error: 'Message blocked: Outside 24-hour window (Instagram policy)',
+              error: 'outside_24h_no_tag',
               deliveryStatus: 'blocked_policy',
               timestamp: new Date(),
               platform: 'instagram'
             } satisfies ManyChatResponse;
           }
         }
-
-        const payload: Record<string, unknown> = {
-          subscriber_id: subscriberId,
-          data: {
-            version: "v2",
-            content: {
-              messages: [{
-                type: 'text',
-                text: message
-              }]
-            }
-          }
-        };
-
-        // لا تستخدم message_tag لرسائل داخل نافذة 24 ساعة
 
         const response = await this.makeAPIRequest('/fb/sending/sendContent', {
           method: 'POST',
@@ -227,40 +251,12 @@ export class ManyChatService {
           subscriberId,
           error: error instanceof Error ? error.message : String(error),
           errorDetails: error instanceof ManyChatAPIError ? error.apiError : null,
-          payload: {
-            subscriber_id: subscriberId,
-            content: [{ type: 'text', text: message }],
-          }
+          payload: { subscriber_id: subscriberId, data: { version: 'v2', content: { messages: [{ type: 'text', text: message }] } } }
         });
 
         // Handle 24h policy errors explicitly - do not retry
         const msg = error instanceof Error ? error.message : String(error);
-        if (msg.includes('more than 24 hours ago') || msg.includes('without a message tag')) {
-          // For direct replies, ManyChat may lag updating last_interaction_at.
-          // Try a couple of short retries to allow propagation, then give up.
-          if (options?.isResponseToNewMessage) {
-            for (let attempt = 1; attempt <= 3; attempt++) {
-              await new Promise((r) => setTimeout(r, 500 * attempt));
-              try {
-                const retryResponse = await this.makeAPIRequest('/fb/sending/sendContent', {
-                  method: 'POST',
-                  body: JSON.stringify({
-                    subscriber_id: subscriberId,
-                    data: { version: 'v2', content: { messages: [{ type: 'text', text: message }] } }
-                  })
-                });
-                if (retryResponse.status === 'success') {
-                  this.logger.info('✅ ManyChat message sent after short retry', { merchantId, subscriberId, attempt });
-                  return {
-                    success: true,
-                    messageId: retryResponse.message_id,
-                    timestamp: new Date(),
-                    platform: 'instagram'
-                  } satisfies ManyChatResponse;
-                }
-              } catch (_e) {}
-            }
-          }
+        if (msg.includes('24') || msg.toLowerCase().includes('message tag')) {
           this.logger.info('⏰ Instagram 24h policy: Message rejected', {
             merchantId,
             subscriberId,
@@ -268,8 +264,8 @@ export class ManyChatService {
           });
           return {
             success: false,
-            error: 'Instagram policy: Outside 24-hour window',
-            deliveryStatus: 'policy_blocked',
+            error: 'outside_24h_policy',
+            deliveryStatus: 'blocked_policy',
             timestamp: new Date(),
             platform: 'instagram'
           } satisfies ManyChatResponse;
