@@ -36,6 +36,12 @@ export async function withRetry<T>(
       return await fn();
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
+      // Do not retry for explicit non-retryable errors (e.g., 4xx policy violations)
+      const noRetry = (err as any)?.noRetry === true || (typeof (err as any)?.status === 'number' && (err as any).status < 500);
+      if (noRetry) {
+        // Surface error immediately without DLQ or further retries
+        throw err;
+      }
       if (i < attempts - 1) {
         const delay = computeBackoff(i);
         logger?.warn?.(`[retry] ${key}`, { attempt: i + 1, delay, error: err.message });

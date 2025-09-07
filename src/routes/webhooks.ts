@@ -128,8 +128,13 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
     let eventId: string = `manychat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const mcResponse = (attrs: Record<string, unknown> = {}) => {
       const duration = Date.now() - processingStartTime;
+      const text = typeof (attrs as any).ai_reply === 'string' ? String((attrs as any).ai_reply) : 'ok';
+      const msgs = [{ type: 'text', text }];
       return {
         version: "v2",
+        content: { messages: msgs },
+        // Back-compat for flows mapping to messages[0].text
+        messages: msgs,
         set_attributes: {
           processing_time: duration,
           webhook_time: duration,

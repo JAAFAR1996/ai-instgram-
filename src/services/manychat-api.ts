@@ -98,6 +98,7 @@ export interface ManyChatAPIErrorResponse {
 }
 
 export class ManyChatAPIError extends Error {
+  public noRetry?: boolean;
   constructor(
     message: string,
     public status: number,
@@ -118,6 +119,9 @@ export class ManyChatAPIError extends Error {
     
     super(detailedMessage);
     this.name = 'ManyChatAPIError';
+    if (typeof status === 'number' && status < 500) {
+      this.noRetry = true;
+    }
   }
 }
 
@@ -172,44 +176,58 @@ export class ManyChatService {
   ): Promise<ManyChatResponse> {
     const result = await this.circuitBreaker.execute(async () => {
       try {
+        // Strict 24h guard using ManyChat only (fail-closed)
+        const apiHours = await this.getHoursSinceLastInteraction(subscriberId);
+        const inboundHours = typeof options?.incomingAtMs === 'number' ? (Date.now() - options.incomingAtMs) / 3_600_000 : null;
+        const allowedTags = new Set<NonNullable<ManyChatSendContentPayloadV2['message_tag']>>([
+          'POST_PURCHASE_UPDATE',
+          'ACCOUNT_UPDATE',
+          'CONFIRMED_EVENT_UPDATE',
+        ]);
+        const tagProvided = options?.messageTag && allowedTags.has(options.messageTag as any);
+        const willSend = apiHours < 24 || !!tagProvided;
+        this.logger.info('🕒 ManyChat 24h guard metrics', {
+          subscriberId,
+          apiHours: Number.isFinite(apiHours) ? apiHours.toFixed(2) : 'inf',
+          inboundHours: inboundHours == null ? null : inboundHours.toFixed(2),
+          willSend,
+        });
+        if (!willSend) {
+          this.logger.warn('⏸️ Blocked (strict 24h): not sending content', {
+            merchantId,
+            subscriberId,
+            apiHours: Number.isFinite(apiHours) ? apiHours.toFixed(2) : 'inf'
+          });
+          // Best-effort: update custom fields for audit/debug
+          try {
+            await this.updateSubscriber(merchantId, subscriberId, {
+              custom_fields: {
+                last_send_status: 'blocked_24h_no_tag',
+                ai_reply_preview: (message || '').slice(0, 140)
+              }
+            });
+          } catch {}
+          return { success: false, error: 'blocked_24h_no_tag', deliveryStatus: 'blocked_policy', timestamp: new Date(), platform: 'instagram' } satisfies ManyChatResponse;
+        }
         this.logger.info('📤 Sending ManyChat message', {
           merchantId,
           subscriberId,
           messageLength: message.length
         });
-
-        // Effective 24h guard using API hours and inbound time
-        const apiHours = await this.getHoursSinceLastInteraction(subscriberId);
-        const inboundHours = typeof options?.incomingAtMs === 'number' ? (Date.now() - options.incomingAtMs) / 3_600_000 : Number.POSITIVE_INFINITY;
-        let effectiveHours = Math.min(apiHours, inboundHours);
-        if (effectiveHours > 24 && inboundHours <= 0.5) {
-          await new Promise(r => setTimeout(r, 1500));
-          const apiHours2 = await this.getHoursSinceLastInteraction(subscriberId);
-          effectiveHours = Math.min(apiHours2, inboundHours);
-        }
-        this.logger.info('?? ManyChat 24h guard metrics', {
-          webhookSubscriberId: subscriberId,
-          sendContentSubscriberId: subscriberId,
-          apiHours: Number.isFinite(apiHours) ? apiHours.toFixed(2) : 'inf',
-          inboundHours: Number.isFinite(inboundHours) ? inboundHours.toFixed(2) : 'inf',
-          effectiveHours: Number.isFinite(effectiveHours) ? effectiveHours.toFixed(2) : 'inf'
-        });const payload: ManyChatSendContentPayloadV2 = {
+        // Build send payload after passing strict 24h guard
+        const payload: ManyChatSendContentPayloadV2 = {
           subscriber_id: subscriberId,
           data: {
             version: 'v2',
             content: { messages: [{ type: 'text', text: message }] }
           }
         };
-
-        if (effectiveHours >= 24) {
-          this.logger.warn('⏰ Blocked (strict 24h): not sending content', {
-            merchantId,
-            subscriberId,
-            effectiveHours: effectiveHours.toFixed(2)
-          });
-          return { success: false, error: 'blocked_24h', deliveryStatus: 'blocked_policy', timestamp: new Date(), platform: 'instagram' } satisfies ManyChatResponse;
-        }
-
+        // Include tag only when explicitly provided and allowed
+        try {
+          if (options?.messageTag && allowedTags.has(options.messageTag as any)) {
+            (payload as any).message_tag = options.messageTag;
+          }
+        } catch {}
         const response = await this.makeAPIRequest('/fb/sending/sendContent', {
           method: 'POST',
           body: JSON.stringify(payload)
@@ -986,6 +1004,14 @@ export function clearManyChatService(): void {
     manyChatServiceInstance = null;
   }
 }
+
+
+
+
+
+
+
+
 
 
 
