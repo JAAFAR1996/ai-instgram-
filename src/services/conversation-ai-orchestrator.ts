@@ -389,7 +389,7 @@ export class ConversationAIOrchestrator {
           ml.ai_processed
         FROM conversations c
         JOIN message_logs ml ON c.id = ml.conversation_id
-        WHERE (c.customer_whatsapp = $1 OR c.customer_instagram = $1)
+        WHERE (c.customer_phone = $1 OR c.customer_instagram = $1)
         AND c.merchant_id = $2::uuid
         ORDER BY ml.created_at DESC
         LIMIT 100`,
@@ -432,6 +432,15 @@ export class ConversationAIOrchestrator {
     customerId: string,
     merchantId: string
   ): Promise<CrossPlatformContext> {
+    if (process.env.DISABLE_CROSS_PLATFORM_CONTEXT === 'true') {
+      return {
+        hasWhatsAppHistory: false,
+        hasInstagramHistory: false,
+        preferredPlatform: 'whatsapp',
+        customerJourney: [],
+        totalInteractions: 0
+      };
+    }
     try {
       const pool = this.db.getPool();
       const { rows: platformHistory } = await pool.query<PlatformHistoryRow>(
@@ -441,7 +450,7 @@ export class ConversationAIOrchestrator {
           MAX(updated_at) as last_interaction,
           array_agg(DISTINCT conversation_stage) as stages
         FROM conversations
-        WHERE (customer_whatsapp = $1 OR customer_instagram = $1)
+        WHERE (customer_phone = $1 OR customer_instagram = $1)
         AND merchant_id = $2::uuid
         GROUP BY platform`,
         [customerId, merchantId]
@@ -473,7 +482,7 @@ export class ConversationAIOrchestrator {
           created_at,
           'unknown' as intent
         FROM conversations
-        WHERE (customer_whatsapp = $1 OR customer_instagram = $1)
+        WHERE (customer_phone = $1 OR customer_instagram = $1)
         AND merchant_id = $2::uuid
         ORDER BY created_at ASC
         LIMIT 20`,
@@ -1124,4 +1133,5 @@ export function getConversationAIOrchestrator(): ConversationAIOrchestrator {
 }
 
 export default ConversationAIOrchestrator;
+
 

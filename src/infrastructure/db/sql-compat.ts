@@ -130,6 +130,12 @@ function createThenableQuery<T extends DatabaseRow = DatabaseRow>(
 
 export function buildSqlCompat(pool: Pool): SqlFunction {
   const exec = async <T extends DatabaseRow = DatabaseRow>(text: string, params: unknown[]): Promise<T[]> => {
+    const trimmed = (text || '').trim();
+    const upper = trimmed.toUpperCase();
+    const isStmt = /^(WITH|SELECT|INSERT|UPDATE|DELETE)\b/.test(upper);
+    if (!isStmt) {
+      throw new Error(`Invalid SQL statement composed: "${trimmed.slice(0, 80)}"`);
+    }
     const { rows } = await pool.query<T>(text, params);
     return rows;
   };
@@ -185,6 +191,12 @@ export function buildSqlCompat(pool: Pool): SqlFunction {
 
 export function buildSqlCompatFromClient(client: PoolClient): SqlFunction {
   const exec = async <T extends DatabaseRow = DatabaseRow>(text: string, params: unknown[]): Promise<T[]> => {
+    const trimmed = (text || '').trim();
+    const upper = trimmed.toUpperCase();
+    const isStmt = /^(WITH|SELECT|INSERT|UPDATE|DELETE)\b/.test(upper);
+    if (!isStmt) {
+      throw new Error(`Invalid SQL statement composed: "${trimmed.slice(0, 80)}"`);
+    }
     const { rows } = await client.query<T>(text, params);
     return rows;
   };
