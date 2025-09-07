@@ -193,15 +193,7 @@ export class ManyChatService {
           apiHours: Number.isFinite(apiHours) ? apiHours.toFixed(2) : 'inf',
           inboundHours: Number.isFinite(inboundHours) ? inboundHours.toFixed(2) : 'inf',
           effectiveHours: Number.isFinite(effectiveHours) ? effectiveHours.toFixed(2) : 'inf'
-        });
-
-        const allowedTags = new Set<NonNullable<ManyChatSendContentPayloadV2['message_tag']>>([
-          'ACCOUNT_UPDATE',
-          'POST_PURCHASE_UPDATE',
-          'CONFIRMED_EVENT_UPDATE',
-        ]);
-
-        const payload: ManyChatSendContentPayloadV2 = {
+        });const payload: ManyChatSendContentPayloadV2 = {
           subscriber_id: subscriberId,
           data: {
             version: 'v2',
@@ -209,23 +201,13 @@ export class ManyChatService {
           }
         };
 
-        if (effectiveHours > 24) {
-          const requestedTag = options?.messageTag as ManyChatSendContentPayloadV2['message_tag'] | undefined;
-          if (requestedTag && allowedTags.has(requestedTag)) {
-            payload.message_tag = requestedTag;
-            this.logger.info('🔖 Using message_tag due to >24h window', { merchantId, subscriberId, tag: requestedTag, effectiveHours: effectiveHours.toFixed(2)
-            });
-          } else {
-            this.logger.warn('⏰ Blocked: outside 24h window and no valid tag', { merchantId, subscriberId, effectiveHours: effectiveHours.toFixed(2)
-            });
-            return {
-              success: false,
-              error: 'outside_24h_no_tag',
-              deliveryStatus: 'blocked_policy',
-              timestamp: new Date(),
-              platform: 'instagram'
-            } satisfies ManyChatResponse;
-          }
+        if (effectiveHours >= 24) {
+          this.logger.warn('⏰ Blocked (strict 24h): not sending content', {
+            merchantId,
+            subscriberId,
+            effectiveHours: effectiveHours.toFixed(2)
+          });
+          return { success: false, error: 'blocked_24h', deliveryStatus: 'blocked_policy', timestamp: new Date(), platform: 'instagram' } satisfies ManyChatResponse;
         }
 
         const response = await this.makeAPIRequest('/fb/sending/sendContent', {
@@ -1004,6 +986,8 @@ export function clearManyChatService(): void {
     manyChatServiceInstance = null;
   }
 }
+
+
 
 
 

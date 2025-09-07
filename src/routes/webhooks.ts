@@ -128,11 +128,8 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
     let eventId: string = `manychat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const mcResponse = (attrs: Record<string, unknown> = {}) => {
       const duration = Date.now() - processingStartTime;
-      const anyAttrs = attrs as any;
-      const replyText = String(anyAttrs?.ai_reply || anyAttrs?.error || 'OK');
       return {
         version: "v2",
-        messages: [{ type: 'text', text: replyText }],
         set_attributes: {
           processing_time: duration,
           webhook_time: duration,
@@ -417,7 +414,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             });
             // ⚡ IMMEDIATE RESPONSE: Return quickly while processing in background
             return c.json(mcResponse({
-              ai_reply: "We received your message. Processing now...",
+              ai_reply: "processing",
               queue_position: queueResult.queuePosition ?? 0
             }));
           } catch (queueError) {
@@ -428,7 +425,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
             
             // FALLBACK: Simple cached response when queue fails
             return c.json(mcResponse({
-              ai_reply: "Service is busy right now. We will retry shortly.",
+              ai_reply: "queue_unavailable",
               error: "queue_unavailable"
             }));
           } finally {
@@ -460,7 +457,7 @@ export function registerWebhookRoutes(app: Hono, _deps: WebhookDependencies): vo
         }
       }
       // Standard no-op response for non-message events
-      return c.json(mcResponse({ ai_reply: "Event received." }));
+      return c.json(mcResponse({ ai_reply: "event_received" }));
     } catch (error) {
       log.error('❌ ManyChat webhook error', error);
       return c.json(mcResponse({ ai_reply: 'Internal error. Please try later.', status_code: 500, error: 'acknowledged' }));
