@@ -106,17 +106,22 @@ interface PromiseWithProperties {
   values: unknown[];
 }
 
-function decoratePromiseWithFragment<T extends DatabaseRow = DatabaseRow>(
-  promise: Promise<T[]>,
+function createLazyThenable<T extends DatabaseRow = DatabaseRow>(
+  exec: (text: string, params: unknown[]) => Promise<T[]>,
   text: string,
   params: unknown[]
 ): Promise<T[]> & SqlFragment {
-  const p = promise as Promise<T[]> & SqlFragment;
-  const promiseWithProps = (p as unknown) as PromiseWithProperties;
-  promiseWithProps[SQL_FRAGMENT_SYMBOL] = true;
-  promiseWithProps.text = text;
-  promiseWithProps.values = params;
-  return p;
+  // Build a lazy thenable that executes only when awaited, while
+  // still carrying fragment metadata for composition inside templates.
+  const thenable: Partial<PromiseWithProperties> & {
+    then?: <U>(onFulfilled?: (v: T[]) => U | Promise<U>, onRejected?: (e: any) => any) => Promise<U>;
+  } = {};
+  thenable[SQL_FRAGMENT_SYMBOL] = true;
+  thenable.text = text;
+  thenable.values = params;
+  // Lazy execution on await/then
+  (thenable as any).then = (onFulfilled?: any, onRejected?: any) => exec(text, params).then(onFulfilled, onRejected);
+  return thenable as Promise<T[]> & SqlFragment;
 }
 
 function createThenableQuery<T extends DatabaseRow = DatabaseRow>(
@@ -125,7 +130,7 @@ function createThenableQuery<T extends DatabaseRow = DatabaseRow>(
   values: unknown[]
 ): Promise<T[]> & SqlFragment {
   const { text, values: params } = toQuery(strings, values);
-  return decoratePromiseWithFragment(exec(text, params) as Promise<T[]>, text, params);
+  return createLazyThenable<T>(exec, text, params);
 }
 
 export function buildSqlCompat(pool: Pool): SqlFunction {
@@ -144,7 +149,8 @@ export function buildSqlCompat(pool: Pool): SqlFunction {
     createThenableQuery<T>(exec, strings, values)) as SqlFunction;
 
   const createThenableFragment = <T extends DatabaseRow = DatabaseRow>(text: string, params: unknown[]): Promise<T[]> & SqlFragment => {
-    return decoratePromiseWithFragment(exec(text, params) as Promise<T[]>, text, params);
+    // Do not execute now; build lazy thenable
+    return createLazyThenable<T>(exec, text, params);
   };
 
   const unsafe = ((stringsOrText: TemplateStringsArray | string, ...vals: unknown[]) => {
@@ -205,7 +211,8 @@ export function buildSqlCompatFromClient(client: PoolClient): SqlFunction {
     createThenableQuery<T>(exec, strings, values)) as SqlFunction;
 
   const createThenableFragment2 = <T extends DatabaseRow = DatabaseRow>(text: string, params: unknown[]): Promise<T[]> & SqlFragment => {
-    return decoratePromiseWithFragment(exec(text, params) as Promise<T[]>, text, params);
+    // Do not execute now; build lazy thenable
+    return createLazyThenable<T>(exec, text, params);
   };
 
   const unsafe = ((stringsOrText: TemplateStringsArray | string, ...vals: unknown[]) => {

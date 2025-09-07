@@ -1084,7 +1084,7 @@ export class InstagramAIService {
       category: string;
     }>;
 
-    // Build dynamic WHERE parts
+    // Build dynamic WHERE parts (safe fragments, seeded reducers)
     const ilikes = tokens.map(t => `%${t}%`);
     const sizeFilter = filters.sizes[0];
     const colorFilter = filters.colors[0];
@@ -1096,7 +1096,40 @@ export class InstagramAIService {
       return tokens.some(t => c.includes(t));
     });
 
+    // Early input guard: return top products if no search tokens/filters/categories
+    if (tokens.length === 0 && !sizeFilter && !colorFilter && matchedCats.length === 0) {
+      return await this.topProductsFallback(merchantId, limit);
+    }
+
     try {
+      // Build safe fragments for text search
+      const nameLikes = ilikes.map(l => sql`lower(p.name_ar) LIKE lower(${l})`);
+      const skuLikes  = ilikes.map(l => sql`lower(p.sku) LIKE lower(${l})`);
+      const catLikes  = ilikes.map(l => sql`lower(p.category) LIKE lower(${l})`);
+      const orJoin = (blocks: any[]): any => {
+        if (!blocks || blocks.length === 0) return sql`TRUE`;
+        return blocks.slice(1).reduce((acc, b) => sql`${acc} OR ${b}`, blocks[0]);
+      };
+      const textSearchClause = orJoin([...nameLikes, ...skuLikes, ...catLikes]);
+
+      const sizeClause = sizeFilter ? sql`(
+        lower(p.attributes->>'size') = ${sizeFilter.toLowerCase()}
+        OR EXISTS (
+          SELECT 1 FROM jsonb_array_elements(p.variants) v
+          WHERE lower(coalesce(v->>'size','')) = ${sizeFilter.toLowerCase()}
+        )
+      )` : sql`TRUE`;
+
+      const colorClause = colorFilter ? sql`(
+        lower(p.attributes->>'color') = ${colorFilter.toLowerCase()}
+        OR EXISTS (
+          SELECT 1 FROM jsonb_array_elements(p.variants) v
+          WHERE lower(coalesce(v->>'color','')) = ${colorFilter.toLowerCase()}
+        )
+      )` : sql`TRUE`;
+
+      const categoryClause = matchedCats.length > 0 ? sql`p.category = ANY(${matchedCats})` : sql`TRUE`;
+
       const rows = await sql<{
         id: string;
         sku: string;
@@ -1115,32 +1148,10 @@ export class InstagramAIService {
         JOIN products_priced pp ON pp.id = p.id
         WHERE p.merchant_id = ${merchantId}::uuid
           AND p.status = 'ACTIVE'
-          AND (
-            ${ilikes.length > 0 ? sql`(
-              ${ilikes.map(l => sql`p.name_ar ILIKE ${l}`).reduce((a, b) => sql`${a} OR ${b}`)}
-              OR ${ilikes.map(l => sql`p.sku ILIKE ${l}`).reduce((a, b) => sql`${a} OR ${b}`)}
-              OR ${ilikes.map(l => sql`p.category ILIKE ${l}`).reduce((a, b) => sql`${a} OR ${b}`)}
-            )` : sql`TRUE`}
-          )
-          AND (${matchedCats.length > 0 ? sql`p.category = ANY(${matchedCats})` : sql`TRUE`})
-          AND (
-            ${sizeFilter ? sql`(
-              lower(p.attributes->>'size') = ${sizeFilter.toLowerCase()}
-              OR EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.variants) v
-                WHERE lower(coalesce(v->>'size','')) = ${sizeFilter.toLowerCase()}
-              )
-            )` : sql`TRUE`}
-          )
-          AND (
-            ${colorFilter ? sql`(
-              lower(p.attributes->>'color') = ${colorFilter.toLowerCase()}
-              OR EXISTS (
-                SELECT 1 FROM jsonb_array_elements(p.variants) v
-                WHERE lower(coalesce(v->>'color','')) = ${colorFilter.toLowerCase()}
-              )
-            )` : sql`TRUE`}
-          )
+          AND ( ${textSearchClause} )
+          AND ( ${categoryClause} )
+          AND ( ${sizeClause} )
+          AND ( ${colorClause} )
         ORDER BY p.is_featured DESC, p.updated_at DESC, p.stock_quantity DESC
         LIMIT ${limit}
       `;
@@ -1150,6 +1161,53 @@ export class InstagramAIService {
       return result;
     } catch (e) {
       this.logger.warn('Dynamic product search failed', { merchantId, error: String(e) });
+      return [];
+    }
+  }
+
+  /**
+   * Fallback when no tokens/filters present: return top products for merchant
+   */
+  private async topProductsFallback(
+    merchantId: string,
+    limit: number
+  ): Promise<Array<{
+    id: string;
+    sku: string;
+    name_ar: string;
+    effective_price: number;
+    price_currency: string;
+    stock_quantity: number;
+    attributes: Record<string, unknown>;
+    variants: Array<Record<string, unknown>>;
+    category: string;
+  }>> {
+    try {
+      const sql = this.db.getSQL();
+      const rows = await sql<{
+        id: string;
+        sku: string;
+        name_ar: string;
+        effective_price: number;
+        price_currency: string;
+        stock_quantity: number;
+        attributes: Record<string, unknown>;
+        variants: Array<Record<string, unknown>>;
+        category: string;
+      }>`
+        SELECT p.id, p.sku, p.name_ar, p.attributes, p.variants, p.category,
+               pp.effective_price::float AS effective_price, pp.price_currency,
+               p.stock_quantity
+        FROM products p
+        JOIN products_priced pp ON pp.id = p.id
+        WHERE p.merchant_id = ${merchantId}::uuid
+          AND p.status = 'ACTIVE'
+        ORDER BY p.is_featured DESC, p.updated_at DESC, p.stock_quantity DESC
+        LIMIT ${limit}
+      `;
+      return rows || [];
+    } catch (e) {
+      this.logger.warn('topProductsFallback failed', { merchantId, error: String(e) });
       return [];
     }
   }

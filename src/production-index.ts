@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ===============================================
  * Production Entry Point - AI Sales Platform
  * Modular, secure, and production-ready initialization
@@ -559,9 +559,49 @@ process.on('uncaughtException', async (error) => {
   await gracefulShutdown('uncaughtException', 1);
 });
 
-process.on('unhandledRejection', async (reason, promise) => {
-  log.error('Unhandled Rejection:', { reason, promise });
-  await gracefulShutdown('unhandledRejection', 1);
+// Debounced soft-cooldown for unhandled rejections (avoid cascading restarts)
+let lastUnhandledAt = 0;
+let coolingDown = false;
+async function softCooldown(reason: unknown) {
+  const now = Date.now();
+  if (coolingDown || (now - lastUnhandledAt) < 5000) {
+    return; // debounce 5s
+  }
+  coolingDown = true;
+  lastUnhandledAt = now;
+  try {
+    log.error('Unhandled Rejection (soft cooldown)', { reason: String(reason ?? '') });
+    // Stop accepting requests (no-op marker here; app server uses external orchestrator)
+    // Stop keep-alive
+    try {
+      const { KeepAliveService } = await import('./services/keep-alive.js');
+      const ka = new KeepAliveService();
+      ka.stop();
+    } catch {}
+    // Stop health
+    try {
+      const { stopHealth } = await import('./services/health-check.js');
+      stopHealth();
+    } catch {}
+    // Close DB
+    try {
+      const { closeDatabase } = await import('./startup/database.js');
+      await closeDatabase();
+    } catch {}
+    // Close Redis
+    try {
+      const { closeRedisConnections } = await import('./startup/redis.js');
+      await closeRedisConnections();
+    } catch {}
+  } finally {
+    // allow future recovery attempts
+    coolingDown = false;
+  }
+}
+
+process.on('unhandledRejection', async (reason ) => {
+  log.error('Unhandled Rejection:', { reason, promise: 'Promise' });
+  await softCooldown(reason);
 });
 
 // Additional signal handlers for different environments
@@ -583,3 +623,5 @@ process.on('SIGUSR2', async () => {
 const app = await bootstrap();
 
 export default app;
+
+
