@@ -2570,7 +2570,7 @@ export class ProductionQueueManager {
               jobData.merchantId,
               subscriberId,
               result.aiResponse,
-              { isResponseToNewMessage: true }
+              { isResponseToNewMessage: true, incomingAtMs: jobData.metadata.processingStartTime }
             );
             
             if (sendResult.success) {

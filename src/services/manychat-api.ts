@@ -20,6 +20,8 @@ export interface ManyChatOptions {
   // When true, indicates this send is an immediate reply to a new user message
   // which re-opens the 24-hour window and must be allowed
   isResponseToNewMessage?: boolean;
+  // Timestamp (ms) of the incoming user message (from webhook receipt time)
+  incomingAtMs?: number;
 }
 
 export interface ManyChatResponse {
@@ -176,8 +178,22 @@ export class ManyChatService {
           messageLength: message.length
         });
 
-        // Pre-send guard: always check last interaction
-        const hoursSinceLastInteraction = await this.getHoursSinceLastInteraction(subscriberId);
+        // Effective 24h guard using API hours and inbound time
+        const apiHours = await this.getHoursSinceLastInteraction(subscriberId);
+        const inboundHours = typeof options?.incomingAtMs === 'number' ? (Date.now() - options.incomingAtMs) / 3_600_000 : Number.POSITIVE_INFINITY;
+        let effectiveHours = Math.min(apiHours, inboundHours);
+        if (effectiveHours > 24 && inboundHours <= 0.5) {
+          await new Promise(r => setTimeout(r, 1500));
+          const apiHours2 = await this.getHoursSinceLastInteraction(subscriberId);
+          effectiveHours = Math.min(apiHours2, inboundHours);
+        }
+        this.logger.info('?? ManyChat 24h guard metrics', {
+          webhookSubscriberId: subscriberId,
+          sendContentSubscriberId: subscriberId,
+          apiHours: Number.isFinite(apiHours) ? apiHours.toFixed(2) : 'inf',
+          inboundHours: Number.isFinite(inboundHours) ? inboundHours.toFixed(2) : 'inf',
+          effectiveHours: Number.isFinite(effectiveHours) ? effectiveHours.toFixed(2) : 'inf'
+        });
 
         const allowedTags = new Set<NonNullable<ManyChatSendContentPayloadV2['message_tag']>>([
           'ACCOUNT_UPDATE',
@@ -193,21 +209,14 @@ export class ManyChatService {
           }
         };
 
-        if (hoursSinceLastInteraction > 24) {
+        if (effectiveHours > 24) {
           const requestedTag = options?.messageTag as ManyChatSendContentPayloadV2['message_tag'] | undefined;
           if (requestedTag && allowedTags.has(requestedTag)) {
             payload.message_tag = requestedTag;
-            this.logger.info('🔖 Using message_tag due to >24h window', {
-              merchantId,
-              subscriberId,
-              tag: requestedTag,
-              hoursSinceLastInteraction
+            this.logger.info('🔖 Using message_tag due to >24h window', { merchantId, subscriberId, tag: requestedTag, effectiveHours: effectiveHours.toFixed(2)
             });
           } else {
-            this.logger.warn('⏰ Blocked: outside 24h window and no valid tag', {
-              merchantId,
-              subscriberId,
-              hoursSinceLastInteraction
+            this.logger.warn('⏰ Blocked: outside 24h window and no valid tag', { merchantId, subscriberId, effectiveHours: effectiveHours.toFixed(2)
             });
             return {
               success: false,
@@ -995,3 +1004,9 @@ export function clearManyChatService(): void {
     manyChatServiceInstance = null;
   }
 }
+
+
+
+
+
+
