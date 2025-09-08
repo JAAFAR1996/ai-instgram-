@@ -34,9 +34,18 @@ function basePino(bindings?: LogContext): PinoLogger {
     base: bindings || {},
     redact: {
       paths: [
-        'headers.authorization',
+        // Common auth fields (top-level or nested)
         'authorization',
-        'x-hub-signature-256',
+        'headers.authorization',
+        'req.headers.authorization',
+        // ManyChat/Instagram webhook signatures (use bracket notation for hyphenated keys)
+        'headers["x-hub-signature-256"]',
+        'req.headers["x-hub-signature-256"]',
+        'headers["x-signature-256"]',
+        'req.headers["x-signature-256"]',
+        'headers["x-signature"]',
+        'req.headers["x-signature"]',
+        // Generic sensitive keys
         'token',
         'password',
         'apiKey',
