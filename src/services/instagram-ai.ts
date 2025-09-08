@@ -1411,15 +1411,15 @@ export class InstagramAIService {
       const colors = (filters.colors || []).map(c => c.toLowerCase());
 
       const sizeClause = sizes.length
-        ? sql.fragment`( (p.attributes->>'size') = ANY(${sizes}) )`
+        ? sql.fragment`( (LOWER(p.attributes->>'size')) = ANY(ARRAY[${sizes}]::text[]) )`
         : sql.empty;
 
       const colorClause = colors.length
-        ? sql.fragment`( (p.attributes->>'color') = ANY(${colors}) )`
+        ? sql.fragment`( (LOWER(p.attributes->>'color')) = ANY(ARRAY[${colors}]::text[]) )`
         : sql.empty;
 
       const categoryClause = matchedCats.length > 0
-        ? sql.fragment`p.category = ANY(${matchedCats})`
+        ? sql.fragment`LOWER(p.category) = ANY(ARRAY[${matchedCats.map(c => c.toLowerCase())}]::text[])`
         : sql.empty;
 
       const minPrice = (filters as any)?.minPrice ?? null;

@@ -1136,6 +1136,7 @@ export class ProductionQueueManager {
         if (!qRef) { return { success: false, error: 'Ù…Ø¯ÙŠØ± Ø§Ù„Ø·ÙˆØ§Ø¨ÙŠØ± ØºÙŠØ± Ù…Ù‡ÙŠØ£' }; }
         const job = await withRetry(
           () => qRef.add('process-webhook', jobData, {
+            jobId: eventId, // Idempotent enqueue by event id
             priority: priorityValue,
             delay: 0, // إزالة أي تأخير
             removeOnComplete: priority === 'urgent' ? 200 : 100,
@@ -1290,6 +1291,7 @@ export class ProductionQueueManager {
       if (!qRef) { return { success: false, error: 'Ù…Ø¯ÙŠØ± Ø§Ù„Ø·ÙˆØ§Ø¨ÙŠØ± ØºÙŠØ± Ù…Ù‡ÙŠØ£' }; }
       const job = await withRetry(
         () => qRef.add('manychat-processing', jobData, {
+          jobId: eventId, // Idempotent enqueue by inbound event id
           priority: priorityValue,
           delay: 0,
           removeOnComplete: priority === 'urgent' ? 200 : 100,

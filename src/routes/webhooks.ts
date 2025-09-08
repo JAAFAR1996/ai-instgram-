@@ -94,7 +94,8 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
       try { (await import('../services/compliance.js')).getComplianceService().logEvent(null, 'WEBHOOK_VERIFY', 'FAILURE', { error: String(error) }); } catch {}
       return c.text('Internal Server Error', 500);
     }
-  });app.post('/webhooks/instagram', async (c) => {
+  });
+  app.post('/webhooks/instagram', async (c) => {
     return c.text('Use ManyChat flow: Instagram → ManyChat → Server → AI → Server → ManyChat → Instagram', 410);
   });
   // ManyChat webhook route - PRODUCTION with AI integration
@@ -136,7 +137,11 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
       }
       
       log.info('📩 ManyChat webhook received');
-      const rawBody = (c.get as any)?.('rawBody') ?? '';
+      // Prefer pre-read raw body from idempotency middleware; fallback to reading request directly
+      let rawBody: string = (c.get as any)?.('rawBody') ?? '';
+      if (!rawBody) {
+        try { rawBody = await c.req.text(); } catch {}
+      }
       // HMAC verification when secret provided
       const signature = c.req.header('x-hub-signature-256') || c.req.header('x-signature-256') || c.req.header('x-signature') || c.req.header('signature');
       const webhookSecret = (getEnv('MANYCHAT_WEBHOOK_SECRET') ?? '').trim();
@@ -261,7 +266,14 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
             log.warn('Failed to create manual followup for escalation', { error: String(e) });
           }
           // Return ManyChat-friendly escalation flag so the flow can handoff
-          return c.json(mcResponse({ ai_reply: 'تم تحويلك للمسؤول، لحظة ونخدمك 🙏', escalate: true, escalate_reason: 'manager_request', in_24h: true }));
+          {
+            const out = mcResponse({ ai_reply: 'تم تحويلك للمسؤول، لحظة ونخدمك 🙏', escalate: true, escalate_reason: 'manager_request', in_24h: true } as Record<string, unknown>);
+            try {
+              (c as unknown as { set: (k: string, v: unknown) => void }).set('idempotencyResponse', { status: 200, body: out });
+              (c as unknown as { set: (k: string, v: unknown) => void }).set('cacheIdempotency', true);
+            } catch {}
+            return c.json(out);
+          }
         }
           // 🚫 Stop server-side sending; generate AI reply synchronously for ManyChat to send
           // Queue disabled for this endpoint
@@ -430,7 +442,14 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
               }
             } catch {}
             // Respond with ManyChat-friendly JSON and attributes
-            return c.json(mcResponse({ ai_reply: aiText || '...', in_24h: in24hWindow, human_agent: !in24hWindow }));
+            {
+              const out = mcResponse({ ai_reply: aiText || '...', in_24h: in24hWindow, human_agent: !in24hWindow } as Record<string, unknown>);
+              try {
+                (c as unknown as { set: (k: string, v: unknown) => void }).set('idempotencyResponse', { status: 200, body: out });
+                (c as unknown as { set: (k: string, v: unknown) => void }).set('cacheIdempotency', true);
+              } catch {}
+              return c.json(out);
+            }
           } catch (aiErr) {
             log.error('❌ AI generation failed', { error: String(aiErr) });
             return c.json(mcResponse({ ai_reply: 'عذرًا، حدث خطأ. حاول لاحقًا.', in_24h: true, status_code: 500 }));
@@ -461,7 +480,14 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
         }
       }
       // Standard no-op response for non-message events
-      return c.json(mcResponse({ ai_reply: "event_received" }));
+      {
+        const out = mcResponse({ ai_reply: 'event_received' } as Record<string, unknown>);
+        try {
+          (c as unknown as { set: (k: string, v: unknown) => void }).set('idempotencyResponse', { status: 200, body: out });
+          (c as unknown as { set: (k: string, v: unknown) => void }).set('cacheIdempotency', true);
+        } catch {}
+        return c.json(out);
+      }
     } catch (error) {
       log.error('❌ ManyChat webhook error', error);
       return c.json(mcResponse({ ai_reply: 'Internal error. Please try later.', status_code: 500, error: 'acknowledged' }));
