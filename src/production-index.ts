@@ -7,6 +7,14 @@
 
 // 1) Global error handlers first
 import './boot/error-handlers.js';
+// Optional: Sentry error tracking (enabled only if SENTRY_DSN is set)
+try {
+  const dsn = process.env.SENTRY_DSN;
+  if (dsn && dsn.trim()) {
+    const Sentry = await import('@sentry/node');
+    Sentry.init({ dsn, tracesSampleRate: 0.05 });
+  }
+} catch {}
 
 // 2) Validate environment strictly before any side effects
 import { assertEnvStrict } from './startup/security-validations.js';

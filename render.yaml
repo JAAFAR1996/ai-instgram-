@@ -7,6 +7,7 @@ services:
     branch: main
     buildCommand: npm ci && npm run build
     startCommand: node dist/production-index.js
+    postdeploy: node dist/database/migrate.js
     healthCheckPath: /webhooks/health
     autoDeploy: true
     envVars:
