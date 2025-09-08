@@ -349,7 +349,7 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
               [conversationId, messageText || (hasImages ? 'IMAGE_MESSAGE' : '')]
             );
           }
-          // Generate AI response synchronously
+          // Generate AI response with hard timeout to satisfy ManyChat 10s limit
           try {
             const { getConversationAIOrchestrator } = await import('../services/conversation-ai-orchestrator.js');
             const orchestrator = getConversationAIOrchestrator();
@@ -363,8 +363,18 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
               conversationHistory: [],
               interactionType: 'dm'
             } as any;
-            const ai = await orchestrator.generatePlatformResponse(messageText, context, 'instagram');
-            const aiText = (ai?.response as any)?.message || '...';
+
+            const timeoutMs = Number.parseInt((getEnv('MANYCHAT_AI_TIMEOUT_MS') ?? '').trim(), 10) || 9000;
+            const fallbackText = 'نجهّز ردك الآن ✨ بنرجع لك خلال لحظات.';
+
+            const aiText = await Promise.race<string>([
+              (async () => {
+                const ai = await orchestrator.generatePlatformResponse(messageText, context, 'instagram');
+                return (ai?.response as any)?.message || fallbackText;
+              })(),
+              new Promise<string>(resolve => setTimeout(() => resolve(fallbackText), timeoutMs))
+            ]).catch(() => fallbackText);
+
             // Respond with ManyChat-friendly JSON and attributes
             return c.json(mcResponse({ ai_reply: aiText, in_24h: true }));
           } catch (aiErr) {
