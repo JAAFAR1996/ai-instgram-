@@ -1085,7 +1085,6 @@ export class InstagramAIService {
     }>;
 
     // Build dynamic WHERE parts (safe fragments, seeded reducers)
-    const ilikes = tokens.map(t => `%${t}%`);
     const sizeFilter = filters.sizes[0];
     const colorFilter = filters.colors[0];
 
@@ -1102,33 +1101,37 @@ export class InstagramAIService {
     }
 
     try {
-      // Build safe fragments for text search
-      const nameLikes = ilikes.map(l => sql`lower(p.name_ar) LIKE lower(${l})`);
-      const skuLikes  = ilikes.map(l => sql`lower(p.sku) LIKE lower(${l})`);
-      const catLikes  = ilikes.map(l => sql`lower(p.category) LIKE lower(${l})`);
-      const orJoin = (blocks: any[]): any => {
-        if (!blocks || blocks.length === 0) return sql`TRUE`;
-        return blocks.slice(1).reduce((acc, b) => sql`${acc} OR ${b}`, blocks[0]);
-      };
-      const textSearchClause = orJoin([...nameLikes, ...skuLikes, ...catLikes]);
+      // Consolidated, safe fragments: build once and embed into main WHERE
+      const text = (queryText ?? '').toString().trim();
+      const q = `%${text}%`;
+      const textSearchClause = text
+        ? sql`(
+            lower(p.name_ar) LIKE lower(${q})
+            OR lower(p.sku) LIKE lower(${q})
+            OR lower(p.category) LIKE lower(${q})
+          )`
+        : sql`TRUE`;
 
-      const sizeClause = sizeFilter ? sql`(
-        lower(p.attributes->>'size') = ${sizeFilter.toLowerCase()}
-        OR EXISTS (
-          SELECT 1 FROM jsonb_array_elements(p.variants) v
-          WHERE lower(coalesce(v->>'size','')) = ${sizeFilter.toLowerCase()}
-        )
-      )` : sql`TRUE`;
+      const sizes = (filters.sizes || []).map(s => s.toLowerCase());
+      const colors = (filters.colors || []).map(c => c.toLowerCase());
 
-      const colorClause = colorFilter ? sql`(
-        lower(p.attributes->>'color') = ${colorFilter.toLowerCase()}
-        OR EXISTS (
-          SELECT 1 FROM jsonb_array_elements(p.variants) v
-          WHERE lower(coalesce(v->>'color','')) = ${colorFilter.toLowerCase()}
-        )
-      )` : sql`TRUE`;
+      const sizeClause = sizes.length
+        ? sql`( (p.attributes->>'size') = ANY(${sizes}) )`
+        : sql`TRUE`;
 
-      const categoryClause = matchedCats.length > 0 ? sql`p.category = ANY(${matchedCats})` : sql`TRUE`;
+      const colorClause = colors.length
+        ? sql`( (p.attributes->>'color') = ANY(${colors}) )`
+        : sql`TRUE`;
+
+      const categoryClause = matchedCats.length > 0
+        ? sql`p.category = ANY(${matchedCats})`
+        : sql`TRUE`;
+
+      const minPrice = (filters as any)?.minPrice ?? null;
+      const maxPrice = (filters as any)?.maxPrice ?? null;
+      const priceClause = (minPrice != null || maxPrice != null)
+        ? sql`pp.effective_price BETWEEN ${minPrice ?? 0} AND ${maxPrice ?? 9_999_999}`
+        : sql`TRUE`;
 
       const rows = await sql<{
         id: string;
@@ -1148,11 +1151,12 @@ export class InstagramAIService {
         JOIN products_priced pp ON pp.id = p.id
         WHERE p.merchant_id = ${merchantId}::uuid
           AND p.status = 'ACTIVE'
-          AND ( ${textSearchClause} )
-          AND ( ${categoryClause} )
-          AND ( ${sizeClause} )
-          AND ( ${colorClause} )
-        ORDER BY p.is_featured DESC, p.updated_at DESC, p.stock_quantity DESC
+          AND ${textSearchClause}
+          AND ${categoryClause}
+          AND ${sizeClause}
+          AND ${colorClause}
+          AND ${priceClause}
+        ORDER BY pp.effective_price ASC
         LIMIT ${limit}
       `;
       const result = rows || [];
