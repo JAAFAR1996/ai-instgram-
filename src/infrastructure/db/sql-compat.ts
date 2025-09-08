@@ -94,6 +94,9 @@ export interface SqlFunction {
     <T extends DatabaseRow = DatabaseRow>(text: string, params?: unknown[]): Promise<T[]> & SqlFragment;
   };
   join: (parts: Array<SqlFragment | string>, separator?: SqlFragment | string) => SqlFragment;
+  and: (...parts: Array<SqlFragment | string>) => SqlFragment;
+  or: (...parts: Array<SqlFragment | string>) => SqlFragment;
+  where: (...parts: Array<SqlFragment | string>) => SqlFragment;
   begin: <T = unknown>(fn: (sql: SqlFunction) => Promise<T>) => Promise<T>;
   commit: () => Promise<void>;
   rollback: () => Promise<void>;
@@ -164,6 +167,30 @@ export function buildSqlCompat(pool: Pool): SqlFunction {
 
   const join = (parts: Array<SqlFragment | string>, separator: SqlFragment | string = asFragment(', ')): SqlFragment => joinFragments(parts, separator);
 
+  const isEmpty = (p: SqlFragment | string): boolean => {
+    const f = typeof p === 'string' ? asFragment(p) : p;
+    return !f.text || f.text.trim().length === 0;
+  };
+
+  const and = (...parts: Array<SqlFragment | string>): SqlFragment => {
+    const xs = parts.filter(p => !isEmpty(p)).map(p => (typeof p === 'string' ? asFragment(p) : p));
+    if (xs.length === 0) return asFragment('');
+    return joinFragments(xs, asFragment(' AND '));
+  };
+
+  const or = (...parts: Array<SqlFragment | string>): SqlFragment => {
+    const xs = parts.filter(p => !isEmpty(p)).map(p => (typeof p === 'string' ? asFragment(p) : p));
+    if (xs.length === 0) return asFragment('');
+    const inner = joinFragments(xs, asFragment(' OR '));
+    return asFragment(`(${inner.text})`, inner.values);
+  };
+
+  const where = (...parts: Array<SqlFragment | string>): SqlFragment => {
+    const body = and(...parts);
+    if (isEmpty(body)) return asFragment('');
+    return asFragment(`WHERE ${body.text}`, body.values);
+  };
+
   const begin = async <T>(fn: (sql: SqlFunction) => Promise<T>): Promise<T> => {
     const newClient = await pool.connect();
     await newClient.query('BEGIN');
@@ -182,6 +209,9 @@ export function buildSqlCompat(pool: Pool): SqlFunction {
   Object.assign(core, {
     unsafe,
     join,
+    and,
+    or,
+    where,
     begin,
     commit: async () => {
       // No-op at pool level
@@ -226,9 +256,36 @@ export function buildSqlCompatFromClient(client: PoolClient): SqlFunction {
 
   const join = (parts: Array<SqlFragment | string>, separator: SqlFragment | string = asFragment(', ')): SqlFragment => joinFragments(parts, separator);
 
+  const isEmpty = (p: SqlFragment | string): boolean => {
+    const f = typeof p === 'string' ? asFragment(p) : p;
+    return !f.text || f.text.trim().length === 0;
+  };
+
+  const and = (...parts: Array<SqlFragment | string>): SqlFragment => {
+    const xs = parts.filter(p => !isEmpty(p)).map(p => (typeof p === 'string' ? asFragment(p) : p));
+    if (xs.length === 0) return asFragment('');
+    return joinFragments(xs, asFragment(' AND '));
+  };
+
+  const or = (...parts: Array<SqlFragment | string>): SqlFragment => {
+    const xs = parts.filter(p => !isEmpty(p)).map(p => (typeof p === 'string' ? asFragment(p) : p));
+    if (xs.length === 0) return asFragment('');
+    const inner = joinFragments(xs, asFragment(' OR '));
+    return asFragment(`(${inner.text})`, inner.values);
+  };
+
+  const where = (...parts: Array<SqlFragment | string>): SqlFragment => {
+    const body = and(...parts);
+    if (isEmpty(body)) return asFragment('');
+    return asFragment(`WHERE ${body.text}`, body.values);
+  };
+
   Object.assign(core, {
     unsafe,
     join,
+    and,
+    or,
+    where,
     begin: async <T>(fn: (sql: SqlFunction) => Promise<T>): Promise<T> => fn(core),
     commit: async () => { await client.query('COMMIT'); },
     rollback: async () => { await client.query('ROLLBACK'); },

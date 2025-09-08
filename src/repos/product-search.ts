@@ -71,14 +71,14 @@ export async function searchProduct(
            CASE WHEN jsonb_typeof(p.image_urls) = 'array' THEN array(SELECT jsonb_array_elements_text(p.image_urls)) END as image_urls
     FROM products p
     JOIN products_priced pp ON pp.id = p.id
-    WHERE p.merchant_id = ${merchantId}::uuid
-      AND (p.status = 'ACTIVE' OR p.status = 'OUT_OF_STOCK')
-      AND (
-        ${expansions.length > 0
-          ? expansions.map(e => sql`(p.name_ar ILIKE ${'%' + e + '%'} OR p.category ILIKE ${'%' + e + '%'} OR p.sku ILIKE ${'%' + e + '%'})`).reduce((a, b) => sql`${a} OR ${b}`)
-          : sql`TRUE`}
-      )
-      AND (${entities.category ? sql`p.category ILIKE ${'%' + entities.category + '%'}` : sql`TRUE`})
+    ${sql.where(
+      sql`p.merchant_id = ${merchantId}::uuid`,
+      sql`(p.status = 'ACTIVE' OR p.status = 'OUT_OF_STOCK')`,
+      sql.or(
+        ...expansions.map(e => sql`(p.name_ar ILIKE ${'%' + e + '%'} OR p.category ILIKE ${'%' + e + '%'} OR p.sku ILIKE ${'%' + e + '%'})`)
+      ),
+      entities.category ? sql`p.category ILIKE ${'%' + entities.category + '%'}` : sql``
+    )}
   `;
 
   // Rank with heuristics: category > size > color > brand > free tokens

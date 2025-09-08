@@ -55,13 +55,13 @@ export async function findProduct(
     SELECT pep.id, pep.merchant_id, pep.sku, pep.name_ar, pep.category, pep.stock_quantity,
            pep.base_price_iqd::float, pep.final_price_iqd::float
     FROM public.products_effective_prices pep
-    WHERE pep.merchant_id = ${merchantId}::uuid
-      AND (
-        ${expansions.length > 0
-          ? expansions.map(e => sql`(pep.name_ar ILIKE ${'%' + e + '%'} OR pep.category ILIKE ${'%' + e + '%'} OR pep.sku ILIKE ${'%' + e + '%'})`).reduce((a, b) => sql`${a} OR ${b}`)
-          : sql`TRUE`}
-      )
-      AND (${entities.category ? sql`pep.category ILIKE ${'%' + entities.category + '%'}` : sql`TRUE`})
+    ${sql.where(
+      sql`pep.merchant_id = ${merchantId}::uuid`,
+      sql.or(
+        ...expansions.map(e => sql`(pep.name_ar ILIKE ${'%' + e + '%'} OR pep.category ILIKE ${'%' + e + '%'} OR pep.sku ILIKE ${'%' + e + '%'})`)
+      ),
+      entities.category ? sql`pep.category ILIKE ${'%' + entities.category + '%'}` : sql``
+    )}
     ORDER BY pep.stock_quantity DESC, pep.final_price_iqd ASC NULLS LAST, pep.name_ar ASC
     LIMIT 10
   `;

@@ -1110,28 +1110,28 @@ export class InstagramAIService {
             OR lower(p.sku) LIKE lower(${q})
             OR lower(p.category) LIKE lower(${q})
           )`
-        : sql`TRUE`;
+        : sql``;
 
       const sizes = (filters.sizes || []).map(s => s.toLowerCase());
       const colors = (filters.colors || []).map(c => c.toLowerCase());
 
       const sizeClause = sizes.length
         ? sql`( (p.attributes->>'size') = ANY(${sizes}) )`
-        : sql`TRUE`;
+        : sql``;
 
       const colorClause = colors.length
         ? sql`( (p.attributes->>'color') = ANY(${colors}) )`
-        : sql`TRUE`;
+        : sql``;
 
       const categoryClause = matchedCats.length > 0
         ? sql`p.category = ANY(${matchedCats})`
-        : sql`TRUE`;
+        : sql``;
 
       const minPrice = (filters as any)?.minPrice ?? null;
       const maxPrice = (filters as any)?.maxPrice ?? null;
       const priceClause = (minPrice != null || maxPrice != null)
         ? sql`pp.effective_price BETWEEN ${minPrice ?? 0} AND ${maxPrice ?? 9_999_999}`
-        : sql`TRUE`;
+        : sql``;
 
       const rows = await sql<{
         id: string;
@@ -1149,13 +1149,15 @@ export class InstagramAIService {
                p.stock_quantity
         FROM products p
         JOIN products_priced pp ON pp.id = p.id
-        WHERE p.merchant_id = ${merchantId}::uuid
-          AND p.status = 'ACTIVE'
-          AND ${textSearchClause}
-          AND ${categoryClause}
-          AND ${sizeClause}
-          AND ${colorClause}
-          AND ${priceClause}
+        ${sql.where(
+          sql`p.merchant_id = ${merchantId}::uuid`,
+          sql`p.status = 'ACTIVE'`,
+          textSearchClause,
+          categoryClause,
+          sizeClause,
+          colorClause,
+          priceClause
+        )}
         ORDER BY pp.effective_price ASC
         LIMIT ${limit}
       `;
