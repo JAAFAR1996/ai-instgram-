@@ -347,7 +347,7 @@ export function auditLogMiddleware() {
           success
         ) VALUES (
           ${merchantId ?? null}::uuid,
-          ${`${c.req.method}_${c.req.path}`},
+          'API_CALL',
           'SYSTEM',
           ${c.req.path},
           'API_REQUEST',

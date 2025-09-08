@@ -1031,7 +1031,7 @@ export class ConversationAIOrchestrator {
         )`,
         [
           context.merchantId,
-          'PLATFORM_AI_ORCHESTRATION',
+          'SYSTEM_EVENT',
           'SYSTEM',
           'AI_INTERACTION',
           JSON.stringify(safeDetails),

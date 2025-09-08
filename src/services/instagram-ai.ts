@@ -312,7 +312,13 @@ export class InstagramAIService {
   private parseJsonSafe<T>(raw?: string): { ok: true; data: T } | { ok: false } {
     try {
       if (!raw) return { ok: false };
-      const data = JSON.parse(raw) as T;
+      // Clean common wrappers like ```json ... ``` or ``` ... ```
+      const cleaned = raw
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/```\s*$/i, '')
+        .trim();
+      const data = JSON.parse(cleaned) as T;
       return { ok: true, data };
     } catch {
       return { ok: false };
@@ -1470,7 +1476,7 @@ ${productsText}
             success
           ) VALUES (
             ${context.merchantId}::uuid,
-            'INSTAGRAM_AI_RESPONSE_GENERATED',
+            'SYSTEM_EVENT',
             'SYSTEM',
             'AI_INTERACTION',
             ${JSON.stringify({

@@ -1,7 +1,16 @@
 import { getDatabase } from '../db/adapter.js';
 import { normalizeForSearch } from '../nlp/ar-normalize.js';
 
+type Entities = {
+  term?: string;
+  category?: string;
+  size?: string;
+  color?: string;
+  brand?: string;
+};
+
 export interface SearchEntities {
+  term?: string | null;
   category?: string | null;
   gender?: string | null;
   size?: string | null;
@@ -28,6 +37,58 @@ export interface SearchResult {
   alternatives: ProductHit[];
 }
 
+export async function searchProducts(merchantId: string, entities: Entities, limit = 20, offset = 0) {
+  const db = getDatabase();
+  const sql = db.getSQL();
+
+  const filters: any[] = [];
+  const safe = (v?: string) => (v ?? "").trim();
+
+  const term = safe(entities.term);
+  if (term) {
+    const ors = [
+      sql`LOWER(p.name_ar) LIKE LOWER(${'%' + term + '%'})`,
+      sql`LOWER(p.sku) LIKE LOWER(${'%' + term + '%'})`,
+      sql`LOWER(p.category) LIKE LOWER(${'%' + term + '%'})`
+    ];
+    filters.push(sql.or(...ors));
+  }
+  if (safe(entities.category)) filters.push(sql`LOWER(p.category) = LOWER(${entities.category})`);
+  if (safe(entities.brand)) filters.push(sql`LOWER(p.attributes->>'brand') = LOWER(${entities.brand})`);
+  if (safe(entities.size)) filters.push(sql`p.attributes->>'size' = ${entities.size}`);
+  if (safe(entities.color)) filters.push(sql`p.attributes->>'color' = ${entities.color}`);
+
+  filters.push(sql`p.merchant_id = ${merchantId}`);
+  filters.push(sql`p.status = 'ACTIVE'`);
+
+  const rows = await sql<{
+    id: string;
+    sku: string;
+    name_ar: string;
+    category: string | null;
+    price_amount: number;
+    sale_price_amount: number | null;
+    price_currency: string;
+    stock_quantity: number;
+    image_urls: string[] | null;
+  }>`
+    SELECT 
+      p.id, p.sku, p.name_ar, p.category,
+      pp.effective_price::float as price_amount,
+      pp.sale_price::float as sale_price_amount,
+      pp.price_currency,
+      p.stock_quantity,
+      p.image_urls
+    FROM products p
+    JOIN product_prices pp ON pp.product_id = p.id
+    ${sql.where(...filters)}
+    ORDER BY p.updated_at DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `;
+
+  return rows.map(toHit);
+}
+
 export async function searchProduct(
   merchantId: string,
   queryText: string,
@@ -48,12 +109,36 @@ export async function searchProduct(
     throw new Error('security_context_missing');
   }
 
-  // Build ILIKE patterns using normalized expansions
-  const expansions = normalizeForSearch(queryText ?? '', synonyms)
-    .filter(Boolean)
-    .slice(0, 6);
+  // Safe string helper to prevent empty/null search conditions
+  const safe = (v?: string | null) => (v ?? "").trim();
 
-  // Base
+  // Build search filters with proper SQL conditions
+  const filters = [];
+  
+  // Add merchant and status filters
+  filters.push(sql`p.merchant_id = ${merchantId}::uuid`);
+  filters.push(sql`p.status = 'ACTIVE'`);
+
+  // Handle search term with multiple fields
+  const term = safe(entities.term || queryText);
+  if (term) {
+    const ors = [
+      sql`LOWER(p.name_ar) LIKE LOWER(${'%' + term + '%'})`,
+      sql`LOWER(p.sku) LIKE LOWER(${'%' + term + '%'})`,
+      sql`LOWER(p.category) LIKE LOWER(${'%' + term + '%'})`
+    ];
+    filters.push(sql.or(...ors));
+  }
+
+  // Add entity-based filters with exact matches
+  if (safe(entities.category)) filters.push(sql`LOWER(p.category) = LOWER(${entities.category})`);
+  if (safe(entities.brand)) filters.push(sql`LOWER(p.attributes->>'brand') = LOWER(${entities.brand})`);
+  if (safe(entities.size)) filters.push(sql`p.attributes->>'size' = ${entities.size}`);
+  if (safe(entities.color)) filters.push(sql`p.attributes->>'color' = ${entities.color}`);
+
+  // Fallback expansions are not used directly in SQL anymore; normalization remains in services
+
+  // Base query with improved structure
   const rows = await sql<{
     id: string;
     sku: string;
@@ -66,19 +151,16 @@ export async function searchProduct(
     image_urls: string[] | null;
   }>`
     SELECT p.id, p.sku, p.name_ar, p.category,
-           pp.price_amount::float, pp.sale_price_amount::float, pp.price_currency,
+           pp.price_amount::float as price_amount, 
+           pp.sale_price_amount::float as sale_price_amount, 
+           pp.price_currency,
            p.stock_quantity,
            CASE WHEN jsonb_typeof(p.image_urls) = 'array' THEN array(SELECT jsonb_array_elements_text(p.image_urls)) END as image_urls
     FROM products p
     JOIN products_priced pp ON pp.id = p.id
-    ${sql.where(
-      sql`p.merchant_id = ${merchantId}::uuid`,
-      sql`(p.status = 'ACTIVE' OR p.status = 'OUT_OF_STOCK')`,
-      sql.or(
-        ...expansions.map(e => sql`(p.name_ar ILIKE ${'%' + e + '%'} OR p.category ILIKE ${'%' + e + '%'} OR p.sku ILIKE ${'%' + e + '%'})`)
-      ),
-      entities.category ? sql`p.category ILIKE ${'%' + entities.category + '%'}` : sql``
-    )}
+    ${sql.where(...filters)}
+    ORDER BY p.updated_at DESC
+    LIMIT 20 OFFSET 0
   `;
 
   // Rank with heuristics: category > size > color > brand > free tokens

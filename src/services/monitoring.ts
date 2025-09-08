@@ -248,7 +248,7 @@ export class MonitoringService {
           error_message
         ) VALUES (
           ${metrics.merchantId ?? null}::uuid,
-          'PERFORMANCE_METRIC',
+          'SYSTEM_EVENT',
           'SYSTEM',
           'API_ENDPOINT',
           ${JSON.stringify({
@@ -829,7 +829,7 @@ export class MonitoringService {
             success
           ) VALUES (
             ${merchantId}::uuid,
-            'QUALITY_ALERT',
+            'SYSTEM_EVENT',
             'SYSTEM',
             'QUALITY_METRIC',
             ${JSON.stringify({

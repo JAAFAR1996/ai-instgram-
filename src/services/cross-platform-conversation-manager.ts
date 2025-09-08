@@ -415,7 +415,7 @@ export class CrossPlatformConversationManager {
           success
         ) VALUES (
           ${merchantId}::uuid,
-          'CONVERSATIONS_MERGED',
+          'SYSTEM_EVENT',
           'CONVERSATION',
           'CONVERSATION',
           ${JSON.stringify({
@@ -1064,4 +1064,3 @@ export function getCrossPlatformConversationManager(): CrossPlatformConversation
 export default CrossPlatformConversationManager;
 
 // Using imported types from conversations.ts
-

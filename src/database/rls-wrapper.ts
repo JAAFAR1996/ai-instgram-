@@ -344,15 +344,19 @@ export class RLSDatabase {
       await sql`
         INSERT INTO audit_logs (
           action,
+          resource_type,
           entity_type,
           details,
-          performed_by,
+          user_id,
+          status,
           created_at
         ) VALUES (
-          ${action},
+          'SYSTEM_EVENT',
+          'SYSTEM',
           'RLS_CONTEXT',
           ${details ? JSON.stringify(details) : null},
           ${userId ?? null},
+          'SUCCESS',
           NOW()
         )
       `;

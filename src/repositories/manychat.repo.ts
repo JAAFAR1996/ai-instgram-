@@ -45,11 +45,14 @@ export async function upsertManychatMapping(
   mcId: string
 ): Promise<void> {
   const pool = getPool();
+  // Prefer upsert by (merchant_id, manychat_subscriber_id) to avoid duplicates on that unique constraint,
+  // and normalize username on update.
   await pool.query(
     `insert into manychat_subscribers(merchant_id, instagram_username, manychat_subscriber_id)
      values ($1,$2,$3)
-     on conflict (merchant_id, instagram_username) do update
-       set manychat_subscriber_id = excluded.manychat_subscriber_id`,
+     on conflict (merchant_id, manychat_subscriber_id) do update
+       set instagram_username = excluded.instagram_username,
+           updated_at = now()`,
     [merchantId, username, mcId]
   );
 }

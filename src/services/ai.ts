@@ -827,7 +827,7 @@ ${productsText}
         )
       `, [
         context.merchantId,
-        'AI_RESPONSE_GENERATED',
+        'SYSTEM_EVENT',
         'SYSTEM',
         'AI_INTERACTION',
         JSON.stringify({

@@ -97,6 +97,8 @@ export interface SqlFunction {
   and: (...parts: Array<SqlFragment | string>) => SqlFragment;
   or: (...parts: Array<SqlFragment | string>) => SqlFragment;
   where: (...parts: Array<SqlFragment | string>) => SqlFragment;
+  like: (column: string, value: string) => SqlFragment;
+  empty: SqlFragment;
   begin: <T = unknown>(fn: (sql: SqlFunction) => Promise<T>) => Promise<T>;
   commit: () => Promise<void>;
   rollback: () => Promise<void>;
@@ -191,6 +193,11 @@ export function buildSqlCompat(pool: Pool): SqlFunction {
     return asFragment(`WHERE ${body.text}`, body.values);
   };
 
+  const like = (column: string, value: string): SqlFragment => {
+    // Column is injected as plain text; callers should pass trusted identifiers only.
+    return asFragment(`LOWER(${column}) LIKE LOWER($1)`, [`%${value}%`]);
+  };
+
   const begin = async <T>(fn: (sql: SqlFunction) => Promise<T>): Promise<T> => {
     const newClient = await pool.connect();
     await newClient.query('BEGIN');
@@ -212,6 +219,8 @@ export function buildSqlCompat(pool: Pool): SqlFunction {
     and,
     or,
     where,
+    like,
+    empty: asFragment(''),
     begin,
     commit: async () => {
       // No-op at pool level
@@ -280,12 +289,18 @@ export function buildSqlCompatFromClient(client: PoolClient): SqlFunction {
     return asFragment(`WHERE ${body.text}`, body.values);
   };
 
+  const like = (column: string, value: string): SqlFragment => {
+    return asFragment(`LOWER(${column}) LIKE LOWER($1)`, [`%${value}%`]);
+  };
+
   Object.assign(core, {
     unsafe,
     join,
     and,
     or,
     where,
+    like,
+    empty: asFragment(''),
     begin: async <T>(fn: (sql: SqlFunction) => Promise<T>): Promise<T> => fn(core),
     commit: async () => { await client.query('COMMIT'); },
     rollback: async () => { await client.query('ROLLBACK'); },
