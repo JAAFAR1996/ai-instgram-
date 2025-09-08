@@ -108,6 +108,22 @@ async function bootstrap() {
 
     // Initialize database (migrations disabled for production safety)
     const pool = getPool();
+    // Sanity check: sql helpers are present in runtime (prevents fragment execution issues)
+    try {
+      const { getDatabase } = await import('./db/adapter.js');
+      const db = getDatabase();
+      const tag: any = db.getSQL();
+      if (typeof tag.where !== 'function' || typeof tag.or !== 'function' || typeof tag.and !== 'function') {
+        log.error('SQL composition helpers missing at runtime', {
+          hasWhere: typeof tag.where,
+          hasOr: typeof tag.or,
+          hasAnd: typeof tag.and
+        });
+        throw new Error('SQL helpers missing: build artifact is stale. Rebuild with npm run build.');
+      }
+    } catch (e) {
+      throw e instanceof Error ? e : new Error(String(e));
+    }
     // await runDatabaseMigrations(); // DISABLED: Run migrations manually before deployment
     log.info('Database initialized (migrations skipped for production safety)');
 

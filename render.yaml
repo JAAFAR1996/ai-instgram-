@@ -4,7 +4,7 @@ services:
     runtime: node
     repo: https://github.com/YOUR_USERNAME/YOUR_REPO
     branch: main
-    buildCommand: npm ci && npm run build
+    buildCommand: NPM_CONFIG_PRODUCTION=false npm ci && npm run build
     startCommand: node dist/production-index.js
     postdeploy: node dist/database/migrate.js
     envVars:
