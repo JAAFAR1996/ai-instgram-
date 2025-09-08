@@ -8,6 +8,8 @@
 import { getLogger } from '../services/logger.js';
 import { withTimeout } from '../utils/timeout.js';
 import { telemetry } from '../services/telemetry.js';
+import { Queue } from 'bullmq';
+import RedisConfigFactory from '../config/RedisConfigurationFactory.js';
 import { randomUUID } from 'crypto';
 
 export interface DeadLetterItem {
@@ -33,6 +35,9 @@ export interface DeadLetterItem {
 }
 
 const dlq: DeadLetterItem[] = [];
+const USE_BULLMQ_DLQ = (process.env.DLQ_BACKEND || 'bullmq').toLowerCase() === 'bullmq';
+const bullConn = RedisConfigFactory.createBullMQConnection();
+const bullDlq = new Queue('dlq', { connection: bullConn, prefix: 'ai-sales' });
 const MAX_DLQ_SIZE = parseInt(process.env.DLQ_MAX_SIZE || '10000');
 const DLQ_RETRY_DELAY_MS = parseInt(process.env.DLQ_RETRY_DELAY_MS || '300000'); // 5 minutes
 const logger = getLogger({ component: 'DLQ' });
@@ -56,6 +61,25 @@ const CIRCUIT_BREAKER_TIMEOUT = parseInt(process.env.DLQ_CIRCUIT_BREAKER_TIMEOUT
  * Enhanced DLQ push with retry logic and categorization
  */
 export function pushDLQ(item: Partial<DeadLetterItem> & { reason: string; payload: unknown }): void {
+  if (USE_BULLMQ_DLQ) {
+    // Durable DLQ via BullMQ
+    bullDlq.add('dlq', {
+      reason: item.reason,
+      payload: item.payload,
+      severity: item.severity || 'medium',
+      category: item.category || 'other',
+      eventId: item.eventId || null,
+      merchantId: item.merchantId || null,
+      platform: item.platform || null,
+      createdAt: new Date().toISOString()
+    }, { attempts: 1, removeOnComplete: true, removeOnFail: false, priority: (item.severity === 'high' || item.severity === 'critical') ? 1 : 3 })
+    .then(job => {
+      logger.error('DLQ item added', { dlqId: job.id, reason: item.reason, severity: item.severity || 'medium', category: item.category || 'other' });
+      try { telemetry.counter('dlq_enqueued_total', 'DLQ enqueued items').add(1, { reason: item.reason, category: String(item.category || 'other') }); } catch {}
+    })
+    .catch(e => logger.error('Failed to enqueue DLQ job', e as Error, { reason: item.reason }));
+    return;
+  }
   const dlqItem: DeadLetterItem = {
     id: generateDLQId(),
     ts: Date.now(),
@@ -131,6 +155,10 @@ export function getDLQStats(): {
   oldestTs: number | null;
   reasons: Record<string, number>;
 } {
+  if (USE_BULLMQ_DLQ) {
+    // Not used by JSON route (which calls async version), return zeros for legacy callers
+    return { size: 0, latest: null, oldestTs: null, reasons: {} };
+  }
   const reasons: Record<string, number> = {};
   
   dlq.forEach(item => {
@@ -149,9 +177,37 @@ export function getDLQStats(): {
  * Drain all items from DLQ (for processing or cleanup)
  */
 export function drainDLQ(): DeadLetterItem[] {
+  if (USE_BULLMQ_DLQ) {
+    // Non-blocking drain is not supported here; use queue-admin APIs to remove jobs
+    return [];
+  }
   const drained = dlq.splice(0, dlq.length);
   console.log(`🗑️ DLQ: Drained ${drained.length} items`);
   return drained;
+}
+
+// BullMQ helpers for UI
+export async function listDLQ(limit = 50): Promise<Array<{ id: string; reason: string; createdAt: string; state: string }>> {
+  if (!USE_BULLMQ_DLQ) return dlq.slice(-limit).map(x => ({ id: x.id, reason: x.reason, createdAt: new Date(x.ts).toISOString(), state: 'legacy' }));
+  const jobs = [
+    ...(await bullDlq.getFailed(0, limit)),
+    ...(await bullDlq.getWaiting(0, limit)),
+    ...(await bullDlq.getDelayed(0, limit))
+  ];
+  return jobs.slice(0, limit).map(j => ({ id: String(j.id), reason: (j.data?.reason ?? 'unknown'), createdAt: (j.data?.createdAt ?? new Date().toISOString()), state: j.failedReason ? 'failed' : 'queued' }));
+}
+
+export async function retryDLQ(jobId: string): Promise<boolean> {
+  if (!USE_BULLMQ_DLQ) return false;
+  const job = await bullDlq.getJob(jobId);
+  if (!job) return false;
+  const target = job.data?.targetQueue as string | undefined;
+  if (target) {
+    const q = new Queue(target, { connection: bullConn, prefix: 'ai-sales' });
+    await q.add(target, job.data?.payload || {}, { attempts: 3, backoff: { type: 'exponential', delay: 10_000 } });
+  }
+  await job.remove();
+  return true;
 }
 
 /**
@@ -165,6 +221,7 @@ export function getRecentDLQItems(limit: number = 10): DeadLetterItem[] {
  * Clear DLQ items older than specified time
  */
 export function cleanupOldDLQItems(maxAgeMs: number = 24 * 60 * 60 * 1000): number {
+  if (USE_BULLMQ_DLQ) return 0;
   const cutoff = Date.now() - maxAgeMs;
   // const originalLength = dlq.length; // unused
   
@@ -193,6 +250,9 @@ export function getDLQHealth(): {
   size: number;
   utilization: number;
 } {
+  if (USE_BULLMQ_DLQ) {
+    return { status: 'healthy', message: 'BullMQ DLQ active', size: 0, utilization: 0 } as any;
+  }
   const size = dlq.length;
   const utilization = (size / MAX_DLQ_SIZE) * 100;
   

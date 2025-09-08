@@ -1,88 +1,90 @@
 services:
   - type: web
-    name: ai-sales-platform
+    name: ai-sales-api
     runtime: node
+    plan: standard
     repo: https://github.com/YOUR_USERNAME/YOUR_REPO
     branch: main
-    buildCommand: NPM_CONFIG_PRODUCTION=false npm ci && npm run build
+    buildCommand: npm ci && npm run build
     startCommand: node dist/production-index.js
-    postdeploy: node dist/database/migrate.js
+    healthCheckPath: /webhooks/health
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 10000
-      - key: IG_VERIFY_TOKEN
-        sync: false
-      - key: META_APP_SECRET
-        sync: false
-      - key: IG_APP_ID
-        sync: false
-      - key: IG_APP_SECRET
-        sync: false
-      - key: INTERNAL_API_KEY
-        sync: false
-      - key: DATABASE_URL
-        sync: false
       - key: OPENAI_API_KEY
-        sync: false
-      - key: ENCRYPTION_KEY_HEX
-        sync: false
-      - key: JWT_SECRET
-        sync: false
-      - key: REDIS_URL
-        sync: false
-      - key: META_APP_ID
-        sync: false
-      - key: BASE_URL
-        value: https://ai-instgram.onrender.com
-      - key: REDIRECT_URI
-        value: https://ai-instgram.onrender.com/auth/instagram/callback
-      - key: CORS_ORIGINS
-        value: https://ai-instgram.onrender.com,https://graph.facebook.com
-      - key: WHATSAPP_PHONE_NUMBER_ID
-        sync: false
-      - key: WHATSAPP_ACCESS_TOKEN
-        sync: false
-      - key: SENTRY_DSN
-        sync: false
-      # ===============================================
-      # ManyChat Integration Environment Variables
-      # ===============================================
-      - key: MANYCHAT_API_KEY
-        sync: false
-      - key: MANYCHAT_BASE_URL
-        value: https://api.manychat.com
+        sync: true
+      - key: META_APP_SECRET
+        sync: true
+      - key: IG_VERIFY_TOKEN
+        sync: true
+      - key: MANYCHAT_BEARER
+        sync: true
       - key: MANYCHAT_WEBHOOK_SECRET
-        sync: false
-      - key: MANYCHAT_DEFAULT_FLOW_ID
-        sync: false
-      - key: MANYCHAT_WELCOME_FLOW_ID
-        sync: false
-      - key: MANYCHAT_AI_RESPONSE_FLOW_ID
-        sync: false
-      - key: MANYCHAT_COMMENT_RESPONSE_FLOW_ID
-        sync: false
-      - key: MANYCHAT_STORY_RESPONSE_FLOW_ID
-        sync: false
-      - key: MANYCHAT_RATE_LIMIT_RPS
-        value: "10"
-      - key: MANYCHAT_RATE_LIMIT_WINDOW_MS
-        value: "1000"
-      - key: MANYCHAT_MAX_RETRIES
-        value: "3"
-      - key: MANYCHAT_RETRY_DELAY_MS
-        value: "1000"
-      - key: MANYCHAT_FAILURE_THRESHOLD
-        value: "5"
-      - key: MANYCHAT_RESET_TIMEOUT_MS
-        value: "30000"
-    healthCheckPath: /health
-    autoDeploy: true
+        sync: true
+      - key: ENCRYPTION_KEY_HEX
+        sync: true
+      - key: JWT_SECRET
+        sync: true
+      - key: DATABASE_URL
+        fromService:
+          name: postgres-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: redis-cache
+          property: connectionString
+
+  - type: worker
+    name: ai-sales-worker
+    runtime: node
+    plan: standard
+    repo: https://github.com/YOUR_USERNAME/YOUR_REPO
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/worker-index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: OPENAI_API_KEY
+        sync: true
+      - key: DATABASE_URL
+        fromService:
+          name: postgres-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: redis-cache
+          property: connectionString
+
+  - type: cron
+    name: cleanup-cron
+    runtime: node
+    plan: standard
+    repo: https://github.com/YOUR_USERNAME/YOUR_REPO
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/cron-index.js
+    schedule: '0 3 * * *'
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromService:
+          name: postgres-db
+          property: connectionString
+
+databases:
+  - name: postgres-db
     plan: starter
     region: oregon
-    numInstances: 1
-    disk:
-      name: ai-sales-data
-      mountPath: /app/data
-      sizeGB: 1
+    databaseName: ai_sales
+    user: ai_sales_user
+  - name: redis-cache
+    plan: starter
+    region: oregon
+
+persistentDisks:
+  - name: uploads
+    sizeGB: 5
+    mountPath: /data/uploads

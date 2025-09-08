@@ -383,8 +383,48 @@ export class AIService {
       };
       aiResponse.responseTime = responseTime;
 
+      // Post-process: Constitutional AI critique & improvement (best-effort)
+      try {
+        const { ConstitutionalAI } = await import('./constitutional-ai.js');
+        const ca = new ConstitutionalAI();
+        const critique = await ca.critiqueResponse(aiResponse.message, { merchantId: context.merchantId });
+        if (!critique.meetsThreshold) {
+          const improved = await ca.improveResponse(aiResponse.message, critique, { merchantId: context.merchantId });
+          aiResponse.message = improved.improved;
+          aiResponse.messageAr = improved.improved;
+        }
+      } catch (e) {
+        this.logger.debug('ConstitutionalAI post-process skipped', { error: String(e) });
+      }
+
+      // Post-process: Tone & Dialect adaptation (Iraqi/BAGHDADI + tier + sentiment)
+      try {
+        const { CustomerProfiler } = await import('./customer-profiler.js');
+        const { adaptDialectAndTone, detectSentiment } = await import('./tone-dialect.js');
+        const profiler = new CustomerProfiler();
+        const profile = await profiler.personalizeResponses(context.merchantId, context.customerId);
+        const sentiment = detectSentiment(customerMessage);
+        const adapted = adaptDialectAndTone(aiResponse.message, {
+          dialect: 'baghdadi',
+          tier: profile.tier,
+          sentiment
+        });
+        aiResponse.message = adapted;
+        aiResponse.messageAr = adapted;
+      } catch (e) {
+        this.logger.debug('Tone/Dialect adaptation skipped', { error: String(e) });
+      }
+
       // Log AI interaction
       await this.logAIInteraction(context, this.maskPII(customerMessage), aiResponse);
+
+      // Save assistant message in semantic memory (best-effort)
+      try {
+        const { getSemanticMemoryService } = await import('./semantic-memory.js');
+        const mem = getSemanticMemoryService();
+        const convId = (context as any)?.conversationId || '00000000-0000-0000-0000-000000000000';
+        await mem.saveMessage(context.merchantId, context.customerId, convId, 'assistant', aiResponse.message);
+      } catch {}
 
       return aiResponse;
     } catch (error: unknown) {
@@ -542,7 +582,8 @@ export class AIService {
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: newSystemPrompt },
-      { role: 'system', content: `تفضيلات العميل: ${memoryLine}` }
+      { role: 'system', content: `تفضيلات العميل: ${memoryLine}` },
+      { role: 'system', content: 'استخدم لهجة عراقية ودودة (بغدادية) عندما يكون ذلك مناسبًا، مع أسلوب محترم وواضح ومباشر بدون مبالغة. تجنب المصطلحات الرسمية الثقيلة.' }
     ];
 
     // Add recent conversation history (last 6)
@@ -560,6 +601,19 @@ export class AIService {
       }
     } catch (e) {
       this.logger.debug('KB retrieval skipped', { error: String(e) });
+    }
+
+    // Semantic Memory: retrieve similar conversation snippets (best-effort)
+    try {
+      const { getSemanticMemoryService } = await import('./semantic-memory.js');
+      const mem = getSemanticMemoryService();
+      const memories = await mem.searchSimilar(context.merchantId, context.customerId, customerMessage, 4);
+      if (Array.isArray(memories) && memories.length) {
+        const lines = memories.map(m => `${m.role === 'user' ? 'المستخدم' : 'الوكيل'}: ${m.content}`).join('\n');
+        messages.push({ role: 'system', content: `ذكريات محادثة سابقة:\n${lines}` });
+      }
+    } catch (e) {
+      this.logger.debug('Semantic memory retrieval skipped', { error: String(e) });
     }
 
     // Build user content with optional images (vision parts)

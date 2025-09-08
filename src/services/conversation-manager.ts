@@ -1,5 +1,6 @@
 import { getLogger } from './logger.js';
 import SmartCache, { CustomerContextCache } from './smart-cache.js';
+import { getAIService } from './ai.js';
 
 export interface ConversationMsg {
   role: 'user' | 'assistant';
@@ -33,11 +34,25 @@ export class ConversationManager {
   ): Promise<ConversationOptimizationResult> {
     try {
       const trimmed = messages.slice(-keepLast);
-      // Derive a short summary of older messages
       const older = messages.slice(0, Math.max(0, messages.length - keepLast));
-      let prior = (await this.cache.getCustomerContext(merchantId, customerId))?.lastSummary ?? '';
-      const olderSummary = summarizeNaively(older, 600);
-      const summary = mergeSummaries(prior, olderSummary, 700);
+      let summary = '';
+      try {
+        const ai = await getAIService();
+        // Map to AI.MessageHistory format
+        const hist = older.map(m => ({ role: m.role, content: m.content, timestamp: new Date(m.timestamp as any) })) as any;
+        summary = await ai.generateConversationSummary(hist, {
+          merchantId,
+          customerId,
+          platform: 'instagram' as any,
+          stage: 'GREETING' as any,
+          cart: [],
+          preferences: {},
+          conversationHistory: []
+        } as any);
+      } catch (e) {
+        const olderSummary = summarizeNaively(older, 600);
+        summary = mergeSummaries('', olderSummary, 700);
+      }
 
       const sessionPatch: CustomerContextCache = { lastSummary: summary };
       await this.cache.patchCustomerContext(merchantId, customerId, sessionPatch);
@@ -84,4 +99,3 @@ function sanitize(s: string): string {
 }
 
 export default ConversationManager;
-

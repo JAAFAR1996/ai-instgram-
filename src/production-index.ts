@@ -41,6 +41,7 @@ import { initializeHashtagServices } from './startup/hashtag-services.js';
 import { securityHeaders, rateLimiter } from './middleware/security.js';
 import { createIdempotencyMiddleware } from './middleware/idempotency.js';
 import rlsMiddleware from './middleware/rls-merchant-isolation.js';
+import { registerErrorHandler } from './middleware/error-handler.js';
 // 7) Routes imports
 import { registerWebhookRoutes } from './routes/webhooks.js';
 import { registerMerchantAdminRoutes } from './routes/merchant-admin.js';
@@ -288,6 +289,9 @@ async function bootstrap() {
       const err = e instanceof Error ? e : new Error(String(e));
       log.warn('Failed to register image search routes', { err });
     }
+
+    // Centralized error handler
+    registerErrorHandler(app);
 
     // Register message analytics routes
     try {

@@ -363,6 +363,12 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
                VALUES ($1, $2, $3, 'INCOMING', 'instagram', 'manychat', NOW()) RETURNING id`,
               [conversationId, messageText || (hasImages ? 'IMAGE_MESSAGE' : ''), hasImages ? 'IMAGE' : 'TEXT']
             );
+            // Save semantic memory (best-effort)
+            try {
+              const { getSemanticMemoryService } = await import('../services/semantic-memory.js');
+              const mem = getSemanticMemoryService();
+              await mem.saveMessage(sanitizedMerchantId, sanitizedUsername, conversationId, 'user', messageText || (hasImages ? 'IMAGE_MESSAGE' : ''));
+            } catch {}
           } catch (insErr) {
             log.warn('Failed to insert incoming message with RETURNING id; retrying plain insert', { error: String(insErr) });
             await pool.query(
@@ -385,6 +391,17 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
               conversationHistory: historyMsgs,
               interactionType: 'dm'
             } as any;
+            // Check 24h message window status (Meta policy)
+            let in24hWindow = true;
+            try {
+              const win = await pool.query(
+                `SELECT can_send, window_expires_at FROM get_instagram_message_window_status($1::uuid, $2)`,
+                [sanitizedMerchantId, sanitizedUsername]
+              );
+              in24hWindow = Boolean(win.rows?.[0]?.can_send);
+            } catch (e) {
+              log.warn('Failed to check 24h window status', { error: String(e) });
+            }
 
             // Respond with pure AI (no artificial fallback text). To reduce timeouts,
             // we still bound with a soft cap if MANYCHAT_AI_TIMEOUT_MS is set; otherwise wait.
@@ -403,8 +420,17 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
               const ai = await orchestrator.generatePlatformResponse(messageText, context, 'instagram');
               aiText = (ai?.response as any)?.message || '';
             }
+            // Enforce 24h policy: avoid promotional content outside window; add human_agent tag
+            try {
+              if (!in24hWindow) {
+                const { looksPromotional } = await import('../services/tone-dialect.js');
+                if (looksPromotional(aiText)) {
+                  aiText = 'حتى نلتزم بسياسات Meta، نكدر نجاوب على سؤالك بشكل عام بدون عروض ترويجية. نقدر نخلي ممثل بشري يتابعك. 🙏';
+                }
+              }
+            } catch {}
             // Respond with ManyChat-friendly JSON and attributes
-            return c.json(mcResponse({ ai_reply: aiText || '...', in_24h: true }));
+            return c.json(mcResponse({ ai_reply: aiText || '...', in_24h: in24hWindow, human_agent: !in24hWindow }));
           } catch (aiErr) {
             log.error('❌ AI generation failed', { error: String(aiErr) });
             return c.json(mcResponse({ ai_reply: 'عذرًا، حدث خطأ. حاول لاحقًا.', in_24h: true, status_code: 500 }));

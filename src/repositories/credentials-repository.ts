@@ -104,6 +104,14 @@ export class CredentialsRepository {
           token_refresh_count = merchant_credentials.token_refresh_count + 1,
           updated_at = NOW()
       `;
+      // Best-effort dual write to pgcrypto column (if available)
+      try {
+        await sql`
+          UPDATE merchant_credentials
+          SET encrypted_access_token = pgp_sym_encrypt(${encryptedJson}, ${ (process.env.ENCRYPTION_KEY_HEX || process.env.ENCRYPTION_KEY || 'ai-sales-platform-key').toString() })
+          WHERE merchant_id = ${merchantId}::uuid
+        `;
+      } catch {}
     } else if (platform === 'instagram') {
       await sql`
         INSERT INTO merchant_credentials (
@@ -130,6 +138,14 @@ export class CredentialsRepository {
           token_refresh_count = merchant_credentials.token_refresh_count + 1,
           updated_at = NOW()
       `;
+      // Best-effort dual write to pgcrypto column (if available)
+      try {
+        await sql`
+          UPDATE merchant_credentials
+          SET encrypted_access_token = pgp_sym_encrypt(${encryptedJson}, ${ (process.env.ENCRYPTION_KEY_HEX || process.env.ENCRYPTION_KEY || 'ai-sales-platform-key').toString() })
+          WHERE merchant_id = ${merchantId}::uuid
+        `;
+      } catch {}
     }
   }
 
@@ -150,6 +166,20 @@ export class CredentialsRepository {
     const row = rows[0] as TokenRow | undefined;
 
     if (!row?.token_encrypted) {
+      // Fallback to pgcrypto column (if available)
+      try {
+        const [fb] = await sql<TokenRow>`
+          SELECT pgp_sym_decrypt(encrypted_access_token, ${ (process.env.ENCRYPTION_KEY_HEX || process.env.ENCRYPTION_KEY || 'ai-sales-platform-key').toString() }) as token_encrypted
+          FROM merchant_credentials
+          WHERE merchant_id = ${merchantId}::uuid
+        `;
+        if (fb?.token_encrypted) {
+          const enc = JSON.parse(fb.token_encrypted);
+          const dec = this.encryption.decryptToken(enc, platform);
+          await this.recordAccess(merchantId);
+          return dec.token;
+        }
+      } catch {}
       return null;
     }
 

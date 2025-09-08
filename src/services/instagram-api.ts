@@ -844,6 +844,15 @@ export class InstagramAPICredentialsManager {
           updated_at = NOW()
       `;
 
+      // Best-effort: also populate pgcrypto BYTEA column if available
+      try {
+        await sql`
+          UPDATE merchant_credentials
+          SET encrypted_access_token = pgp_sym_encrypt(${JSON.stringify(encryptedToken)}, ${ (process.env.ENCRYPTION_KEY_HEX || process.env.ENCRYPTION_KEY || 'ai-sales-platform-key').toString() })
+          WHERE merchant_id = ${merchantId}::uuid
+        `;
+      } catch {}
+
       this.logger.info(`✅ Instagram credentials stored for merchant: ${merchantId}`);
     } catch (error) {
       this.logger.error('❌ Failed to store Instagram credentials:', error);

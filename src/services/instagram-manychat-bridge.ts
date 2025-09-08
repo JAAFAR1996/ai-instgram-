@@ -444,7 +444,23 @@ export class InstagramManyChatBridge {
     
     try {
       // Send using the ManyChat subscriber ID, not the Instagram ID
-      const result = await this.manyChatService.sendText(merchantId, mcId, message, { isResponseToNewMessage: true });
+      const lastInboundAt = await this.getLastInboundAt(merchantId, username);
+      const inboundHours = lastInboundAt ? ((Date.now() - new Date(lastInboundAt).getTime()) / 3_600_000) : Number.POSITIVE_INFINITY;
+      const outside24h = !(Number.isFinite(inboundHours) && inboundHours <= 24);
+      const tag = outside24h ? 'HUMAN_AGENT' as const : undefined;
+
+      const result = await this.manyChatService.sendText(merchantId, mcId, message, {
+        isResponseToNewMessage: !outside24h,
+        tag,
+        outside24h
+      });
+      
+      // إذا كانت الرسالة محجوبة بسياسة 24 ساعة، نُشعِر المستخدم الطريقة الصحيحة ونسجل متابعة
+      if (!result.success && (result.error === 'blocked_24h_no_tag' || result.error === 'outside_24h_policy')) {
+        const nudge = 'حسب سياسة إنستغرام، لازم تراسلنا برسالة قصيرة حتى نكمل ❤️ اكتب "مرحبا" حتى نكمل وياك.';
+        try { await this.manyChatService.sendText(merchantId, mcId, nudge, { tag, outside24h }); } catch {}
+        await this.scheduleForFollowUp({ merchantId, customerId: username, message, interactionType: 'dm', platform: 'instagram' } as any);
+      }
       return { ...result, mcId };
       
     } catch (error) {
@@ -495,6 +511,30 @@ export class InstagramManyChatBridge {
       
       // If not subscriber error, throw original error
       throw error;
+    }
+  }
+
+  /**
+   * آخر رسالة واردة من العميل لاحتساب نافذة الـ 24 ساعة
+   */
+  private async getLastInboundAt(merchantId: string, username: string): Promise<Date | null> {
+    try {
+      const sql = this.db.getSQL();
+      const rows = await sql<{ created_at: string | Date }>`
+        SELECT ml.created_at
+        FROM message_logs ml
+        JOIN conversations c ON c.id = ml.conversation_id
+        WHERE c.merchant_id = ${merchantId}::uuid
+          AND lower(c.customer_instagram) = lower(${username})
+          AND ml.platform = 'instagram'
+          AND ml.direction = 'INCOMING'
+        ORDER BY ml.created_at DESC
+        LIMIT 1
+      `;
+      return rows?.[0]?.created_at ? new Date(rows[0].created_at) : null;
+    } catch (e) {
+      this.logger.warn('getLastInboundAt failed', { error: String(e), merchantId, username });
+      return null;
     }
   }
 

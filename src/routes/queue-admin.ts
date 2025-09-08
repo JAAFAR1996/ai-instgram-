@@ -106,6 +106,33 @@ refresh();
     if (!r.ok) return c.json({ ok:false, reason: r.reason }, 400);
     return c.json({ ok: true });
   });
+
+  // DLQ JSON APIs (BullMQ-based when enabled)
+  app.get('/admin/api/dlq/list', async (c) => {
+    try { requireAdminAuth(c.req.raw); } catch { return c.json({ ok:false, error:'unauthorized' }, 401); }
+    try {
+      const { listDLQ, getDLQStats } = await import('../queue/dead-letter.js');
+      const stats = await (getDLQStats() as any);
+      const items = await (listDLQ as any)(50);
+      return c.json({ ok: true, stats, items });
+    } catch (e) {
+      return c.json({ ok:false, error: String(e) }, 500);
+    }
+  });
+
+  app.post('/admin/api/dlq/retry', async (c) => {
+    try { requireAdminAuth(c.req.raw); } catch { return c.json({ ok:false, error:'unauthorized' }, 401); }
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const id = body?.id || new URL(c.req.url).searchParams.get('id');
+      if (!id) return c.json({ ok:false, error:'id_required' }, 400);
+      const { retryDLQ } = await import('../queue/dead-letter.js');
+      const ok = await (retryDLQ as any)(String(id));
+      return c.json({ ok });
+    } catch (e) {
+      return c.json({ ok:false, error: String(e) }, 500);
+    }
+  });
 }
 
 export default registerQueueControlRoutes;

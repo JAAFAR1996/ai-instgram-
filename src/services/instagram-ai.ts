@@ -473,9 +473,11 @@ export class InstagramAIService {
     try {
       // ✅ 1. Configuration Management: Get merchant-specific config
       const config = await this.getConfigForMerchant(context.merchantId);
-      // Preload merchant context and attempt quick dynamic search (used for richer prompts elsewhere)
+      // Preload merchant context
       try { await this.getMerchantContext(context.merchantId); } catch {}
-      try { await this.searchProductsDynamic(context.merchantId, customerMessage, 1); } catch {}
+      // Prepare DB facts for this message (used for strict grounding)
+      let __factsForRequest: Array<{ id: string; sku: string; name_ar: string; effective_price: number; price_currency: string; stock_quantity: number; attributes: Record<string, unknown>; variants: Array<Record<string, unknown>>; category: string; }> = [];
+      try { __factsForRequest = await this.searchProductsDynamic(context.merchantId, customerMessage, 6); } catch {}
       
       // Vision: if images present, pre-analyze for descriptors and candidate products
       let visionDescriptors: { labels: string[]; attributes: Record<string, string> } | null = null;
@@ -496,8 +498,8 @@ export class InstagramAIService {
         }
       }
 
-      // Build Instagram-specific prompt (with images if present)
-      const prompt = await this.buildInstagramConversationPrompt(customerMessage, context);
+      // Build Instagram-specific prompt (with images if present + strict facts)
+      const prompt = await this.buildInstagramConversationPrompt(customerMessage, context, __factsForRequest);
 
       // Call OpenAI with merchant-specific settings + dynamic temperature
       const model = hasImages ? (getEnv('OPENAI_VISION_MODEL') || 'gpt-4o') : config.aiModel;
@@ -555,6 +557,12 @@ export class InstagramAIService {
           return this.getContextualFallback(context, 'AI_API_ERROR');
         }
       }
+
+      // Strict grounding: scrub any numbers (سعر/مقاس) غير موجودة ضمن حقائق DB لهذه الرسالة
+      try {
+        aiResponse.message = this.__enforceDBFacts(aiResponse.message, __factsForRequest);
+        aiResponse.messageAr = aiResponse.messageAr || aiResponse.message;
+      } catch {}
       
       // Attach visually similar products if we have them (best-effort)
       if (hasImages && visionSimilar.length) {
@@ -578,6 +586,38 @@ export class InstagramAIService {
       };
       aiResponse.responseTime = responseTime;
 
+      // Post-process: Constitutional AI critique & improvement (best-effort)
+      try {
+        const { ConstitutionalAI } = await import('./constitutional-ai.js');
+        const ca = new ConstitutionalAI();
+        const critique = await ca.critiqueResponse(aiResponse.message, { merchantId: context.merchantId });
+        if (!critique.meetsThreshold) {
+          const improved = await ca.improveResponse(aiResponse.message, critique, { merchantId: context.merchantId });
+          aiResponse.message = improved.improved;
+          aiResponse.messageAr = improved.improved;
+        }
+      } catch (e) {
+        this.logger.debug('ConstitutionalAI post-process skipped', { error: String(e) });
+      }
+
+      // Post-process: Tone & Dialect adaptation (Iraqi/BAGHDADI + tier + sentiment)
+      try {
+        const { CustomerProfiler } = await import('./customer-profiler.js');
+        const { adaptDialectAndTone, detectSentiment } = await import('./tone-dialect.js');
+        const profiler = new CustomerProfiler();
+        const profile = await profiler.personalizeResponses(context.merchantId, context.customerId);
+        const sentiment = detectSentiment(customerMessage);
+        const adapted = adaptDialectAndTone(aiResponse.message, {
+          dialect: 'baghdadi',
+          tier: profile.tier,
+          sentiment
+        });
+        aiResponse.message = adapted;
+        aiResponse.messageAr = adapted;
+      } catch (e) {
+        this.logger.debug('Tone/Dialect adaptation skipped', { error: String(e) });
+      }
+
       // Enhance with Instagram-specific features
       aiResponse.hashtagSuggestions = await this.generateRelevantHashtags(
         context
@@ -585,6 +625,13 @@ export class InstagramAIService {
 
       // Log Instagram AI interaction
       await this.logInstagramAIInteraction(context, customerMessage, aiResponse);
+
+      // Save assistant message in semantic memory (best-effort)
+      try {
+        const { getSemanticMemoryService } = await import('./semantic-memory.js');
+        const mem = getSemanticMemoryService();
+        await mem.saveMessage(context.merchantId, context.customerId, (context as any)?.conversationId || '00000000-0000-0000-0000-000000000000', 'assistant', aiResponse.message);
+      } catch {}
 
       return aiResponse;
     } catch (error) {
@@ -794,8 +841,19 @@ export class InstagramAIService {
    */
   private async buildInstagramConversationPrompt(
     customerMessage: string,
-    context: InstagramContext
+    context: InstagramContext,
+    factsForRequest?: Array<{ id: string; sku: string; name_ar: string; effective_price: number; price_currency: string; stock_quantity: number; attributes?: Record<string, unknown>; variants?: Array<Record<string, unknown>>; category: string; }>
   ): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam[]> {
+    // Tone control based on customer tier
+    const tier = (context.customerProfile as any)?.tier || (context.merchantSettings as any)?.tier || 'standard';
+    const toneByTier: Record<string, string> = {
+      vip: 'كن محترف جداً، لبق، سريع في تقديم خيارات واضحة ومختصرة، وقدم امتيازات بسيطة.',
+      repeat: 'خاطب العميل بالاسم إن توفر، واذكر تفضيلاته إن عُرفت، كن ودود ومباشر.',
+      new: 'كن ودود ومطمئن، اسأل سؤالاً واحداً فقط لمعرفة الاحتياج قبل الاقتراح.',
+      standard: 'كن طبيعي، مختصر، لبق.'
+    };
+    const tierRule = toneByTier[(String(tier).toLowerCase())] || toneByTier.standard;
+
     const systemPrompt = `أنت مساعد محادثة بشري المظهر لتجار متنوعين على Instagram في العراق.
 
 🎯 أسلوب الحديث:
@@ -805,6 +863,7 @@ export class InstagramAIService {
 - لا تقترح منتجات ولا تسأل عن المقاس/اللون/الفئة إلا إذا المستخدم سأل أو وضّح.
 - إذا كانت هذه ليست أول رسالة في المحادثة، تجنّب تكرار الترحيب.
 - خصّص الرد حسب نوع بضاعة التاجر إن وُجد (ملابس/إكسسوارات/أجهزة... إلخ) اعتماداً على البيانات المتاحة.
+- ${tierRule}
 
 📱 نوع التفاعل: ${context.interactionType}
 🏪 اسم المحل: ${context.merchantSettings?.businessName || 'غير محدد'}
@@ -872,19 +931,41 @@ export class InstagramAIService {
         effective_price: number;
         price_currency: string;
         stock_quantity: number;
+        attributes: Record<string, unknown> | null;
+        variants: Array<Record<string, unknown>> | null;
       }>`
-        SELECT id, sku, name_ar,
-               effective_price::float as effective_price,
-               price_currency,
-               stock_quantity
-        FROM products_priced
-        WHERE merchant_id = ${context.merchantId}::uuid
-        ORDER BY updated_at DESC
+        SELECT p.id, p.sku, p.name_ar,
+               pp.effective_price::float as effective_price,
+               pp.price_currency,
+               p.stock_quantity,
+               p.attributes,
+               p.variants
+        FROM products p
+        JOIN products_priced pp ON pp.id = p.id
+        WHERE p.merchant_id = ${context.merchantId}::uuid
+        ORDER BY p.updated_at DESC
         LIMIT 8
       `;
 
+      const getSizes = (row: { attributes: any; variants: any }): string => {
+        try {
+          const sizes = new Set<string>();
+          const attr = row.attributes || {};
+          const va = row.variants || [];
+          if (typeof attr?.size === 'string') sizes.add(String(attr.size));
+          if (Array.isArray(va)) {
+            for (const v of va) {
+              const sz = (v && (v.size || v?.attributes?.size)) as string | undefined;
+              if (typeof sz === 'string' && sz) sizes.add(sz);
+            }
+          }
+          const arr = Array.from(sizes);
+          return arr.length ? ` | مقاسات: ${arr.slice(0,8).join(', ')}` : '';
+        } catch { return ''; }
+      };
+
       const productsList = productRows.map(p =>
-        `• ${p.name_ar} (SKU ${p.sku}) — ${Math.round(p.effective_price)} ${p.price_currency}${p.stock_quantity <= 0 ? ' [غير متوفر]' : ''}`
+        `• ${p.name_ar} (SKU ${p.sku}) — ${Math.round(p.effective_price)} ${p.price_currency}${p.stock_quantity <= 0 ? ' [غير متوفر]' : ''}${getSizes(p)}`
       ).join('\n');
 
       // 24h messaging window (optional, best-effort)
@@ -911,6 +992,48 @@ export class InstagramAIService {
       ].filter(Boolean).join('\n');
 
       messages.push({ role: 'system', content: merchantContextBlock });
+
+      // Merchant overview (categories + price range) — يساعد على سؤال "شنو تبيعون؟"
+      try {
+        const overview = await sql<{ category: string; cnt: number }>`
+          SELECT category, COUNT(*)::int AS cnt
+          FROM products
+          WHERE merchant_id = ${context.merchantId}::uuid AND COALESCE(category,'') <> ''
+          GROUP BY category
+          ORDER BY cnt DESC
+          LIMIT 12
+        `;
+        const price = await sql<{ lo: number; hi: number; curr: string }>`
+          SELECT MIN(pp.effective_price)::float AS lo,
+                 MAX(pp.effective_price)::float AS hi,
+                 MAX(pp.price_currency) AS curr
+          FROM products p
+          JOIN products_priced pp ON pp.id = p.id
+          WHERE p.merchant_id = ${context.merchantId}::uuid
+        `;
+        const catsLine = overview.length ? overview.map(r => `${r.category} (${r.cnt})`).join(', ') : 'غير متوفر';
+        const lo = Math.round(price[0]?.lo || 0), hi = Math.round(price[0]?.hi || 0);
+        const prLine = (lo && hi) ? `مجال الأسعار التقريبي: ${lo}–${hi} ${price[0]?.curr || 'IQD'}` : '';
+        const overviewBlock = [
+          'نظرة عامة على المخزون (من قاعدة البيانات):',
+          `- أهم الفئات: ${catsLine}`,
+          prLine
+        ].filter(Boolean).join('\n');
+        messages.push({ role: 'system', content: overviewBlock });
+      } catch {}
+
+      // Query-aware catalog snapshot لهذه الرسالة (حقائق تُستخدم كما هي)
+      try {
+        const filters = this.parseAttributeFilters(customerMessage);
+        const looksQuery = (filters.sizes.length > 0) || this.extractSearchTerms(customerMessage).length > 0;
+        if (looksQuery) {
+          const found = await this.searchProductsDynamic(context.merchantId, customerMessage, 5);
+          if (Array.isArray(found) && found.length) {
+            const block = found.map(f => `• ${f.name_ar} — ${Math.round(f.effective_price)} ${f.price_currency} | ستوك: ${f.stock_quantity}`).join('\n');
+            messages.push({ role: 'system', content: `حقائق من قاعدة البيانات (لا تختلق معلومات خارجها):\n${block}` });
+          }
+        }
+      } catch {}
 
       // Add interaction analysis + risk/engagement context (best-effort)
       try {
@@ -977,6 +1100,24 @@ export class InstagramAIService {
     } catch (e) {
       this.logger.debug('Personalization injection skipped', { error: String(e) });
     }
+
+    // Inject strict grounding facts for this request, إذا توفرت
+    try {
+      if (Array.isArray(factsForRequest) && factsForRequest.length) {
+        const factsJson = factsForRequest.slice(0, 8).map(f => ({
+          id: f.id,
+          sku: f.sku,
+          name: f.name_ar,
+          price: Math.round(f.effective_price),
+          currency: f.price_currency,
+          stock: f.stock_quantity,
+          category: f.category
+        }));
+        const rules = 'قواعد صارمة: لا تذكر أي سعر/مقاس/معلومة إلا إذا كانت ضمن FACTS_JSON أو حقائق النظام أعلاه. إذا المعلومة ناقصة، اسأل توضيح ولا تختلق.';
+        messages.push({ role: 'system', content: rules });
+        messages.push({ role: 'system', content: `FACTS_JSON:\n${JSON.stringify(factsJson)}` });
+      }
+    } catch {}
 
     return messages;
   }
@@ -1068,19 +1209,29 @@ export class InstagramAIService {
 
   // Parse attribute filters (size/color/category hints) from free text (AR/EN)
   private parseAttributeFilters(text: string): { sizes: string[]; colors: string[]; categories: string[] } {
-    const t = (text ?? '').toLowerCase();
+    const raw = (text ?? '').toString();
+    const t = raw.toLowerCase();
     const sizes: string[] = [];
     const colors: string[] = [];
     const categories: string[] = [];
 
+    // Helper: normalize Arabic-Indic digits to ASCII
+    const toAsciiDigits = (s: string): string => s
+      .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+      .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+    const tn = toAsciiDigits(t);
+
     // Sizes (EN)
-    const sizeMatch = t.match(/\b(xx?l|xs|s|m|l|xl|xxl)\b/g);
+    const sizeMatch = tn.match(/\b(xx?l|xs|s|m|l|xl|xxl)\b/g);
     if (sizeMatch) sizes.push(...Array.from(new Set(sizeMatch.map(s => s.toUpperCase()))));
     // Sizes (AR)
-    if (/\b(صغير|سمول)\b/.test(t)) sizes.push('S');
-    if (/\b(متوسط|وسط|ميديم)\b/.test(t)) sizes.push('M');
-    if (/\b(كبير|لارج)\b/.test(t)) sizes.push('L');
-    if (/\b(اكبر|إكس لارج|اكس لارج|xl)\b/.test(t)) sizes.push('XL');
+    if (/\b(صغير|سمول)\b/.test(tn)) sizes.push('S');
+    if (/\b(متوسط|وسط|ميديم)\b/.test(tn)) sizes.push('M');
+    if (/\b(كبير|لارج)\b/.test(tn)) sizes.push('L');
+    if (/\b(اكبر|إكس لارج|اكس لارج|xl)\b/.test(tn)) sizes.push('XL');
+    // Numeric shoe/clothing sizes (20-60)
+    const numSize = tn.match(/\b([2-5][0-9])\b/);
+    if (numSize) sizes.push(numSize[1]);
 
     // Colors map
     const colorMap: Record<string, string> = {
@@ -1096,20 +1247,76 @@ export class InstagramAIService {
       'gray': 'gray', 'رمادي': 'gray'
     };
     for (const k of Object.keys(colorMap)) {
-      if (t.includes(k)) {
+      if (tn.includes(k)) {
         const v = (colorMap as Record<string, string>)[k];
         if (v) colors.push(v);
       }
     }
 
-    // Do NOT assume merchant vertical. Categories will be
-    // inferred dynamically from merchant catalog where possible.
+    // Categories: basic Arabic synonyms mapped to common English labels
+    const catSyn: Record<string, string[]> = {
+      'حذاء': ['حذاء','احذية','shoes','sneakers','heels','slippers'],
+      'جزمة': ['حذاء','shoes'],
+      'نعل': ['slippers','shoes'],
+      'حقيبة': ['حقائب','bag','bags'],
+      'شنطة': ['bag','bags'],
+      'قميص': ['shirt'],
+      'تيشيرت': ['tshirt','tee','shirt'],
+      'بنطلون': ['pants','trousers','jeans'],
+      'فستان': ['dress'],
+      'عباية': ['abaya'],
+      'اكسسوار': ['accessories','accessory'],
+    };
+    const words = tn.split(/[^\p{L}\p{N}\._-]+/u).filter(Boolean);
+    for (const w of words) {
+      for (const [ar, syns] of Object.entries(catSyn)) {
+        if (w.includes(ar) || syns.some(s => w.includes(s))) {
+          categories.push(...syns, ar);
+        }
+      }
+    }
 
     return {
       sizes: Array.from(new Set(sizes)),
       colors: Array.from(new Set(colors)),
       categories: Array.from(new Set(categories))
     };
+  }
+
+  // Enforce that response text does not leak prices/sizes غير موجودة ضمن الحقائق
+  private __enforceDBFacts(text: string, facts: Array<{ effective_price: number; price_currency: string; attributes?: Record<string, unknown>; variants?: Array<Record<string, unknown>> }>): string {
+    if (!text) return text;
+    const toAscii = (s: string) => s
+      .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+      .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+    const allowed = new Set<number>();
+    for (const f of facts || []) {
+      if (typeof f.effective_price === 'number') allowed.add(Math.round(f.effective_price));
+      try {
+        const a = f.attributes || {};
+        const sz = (a as any)?.size;
+        if (typeof sz === 'string') {
+          const n = parseInt(toAscii(sz).replace(/\D+/g, ''), 10);
+          if (Number.isFinite(n)) allowed.add(n);
+        }
+        const vs = Array.isArray((f as any).variants) ? (f as any).variants : [];
+        for (const v of vs) {
+          const szz = (v && (v.size || v?.attributes?.size)) as string | undefined;
+          if (typeof szz === 'string') {
+            const n = parseInt(toAscii(szz).replace(/\D+/g, ''), 10);
+            if (Number.isFinite(n)) allowed.add(n);
+          }
+        }
+      } catch {}
+    }
+
+    const norm = toAscii(text);
+    const scrubbed = norm.replace(/\b(\d{2,6})(?:[\s,\.]\d{3})*\b/g, (m) => {
+      const raw = m.replace(/[^0-9]/g, '');
+      const n = parseInt(raw, 10);
+      return allowed.has(n) ? m : m.replace(/\d/g, '');
+    });
+    return scrubbed;
   }
 
   // Load merchant categories from catalog (cached 5m) without assuming a vertical
@@ -1154,8 +1361,9 @@ export class InstagramAIService {
     const sql = this.db.getSQL();
 
     // Normalize tokens and filters
-    const tokens = this.extractSearchTerms(queryText);
     const filters = this.parseAttributeFilters(queryText);
+    const baseTokens = this.extractSearchTerms(queryText);
+    const tokens = Array.from(new Set([...baseTokens, ...filters.categories]));
 
     // Cache key for identical searches for 2 minutes
     const ck = `psearch:${merchantId}:${tokens.join('-')}:${filters.sizes.join(',')}:${filters.colors.join(',')}`;
