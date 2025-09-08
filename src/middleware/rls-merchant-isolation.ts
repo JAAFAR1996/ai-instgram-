@@ -66,7 +66,22 @@ const DEFAULT_CONFIG: MerchantIsolationConfig = {
   softMode: false,
   // Allow ManyChat webhook to enforce merchant_id at route-level
   // Also allow admin UI/API (protected separately via Basic Auth)
-  allowedPublicPaths: ['/', '/health', '/ready', '/webhooks/instagram', '/webhooks/manychat', '/internal/diagnostics/meta-ping', '/webhook', '/auth', '/favicon.ico', '/robots.txt', '/admin'],
+  // Public endpoints that must bypass merchant isolation and auth.
+  // IMPORTANT: Include service health endpoint so platform health checks pass.
+  allowedPublicPaths: [
+    '/',
+    '/health',
+    '/ready',
+    '/webhooks/health',
+    '/webhooks/instagram',
+    '/webhooks/manychat',
+    '/internal/diagnostics/meta-ping',
+    '/webhook',
+    '/auth',
+    '/favicon.ico',
+    '/robots.txt',
+    '/admin'
+  ],
   headerName: 'x-merchant-id',
   queryParam: 'merchant_id',
   rateLimitConfig: {
