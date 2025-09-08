@@ -240,6 +240,7 @@ export class MonitoringService {
         INSERT INTO audit_logs (
           merchant_id,
           action,
+          resource_type,
           entity_type,
           details,
           execution_time_ms,
@@ -248,6 +249,7 @@ export class MonitoringService {
         ) VALUES (
           ${metrics.merchantId ?? null}::uuid,
           'PERFORMANCE_METRIC',
+          'SYSTEM',
           'API_ENDPOINT',
           ${JSON.stringify({
             endpoint: metrics.endpoint,
@@ -821,12 +823,14 @@ export class MonitoringService {
           INSERT INTO audit_logs (
             merchant_id,
             action,
+            resource_type,
             entity_type,
             details,
             success
           ) VALUES (
             ${merchantId}::uuid,
             'QUALITY_ALERT',
+            'SYSTEM',
             'QUALITY_METRIC',
             ${JSON.stringify({
               platform,

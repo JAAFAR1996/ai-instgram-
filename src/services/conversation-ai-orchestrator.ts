@@ -1015,6 +1015,7 @@ export class ConversationAIOrchestrator {
         `INSERT INTO audit_logs (
           merchant_id,
           action,
+          resource_type,
           entity_type,
           details,
           execution_time_ms,
@@ -1023,13 +1024,15 @@ export class ConversationAIOrchestrator {
           $1::uuid,
           $2,
           $3,
-          $4::jsonb,
-          $5,
-          $6
+          $4,
+          $5::jsonb,
+          $6,
+          $7
         )`,
         [
           context.merchantId,
           'PLATFORM_AI_ORCHESTRATION',
+          'SYSTEM',
           'AI_INTERACTION',
           JSON.stringify(safeDetails),
           response.responseTime,

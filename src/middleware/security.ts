@@ -333,6 +333,8 @@ export function auditLogMiddleware() {
         INSERT INTO audit_logs (
           merchant_id,
           action,
+          resource_type,
+          resource_id,
           entity_type,
           details,
           trace_id,
@@ -346,6 +348,8 @@ export function auditLogMiddleware() {
         ) VALUES (
           ${merchantId ?? null}::uuid,
           ${`${c.req.method}_${c.req.path}`},
+          'SYSTEM',
+          ${c.req.path},
           'API_REQUEST',
           ${JSON.stringify({
             query: c.req.query(),

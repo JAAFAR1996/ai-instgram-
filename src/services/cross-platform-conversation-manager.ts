@@ -409,12 +409,14 @@ export class CrossPlatformConversationManager {
         INSERT INTO audit_logs (
           merchant_id,
           action,
+          resource_type,
           entity_type,
           details,
           success
         ) VALUES (
           ${merchantId}::uuid,
           'CONVERSATIONS_MERGED',
+          'CONVERSATION',
           'CONVERSATION',
           ${JSON.stringify({
             primaryConversationId: primaryConversation.id,
@@ -1062,5 +1064,4 @@ export function getCrossPlatformConversationManager(): CrossPlatformConversation
 export default CrossPlatformConversationManager;
 
 // Using imported types from conversations.ts
-
 

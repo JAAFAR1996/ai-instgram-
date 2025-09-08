@@ -1461,6 +1461,7 @@ ${productsText}
           INSERT INTO audit_logs (
             merchant_id,
             action,
+            resource_type,
             entity_type,
             details,
             execution_time_ms,
@@ -1468,6 +1469,7 @@ ${productsText}
           ) VALUES (
             ${context.merchantId}::uuid,
             'INSTAGRAM_AI_RESPONSE_GENERATED',
+            'SYSTEM',
             'AI_INTERACTION',
             ${JSON.stringify({
               input: input.substring(0, 200),

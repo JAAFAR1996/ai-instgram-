@@ -811,6 +811,7 @@ ${productsText}
         INSERT INTO audit_logs (
           merchant_id,
           action,
+          resource_type,
           entity_type,
           details,
           execution_time_ms,
@@ -819,13 +820,15 @@ ${productsText}
           $1::uuid,
           $2,
           $3,
-          $4::jsonb,
-          $5::int,
-          $6::boolean
+          $4,
+          $5::jsonb,
+          $6::int,
+          $7::boolean
         )
       `, [
         context.merchantId,
         'AI_RESPONSE_GENERATED',
+        'SYSTEM',
         'AI_INTERACTION',
         JSON.stringify({
           input: input.substring(0, 200),

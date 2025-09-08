@@ -21,7 +21,7 @@ export class ContinuousImprovementEngine {
       INSERT INTO audit_logs (
         action, resource_type, resource_id, new_values, status, created_at
       ) VALUES (
-        'STRATEGY_PERFORMANCE', 'AI_RESPONSE', ${rec.strategyId},
+        'SYSTEM_EVENT', 'SYSTEM', ${rec.strategyId},
         ${JSON.stringify({ variantId: rec.variantId, success: rec.success, context: rec.context || {} })}::jsonb,
         ${rec.success ? 'SUCCESS' : 'FAILED'}, NOW()
       )
@@ -40,7 +40,7 @@ export class ContinuousImprovementEngine {
                  COUNT(*) as trials,
                  AVG(CASE WHEN status = 'SUCCESS' THEN 1.0 ELSE 0.0 END) as success_rate
           FROM audit_logs
-          WHERE action = 'STRATEGY_PERFORMANCE' AND resource_id = ${strategyId}
+          WHERE action = 'SYSTEM_EVENT' AND resource_id = ${strategyId} AND (new_values ? 'variantId')
           GROUP BY (new_values->>'variantId')
         )
         SELECT variant, success_rate, trials FROM perf
@@ -77,7 +77,7 @@ export class ContinuousImprovementEngine {
              AVG(CASE WHEN status='SUCCESS' THEN 1.0 ELSE 0.0 END) as success_rate,
              COUNT(*) as trials
       FROM audit_logs
-      WHERE action = 'STRATEGY_PERFORMANCE' AND resource_id = ${strategyId}
+      WHERE action = 'SYSTEM_EVENT' AND resource_id = ${strategyId} AND (new_values ? 'variantId')
       GROUP BY (new_values->>'variantId')
       ORDER BY success_rate DESC, trials DESC
       LIMIT 1
@@ -86,7 +86,7 @@ export class ContinuousImprovementEngine {
     if (winner) {
       await sql`
         INSERT INTO audit_logs (action, resource_type, resource_id, new_values, status, created_at)
-        VALUES ('SYSTEM_EVENT','AI_RESPONSE', ${strategyId}, ${JSON.stringify({ winner })}::jsonb, 'SUCCESS', NOW())
+        VALUES ('SYSTEM_EVENT','SYSTEM', ${strategyId}, ${JSON.stringify({ winner })}::jsonb, 'SUCCESS', NOW())
       `;
     }
     if (winner) {
