@@ -156,6 +156,8 @@ export class DatabaseAdapter implements IDatabase {
     const sourceSql = baseSql as EnhancedSqlFunction;
     
     // Propagate composition helpers from baseSql so runtime has .where/.and/.or/.like/.empty
+    // Robust propagation of helpers: set prototype and copy known helpers.
+    try { Object.setPrototypeOf(targetSql, sourceSql); } catch {}
     targetSql.unsafe = sourceSql.unsafe;
     targetSql.join = sourceSql.join;
     (targetSql as any).and = (sourceSql as any).and;
