@@ -1,5 +1,5 @@
 import { getDatabase } from '../db/adapter.js';
-import { normalizeForSearch } from '../nlp/ar-normalize.js';
+// import { normalizeForSearch } from '../nlp/ar-normalize.js';
 
 type Entities = {
   term?: string;
@@ -92,8 +92,7 @@ export async function searchProducts(merchantId: string, entities: Entities, lim
 export async function searchProduct(
   merchantId: string,
   queryText: string,
-  entities: SearchEntities,
-  synonyms?: Record<string, string[]>
+  entities: SearchEntities
 ): Promise<SearchResult> {
   const db = getDatabase();
   const sql = db.getSQL();
