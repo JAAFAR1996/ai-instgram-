@@ -231,14 +231,16 @@ export class PredictiveAnalyticsEngine {
         avg_order_value: number;
         engagement_trend: number;
       }>`
-        WITH recent_messages AS (
+        WITH conv AS (
+          SELECT id FROM conversations 
+          WHERE merchant_id = ${merchantId}::uuid AND customer_instagram = ${customerId}
+        ),
+        recent_messages AS (
           SELECT COUNT(*) as msg_count,
                  EXTRACT(EPOCH FROM (NOW() - MAX(ml.created_at)))/86400 as last_msg_days,
                  EXTRACT(EPOCH FROM (NOW() - MIN(ml.created_at)))/86400 as msg_span_days
           FROM message_logs ml
-          JOIN conversations c ON c.id = ml.conversation_id
-          WHERE c.merchant_id = ${merchantId}::uuid 
-            AND c.customer_instagram = ${customerId}
+          WHERE ml.conversation_id IN (SELECT id FROM conv)
             AND ml.created_at >= NOW() - INTERVAL '90 days'
         ),
         recent_orders AS (
@@ -253,9 +255,7 @@ export class PredictiveAnalyticsEngine {
         engagement_trend AS (
           SELECT COUNT(*) as recent_msgs
           FROM message_logs ml
-          JOIN conversations c ON c.id = ml.conversation_id
-          WHERE c.merchant_id = ${merchantId}::uuid 
-            AND c.customer_instagram = ${customerId}
+          WHERE ml.conversation_id IN (SELECT id FROM conv)
             AND ml.created_at >= NOW() - INTERVAL '30 days'
         )
         SELECT 
@@ -440,7 +440,11 @@ export class PredictiveAnalyticsEngine {
         responses: number;
         total_sent: number;
       }>`
-        WITH message_times AS (
+        WITH conv AS (
+          SELECT id FROM conversations 
+          WHERE merchant_id = ${merchantId}::uuid AND customer_instagram = ${customerId}
+        ),
+        message_times AS (
           SELECT 
             CASE 
               WHEN EXTRACT(HOUR FROM ml.created_at) BETWEEN 6 AND 11 THEN 'morning'
@@ -450,13 +454,10 @@ export class PredictiveAnalyticsEngine {
             END as hour_slot,
             EXTRACT(DOW FROM ml.created_at) as day_of_week,
             ml.direction,
-            LAG(ml.direction) OVER (ORDER BY ml.created_at) as prev_direction
+            LAG(ml.direction) OVER (PARTITION BY ml.conversation_id ORDER BY ml.created_at) as prev_direction
           FROM message_logs ml
-          JOIN conversations c ON c.id = ml.conversation_id
-          WHERE c.merchant_id = ${merchantId}::uuid 
-            AND c.customer_instagram = ${customerId}
+          WHERE ml.conversation_id IN (SELECT id FROM conv)
             AND ml.created_at >= NOW() - INTERVAL '60 days'
-          ORDER BY ml.created_at
         )
         SELECT 
           hour_slot,
