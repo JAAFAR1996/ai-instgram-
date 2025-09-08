@@ -325,6 +325,79 @@ export class InstagramAIService {
     }
   }
 
+  // Coerce partial/loose JSON into a valid InstagramAIResponse with sensible defaults
+  private coerceInstagramResponse(
+    x: Partial<InstagramAIResponse> | Record<string, any> | null | undefined,
+    context: InstagramContext
+  ): InstagramAIResponse {
+    const obj = (x && typeof x === 'object') ? x : {} as Record<string, unknown>;
+
+    // Try to map common alternative keys
+    const message = typeof (obj as any).message === 'string'
+      ? (obj as any).message
+      : typeof (obj as any).text === 'string'
+        ? (obj as any).text
+        : typeof (obj as any).content === 'string'
+          ? (obj as any).content
+          : '';
+
+    const messageAr = typeof (obj as any).messageAr === 'string' && (obj as any).messageAr
+      ? (obj as any).messageAr
+      : message;
+
+    const intent = typeof (obj as any).intent === 'string' && (obj as any).intent
+      ? (obj as any).intent
+      : 'GENERAL';
+
+    const stage = typeof (obj as any).stage === 'string' && (obj as any).stage
+      ? (obj as any).stage
+      : (context.stage || 'initial');
+
+    const actions = Array.isArray((obj as any).actions) ? (obj as any).actions : [];
+    const products = Array.isArray((obj as any).products) ? (obj as any).products : [];
+
+    const visualStyleRaw = (obj as any).visualStyle;
+    const visualStyle: InstagramAIResponse['visualStyle'] =
+      visualStyleRaw === 'story' || visualStyleRaw === 'post' || visualStyleRaw === 'reel' || visualStyleRaw === 'direct'
+        ? visualStyleRaw
+        : (context.interactionType === 'story_reply' || context.interactionType === 'story_mention' || context.interactionType === 'story_reaction')
+          ? 'story'
+          : 'direct';
+
+    const engagement = (obj as any).engagement && typeof (obj as any).engagement === 'object'
+      ? {
+          likelyToShare: !!(obj as any).engagement.likelyToShare,
+          viralPotential: Number((obj as any).engagement.viralPotential) || 0,
+          userGeneratedContent: !!(obj as any).engagement.userGeneratedContent,
+        }
+      : {
+          likelyToShare: visualStyle === 'story',
+          viralPotential: visualStyle === 'story' ? 0.6 : 0.3,
+          userGeneratedContent: visualStyle === 'story',
+        };
+
+    const hashtagSuggestions = Array.isArray((obj as any).hashtagSuggestions)
+      ? (obj as any).hashtagSuggestions
+      : [];
+
+    const confidence = Number((obj as any).confidence) || 0.7;
+
+    return {
+      message,
+      messageAr,
+      intent,
+      stage,
+      actions,
+      products,
+      confidence,
+      tokens: { prompt: 0, completion: 0, total: 0 },
+      responseTime: 0,
+      visualStyle,
+      engagement,
+      hashtagSuggestions,
+    };
+  }
+
   private validateInstagramResponse(x: Partial<InstagramAIResponse>): x is InstagramAIResponse {
     return !!x &&
       typeof x.message === 'string' &&
@@ -466,11 +539,27 @@ export class InstagramAIService {
       }
 
       const parsed = this.parseJsonSafe<Partial<InstagramAIResponse>>(response);
-      if (!parsed.ok || !this.validateInstagramResponse(parsed.data)) {
-        this.logger.error('Invalid Instagram AI JSON response', { sample: response.slice(0, 200) });
-        return this.getContextualFallback(context, 'AI_API_ERROR');
+      let aiResponse: InstagramAIResponse;
+      if (parsed.ok) {
+        aiResponse = this.coerceInstagramResponse(parsed.data, context);
+        if (!aiResponse.message) {
+          // As a last resort, try to extract a message field from the raw string
+          const m = response.match(/"message"\s*:\s*"([\s\S]*?)"/);
+          if (m && m[1]) {
+            aiResponse.message = m[1];
+            aiResponse.messageAr = aiResponse.messageAr || aiResponse.message;
+          }
+        }
+      } else {
+        this.logger.warn('Instagram AI returned non-JSON content, coercing', { sample: response.slice(0, 200) });
+        // Try to salvage a plain-text response as message
+        const text = (response || '').trim();
+        if (text) {
+          aiResponse = this.coerceInstagramResponse({ message: text } as any, context);
+        } else {
+          return this.getContextualFallback(context, 'AI_API_ERROR');
+        }
       }
-      const aiResponse = parsed.data;
       
       // Attach visually similar products if we have them (best-effort)
       if (hasImages && visionSimilar.length) {
@@ -534,9 +623,9 @@ export class InstagramAIService {
       });
 
       const response = completion.choices?.[0]?.message?.content;
-      const parsed = this.parseJsonSafe<InstagramAIResponse>(response ?? undefined);
-      const aiResponse = parsed.ok && this.validateInstagramResponse(parsed.data)
-        ? parsed.data
+      const parsed = this.parseJsonSafe<Partial<InstagramAIResponse>>(response ?? undefined);
+      const aiResponse = parsed.ok
+        ? this.coerceInstagramResponse(parsed.data, context)
         : this.getInstagramFallbackResponse(context);
 
       // Set visual style for story replies
@@ -575,9 +664,9 @@ export class InstagramAIService {
       });
 
       const response = completion.choices?.[0]?.message?.content;
-      const parsed = this.parseJsonSafe<InstagramAIResponse>(response ?? undefined);
-      const aiResponse = parsed.ok && this.validateInstagramResponse(parsed.data)
-        ? parsed.data
+      const parsed = this.parseJsonSafe<Partial<InstagramAIResponse>>(response ?? undefined);
+      const aiResponse = parsed.ok
+        ? this.coerceInstagramResponse(parsed.data, context)
         : this.getInstagramFallbackResponse(context);
 
       // Set visual style for post comments
