@@ -28,13 +28,13 @@ export class SemanticMemoryService {
   /** Ensure pgvector extension and table exist (best-effort) */
   public async ensureSchema(): Promise<void> {
     try {
-      await this.db.query('CREATE EXTENSION IF NOT EXISTS vector');
+      await this.db.query('CREATE EXTENSION IF NOT EXISTS vector', []);
     } catch (e) {
       this.log.warn('pgvector extension ensure failed (may already exist)', { error: String(e) });
     }
     try {
-      await this.db.query(`
-        CREATE TABLE IF NOT EXISTS conversation_embeddings (
+      await this.db.query(
+        `CREATE TABLE IF NOT EXISTS conversation_embeddings (
           id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
           merchant_id UUID NOT NULL,
           customer_id TEXT NOT NULL,
@@ -43,37 +43,21 @@ export class SemanticMemoryService {
           content TEXT NOT NULL,
           embedding vector(${this.dim}) NOT NULL,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_convem_mem ON conversation_embeddings(merchant_id, customer_id, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_convem_conv ON conversation_embeddings(conversation_id, created_at DESC);
-      `);
+        )`,
+        []
+      );
+      await this.db.query(
+        'CREATE INDEX IF NOT EXISTS idx_convem_mem ON conversation_embeddings(merchant_id, customer_id, created_at DESC)',
+        []
+      );
+      await this.db.query(
+        'CREATE INDEX IF NOT EXISTS idx_convem_conv ON conversation_embeddings(conversation_id, created_at DESC)',
+        []
+      );
     } catch (e) {
       this.log.warn('conversation_embeddings ensure failed', { error: String(e) });
     }
-    // Best-effort: ensure ANN index for vector similarity (HNSW preferred, fallback to IVFFlat)
-    try {
-      await this.db.query(`
-        DO $$ BEGIN
-          IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
-            BEGIN
-              CREATE INDEX IF NOT EXISTS idx_convem_embedding_hnsw
-                ON conversation_embeddings USING hnsw (embedding vector_cosine_ops);
-            EXCEPTION WHEN OTHERS THEN
-              BEGIN
-                CREATE INDEX IF NOT EXISTS idx_convem_embedding_ivfflat
-                  ON conversation_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-              EXCEPTION WHEN OTHERS THEN
-                RAISE NOTICE 'Failed to create ANN index on conversation_embeddings.embedding';
-              END;
-            END;
-          ELSE
-            RAISE NOTICE 'pgvector not enabled; skipping ANN index creation';
-          END IF;
-        END $$;
-      `);
-    } catch (e) {
-      this.log.debug?.('ANN index ensure skipped', { error: String(e) });
-    }
+    // ANN index تُدار عبر الهجرات (095/096). نُبقيها خارج المسار الحي لتفادي أخطاء أثناء التشغيل.
   }
 
   /** Create vector embedding */
@@ -96,12 +80,21 @@ export class SemanticMemoryService {
       await this.ensureSchema();
       const emb = await this.embed(content);
       if (!Array.isArray(emb) || emb.length === 0) return false;
-      const vec = `[${emb.join(',')}]`;
-      await this.db.query(
-        `INSERT INTO conversation_embeddings (merchant_id, customer_id, conversation_id, role, content, embedding)
-         VALUES ($1::uuid, $2, $3::uuid, $4, $5, ${vec}::vector)`,
-        [merchantId, customerId, conversationId, role, content]
-      );
+      const sql = (this.db as any).getSQL ? (this.db as any).getSQL() : null;
+      if (sql) {
+        await sql`
+          INSERT INTO conversation_embeddings (merchant_id, customer_id, conversation_id, role, content, embedding)
+          VALUES (${merchantId}::uuid, ${customerId}, ${conversationId}::uuid, ${role}, ${content}, ${JSON.stringify(emb)}::vector)
+        `;
+      } else {
+        // Fallback: parameterized query with explicit cast
+        const vecText = JSON.stringify(emb);
+        await this.db.query(
+          `INSERT INTO conversation_embeddings (merchant_id, customer_id, conversation_id, role, content, embedding)
+           VALUES ($1::uuid, $2, $3::uuid, $4, $5, ($6)::vector)`,
+          [merchantId, customerId, conversationId, role, content, vecText]
+        );
+      }
       return true;
     } catch (e) {
       this.log.warn('saveMessage failed', { error: String(e) });
@@ -119,16 +112,28 @@ export class SemanticMemoryService {
     try {
       const emb = await this.embed(query);
       if (!Array.isArray(emb) || emb.length === 0) return [];
-      const vec = `[${emb.join(',')}]`;
-      const rows = await this.db.query<{ role: Role; content: string }>(
-        `SELECT role, content
-         FROM conversation_embeddings
-         WHERE merchant_id = $1::uuid AND customer_id = $2
-         ORDER BY embedding <=> ${vec}::vector ASC
-         LIMIT ${limit}`,
-        [merchantId, customerId]
-      );
-      return rows as Array<{ role: Role; content: string }>;
+      const sql = (this.db as any).getSQL ? (this.db as any).getSQL() : null;
+      if (sql) {
+        const rows = await sql<{ role: Role; content: string }>`
+          SELECT role, content
+          FROM conversation_embeddings
+          WHERE merchant_id = ${merchantId}::uuid AND customer_id = ${customerId}
+          ORDER BY embedding <=> ${JSON.stringify(emb)}::vector ASC
+          LIMIT ${limit}
+        `;
+        return rows as Array<{ role: Role; content: string }>;
+      } else {
+        const vecText = JSON.stringify(emb);
+        const rows = await this.db.query<{ role: Role; content: string }>(
+          `SELECT role, content
+           FROM conversation_embeddings
+           WHERE merchant_id = $1::uuid AND customer_id = $2
+           ORDER BY embedding <=> ($3)::vector ASC
+           LIMIT ${limit}`,
+          [merchantId, customerId, vecText]
+        );
+        return rows as Array<{ role: Role; content: string }>;
+      }
     } catch (e) {
       this.log.warn('searchSimilar failed', { error: String(e) });
       return [];
