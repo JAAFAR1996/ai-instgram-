@@ -67,12 +67,25 @@ function basePino(bindings?: LogContext): PinoLogger {
 export class Logger {
   private l: PinoLogger;
   private ctx: LogContext;
-  constructor(context: LogContext = {}) {
-    this.ctx = context;
-    this.l = basePino(context);
+  // single root pino instance to avoid stacking child bindings repeatedly
+  private static root: PinoLogger | null = null;
+  private static getRoot(): PinoLogger {
+    if (!Logger.root) Logger.root = basePino();
+    return Logger.root;
   }
-  setContext(ctx: LogContext): void { this.ctx = { ...(this.ctx||{}), ...(ctx||{}) }; this.l = this.l.child(this.ctx); }
-  child(bindings: Record<string, unknown>): Logger { const child = new Logger({ ...(this.ctx||{}), ...(bindings||{}) }); child.l = this.l.child(bindings); return child; }
+  constructor(context: LogContext = {}) {
+    this.ctx = context || {};
+    this.l = Logger.getRoot().child(this.ctx);
+  }
+  setContext(ctx: LogContext): void {
+    // Rebind against root to prevent accumulating nested children
+    this.ctx = { ...(this.ctx || {}), ...(ctx || {}) };
+    this.l = Logger.getRoot().child(this.ctx);
+  }
+  child(bindings: Record<string, unknown>): Logger {
+    // Create a fresh child logger bound to root with merged context
+    return new Logger({ ...(this.ctx || {}), ...(bindings || {}) });
+  }
   private log(level: 'debug'|'info'|'warn'|'error'|'fatal', a: unknown, b?: unknown, c?: unknown): void {
     let msg = '';
     let fields: Record<string, unknown> | undefined;
@@ -101,9 +114,9 @@ export class Logger {
 
 let globalLogger: Logger | null = null;
 export function getLogger(context?: LogContext): Logger {
-  if (!globalLogger) globalLogger = new Logger(context);
-  else if (context) globalLogger.setContext(context);
-  return globalLogger;
+  if (!globalLogger) globalLogger = new Logger();
+  // Do not mutate the global logger context; return a child when context is requested
+  return context ? globalLogger.child(context) : globalLogger;
 }
 
 export function createLogger(context: LogContext): Logger { return new Logger(context); }
