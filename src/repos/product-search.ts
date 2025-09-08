@@ -47,19 +47,19 @@ export async function searchProducts(merchantId: string, entities: Entities, lim
   const term = safe(entities.term);
   if (term) {
     const ors = [
-      sql`LOWER(p.name_ar) LIKE LOWER(${'%' + term + '%'})`,
-      sql`LOWER(p.sku) LIKE LOWER(${'%' + term + '%'})`,
-      sql`LOWER(p.category) LIKE LOWER(${'%' + term + '%'})`
+      sql.like('p.name_ar', term),
+      sql.like('p.sku', term),
+      sql.like('p.category', term)
     ];
     filters.push(sql.or(...ors));
   }
-  if (safe(entities.category)) filters.push(sql`LOWER(p.category) = LOWER(${entities.category})`);
-  if (safe(entities.brand)) filters.push(sql`LOWER(p.attributes->>'brand') = LOWER(${entities.brand})`);
-  if (safe(entities.size)) filters.push(sql`p.attributes->>'size' = ${entities.size}`);
-  if (safe(entities.color)) filters.push(sql`p.attributes->>'color' = ${entities.color}`);
+  if (safe(entities.category)) filters.push(sql.fragment`LOWER(p.category) = LOWER(${entities.category})`);
+  if (safe(entities.brand)) filters.push(sql.fragment`LOWER(p.attributes->>'brand') = LOWER(${entities.brand})`);
+  if (safe(entities.size)) filters.push(sql.fragment`p.attributes->>'size' = ${entities.size}`);
+  if (safe(entities.color)) filters.push(sql.fragment`p.attributes->>'color' = ${entities.color}`);
 
-  filters.push(sql`p.merchant_id = ${merchantId}`);
-  filters.push(sql`p.status = 'ACTIVE'`);
+  filters.push(sql.fragment`p.merchant_id = ${merchantId}`);
+  filters.push(sql.fragment`p.status = 'ACTIVE'`);
 
   const rows = await sql<{
     id: string;
@@ -115,25 +115,25 @@ export async function searchProduct(
   const filters = [];
   
   // Add merchant and status filters
-  filters.push(sql`p.merchant_id = ${merchantId}::uuid`);
-  filters.push(sql`p.status = 'ACTIVE'`);
+  filters.push(sql.fragment`p.merchant_id = ${merchantId}::uuid`);
+  filters.push(sql.fragment`p.status = 'ACTIVE'`);
 
   // Handle search term with multiple fields
   const term = safe(entities.term || queryText);
   if (term) {
     const ors = [
-      sql`LOWER(p.name_ar) LIKE LOWER(${'%' + term + '%'})`,
-      sql`LOWER(p.sku) LIKE LOWER(${'%' + term + '%'})`,
-      sql`LOWER(p.category) LIKE LOWER(${'%' + term + '%'})`
+      sql.like('p.name_ar', term),
+      sql.like('p.sku', term),
+      sql.like('p.category', term)
     ];
     filters.push(sql.or(...ors));
   }
 
   // Add entity-based filters with exact matches
-  if (safe(entities.category)) filters.push(sql`LOWER(p.category) = LOWER(${entities.category})`);
-  if (safe(entities.brand)) filters.push(sql`LOWER(p.attributes->>'brand') = LOWER(${entities.brand})`);
-  if (safe(entities.size)) filters.push(sql`p.attributes->>'size' = ${entities.size}`);
-  if (safe(entities.color)) filters.push(sql`p.attributes->>'color' = ${entities.color}`);
+  if (safe(entities.category)) filters.push(sql.fragment`LOWER(p.category) = LOWER(${entities.category})`);
+  if (safe(entities.brand)) filters.push(sql.fragment`LOWER(p.attributes->>'brand') = LOWER(${entities.brand})`);
+  if (safe(entities.size)) filters.push(sql.fragment`p.attributes->>'size' = ${entities.size}`);
+  if (safe(entities.color)) filters.push(sql.fragment`p.attributes->>'color' = ${entities.color}`);
 
   // Fallback expansions are not used directly in SQL anymore; normalization remains in services
 

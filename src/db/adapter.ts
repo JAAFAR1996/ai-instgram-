@@ -159,6 +159,7 @@ export class DatabaseAdapter implements IDatabase {
     // Robust propagation of helpers: set prototype and copy known helpers.
     try { Object.setPrototypeOf(targetSql, sourceSql); } catch {}
     targetSql.unsafe = sourceSql.unsafe;
+    (targetSql as any).fragment = (sourceSql as any).fragment;
     targetSql.join = sourceSql.join;
     (targetSql as any).and = (sourceSql as any).and;
     (targetSql as any).or = (sourceSql as any).or;

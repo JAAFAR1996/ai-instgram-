@@ -1109,35 +1109,34 @@ export class InstagramAIService {
     try {
       // Consolidated, safe fragments: build once and embed into main WHERE
       const text = (queryText ?? '').toString().trim();
-      const q = `%${text}%`;
       const textSearchClause = text
-        ? sql`(
-            lower(p.name_ar) LIKE lower(${q})
-            OR lower(p.sku) LIKE lower(${q})
-            OR lower(p.category) LIKE lower(${q})
-          )`
-        : sql``;
+        ? sql.or(
+            sql.like('p.name_ar', text),
+            sql.like('p.sku', text),
+            sql.like('p.category', text)
+          )
+        : sql.empty;
 
       const sizes = (filters.sizes || []).map(s => s.toLowerCase());
       const colors = (filters.colors || []).map(c => c.toLowerCase());
 
       const sizeClause = sizes.length
-        ? sql`( (p.attributes->>'size') = ANY(${sizes}) )`
-        : sql``;
+        ? sql.fragment`( (p.attributes->>'size') = ANY(${sizes}) )`
+        : sql.empty;
 
       const colorClause = colors.length
-        ? sql`( (p.attributes->>'color') = ANY(${colors}) )`
-        : sql``;
+        ? sql.fragment`( (p.attributes->>'color') = ANY(${colors}) )`
+        : sql.empty;
 
       const categoryClause = matchedCats.length > 0
-        ? sql`p.category = ANY(${matchedCats})`
-        : sql``;
+        ? sql.fragment`p.category = ANY(${matchedCats})`
+        : sql.empty;
 
       const minPrice = (filters as any)?.minPrice ?? null;
       const maxPrice = (filters as any)?.maxPrice ?? null;
       const priceClause = (minPrice != null || maxPrice != null)
-        ? sql`pp.effective_price BETWEEN ${minPrice ?? 0} AND ${maxPrice ?? 9_999_999}`
-        : sql``;
+        ? sql.fragment`pp.effective_price BETWEEN ${minPrice ?? 0} AND ${maxPrice ?? 9_999_999}`
+        : sql.empty;
 
       const rows = await sql<{
         id: string;
@@ -1156,8 +1155,8 @@ export class InstagramAIService {
         FROM products p
         JOIN products_priced pp ON pp.id = p.id
         ${sql.where(
-          sql`p.merchant_id = ${merchantId}::uuid`,
-          sql`p.status = 'ACTIVE'`,
+          sql.fragment`p.merchant_id = ${merchantId}::uuid`,
+          sql.fragment`p.status = 'ACTIVE'`,
           textSearchClause,
           categoryClause,
           sizeClause,

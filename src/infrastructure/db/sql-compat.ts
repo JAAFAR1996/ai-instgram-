@@ -93,6 +93,10 @@ export interface SqlFunction {
     <T extends DatabaseRow = DatabaseRow>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]> & SqlFragment;
     <T extends DatabaseRow = DatabaseRow>(text: string, params?: unknown[]): Promise<T[]> & SqlFragment;
   };
+  fragment: {
+    (strings: TemplateStringsArray, ...values: unknown[]): SqlFragment;
+    (text: string, params?: unknown[]): SqlFragment;
+  };
   join: (parts: Array<SqlFragment | string>, separator?: SqlFragment | string) => SqlFragment;
   and: (...parts: Array<SqlFragment | string>) => SqlFragment;
   or: (...parts: Array<SqlFragment | string>) => SqlFragment;
@@ -167,6 +171,16 @@ export function buildSqlCompat(pool: Pool): SqlFunction {
     return createThenableFragment(text, values);
   }) as SqlFunction['unsafe'];
 
+  // Safe fragment builder that NEVER executes queries; returns a plain SqlFragment
+  const fragment = ((stringsOrText: TemplateStringsArray | string, ...vals: unknown[]) => {
+    if (typeof stringsOrText === 'string') {
+      const params = Array.isArray(vals[0]) ? (vals[0] as unknown[]) : [];
+      return asFragment(stringsOrText, params);
+    }
+    const { text, values } = toQuery(stringsOrText, vals);
+    return asFragment(text, values);
+  }) as SqlFunction['fragment'];
+
   const join = (parts: Array<SqlFragment | string>, separator: SqlFragment | string = asFragment(', ')): SqlFragment => joinFragments(parts, separator);
 
   const isEmpty = (p: SqlFragment | string): boolean => {
@@ -215,6 +229,7 @@ export function buildSqlCompat(pool: Pool): SqlFunction {
 
   Object.assign(core, {
     unsafe,
+    fragment,
     join,
     and,
     or,
@@ -263,6 +278,16 @@ export function buildSqlCompatFromClient(client: PoolClient): SqlFunction {
     return createThenableFragment2(text, values);
   }) as SqlFunction['unsafe'];
 
+  // Safe fragment builder that NEVER executes queries; returns a plain SqlFragment
+  const fragment = ((stringsOrText: TemplateStringsArray | string, ...vals: unknown[]) => {
+    if (typeof stringsOrText === 'string') {
+      const params = Array.isArray(vals[0]) ? (vals[0] as unknown[]) : [];
+      return asFragment(stringsOrText, params);
+    }
+    const { text, values } = toQuery(stringsOrText, vals);
+    return asFragment(text, values);
+  }) as SqlFunction['fragment'];
+
   const join = (parts: Array<SqlFragment | string>, separator: SqlFragment | string = asFragment(', ')): SqlFragment => joinFragments(parts, separator);
 
   const isEmpty = (p: SqlFragment | string): boolean => {
@@ -295,6 +320,7 @@ export function buildSqlCompatFromClient(client: PoolClient): SqlFunction {
 
   Object.assign(core, {
     unsafe,
+    fragment,
     join,
     and,
     or,
