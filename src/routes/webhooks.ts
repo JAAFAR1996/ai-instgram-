@@ -267,7 +267,7 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
           }
           // Return ManyChat-friendly escalation flag so the flow can handoff
           {
-            const out = mcResponse({ ai_reply: 'تم تحويلك للمسؤول، لحظة ونخدمك 🙏', escalate: true, escalate_reason: 'manager_request', in_24h: true } as Record<string, unknown>);
+            const out = mcResponse({ ai_reply: 'تم تحويلك للمسؤول، لحظة ونخدمك 🙏', escalate: true, escalate_reason: 'manager_request', in_24h: true, ai_source: 'human_escalation' } as Record<string, unknown>);
             try {
               (c as unknown as { set: (k: string, v: unknown) => void }).set('idempotencyResponse', { status: 200, body: out });
               (c as unknown as { set: (k: string, v: unknown) => void }).set('cacheIdempotency', true);
@@ -443,7 +443,7 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
             } catch {}
             // Respond with ManyChat-friendly JSON and attributes
             {
-              const out = mcResponse({ ai_reply: aiText || '...', in_24h: in24hWindow, human_agent: !in24hWindow } as Record<string, unknown>);
+              const out = mcResponse({ ai_reply: aiText || '...', in_24h: in24hWindow, human_agent: !in24hWindow, ai_source: 'openai' } as Record<string, unknown>);
               try {
                 (c as unknown as { set: (k: string, v: unknown) => void }).set('idempotencyResponse', { status: 200, body: out });
                 (c as unknown as { set: (k: string, v: unknown) => void }).set('cacheIdempotency', true);
@@ -452,7 +452,7 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
             }
           } catch (aiErr) {
             log.error('❌ AI generation failed', { error: String(aiErr) });
-            return c.json(mcResponse({ ai_reply: 'عذرًا، حدث خطأ. حاول لاحقًا.', in_24h: true, status_code: 500 }));
+            return c.json(mcResponse({ ai_reply: 'عذرًا، حدث خطأ. حاول لاحقًا.', in_24h: true, status_code: 500, ai_source: 'fallback', ai_error: String(aiErr).slice(0,200) }));
           }
         } catch (error) {
           log.error('❌ ManyChat webhook processing error', { 
@@ -461,7 +461,7 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
             username: sanitizedUsername 
           });
           
-          return c.json(mcResponse({ ai_reply: "Processing error. Please try later.", status_code: 500 }));
+          return c.json(mcResponse({ ai_reply: "Processing error. Please try later.", status_code: 500, ai_source: 'fallback', ai_error: String(error).slice(0,200) }));
         }
       }
       // Handle non-message events (mapping updates, etc.)
@@ -481,7 +481,7 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
       }
       // Standard no-op response for non-message events
       {
-        const out = mcResponse({ ai_reply: 'event_received' } as Record<string, unknown>);
+        const out = mcResponse({ ai_reply: 'event_received', ai_source: 'noop' } as Record<string, unknown>);
         try {
           (c as unknown as { set: (k: string, v: unknown) => void }).set('idempotencyResponse', { status: 200, body: out });
           (c as unknown as { set: (k: string, v: unknown) => void }).set('cacheIdempotency', true);
@@ -490,7 +490,7 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
       }
     } catch (error) {
       log.error('❌ ManyChat webhook error', error);
-      return c.json(mcResponse({ ai_reply: 'Internal error. Please try later.', status_code: 500, error: 'acknowledged' }));
+      return c.json(mcResponse({ ai_reply: 'Internal error. Please try later.', status_code: 500, error: 'acknowledged', ai_source: 'fallback', ai_error: String(error).slice(0,200) }));
     }
   });
   // WhatsApp webhook routes - DISABLED
