@@ -242,6 +242,27 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
         if (messageText.length > 4000) {
           return c.json(mcResponse({ ai_reply: "Message too long. Please shorten.", status_code: 400 }));
         }
+        // 🚩 Human escalation keywords (Iraqi/Arabic common phrases)
+        const needsHuman = /\b(اكلم|اتكلم|اتواصل)\s*(?:وي|ويا)?\s*(?:ال)?(مدير|مسؤول|مشرف|ادمن|الدعم|بشري|انسان)\b|\bاريد\s*(?:اكلم|اتكلم)\b|\bبشري\b/i.test(messageText);
+        if (needsHuman) {
+          try {
+            // Create a manual followup ticket (best-effort)
+            const { ManualFollowupRepository } = await import('../repositories/manual-followup-repository.js');
+            const repo = new ManualFollowupRepository();
+            await repo.create({
+              merchantId: sanitizedMerchantId,
+              customerId: sanitizedUsername,
+              conversationId,
+              originalMessage: messageText,
+              reason: 'manager_request',
+              priority: 'urgent'
+            });
+          } catch (e) {
+            log.warn('Failed to create manual followup for escalation', { error: String(e) });
+          }
+          // Return ManyChat-friendly escalation flag so the flow can handoff
+          return c.json(mcResponse({ ai_reply: 'تم تحويلك للمسؤول، لحظة ونخدمك 🙏', escalate: true, escalate_reason: 'manager_request', in_24h: true }));
+        }
           // 🚫 Stop server-side sending; generate AI reply synchronously for ManyChat to send
           // Queue disabled for this endpoint
         try {
@@ -303,7 +324,7 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
           }
 
           // Load recent messages as conversation history (oldest -> newest)
-          
+          let historyMsgs: ConversationMsg[] = [];
           try {
             const historyResult = await pool.query(
               `SELECT id, content, direction, created_at
@@ -329,6 +350,7 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
               if (opt.sessionPatch && Object.keys(opt.sessionPatch).length) {
                 sessionData = { ...(opt.sessionPatch || {}), ...(sessionData || {}) };
               }
+              historyMsgs = Array.isArray(opt.trimmedHistory) && opt.trimmedHistory.length ? opt.trimmedHistory : msgs;
             } catch {}
           } catch (histErr) {
             log.warn('Failed to load conversation history, proceeding without it', { error: String(histErr) });
@@ -357,26 +379,32 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
               merchantId: sanitizedMerchantId,
               customerId: sanitizedUsername,
               platform: 'instagram',
-              stage: 'GREETING',
-              cart: [],
-              preferences: {},
-              conversationHistory: [],
+              stage: (sessionData as any)?.stage || 'GREETING',
+              cart: Array.isArray((sessionData as any)?.cart) ? (sessionData as any).cart : [],
+              preferences: (sessionData as any)?.preferences || {},
+              conversationHistory: historyMsgs,
               interactionType: 'dm'
             } as any;
 
-            const timeoutMs = Number.parseInt((getEnv('MANYCHAT_AI_TIMEOUT_MS') ?? '').trim(), 10) || 9000;
-            const fallbackText = 'نجهّز ردك الآن ✨ بنرجع لك خلال لحظات.';
-
-            const aiText = await Promise.race<string>([
-              (async () => {
-                const ai = await orchestrator.generatePlatformResponse(messageText, context, 'instagram');
-                return (ai?.response as any)?.message || fallbackText;
-              })(),
-              new Promise<string>(resolve => setTimeout(() => resolve(fallbackText), timeoutMs))
-            ]).catch(() => fallbackText);
-
+            // Respond with pure AI (no artificial fallback text). To reduce timeouts,
+            // we still bound with a soft cap if MANYCHAT_AI_TIMEOUT_MS is set; otherwise wait.
+            const timeoutRaw = (getEnv('MANYCHAT_AI_TIMEOUT_MS') ?? '').trim();
+            const timeoutMs = timeoutRaw ? Number.parseInt(timeoutRaw, 10) : 0;
+            let aiText: string;
+            if (timeoutMs && timeoutMs > 0) {
+              aiText = await Promise.race<string>([
+                (async () => {
+                  const ai = await orchestrator.generatePlatformResponse(messageText, context, 'instagram');
+                  return (ai?.response as any)?.message || '';
+                })(),
+                new Promise<string>((resolve) => setTimeout(() => resolve(''), timeoutMs))
+              ]).catch(() => '');
+            } else {
+              const ai = await orchestrator.generatePlatformResponse(messageText, context, 'instagram');
+              aiText = (ai?.response as any)?.message || '';
+            }
             // Respond with ManyChat-friendly JSON and attributes
-            return c.json(mcResponse({ ai_reply: aiText, in_24h: true }));
+            return c.json(mcResponse({ ai_reply: aiText || '...', in_24h: true }));
           } catch (aiErr) {
             log.error('❌ AI generation failed', { error: String(aiErr) });
             return c.json(mcResponse({ ai_reply: 'عذرًا، حدث خطأ. حاول لاحقًا.', in_24h: true, status_code: 500 }));
