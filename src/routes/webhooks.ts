@@ -352,38 +352,7 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
             return c.json(mcResponse({ ai_reply: 'Database error. Please try later.', status_code: 500 }));
           }
 
-          // Load recent messages as conversation history (oldest -> newest)
-          let historyMsgs: ConversationMsg[] = [];
-          try {
-            const historyResult = await pool.query(
-              `SELECT id, content, direction, created_at
-               FROM message_logs
-               WHERE conversation_id = $1
-               ORDER BY created_at DESC
-               LIMIT 20`,
-              [conversationId]
-            );
-            // collect last messages ids (unused)
-            // Optimize long history into a short summary for sessionData (kept small for tokens)
-            try {
-              const msgs: ConversationMsg[] = historyResult.rows
-                .map((r: { direction: string; content: unknown; created_at: Date | string }) => ({
-                  role: r.direction === 'INCOMING' ? 'user' as const : 'assistant' as const,
-                  content: String(r.content ?? ''),
-                  timestamp: r.created_at,
-                }))
-                .reverse(); // oldest -> newest
-              const { ConversationManager } = await import('../services/conversation-manager.js');
-              const cm = new ConversationManager();
-              const opt = await cm.optimizeHistory(sanitizedMerchantId, sanitizedUsername, msgs, 6);
-              if (opt.sessionPatch && Object.keys(opt.sessionPatch).length) {
-                sessionData = { ...(opt.sessionPatch || {}), ...(sessionData || {}) };
-              }
-              historyMsgs = Array.isArray(opt.trimmedHistory) && opt.trimmedHistory.length ? opt.trimmedHistory : msgs;
-            } catch {}
-          } catch (histErr) {
-            log.warn('Failed to load conversation history, proceeding without it', { error: String(histErr) });
-          }
+          // Note: Conversation history is now handled by instagram-manychat-bridge.ts
           // Store incoming message
           // Store incoming message
           try {
@@ -406,20 +375,33 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
               [conversationId, messageText || (hasImages ? 'IMAGE_MESSAGE' : '')]
             );
           }
-          // Generate AI response with hard timeout to satisfy ManyChat 10s limit
+          // Generate AI response using ManyChat Bridge (Local AI)
           try {
-            const { getConversationAIOrchestrator } = await import('../services/conversation-ai-orchestrator.js');
-            const orchestrator = getConversationAIOrchestrator();
-            const context = {
+            const { getInstagramManyChatBridge } = await import('../services/instagram-manychat-bridge.js');
+            const bridge = getInstagramManyChatBridge();
+            
+            // Use bridge to process message with Local AI
+            const result = await bridge.processMessage({
               merchantId: sanitizedMerchantId,
               customerId: sanitizedUsername,
+              message: messageText,
               platform: 'instagram',
-              stage: (sessionData as any)?.stage || 'GREETING',
-              cart: Array.isArray((sessionData as any)?.cart) ? (sessionData as any).cart : [],
-              preferences: (sessionData as any)?.preferences || {},
-              conversationHistory: historyMsgs,
-              interactionType: 'dm'
-            } as any;
+              interactionType: 'dm',
+              conversationId: conversationId,
+              ...(hasImages ? { mediaContext: { mediaType: 'photo' } } : {})
+            }, {
+              useManyChat: false, // تعطيل ManyChat لاستخدام Local AI
+              fallbackToLocalAI: true,
+              priority: 'normal'
+            });
+            
+            let aiText = '';
+            if (result.success && result.metadata?.aiResponse) {
+              aiText = result.metadata.aiResponse as string;
+            } else {
+              aiText = 'عذراً، حدث خطأ مؤقت. يرجى المحاولة مرة أخرى.';
+            }
+            
             // Check 24h message window status (Meta policy)
             let in24hWindow = true;
             try {
@@ -430,24 +412,6 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
               in24hWindow = Boolean(win.rows?.[0]?.can_send);
             } catch (e) {
               log.warn('Failed to check 24h window status', { error: String(e) });
-            }
-
-            // Respond with pure AI (no artificial fallback text). To reduce timeouts,
-            // we still bound with a soft cap if MANYCHAT_AI_TIMEOUT_MS is set; otherwise wait.
-            const timeoutRaw = (getEnv('MANYCHAT_AI_TIMEOUT_MS') ?? '').trim();
-            const timeoutMs = timeoutRaw ? Number.parseInt(timeoutRaw, 10) : 0;
-            let aiText: string;
-            if (timeoutMs && timeoutMs > 0) {
-              aiText = await Promise.race<string>([
-                (async () => {
-                  const ai = await orchestrator.generatePlatformResponse(messageText, context, 'instagram');
-                  return (ai?.response as any)?.message || '';
-                })(),
-                new Promise<string>((resolve) => setTimeout(() => resolve(''), timeoutMs))
-              ]).catch(() => '');
-            } else {
-              const ai = await orchestrator.generatePlatformResponse(messageText, context, 'instagram');
-              aiText = (ai?.response as any)?.message || '';
             }
             // Enforce 24h policy: avoid promotional content outside window; add human_agent tag
             try {
