@@ -631,7 +631,7 @@ export function registerAdminRoutes(app: Hono) {
     // Get dynamic analytics data
     const [products, conversations, customers, messages] = await Promise.all([
       sql<{ count: number; total_value: number }>`
-        SELECT COUNT(*) as count, COALESCE(SUM(price_amount), 0) as total_value
+        SELECT COUNT(*) as count, COALESCE(SUM(price_usd), 0) as total_value
         FROM products WHERE merchant_id = ${merchantId}::uuid AND status = 'ACTIVE'
       `,
       sql<{ count: number; last_week: number }>`
@@ -970,8 +970,8 @@ export function registerAdminRoutes(app: Hono) {
     }
     
     const merchant = merchantRows[0];
-    const products = await sql<{ id: string; sku: string; name_ar: string; name_en: string; category: string; price_amount: number; stock_quantity: number; status: string; created_at: Date }>`
-      SELECT id, sku, name_ar, name_en, category, price_amount, stock_quantity, status, created_at
+    const products = await sql<{ id: string; sku: string; name_ar: string; name_en: string; category: string; price_usd: number; stock_quantity: number; status: string; created_at: Date }>`
+      SELECT id, sku, name_ar, name_en, category, price_usd, stock_quantity, status, created_at
       FROM products WHERE merchant_id = ${merchantId}::uuid ORDER BY created_at DESC
     `;
 
@@ -1396,7 +1396,7 @@ export function registerAdminRoutes(app: Hono) {
                             '<td>' + p.sku + '</td>' +
                             '<td>' + p.name_ar + '</td>' +
                             '<td>' + p.category + '</td>' +
-                            '<td>' + p.price_amount + '</td>' +
+                            '<td>' + p.price_usd + '</td>' +
                             '<td>' + p.stock_quantity + '</td>' +
                             '<td><span class="status-badge status-' + p.status.toLowerCase() + '">' + (p.status === 'ACTIVE' ? 'نشط' : 'غير نشط') + '</span></td>' +
                             '<td>' + new Date(p.created_at).toLocaleDateString('ar-SA') + '</td>' +
@@ -1524,14 +1524,38 @@ export function registerAdminRoutes(app: Hono) {
             const formData = new FormData(this);
             const data = Object.fromEntries(formData.entries());
             
-            // Convert price_amount to number
+            // Convert price_amount to number and validate
             if (data.price_amount) {
                 data.price_amount = parseFloat(data.price_amount);
+                if (isNaN(data.price_amount) || data.price_amount < 0) {
+                    showNotification('السعر يجب أن يكون رقماً صحيحاً أكبر من أو يساوي 0', 'error');
+                    return;
+                }
+            } else {
+                showNotification('السعر مطلوب', 'error');
+                return;
             }
             
-            // Convert stock_quantity to number
+            // Convert stock_quantity to number and validate
             if (data.stock_quantity) {
                 data.stock_quantity = parseInt(data.stock_quantity);
+                if (isNaN(data.stock_quantity) || data.stock_quantity < 0) {
+                    showNotification('الكمية يجب أن تكون رقماً صحيحاً أكبر من أو يساوي 0', 'error');
+                    return;
+                }
+            } else {
+                data.stock_quantity = 0;
+            }
+            
+            // Validate required fields
+            if (!data.sku || data.sku.trim() === '') {
+                showNotification('رمز المنتج (SKU) مطلوب', 'error');
+                return;
+            }
+            
+            if (!data.name_ar || data.name_ar.trim() === '') {
+                showNotification('اسم المنتج (عربي) مطلوب', 'error');
+                return;
             }
             
             try {
@@ -2545,11 +2569,28 @@ function openMerchantPage(page) {
       const merchantId = c.req.param('merchantId');
       const body = await c.req.json();
       
+      // Validate required fields
+      if (!body.sku || !body.name_ar || !body.price_amount) {
+        return c.json({ success: false, error: 'missing_required_fields', message: 'SKU, name_ar, and price_amount are required' }, 400);
+      }
+      
+      // Validate price
+      const price = parseFloat(body.price_amount);
+      if (isNaN(price) || price < 0) {
+        return c.json({ success: false, error: 'invalid_price', message: 'Price must be a valid number >= 0' }, 400);
+      }
+      
+      // Validate stock quantity
+      const stock = parseInt(body.stock_quantity || '0');
+      if (isNaN(stock) || stock < 0) {
+        return c.json({ success: false, error: 'invalid_stock', message: 'Stock quantity must be a valid number >= 0' }, 400);
+      }
+      
       const productId = randomUUID();
       await sql`
         INSERT INTO products (
           id, merchant_id, sku, name_ar, name_en, description_ar, category,
-          price_amount, stock_quantity, status, created_at, updated_at
+          price_usd, stock_quantity, status, created_at, updated_at
         ) VALUES (
           ${productId}::uuid,
           ${merchantId}::uuid,
@@ -2566,10 +2607,30 @@ function openMerchantPage(page) {
       `;
       
       await invalidate(merchantId);
-      return c.json({ success: true, product_id: productId });
+      
+      log.info('Product created successfully', { 
+        productId, 
+        merchantId, 
+        sku: body.sku, 
+        name_ar: body.name_ar,
+        price: price,
+        stock: stock
+      });
+      
+      return c.json({ 
+        success: true, 
+        product_id: productId,
+        message: 'Product created successfully'
+      });
     } catch (error) {
-      log.error('Failed to create product', { error: String(error) });
-      return c.json({ success: false, error: 'internal_error' }, 500);
+      log.error('Failed to create product', { 
+        error: String(error)
+      });
+      return c.json({ 
+        success: false, 
+        error: 'internal_error',
+        message: 'Failed to create product: ' + String(error)
+      }, 500);
     }
   });
 
