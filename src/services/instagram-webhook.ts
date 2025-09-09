@@ -153,8 +153,7 @@ export class InstagramWebhookHandler {
     payload: InstagramWebhookEvent,
     merchantId: string
   ): Promise<ProcessedWebhookResult> {
-    // 🚫 DISABLED: Instagram direct webhook completely disabled - use ManyChat only
-    this.logger.info('🚫 Instagram direct webhook disabled - use ManyChat only', {
+    this.logger.info('📷 Processing Instagram webhook', {
       merchantId,
       entriesCount: payload.entry?.length || 0,
       object: payload.object
@@ -168,8 +167,107 @@ export class InstagramWebhookHandler {
       errors: []
     };
 
-    // Return immediately - Instagram direct processing disabled
+    // معالجة حقيقية للـ webhook
+    if (!payload.entry || !Array.isArray(payload.entry)) {
+      this.logger.warn('Invalid webhook payload structure', { merchantId });
+      return result;
+    }
+
+    for (const entry of payload.entry) {
+      try {
+        // معالجة الرسائل
+        if (entry.messaging) {
+          for (const event of entry.messaging) {
+            if (event.message) {
+              await this.processMessage(event, merchantId);
+              result.messagesProcessed++;
+            }
+          }
+        }
+        
+        // معالجة التعليقات (إذا كانت متوفرة)
+        if ((entry as any).changes) {
+          for (const change of (entry as any).changes) {
+            if (change.field === 'comments') {
+              await this.processComment(change, merchantId);
+              result.eventsProcessed++;
+            }
+          }
+        }
+        
+        result.eventsProcessed++;
+      } catch (error) {
+        this.logger.error('Error processing webhook entry', { 
+          error: String(error),
+          merchantId 
+        });
+        result.errors.push(String(error));
+      }
+    }
+
     return result;
+  }
+
+  /**
+   * معالجة رسالة Instagram
+   */
+  private async processMessage(event: any, merchantId: string): Promise<void> {
+    try {
+      // استخدام ManyChat Bridge لمعالجة الرسالة
+      const { InstagramManyChatBridge } = await import('./instagram-manychat-bridge.js');
+      const bridge = new InstagramManyChatBridge();
+      
+      await bridge.processMessage({
+        merchantId,
+        customerId: event.sender.id,
+        message: event.message.text || '',
+        platform: 'instagram',
+        interactionType: 'dm',
+        conversationId: undefined
+      }, {
+        useManyChat: true,
+        fallbackToLocalAI: true,
+        priority: 'normal'
+      });
+      
+    } catch (error) {
+      this.logger.error('Error processing Instagram message', { 
+        error: String(error),
+        merchantId,
+        senderId: event.sender?.id 
+      });
+    }
+  }
+
+  /**
+   * معالجة تعليق Instagram
+   */
+  private async processComment(change: any, merchantId: string): Promise<void> {
+    try {
+      // استخدام ManyChat Bridge لمعالجة التعليق
+      const { InstagramManyChatBridge } = await import('./instagram-manychat-bridge.js');
+      const bridge = new InstagramManyChatBridge();
+      
+      await bridge.processMessage({
+        merchantId,
+        customerId: change.value.from.username || change.value.from.id,
+        message: change.value.text || '',
+        platform: 'instagram',
+        interactionType: 'comment',
+        conversationId: undefined
+      }, {
+        useManyChat: true,
+        fallbackToLocalAI: true,
+        priority: 'normal'
+      });
+      
+    } catch (error) {
+      this.logger.error('Error processing Instagram comment', { 
+        error: String(error),
+        merchantId,
+        commentId: change.value?.id 
+      });
+    }
   }
 
   /**

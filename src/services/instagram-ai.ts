@@ -968,6 +968,15 @@ export class InstagramAIService {
 - لا تقترح منتجات ولا تسأل عن المقاس/اللون/الفئة إلا إذا المستخدم سأل أو وضّح.
 - إذا كانت هذه ليست أول رسالة في المحادثة، تجنّب تكرار الترحيب.
 - خصّص الرد حسب نوع بضاعة التاجر إن وُجد (ملابس/إكسسوارات/أجهزة... إلخ) اعتماداً على البيانات المتاحة.
+
+🧠 فهم السياق:
+- "اي" أو "نعم" أو "موافق" = موافقة على ما تم عرضه
+- "لا" أو "مو" = رفض أو عدم رغبة
+- "شكراً" = انتهاء المحادثة أو رضا
+- "كم السعر" = استفسار عن السعر
+- "أريد" = طلب منتج معين
+- فهم السياق من المحادثة السابقة مهم جداً!
+
 - ${tierRule}
 
 📱 نوع التفاعل: ${context.interactionType}
@@ -1205,11 +1214,36 @@ export class InstagramAIService {
       messageWithContext = `[منشن في ستوري] ${customerMessage}`;
     }
 
-    const hasImages = Array.isArray(context.imageData) && context.imageData.length > 0;
-    if (hasImages) {
-      messages.push(this.buildUserContentWithImages(messageWithContext, context.imageData!));
+    // إضافة تاريخ المحادثة للذكاء الاصطناعي - هذا هو الحل!
+    const conversationHistory = context.conversationHistory || [];
+    if (conversationHistory.length > 0) {
+      // إضافة آخر 5 رسائل من المحادثة
+      const recentHistory = conversationHistory.slice(-5);
+      for (const msg of recentHistory) {
+        messages.push({
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          content: msg.content
+        });
+      }
+      
+      // إضافة رسالة المستخدم الحالية إذا لم تكن موجودة في التاريخ
+      const lastMessage = recentHistory[recentHistory.length - 1];
+      if (!lastMessage || lastMessage.content !== customerMessage) {
+        const hasImages = Array.isArray(context.imageData) && context.imageData.length > 0;
+        if (hasImages) {
+          messages.push(this.buildUserContentWithImages(messageWithContext, context.imageData!));
+        } else {
+          messages.push({ role: 'user', content: messageWithContext });
+        }
+      }
     } else {
-      messages.push({ role: 'user', content: messageWithContext });
+      // إذا لم يكن هناك تاريخ، أضف الرسالة الحالية
+      const hasImages = Array.isArray(context.imageData) && context.imageData.length > 0;
+      if (hasImages) {
+        messages.push(this.buildUserContentWithImages(messageWithContext, context.imageData!));
+      } else {
+        messages.push({ role: 'user', content: messageWithContext });
+      }
     }
 
     // Inject lightweight personalization profile into system context (best-effort)

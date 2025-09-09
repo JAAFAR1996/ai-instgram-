@@ -552,10 +552,60 @@ export class InstagramManyChatBridge {
 
 
   /**
+   * جلب تاريخ المحادثة من قاعدة البيانات
+   */
+  private async getConversationHistory(merchantId: string, customerId: string): Promise<Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }>> {
+    try {
+      const sql = this.db.getSQL();
+      
+      // البحث عن المحادثة النشطة
+      const conversation = await sql<{ id: string }>`
+        SELECT id FROM conversations 
+        WHERE merchant_id = ${merchantId}::uuid 
+          AND customer_instagram = ${customerId}
+          AND is_active = true
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `;
+      
+      if (conversation.length === 0) {
+        return []; // لا توجد محادثة نشطة
+      }
+      
+      // جلب آخر 10 رسائل من المحادثة
+      const messages = await sql<{ direction: string; content: string; created_at: string }>`
+        SELECT direction, content, created_at
+        FROM message_logs
+        WHERE conversation_id = ${conversation[0].id}
+        ORDER BY created_at DESC
+        LIMIT 10
+      `;
+      
+      // تحويل إلى تنسيق OpenAI مع timestamp
+      return messages.reverse().map(msg => ({
+        role: msg.direction === 'INCOMING' ? 'user' as const : 'assistant' as const,
+        content: msg.content || '',
+        timestamp: new Date(msg.created_at)
+      }));
+      
+    } catch (error) {
+      this.logger.warn('Failed to get conversation history', { 
+        error: String(error),
+        merchantId,
+        customerId 
+      });
+      return [];
+    }
+  }
+
+  /**
    * Generate AI response
    */
   private async generateAIResponse(data: BridgeMessageData): Promise<string> {
     try {
+      // جلب تاريخ المحادثة من قاعدة البيانات - هذا هو الحل!
+      const conversationHistory = await this.getConversationHistory(data.merchantId, data.customerId);
+      
       const context: InstagramContext = {
         merchantId: data.merchantId,
         customerId: data.customerId,
@@ -563,7 +613,7 @@ export class InstagramManyChatBridge {
         stage: 'GREETING',
         cart: [],
         preferences: {},
-        conversationHistory: [],
+        conversationHistory: conversationHistory, // استخدام التاريخ الحقيقي!
         interactionType: data.interactionType,
         ...(data.mediaContext ? { 
           mediaContext: {
