@@ -981,6 +981,7 @@ export function registerAdminRoutes(app: Hono) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>إدارة المنتجات - ${merchant.business_name}</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -988,6 +989,14 @@ export function registerAdminRoutes(app: Hono) {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
+            animation: backgroundShift 15s ease-in-out infinite;
+        }
+        
+        @keyframes backgroundShift {
+            0%, 100% { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+            25% { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+            50% { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+            75% { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
         }
         .container {
             max-width: 1400px;
@@ -1156,6 +1165,174 @@ export function registerAdminRoutes(app: Hono) {
         .close:hover {
             color: #000;
         }
+        
+        /* Notification System */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            min-width: 300px;
+            max-width: 500px;
+            animation: slideInRight 0.5s ease-out;
+        }
+        
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .notification-content {
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            backdrop-filter: blur(10px);
+        }
+        
+        .notification-success {
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            color: white;
+        }
+        
+        .notification-error {
+            background: linear-gradient(135deg, #f44336, #d32f2f);
+            color: white;
+        }
+        
+        .notification-info {
+            background: linear-gradient(135deg, #2196F3, #1976D2);
+            color: white;
+        }
+        
+        .notification-icon {
+            font-size: 1.2rem;
+            margin-left: 10px;
+        }
+        
+        .notification-message {
+            flex: 1;
+            font-weight: 500;
+        }
+        
+        .notification-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            margin-right: 10px;
+            opacity: 0.7;
+            transition: opacity 0.3s;
+        }
+        
+        .notification-close:hover {
+            opacity: 1;
+        }
+        
+        /* Enhanced Animations */
+        .stat-card {
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            transition: left 0.5s;
+        }
+        
+        .stat-card:hover::before {
+            left: 100%;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-10px) scale(1.02);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+        }
+        
+        .btn {
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(255,255,255,0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+        
+        .btn:hover::before {
+            width: 300px;
+            height: 300px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+        
+        /* Loading Animation */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Enhanced Table */
+        .products-table {
+            animation: fadeInUp 0.6s ease-out;
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .products-table tr {
+            transition: all 0.3s ease;
+        }
+        
+        .products-table tr:hover {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            transform: scale(1.01);
+        }
     </style>
 </head>
 <body>
@@ -1186,10 +1363,18 @@ export function registerAdminRoutes(app: Hono) {
             </div>
             
             <div class="actions">
-                <button class="btn btn-primary" onclick="openAddProductModal()">+ إضافة منتج جديد</button>
-                <button class="btn btn-success" onclick="refreshProducts()">🔄 تحديث</button>
-                <button class="btn btn-warning" onclick="exportProducts()">📊 تصدير</button>
-                <button class="btn btn-danger" onclick="bulkActions()">⚡ إجراءات جماعية</button>
+                <button class="btn btn-primary" onclick="openAddProductModal()">
+                    <i class="fas fa-plus"></i> إضافة منتج جديد
+                </button>
+                <button class="btn btn-success" onclick="refreshProducts()">
+                    <i class="fas fa-sync-alt"></i> تحديث
+                </button>
+                <button class="btn btn-warning" onclick="exportProducts()">
+                    <i class="fas fa-download"></i> تصدير
+                </button>
+                <button class="btn btn-danger" onclick="bulkActions()">
+                    <i class="fas fa-bolt"></i> إجراءات جماعية
+                </button>
             </div>
             
             <table class="products-table">
@@ -1216,8 +1401,8 @@ export function registerAdminRoutes(app: Hono) {
                             '<td><span class="status-badge status-' + p.status.toLowerCase() + '">' + (p.status === 'ACTIVE' ? 'نشط' : 'غير نشط') + '</span></td>' +
                             '<td>' + new Date(p.created_at).toLocaleDateString('ar-SA') + '</td>' +
                             '<td>' +
-                                '<button class="btn btn-primary" onclick="editProduct(\'' + p.id + '\')">تعديل</button>' +
-                                '<button class="btn btn-danger" onclick="deleteProduct(\'' + p.id + '\')">حذف</button>' +
+                                '<button class="btn btn-primary" onclick="editProduct(\'' + p.id + '\')"><i class="fas fa-edit"></i> تعديل</button>' +
+                                '<button class="btn btn-danger" onclick="deleteProduct(\'' + p.id + '\')"><i class="fas fa-trash"></i> حذف</button>' +
                             '</td>' +
                         '</tr>'
                     ).join('')}
@@ -1267,7 +1452,9 @@ export function registerAdminRoutes(app: Hono) {
                     <label>وصف المنتج</label>
                     <textarea name="description_ar" rows="3"></textarea>
                 </div>
-                <button type="submit" class="btn btn-primary">إضافة المنتج</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> إضافة المنتج
+                </button>
             </form>
         </div>
     </div>
@@ -1284,16 +1471,18 @@ export function registerAdminRoutes(app: Hono) {
         }
         
         function refreshProducts() {
-            location.reload();
+            showNotification('جاري تحديث البيانات...', 'info');
+            setTimeout(() => {
+                location.reload();
+            }, 1000);
         }
         
         function exportProducts() {
-            // Export functionality
-            alert('ميزة التصدير قيد التطوير');
+            showNotification('ميزة التصدير قيد التطوير', 'info');
         }
         
         function bulkActions() {
-            alert('الإجراءات الجماعية قيد التطوير');
+            showNotification('الإجراءات الجماعية قيد التطوير', 'info');
         }
         
         function editProduct(productId) {
@@ -1302,6 +1491,8 @@ export function registerAdminRoutes(app: Hono) {
         
         function deleteProduct(productId) {
             if (confirm('هل أنت متأكد من حذف هذا المنتج؟')) {
+                showNotification('جاري حذف المنتج...', 'info');
+                
                 fetch(\`/admin/api/products/\${productId}\`, {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' }
@@ -1309,18 +1500,39 @@ export function registerAdminRoutes(app: Hono) {
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        location.reload();
+                        showNotification('تم حذف المنتج بنجاح!', 'success');
+                        setTimeout(() => location.reload(), 1000);
                     } else {
-                        alert('خطأ في حذف المنتج: ' + data.error);
+                        showNotification('خطأ في حذف المنتج: ' + data.error, 'error');
                     }
+                })
+                .catch(error => {
+                    showNotification('خطأ في الاتصال: ' + error.message, 'error');
                 });
             }
         }
         
         document.getElementById('addProductForm').addEventListener('submit', async function(e) {
             e.preventDefault();
+            
+            // Show loading state
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalText = submitBtn.textContent;
+            submitBtn.textContent = 'جاري الإضافة...';
+            submitBtn.disabled = true;
+            
             const formData = new FormData(this);
             const data = Object.fromEntries(formData.entries());
+            
+            // Convert price_amount to number
+            if (data.price_amount) {
+                data.price_amount = parseFloat(data.price_amount);
+            }
+            
+            // Convert stock_quantity to number
+            if (data.stock_quantity) {
+                data.stock_quantity = parseInt(data.stock_quantity);
+            }
             
             try {
                 const response = await fetch(\`/admin/api/merchants/\${merchantId}/products\`, {
@@ -1332,15 +1544,44 @@ export function registerAdminRoutes(app: Hono) {
                 const result = await response.json();
                 
                 if (result.success) {
+                    // Show success message
+                    showNotification('تم إضافة المنتج بنجاح!', 'success');
                     closeModal('addProductModal');
-                    location.reload();
+                    this.reset(); // Reset form
+                    setTimeout(() => location.reload(), 1000);
                 } else {
-                    alert('خطأ في إضافة المنتج: ' + result.error);
+                    showNotification('خطأ في إضافة المنتج: ' + (result.error || 'خطأ غير معروف'), 'error');
                 }
             } catch (error) {
-                alert('خطأ في الاتصال: ' + error.message);
+                showNotification('خطأ في الاتصال: ' + error.message, 'error');
+            } finally {
+                // Restore button state
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
             }
         });
+        
+        // Notification system
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = \`notification notification-\${type}\`;
+            notification.innerHTML = \`
+                <div class="notification-content">
+                    <span class="notification-icon">\${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'}</span>
+                    <span class="notification-message">\${message}</span>
+                    <button class="notification-close" onclick="this.parentElement.parentElement.remove()">×</button>
+                </div>
+            \`;
+            
+            document.body.appendChild(notification);
+            
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.remove();
+                }
+            }, 5000);
+        }
         
         // Close modal when clicking outside
         window.onclick = function(event) {
