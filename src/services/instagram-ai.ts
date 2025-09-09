@@ -289,26 +289,43 @@ export class InstagramAIService {
         };
       }
 
-      // Default configuration
-      const maxTokensEnv = parseInt(getEnv('OPENAI_MAX_TOKENS') || '600', 10);
-      const maxTokensRaw = Number.isFinite(maxTokensEnv) ? maxTokensEnv : 600;
-      const maxTokens = Math.min(maxTokensRaw, InstagramAIService.MAX_TOKENS_HARD_CAP);
-
+      // جلب الإعدادات من قاعدة البيانات - ديناميكي بالكامل
+      const { dynamicTemplateManager } = await import('./dynamic-template-manager.js');
+      const aiSettings = await dynamicTemplateManager.getAISettings(merchantId);
+      
       return {
-        aiModel: getEnv('OPENAI_MODEL') || 'gpt-4o-mini',
-        maxTokens: Math.min(maxTokens, 500),
-        temperature: 0.8,
-        language: 'ar'
+        aiModel: aiSettings.model,
+        maxTokens: Math.min(aiSettings.maxTokens, InstagramAIService.MAX_TOKENS_HARD_CAP),
+        temperature: aiSettings.temperature,
+        language: aiSettings.language
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error('❌ Failed to get merchant AI config:', { error: errorMessage });
-      return {
-        aiModel: 'gpt-4o-mini',
-        maxTokens: 600,
-        temperature: 0.8,
-        language: 'ar'
-      };
+      
+      // في حالة الخطأ، جلب إعدادات افتراضية من النظام
+      try {
+        const { dynamicTemplateManager } = await import('./dynamic-template-manager.js');
+        const aiSettings = await dynamicTemplateManager.getAISettings(merchantId);
+        return {
+          aiModel: aiSettings.model,
+          maxTokens: Math.min(aiSettings.maxTokens, InstagramAIService.MAX_TOKENS_HARD_CAP),
+          temperature: aiSettings.temperature,
+          language: aiSettings.language
+        };
+      } catch (fallbackError) {
+        // آخر حل: إعدادات افتراضية من متغيرات البيئة
+        const maxTokensEnv = parseInt(getEnv('OPENAI_MAX_TOKENS') || '600', 10);
+        const maxTokensRaw = Number.isFinite(maxTokensEnv) ? maxTokensEnv : 600;
+        const maxTokens = Math.min(maxTokensRaw, InstagramAIService.MAX_TOKENS_HARD_CAP);
+
+        return {
+          aiModel: getEnv('OPENAI_MODEL') || 'gpt-4o-mini',
+          maxTokens: Math.min(maxTokens, 500),
+          temperature: 0.8,
+          language: 'ar'
+        };
+      }
     }
   }
 

@@ -1,6 +1,7 @@
 import { getLogger } from './logger.js';
 import SmartCache from './smart-cache.js';
 import SmartProductSearch from './search/smart-product-search.js';
+import { dynamicTemplateManager } from './dynamic-template-manager.js';
 
 export interface FallbackResult {
   text: string;
@@ -70,17 +71,32 @@ export class ErrorFallbacksService {
       this.log.warn('fallback: product suggestions failed', { error: String(e) });
     }
 
-    // 3) Static, friendly fallback with variety
-    const fallbackMessages = [
+    // 3) Dynamic fallback messages from database
+    try {
+      const errorMessages = await dynamicTemplateManager.getErrorMessages(merchantId);
+      const fallbackMessages = errorMessages.fallback;
+      
+      if (fallbackMessages.length > 0) {
+        // اختيار رسالة عشوائية من قاعدة البيانات
+        const randomIndex = Math.floor(Math.random() * fallbackMessages.length);
+        const dynamicMessage = fallbackMessages[randomIndex] || fallbackMessages[0];
+        
+        return { text: dynamicMessage, used: 'static' };
+      }
+    } catch (error) {
+      this.log.warn('Failed to get dynamic error messages', { error: String(error) });
+    }
+    
+    // آخر حل: رسائل افتراضية من النظام
+    const systemFallbackMessages = [
       'واضح! أعطيني تفاصيل أكثر (اسم المنتج/الكود أو اللي يدور ببالك) وأنا أجاوبك فوراً بمعلومة محددة.',
       'ممتاز! أخبرني أكثر عن ما تبحث عنه (النوع/المقاس/اللون) وسأساعدك بسرعة.',
       'رائع! وضح لي احتياجاتك بالتفصيل وسأجد لك الأنسب فوراً.',
       'ماشي! اشرح لي ما تحتاجه (المنتج/المقاس/اللون) وسأخدمك حالاً.'
     ];
     
-    // اختيار رسالة عشوائية لتجنب التكرار
-    const randomIndex = Math.floor(Math.random() * fallbackMessages.length);
-    const generic = fallbackMessages[randomIndex] || fallbackMessages[0];
+    const randomIndex = Math.floor(Math.random() * systemFallbackMessages.length);
+    const generic = systemFallbackMessages[randomIndex] || systemFallbackMessages[0];
     
     return { text: generic, used: 'static' };
   }

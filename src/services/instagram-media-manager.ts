@@ -553,7 +553,17 @@ export class InstagramMediaManager {
     // This would use AI to generate personalized captions
     // For now, return a simple caption
     this.logger.debug?.('generateTemplateCaption', { template: template.name, merchantId });
-    return `${template.name} - محتوى مميز من متجرنا! 🌟`;
+    // جلب اسم المتجر من قاعدة البيانات - ديناميكي بالكامل
+    let businessName = 'متجرنا';
+    try {
+      const { dynamicTemplateManager } = await import('./dynamic-template-manager.js');
+      const defaults = await dynamicTemplateManager.getDefaults(merchantId);
+      businessName = defaults.businessName;
+    } catch (error) {
+      this.logger.warn('Failed to get dynamic business name for media caption', { error: String(error) });
+    }
+    
+    return `${template.name} - محتوى مميز من ${businessName}! 🌟`;
   }
 
   /**

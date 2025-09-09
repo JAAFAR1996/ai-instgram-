@@ -25,7 +25,7 @@ export class ResponsePersonalizer {
   private log = getLogger({ component: 'response-personalizer' });
   private search = new SmartProductSearch();
 
-  private greetingForTier(tier: PersonalizeOptions['tier']): string {
+  private async greetingForTier(tier: PersonalizeOptions['tier'], merchantId: string): Promise<string> {
     const vipGreetings = [
       'هلا وسهلا عميلنا المميز ✨',
       'أهلاً وسهلاً بيك يا VIP 🌟',
@@ -40,12 +40,25 @@ export class ResponsePersonalizer {
       'أهلاً وسهلاً بيك مرة أخرى 🌸'
     ];
     
-    const newGreetings = [
-      'أهلاً وسهلاً بيك 🙌',
-      'مرحباً بك في متجرنا 🌟',
-      'أهلاً وسهلاً بيك معنا ✨',
-      'مرحباً بك وسهلاً 💫'
-    ];
+    // جلب تحيات ديناميكية من قاعدة البيانات
+    let newGreetings: string[] = [];
+    try {
+      const { dynamicTemplateManager } = await import('./dynamic-template-manager.js');
+      const greetingTemplate = await dynamicTemplateManager.getResponseTemplate(
+        merchantId, 
+        'greeting', 
+        { business_name: 'متجرنا' }
+      );
+      newGreetings = [greetingTemplate];
+    } catch (error) {
+      // في حالة الخطأ، استخدام تحيات افتراضية
+      newGreetings = [
+        'أهلاً وسهلاً بيك 🙌',
+        'مرحباً بك في متجرنا 🌟',
+        'أهلاً وسهلاً بيك معنا ✨',
+        'مرحباً بك وسهلاً 💫'
+      ];
+    }
     
     if (tier === 'VIP') {
       return vipGreetings[Math.floor(Math.random() * vipGreetings.length)];
@@ -86,7 +99,7 @@ export class ResponsePersonalizer {
   }
 
   public async personalizeResponses(baseText: string, opts: PersonalizeOptions): Promise<PersonalizedResult> {
-    const greet = this.greetingForTier(opts.tier);
+    const greet = await this.greetingForTier(opts.tier, opts.merchantId);
     const tone = this.adjustTone(baseText, opts.tier, opts.preferences?.priceSensitivity);
     const recommendations = await this.dynamicRecs(opts);
     const parts: string[] = [];

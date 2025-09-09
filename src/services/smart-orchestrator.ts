@@ -49,12 +49,16 @@ export async function orchestrate(
   const db = getDatabase();
   const sql = db.getSQL();
 
-  // Load merchant hints (ai_config)
+  // Load merchant hints (ai_config) - ديناميكي بالكامل
   const rows = await sql<{ ai_config: Record<string, unknown> | null; business_name: string; business_category: string | null; merchant_type: string | null; currency: string | null; settings: Record<string, unknown> | null }>`
     SELECT ai_config, business_name, business_category, merchant_type::text as merchant_type, currency, settings FROM merchants WHERE id = ${merchantId}::uuid LIMIT 1
   `;
-  const merchant: { ai_config: Record<string, unknown> | null; business_name: string; business_category: string | null; merchant_type: string | null; currency: string | null; settings: Record<string, unknown> | null } =
-    rows[0] ?? { ai_config: {}, business_name: 'متجرنا', business_category: null, merchant_type: 'other', currency: 'IQD', settings: {} };
+  
+  if (rows.length === 0) {
+    throw new Error(`Merchant not found: ${merchantId}`);
+  }
+  
+  const merchant = rows[0];
   const aiCfg = merchant.ai_config || {};
 
   const hints: {

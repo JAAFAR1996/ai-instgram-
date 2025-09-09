@@ -699,7 +699,16 @@ export class AIService {
       electric: 'أجهزة كهربائية', other: 'عام'
     };
     const catLabel = catLabelMap[persona.businessCategory] || 'عام';
-    const businessName = context.merchantSettings?.businessName || 'متجرنا';
+    // جلب اسم المتجر من قاعدة البيانات - ديناميكي بالكامل
+    let businessName = 'متجرنا'; // قيمة افتراضية فقط
+    try {
+      const { dynamicTemplateManager } = await import('./dynamic-template-manager.js');
+      const defaults = await dynamicTemplateManager.getDefaults(context.merchantId);
+      businessName = defaults.businessName;
+    } catch (error) {
+      this.logger.warn('Failed to get dynamic business name', { error: String(error) });
+      businessName = context.merchantSettings?.businessName || 'متجرنا';
+    }
     let relevantProducts: Array<Record<string, any>> = [];
     try { 
       relevantProducts = await this.searchRelevantProducts(customerMessage, context.merchantId, 5);
