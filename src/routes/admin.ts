@@ -2599,8 +2599,8 @@ function openMerchantPage(page) {
           ${body.name_en || null},
           ${body.description_ar || null},
           ${body.category || 'general'},
-          ${body.price_amount},
-          ${body.stock_quantity || 0},
+          ${price},
+          ${stock},
           'ACTIVE',
           NOW(), NOW()
         )
