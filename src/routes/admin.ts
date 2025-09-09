@@ -1419,15 +1419,18 @@ export function registerAdminRoutes(app: Hono) {
             <form id="addProductForm">
                 <div class="form-group">
                     <label>رمز المنتج (SKU) *</label>
-                    <input type="text" name="sku" required>
+                    <input type="text" name="sku" required placeholder="مثال: PROD-001">
+                    <div class="help-text">رمز فريد للمنتج</div>
                 </div>
                 <div class="form-group">
                     <label>اسم المنتج (عربي) *</label>
-                    <input type="text" name="name_ar" required>
+                    <input type="text" name="name_ar" required placeholder="مثال: قميص قطني">
+                    <div class="help-text">اسم المنتج باللغة العربية</div>
                 </div>
                 <div class="form-group">
                     <label>اسم المنتج (إنجليزي)</label>
-                    <input type="text" name="name_en">
+                    <input type="text" name="name_en" placeholder="مثال: Cotton Shirt">
+                    <div class="help-text">اسم المنتج باللغة الإنجليزية (اختياري)</div>
                 </div>
                 <div class="form-group">
                     <label>الفئة</label>
@@ -1442,17 +1445,20 @@ export function registerAdminRoutes(app: Hono) {
                 </div>
                 <div class="form-group">
                     <label>السعر (${merchant.currency}) *</label>
-                    <input type="number" name="price_amount" step="0.01" min="0" required>
+                    <input type="number" name="price_amount" step="0.01" min="0" required placeholder="0.00">
+                    <div class="help-text">سعر المنتج بالعملة المحلية</div>
                 </div>
                 <div class="form-group">
                     <label>الكمية المتوفرة</label>
-                    <input type="number" name="stock_quantity" min="0" value="0">
+                    <input type="number" name="stock_quantity" min="0" value="0" placeholder="0">
+                    <div class="help-text">عدد القطع المتوفرة في المخزن</div>
                 </div>
                 <div class="form-group">
                     <label>وصف المنتج</label>
-                    <textarea name="description_ar" rows="3"></textarea>
+                    <textarea name="description_ar" rows="3" placeholder="وصف مفصل للمنتج..."></textarea>
+                    <div class="help-text">وصف تفصيلي للمنتج (اختياري)</div>
                 </div>
-                <button type="submit" class="btn btn-primary">
+                <button type="submit" class="btn btn-primary pulse">
                     <i class="fas fa-plus"></i> إضافة المنتج
                 </button>
             </form>
@@ -1518,7 +1524,7 @@ export function registerAdminRoutes(app: Hono) {
             // Show loading state
             const submitBtn = this.querySelector('button[type="submit"]');
             const originalText = submitBtn.textContent;
-            submitBtn.textContent = 'جاري الإضافة...';
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإضافة...';
             submitBtn.disabled = true;
             
             const formData = new FormData(this);
@@ -1529,10 +1535,14 @@ export function registerAdminRoutes(app: Hono) {
                 data.price_amount = parseFloat(data.price_amount);
                 if (isNaN(data.price_amount) || data.price_amount < 0) {
                     showNotification('السعر يجب أن يكون رقماً صحيحاً أكبر من أو يساوي 0', 'error');
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
                     return;
                 }
             } else {
                 showNotification('السعر مطلوب', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
                 return;
             }
             
@@ -1541,6 +1551,8 @@ export function registerAdminRoutes(app: Hono) {
                 data.stock_quantity = parseInt(data.stock_quantity);
                 if (isNaN(data.stock_quantity) || data.stock_quantity < 0) {
                     showNotification('الكمية يجب أن تكون رقماً صحيحاً أكبر من أو يساوي 0', 'error');
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
                     return;
                 }
             } else {
@@ -1550,11 +1562,121 @@ export function registerAdminRoutes(app: Hono) {
             // Validate required fields
             if (!data.sku || data.sku.trim() === '') {
                 showNotification('رمز المنتج (SKU) مطلوب', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate SKU format
+            if (data.sku.length < 3) {
+                showNotification('رمز المنتج يجب أن يكون 3 أحرف على الأقل', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
                 return;
             }
             
             if (!data.name_ar || data.name_ar.trim() === '') {
                 showNotification('اسم المنتج (عربي) مطلوب', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate name length
+            if (data.name_ar.trim().length < 2) {
+                showNotification('اسم المنتج يجب أن يكون حرفين على الأقل', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate price range
+            if (data.price_amount > 1000000) {
+                showNotification('السعر لا يمكن أن يكون أكبر من 1,000,000', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate stock range
+            if (data.stock_quantity > 100000) {
+                showNotification('الكمية لا يمكن أن تكون أكبر من 100,000', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate description length if provided
+            if (data.description_ar && data.description_ar.length > 1000) {
+                showNotification('وصف المنتج لا يمكن أن يكون أكبر من 1000 حرف', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate category
+            const validCategories = ['general', 'fashion', 'electronics', 'beauty', 'home', 'sports'];
+            if (data.category && !validCategories.includes(data.category)) {
+                showNotification('فئة المنتج غير صحيحة', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate English name if provided
+            if (data.name_en && data.name_en.trim().length < 2) {
+                showNotification('اسم المنتج بالإنجليزية يجب أن يكون حرفين على الأقل', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate English name length if provided
+            if (data.name_en && data.name_en.length > 100) {
+                showNotification('اسم المنتج بالإنجليزية لا يمكن أن يكون أكبر من 100 حرف', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate Arabic name length
+            if (data.name_ar.length > 100) {
+                showNotification('اسم المنتج بالعربية لا يمكن أن يكون أكبر من 100 حرف', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate SKU length
+            if (data.sku.length > 50) {
+                showNotification('رمز المنتج لا يمكن أن يكون أكبر من 50 حرف', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate SKU format (alphanumeric and hyphens only)
+            const skuRegex = /^[a-zA-Z0-9\-_]+$/;
+            if (!skuRegex.test(data.sku)) {
+                showNotification('رمز المنتج يجب أن يحتوي على أحرف وأرقام وشرطات فقط', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate price precision (max 2 decimal places)
+            if (data.price_amount % 0.01 !== 0) {
+                showNotification('السعر يجب أن يكون بدقة سنتين فقط', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+                return;
+            }
+            
+            // Validate stock is integer
+            if (data.stock_quantity % 1 !== 0) {
+                showNotification('الكمية يجب أن تكون رقماً صحيحاً', 'error');
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
                 return;
             }
             
@@ -1580,7 +1702,7 @@ export function registerAdminRoutes(app: Hono) {
                 showNotification('خطأ في الاتصال: ' + error.message, 'error');
             } finally {
                 // Restore button state
-                submitBtn.textContent = originalText;
+                submitBtn.innerHTML = originalText;
                 submitBtn.disabled = false;
             }
         });
@@ -1637,6 +1759,7 @@ export function registerAdminRoutes(app: Hono) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>إضافة تاجر جديد - AI Sales Platform</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -1644,20 +1767,60 @@ export function registerAdminRoutes(app: Hono) {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
+            animation: backgroundShift 20s ease-in-out infinite;
+        }
+        
+        @keyframes backgroundShift {
+            0%, 100% { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+            25% { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+            50% { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+            75% { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
         }
         .container {
             max-width: 1200px;
             margin: 0 auto;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 25px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.15);
             overflow: hidden;
+            animation: slideInUp 0.8s ease-out;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        
+        @keyframes slideInUp {
+            from {
+                opacity: 0;
+                transform: translateY(50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
         .header {
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
             color: white;
             padding: 30px;
             text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            animation: shimmer 3s infinite;
+        }
+        
+        @keyframes shimmer {
+            0% { left: -100%; }
+            100% { left: 100%; }
         }
         .header h1 {
             font-size: 2.5rem;
@@ -1674,8 +1837,34 @@ export function registerAdminRoutes(app: Hono) {
             margin-bottom: 40px;
             padding: 30px;
             border: 2px solid #f0f0f0;
-            border-radius: 15px;
-            background: #fafafa;
+            border-radius: 20px;
+            background: linear-gradient(135deg, #fafafa 0%, #f8f9fa 100%);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .form-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea, #764ba2, #f093fb, #f5576c);
+            background-size: 300% 100%;
+            animation: gradientShift 3s ease infinite;
+        }
+        
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        
+        .form-section:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            border-color: #667eea;
         }
         .form-section h2 {
             color: #1e3c72;
@@ -1704,16 +1893,24 @@ export function registerAdminRoutes(app: Hono) {
         }
         input, select, textarea {
             width: 100%;
-            padding: 12px 15px;
+            padding: 15px 20px;
             border: 2px solid #e0e0e0;
-            border-radius: 10px;
+            border-radius: 15px;
             font-size: 16px;
             transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(5px);
         }
         input:focus, select:focus, textarea:focus {
             outline: none;
             border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15);
+            transform: translateY(-2px);
+            background: rgba(255, 255, 255, 1);
+        }
+        input:hover, select:hover, textarea:hover {
+            border-color: #667eea;
+            transform: translateY(-1px);
         }
         textarea {
             resize: vertical;
@@ -1773,18 +1970,40 @@ export function registerAdminRoutes(app: Hono) {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            padding: 15px 40px;
-            border-radius: 10px;
+            padding: 18px 40px;
+            border-radius: 15px;
             font-size: 18px;
             font-weight: 600;
             cursor: pointer;
             width: 100%;
             margin-top: 30px;
             transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
         }
+        
+        .submit-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            transition: left 0.5s;
+        }
+        
+        .submit-btn:hover::before {
+            left: 100%;
+        }
+        
         .submit-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+            transform: translateY(-3px);
+            box-shadow: 0 15px 30px rgba(102, 126, 234, 0.4);
+        }
+        
+        .submit-btn:active {
+            transform: translateY(-1px);
         }
         .loading {
             display: none;
@@ -1793,21 +2012,36 @@ export function registerAdminRoutes(app: Hono) {
         }
         .success {
             display: none;
-            background: #2ed573;
+            background: linear-gradient(135deg, #2ed573 0%, #17c0eb 100%);
             color: white;
             padding: 20px;
-            border-radius: 10px;
+            border-radius: 15px;
             text-align: center;
             margin-top: 20px;
+            animation: slideInDown 0.5s ease-out;
+            box-shadow: 0 10px 25px rgba(46, 213, 115, 0.3);
         }
         .error {
             display: none;
-            background: #ff4757;
+            background: linear-gradient(135deg, #ff4757 0%, #ff3838 100%);
             color: white;
             padding: 20px;
-            border-radius: 10px;
+            border-radius: 15px;
             text-align: center;
             margin-top: 20px;
+            animation: slideInDown 0.5s ease-out;
+            box-shadow: 0 10px 25px rgba(255, 71, 87, 0.3);
+        }
+        
+        @keyframes slideInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
         .required {
             color: #ff4757;
@@ -1817,12 +2051,92 @@ export function registerAdminRoutes(app: Hono) {
             color: #666;
             margin-top: 5px;
         }
+        
+        /* Form validation styles */
+        .form-group.error input,
+        .form-group.error select,
+        .form-group.error textarea {
+            border-color: #ff4757;
+            box-shadow: 0 0 0 3px rgba(255, 71, 87, 0.1);
+        }
+        
+        .form-group.success input,
+        .form-group.success select,
+        .form-group.success textarea {
+            border-color: #2ed573;
+            box-shadow: 0 0 0 3px rgba(46, 213, 115, 0.1);
+        }
+        
+        .error-message {
+            color: #ff4757;
+            font-size: 0.85rem;
+            margin-top: 5px;
+            display: none;
+        }
+        
+        .success-message {
+            color: #2ed573;
+            font-size: 0.85rem;
+            margin-top: 5px;
+            display: none;
+        }
+        
+        /* Floating labels effect */
+        .form-group {
+            position: relative;
+        }
+        
+        .form-group label {
+            transition: all 0.3s ease;
+        }
+        
+        .form-group input:focus + label,
+        .form-group select:focus + label,
+        .form-group textarea:focus + label {
+            color: #667eea;
+            transform: translateY(-2px);
+        }
+        
+        /* Pulse animation for important elements */
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        /* Smooth transitions for all interactive elements */
+        * {
+            transition: all 0.3s ease;
+        }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 إضافة تاجر جديد</h1>
+            <h1><i class="fas fa-rocket pulse"></i> إضافة تاجر جديد</h1>
             <p>قم بإعداد تاجر جديد في النظام مع جميع الإعدادات المطلوبة</p>
         </div>
         
@@ -1830,7 +2144,7 @@ export function registerAdminRoutes(app: Hono) {
             <form id="merchantForm">
                 <!-- Basic Business Information -->
                 <div class="form-section">
-                    <h2>📋 المعلومات الأساسية للمتجر</h2>
+                    <h2><i class="fas fa-store"></i> المعلومات الأساسية للمتجر</h2>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="business_name">اسم المتجر <span class="required">*</span></label>
@@ -1865,7 +2179,7 @@ export function registerAdminRoutes(app: Hono) {
 
                 <!-- Contact Information -->
                 <div class="form-section">
-                    <h2>📞 معلومات التواصل</h2>
+                    <h2><i class="fas fa-phone"></i> معلومات التواصل</h2>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="whatsapp_number">رقم الواتساب <span class="required">*</span></label>
@@ -1885,7 +2199,7 @@ export function registerAdminRoutes(app: Hono) {
 
                 <!-- Business Settings -->
                 <div class="form-section">
-                    <h2>⚙️ إعدادات المتجر</h2>
+                    <h2><i class="fas fa-cog"></i> إعدادات المتجر</h2>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="currency">العملة</label>
@@ -1912,7 +2226,7 @@ export function registerAdminRoutes(app: Hono) {
 
                 <!-- Working Hours -->
                 <div class="form-section">
-                    <h2>🕒 ساعات العمل</h2>
+                    <h2><i class="fas fa-clock"></i> ساعات العمل</h2>
                     <div class="form-group">
                         <label>
                             <input type="checkbox" id="working_hours_enabled" name="working_hours_enabled" checked>
@@ -1989,7 +2303,7 @@ export function registerAdminRoutes(app: Hono) {
 
                 <!-- Payment Methods -->
                 <div class="form-section">
-                    <h2>💳 طرق الدفع</h2>
+                    <h2><i class="fas fa-credit-card"></i> طرق الدفع</h2>
                     <div class="checkbox-group">
                         <div class="checkbox-item">
                             <input type="checkbox" id="cod" name="payment_methods" value="COD" checked>
@@ -2020,7 +2334,7 @@ export function registerAdminRoutes(app: Hono) {
 
                 <!-- Delivery Settings -->
                 <div class="form-section">
-                    <h2>🚚 إعدادات التوصيل</h2>
+                    <h2><i class="fas fa-truck"></i> إعدادات التوصيل</h2>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="delivery_inside">رسوم التوصيل داخل بغداد</label>
@@ -2035,7 +2349,7 @@ export function registerAdminRoutes(app: Hono) {
 
                 <!-- AI Configuration -->
                 <div class="form-section">
-                    <h2>🤖 إعدادات الذكاء الاصطناعي</h2>
+                    <h2><i class="fas fa-robot"></i> إعدادات الذكاء الاصطناعي</h2>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="ai_model">نموذج الذكاء الاصطناعي</label>
@@ -2070,7 +2384,7 @@ export function registerAdminRoutes(app: Hono) {
 
                 <!-- Response Templates -->
                 <div class="form-section">
-                    <h2>💬 قوالب الردود</h2>
+                    <h2><i class="fas fa-comments"></i> قوالب الردود</h2>
                     <div class="form-group">
                         <label for="greeting_template">رسالة الترحيب</label>
                         <textarea id="greeting_template" name="greeting_template" placeholder="مرحباً بك في متجرنا! كيف يمكنني مساعدتك اليوم؟"></textarea>
@@ -2087,25 +2401,27 @@ export function registerAdminRoutes(app: Hono) {
 
                 <!-- Products Section -->
                 <div class="form-section">
-                    <h2>📦 المنتجات (اختياري)</h2>
+                    <h2><i class="fas fa-box"></i> المنتجات (اختياري)</h2>
                     <p>يمكنك إضافة المنتجات الآن أو لاحقاً من لوحة التحكم</p>
                     <button type="button" class="add-product" onclick="addProduct()">+ إضافة منتج</button>
                     <div id="products-container"></div>
                 </div>
 
-                <button type="submit" class="submit-btn">🚀 إنشاء التاجر</button>
+                <button type="submit" class="submit-btn pulse">
+                    <i class="fas fa-rocket"></i> إنشاء التاجر
+                </button>
                 
                 <div class="loading" id="loading">
-                    <p>جاري إنشاء التاجر...</p>
+                    <p><i class="fas fa-spinner fa-spin"></i> جاري إنشاء التاجر...</p>
                 </div>
                 
                 <div class="success" id="success">
-                    <h3>✅ تم إنشاء التاجر بنجاح!</h3>
+                    <h3><i class="fas fa-check-circle"></i> تم إنشاء التاجر بنجاح!</h3>
                     <p id="success-message"></p>
                 </div>
                 
                 <div class="error" id="error">
-                    <h3>❌ حدث خطأ</h3>
+                    <h3><i class="fas fa-exclamation-triangle"></i> حدث خطأ</h3>
                     <p id="error-message"></p>
                 </div>
             </form>
@@ -2181,8 +2497,347 @@ export function registerAdminRoutes(app: Hono) {
         });
 
         // Form submission
+        // Form validation function
+        function validateForm() {
+            let isValid = true;
+            const requiredFields = document.querySelectorAll('input[required], select[required], textarea[required]');
+            
+            requiredFields.forEach(field => {
+                const formGroup = field.closest('.form-group');
+                if (!field.value.trim()) {
+                    formGroup.classList.add('error');
+                    formGroup.classList.remove('success');
+                    isValid = false;
+                } else {
+                    formGroup.classList.remove('error');
+                    formGroup.classList.add('success');
+                }
+            });
+            
+            // Validate WhatsApp number format
+            const whatsappField = document.getElementById('whatsapp_number');
+            if (whatsappField && whatsappField.value) {
+                const whatsappRegex = /^[0-9]{10,15}$/;
+                if (!whatsappRegex.test(whatsappField.value.replace(/[^0-9]/g, ''))) {
+                    whatsappField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate Instagram username format
+            const instagramField = document.getElementById('instagram_username');
+            if (instagramField && instagramField.value) {
+                const instagramRegex = /^[a-zA-Z0-9._]{1,30}$/;
+                if (!instagramRegex.test(instagramField.value.replace('@', ''))) {
+                    instagramField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate email format
+            const emailField = document.getElementById('email');
+            if (emailField && emailField.value) {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(emailField.value)) {
+                    emailField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate business name length
+            const businessNameField = document.getElementById('business_name');
+            if (businessNameField && businessNameField.value) {
+                if (businessNameField.value.trim().length < 2) {
+                    businessNameField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate delivery fees
+            const deliveryInsideField = document.getElementById('delivery_inside');
+            const deliveryOutsideField = document.getElementById('delivery_outside');
+            if (deliveryInsideField && deliveryInsideField.value) {
+                const fee = parseFloat(deliveryInsideField.value);
+                if (isNaN(fee) || fee < 0) {
+                    deliveryInsideField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            if (deliveryOutsideField && deliveryOutsideField.value) {
+                const fee = parseFloat(deliveryOutsideField.value);
+                if (isNaN(fee) || fee < 0) {
+                    deliveryOutsideField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate AI temperature
+            const aiTemperatureField = document.getElementById('ai_temperature');
+            if (aiTemperatureField && aiTemperatureField.value) {
+                const temp = parseFloat(aiTemperatureField.value);
+                if (isNaN(temp) || temp < 0 || temp > 2) {
+                    aiTemperatureField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate AI max tokens
+            const aiMaxTokensField = document.getElementById('ai_max_tokens');
+            if (aiMaxTokensField && aiMaxTokensField.value) {
+                const tokens = parseInt(aiMaxTokensField.value);
+                if (isNaN(tokens) || tokens < 1 || tokens > 4000) {
+                    aiMaxTokensField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate product fields if any exist
+            const productContainers = document.querySelectorAll('.product-item');
+            productContainers.forEach((container, index) => {
+                const nameField = container.querySelector('input[name="products[' + index + '][name]"]');
+                const priceField = container.querySelector('input[name="products[' + index + '][price]"]');
+                const stockField = container.querySelector('input[name="products[' + index + '][stock]"]');
+                
+                if (nameField && nameField.value.trim().length < 2) {
+                    nameField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+                
+                if (priceField && priceField.value) {
+                    const price = parseFloat(priceField.value);
+                    if (isNaN(price) || price < 0) {
+                        priceField.closest('.form-group').classList.add('error');
+                        isValid = false;
+                    }
+                }
+                
+                if (stockField && stockField.value) {
+                    const stock = parseInt(stockField.value);
+                    if (isNaN(stock) || stock < 0) {
+                        stockField.closest('.form-group').classList.add('error');
+                        isValid = false;
+                    }
+                }
+            });
+            
+            // Validate working hours if enabled
+            const workingHoursEnabled = document.getElementById('working_hours_enabled');
+            if (workingHoursEnabled && workingHoursEnabled.checked) {
+                const workingHoursContainer = document.getElementById('working-hours-container');
+                if (workingHoursContainer) {
+                    const timeInputs = workingHoursContainer.querySelectorAll('input[type="time"]');
+                    let hasValidHours = false;
+                    
+                    timeInputs.forEach(input => {
+                        if (input.value) {
+                            hasValidHours = true;
+                        }
+                    });
+                    
+                    if (!hasValidHours) {
+                        workingHoursContainer.classList.add('error');
+                        isValid = false;
+                    }
+                }
+            }
+            
+            // Validate payment methods selection
+            const paymentMethods = document.querySelectorAll('input[name="payment_methods"]:checked');
+            if (paymentMethods.length === 0) {
+                const paymentSection = document.querySelector('.form-section:has(.checkbox-group)');
+                if (paymentSection) {
+                    paymentSection.classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate business description length
+            const businessDescriptionField = document.getElementById('business_description');
+            if (businessDescriptionField && businessDescriptionField.value) {
+                if (businessDescriptionField.value.trim().length < 10) {
+                    businessDescriptionField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate business category
+            const businessCategoryField = document.getElementById('business_category');
+            if (businessCategoryField && businessCategoryField.value) {
+                const validCategories = ['general', 'food', 'clothing', 'electronics', 'beauty', 'home', 'sports', 'books', 'toys', 'automotive', 'health', 'education', 'services', 'other'];
+                if (!validCategories.includes(businessCategoryField.value)) {
+                    businessCategoryField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate currency
+            const currencyField = document.getElementById('currency');
+            if (currencyField && currencyField.value) {
+                const validCurrencies = ['IQD', 'USD', 'EUR', 'GBP', 'SAR', 'AED', 'KWD', 'QAR', 'BHD', 'OMR', 'JOD', 'LBP', 'EGP', 'TRY', 'IRR'];
+                if (!validCurrencies.includes(currencyField.value)) {
+                    currencyField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate timezone
+            const timezoneField = document.getElementById('timezone');
+            if (timezoneField && timezoneField.value) {
+                const validTimezones = ['Asia/Baghdad', 'Asia/Dubai', 'Asia/Kuwait', 'Asia/Qatar', 'Asia/Bahrain', 'Asia/Muscat', 'Asia/Riyadh', 'Asia/Tehran', 'Asia/Beirut', 'Asia/Damascus', 'Asia/Amman', 'Asia/Cairo', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles'];
+                if (!validTimezones.includes(timezoneField.value)) {
+                    timezoneField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate AI model
+            const aiModelField = document.getElementById('ai_model');
+            if (aiModelField && aiModelField.value) {
+                const validModels = ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo', 'claude-3-haiku', 'claude-3-sonnet', 'claude-3-opus'];
+                if (!validModels.includes(aiModelField.value)) {
+                    aiModelField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate response templates length
+            const greetingTemplateField = document.getElementById('greeting_template');
+            if (greetingTemplateField && greetingTemplateField.value) {
+                if (greetingTemplateField.value.trim().length < 5) {
+                    greetingTemplateField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            const closingTemplateField = document.getElementById('closing_template');
+            if (closingTemplateField && closingTemplateField.value) {
+                if (closingTemplateField.value.trim().length < 5) {
+                    closingTemplateField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate business address
+            const businessAddressField = document.getElementById('business_address');
+            if (businessAddressField && businessAddressField.value) {
+                if (businessAddressField.value.trim().length < 10) {
+                    businessAddressField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate business short description
+            const businessShortDescriptionField = document.getElementById('business_short_description');
+            if (businessShortDescriptionField && businessShortDescriptionField.value) {
+                if (businessShortDescriptionField.value.trim().length < 5) {
+                    businessShortDescriptionField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate business type
+            const businessTypeField = document.getElementById('business_type');
+            if (businessTypeField && businessTypeField.value) {
+                const validTypes = ['retail', 'wholesale', 'service', 'restaurant', 'cafe', 'clinic', 'salon', 'gym', 'school', 'consulting', 'freelance', 'other'];
+                if (!validTypes.includes(businessTypeField.value)) {
+                    businessTypeField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate business status
+            const businessStatusField = document.getElementById('business_status');
+            if (businessStatusField && businessStatusField.value) {
+                const validStatuses = ['active', 'inactive', 'pending', 'suspended', 'maintenance'];
+                if (!validStatuses.includes(businessStatusField.value)) {
+                    businessStatusField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate business website
+            const businessWebsiteField = document.getElementById('business_website');
+            if (businessWebsiteField && businessWebsiteField.value) {
+                const websiteRegex = /^https?:\/\/.+\..+/;
+                if (!websiteRegex.test(businessWebsiteField.value)) {
+                    businessWebsiteField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            // Validate business phone
+            const businessPhoneField = document.getElementById('business_phone');
+            if (businessPhoneField && businessPhoneField.value) {
+                const phoneRegex = /^[0-9+\-\s()]{10,20}$/;
+                if (!phoneRegex.test(businessPhoneField.value)) {
+                    businessPhoneField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            }
+            
+            return isValid;
+        }
+        
+        // Real-time validation with animations
+        document.querySelectorAll('input, select, textarea').forEach(field => {
+            field.addEventListener('blur', function() {
+                const formGroup = this.closest('.form-group');
+                if (this.hasAttribute('required') && !this.value.trim()) {
+                    formGroup.classList.add('error');
+                    formGroup.classList.remove('success');
+                    // Add shake animation for error
+                    formGroup.style.animation = 'shake 0.5s ease-in-out';
+                    setTimeout(() => formGroup.style.animation = '', 500);
+                } else if (this.value.trim()) {
+                    formGroup.classList.remove('error');
+                    formGroup.classList.add('success');
+                }
+            });
+            
+            field.addEventListener('input', function() {
+                const formGroup = this.closest('.form-group');
+                if (this.value.trim()) {
+                    formGroup.classList.remove('error');
+                    formGroup.classList.add('success');
+                }
+            });
+            
+            // Add focus effects
+            field.addEventListener('focus', function() {
+                this.closest('.form-group').style.transform = 'scale(1.02)';
+            });
+            
+            field.addEventListener('blur', function() {
+                this.closest('.form-group').style.transform = 'scale(1)';
+            });
+        });
+        
+        // Add shake animation for errors
+        const style = document.createElement('style');
+        style.textContent = \`
+            @keyframes shake {
+                0%, 100% { transform: translateX(0); }
+                25% { transform: translateX(-5px); }
+                75% { transform: translateX(5px); }
+            }
+        \`;
+        document.head.appendChild(style);
+        
         document.getElementById('merchantForm').addEventListener('submit', async function(e) {
             e.preventDefault();
+            
+            // Validate form before submission
+            if (!validateForm()) {
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('error-message').textContent = 'يرجى ملء جميع الحقول المطلوبة بشكل صحيح';
+                
+                // Scroll to first error
+                const firstError = document.querySelector('.form-group.error');
+                if (firstError) {
+                    firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                return;
+            }
             
             const formData = new FormData(this);
             const data = {};
@@ -2235,9 +2890,14 @@ export function registerAdminRoutes(app: Hono) {
             }
             
             // Show loading
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('success').style.display = 'none';
-            document.getElementById('error').style.display = 'none';
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('success').style.display = 'none';
+        document.getElementById('error').style.display = 'none';
+        
+        // Add loading animation to button
+        const submitBtn = document.querySelector('.submit-btn');
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإنشاء...';
+        submitBtn.disabled = true;
             
             try {
                 const response = await fetch('/admin/api/merchants/complete', {
@@ -2255,6 +2915,18 @@ export function registerAdminRoutes(app: Hono) {
                 if (result.success) {
                     document.getElementById('success').style.display = 'block';
                     document.getElementById('success-message').textContent = \`تم إنشاء التاجر بنجاح! معرف التاجر: \${result.merchant_id}\`;
+                    
+                    // Scroll to success message
+                    document.getElementById('success').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    
+                    // Add confetti effect (simple)
+                    setTimeout(() => {
+                        document.body.style.background = 'linear-gradient(135deg, #2ed573 0%, #17c0eb 100%)';
+                        setTimeout(() => {
+                            document.body.style.background = '';
+                        }, 2000);
+                    }, 500);
+                    
                     this.reset();
                 } else {
                     document.getElementById('error').style.display = 'block';
@@ -2264,6 +2936,11 @@ export function registerAdminRoutes(app: Hono) {
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('error').style.display = 'block';
                 document.getElementById('error-message').textContent = 'خطأ في الاتصال: ' + error.message;
+            } finally {
+                // Restore button
+                const submitBtn = document.querySelector('.submit-btn');
+                submitBtn.innerHTML = '<i class="fas fa-rocket"></i> إنشاء التاجر';
+                submitBtn.disabled = false;
             }
         });
     </script>
