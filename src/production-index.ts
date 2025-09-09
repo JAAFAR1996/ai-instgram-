@@ -54,7 +54,6 @@ import { registerErrorHandler } from './middleware/error-handler.js';
 import { registerWebhookRoutes } from './routes/webhooks.js';
 import { registerMerchantAdminRoutes } from './routes/merchant-admin.js';
 import { registerAdminRoutes } from './routes/admin.js';
-import { registerMerchantOnboardingRoutes } from './routes/merchant-onboarding.js';
 import { registerQueueControlRoutes } from './routes/queue-admin.js';
 import { registerUtilityMessageRoutes } from './routes/utility-messages.js';
 import { registerImageSearchRoutes } from './routes/image-search.js';
@@ -279,7 +278,6 @@ async function bootstrap() {
     registerWebhookRoutes(app, deps);
     registerMerchantAdminRoutes(app);
     registerAdminRoutes(app);
-    registerMerchantOnboardingRoutes(app);
     registerQueueControlRoutes(app, { queueManager });
     
     // Register utility messages routes
