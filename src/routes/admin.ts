@@ -2733,7 +2733,7 @@ export function registerAdminRoutes(app: Hono) {
                 <div class="form-section">
                     <h2><i class="fas fa-box"></i> المنتجات (اختياري)</h2>
                     <p>يمكنك إضافة المنتجات الآن أو لاحقاً من لوحة التحكم</p>
-                    <button type="button" class="add-product" onclick="addProduct()" id="add-product-btn">+ إضافة منتج</button>
+                    <button type="button" class="add-product" onclick="addProduct(); return false;" id="add-product-btn">+ إضافة منتج</button>
                     <div id="products-container"></div>
                 </div>
 
@@ -2773,6 +2773,15 @@ export function registerAdminRoutes(app: Hono) {
                 alert('خطأ: لم يتم العثور على حاوية المنتجات');
                 return;
             }
+            
+            // Check if container is visible
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+            }
+            
+            // Ensure container is visible
+            container.style.display = 'block';
+            container.style.visibility = 'visible';
             const productDiv = document.createElement('div');
             productDiv.className = 'product-item';
             productDiv.innerHTML = 
@@ -2838,6 +2847,10 @@ export function registerAdminRoutes(app: Hono) {
             setTimeout(() => {
                 productDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 400);
+            
+            // Show success message
+            console.log('Product added successfully!');
+            alert('تم إضافة المنتج بنجاح!');
         }
 
         function removeProduct(button) {
@@ -2850,20 +2863,41 @@ export function registerAdminRoutes(app: Hono) {
             }, 300);
         }
 
-        // Toggle working hours
-        document.getElementById('working_hours_enabled').addEventListener('change', function() {
-            const container = document.getElementById('working-hours-container');
-            container.style.display = this.checked ? 'block' : 'none';
-        });
-        
         // Ensure add product button works
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM Content Loaded - Setting up event listeners');
+            
             const addProductBtn = document.getElementById('add-product-btn');
+            console.log('Add product button found:', addProductBtn);
+            
             if (addProductBtn) {
                 addProductBtn.addEventListener('click', function(e) {
                     e.preventDefault();
+                    e.stopPropagation();
                     console.log('Add product button clicked via event listener');
                     addProduct();
+                });
+                
+                // Also add a backup click handler
+                addProductBtn.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Add product button clicked via onclick');
+                    addProduct();
+                    return false;
+                };
+            } else {
+                console.error('Add product button not found!');
+            }
+            
+            // Toggle working hours
+            const workingHoursToggle = document.getElementById('working_hours_enabled');
+            if (workingHoursToggle) {
+                workingHoursToggle.addEventListener('change', function() {
+                    const container = document.getElementById('working-hours-container');
+                    if (container) {
+                        container.style.display = this.checked ? 'block' : 'none';
+                    }
                 });
             }
         });
