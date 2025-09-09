@@ -2046,6 +2046,52 @@ export function registerAdminRoutes(app: Hono) {
         .required {
             color: #ff4757;
         }
+        
+        .form-group.error {
+            border-color: #ff4757;
+            background: rgba(255, 71, 87, 0.05);
+        }
+        
+        .form-group.error input,
+        .form-group.error select,
+        .form-group.error textarea {
+            border-color: #ff4757;
+            background: rgba(255, 71, 87, 0.05);
+        }
+        
+        .form-group.success {
+            border-color: #2ed573;
+            background: rgba(46, 213, 115, 0.05);
+        }
+        
+        .form-group.success input,
+        .form-group.success select,
+        .form-group.success textarea {
+            border-color: #2ed573;
+            background: rgba(46, 213, 115, 0.05);
+        }
+        
+        .form-group.error::after {
+            content: "⚠️";
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 16px;
+        }
+        
+        .form-group.success::after {
+            content: "✅";
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 16px;
+        }
+        
+        .form-group {
+            position: relative;
+        }
         .help-text {
             font-size: 0.9rem;
             color: #666;
@@ -2338,11 +2384,11 @@ export function registerAdminRoutes(app: Hono) {
                     <div class="form-row">
                         <div class="form-group">
                             <label for="delivery_inside">رسوم التوصيل داخل بغداد</label>
-                            <input type="number" id="delivery_inside" name="delivery_inside" value="0" min="0">
+                            <input type="number" id="delivery_inside" name="delivery_fees_inside_baghdad" value="0" min="0">
                         </div>
                         <div class="form-group">
                             <label for="delivery_outside">رسوم التوصيل خارج بغداد</label>
-                            <input type="number" id="delivery_outside" name="delivery_outside" value="5" min="0">
+                            <input type="number" id="delivery_outside" name="delivery_fees_outside_baghdad" value="5" min="0">
                         </div>
                     </div>
                 </div>
@@ -2387,15 +2433,15 @@ export function registerAdminRoutes(app: Hono) {
                     <h2><i class="fas fa-comments"></i> قوالب الردود</h2>
                     <div class="form-group">
                         <label for="greeting_template">رسالة الترحيب</label>
-                        <textarea id="greeting_template" name="greeting_template" placeholder="مرحباً بك في متجرنا! كيف يمكنني مساعدتك اليوم؟"></textarea>
+                        <textarea id="greeting_template" name="response_greeting" placeholder="مرحباً بك في متجرنا! كيف يمكنني مساعدتك اليوم؟"></textarea>
                     </div>
                     <div class="form-group">
                         <label for="fallback_template">رد عدم الفهم</label>
-                        <textarea id="fallback_template" name="fallback_template" placeholder="عذراً، لم أفهم طلبك. هل يمكنك توضيح ما تبحث عنه؟"></textarea>
+                        <textarea id="fallback_template" name="response_fallback" placeholder="عذراً، لم أفهم طلبك. هل يمكنك توضيح ما تبحث عنه؟"></textarea>
                     </div>
                     <div class="form-group">
                         <label for="outside_hours_template">رد خارج ساعات العمل</label>
-                        <textarea id="outside_hours_template" name="outside_hours_template" placeholder="نعتذر، المحل مغلق حالياً. ساعات العمل: 9 صباحاً - 10 مساءً"></textarea>
+                        <textarea id="outside_hours_template" name="response_outside_hours" placeholder="نعتذر، المحل مغلق حالياً. ساعات العمل: 9 صباحاً - 10 مساءً"></textarea>
                     </div>
                 </div>
 
@@ -2443,18 +2489,18 @@ export function registerAdminRoutes(app: Hono) {
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label>رمز المنتج (SKU)</label>
-                        <input type="text" name="products[\${productCount}].sku" required>
+                        <label>رمز المنتج (SKU) *</label>
+                        <input type="text" name="products[\${productCount}].sku" required placeholder="مثال: PROD-\${productCount}">
                     </div>
                     <div class="form-group">
-                        <label>اسم المنتج (عربي)</label>
-                        <input type="text" name="products[\${productCount}].name_ar" required>
+                        <label>اسم المنتج (عربي) *</label>
+                        <input type="text" name="products[\${productCount}].name_ar" required placeholder="مثال: قميص قطني">
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label>اسم المنتج (إنجليزي)</label>
-                        <input type="text" name="products[\${productCount}].name_en">
+                        <input type="text" name="products[\${productCount}].name_en" placeholder="مثال: Cotton Shirt">
                     </div>
                     <div class="form-group">
                         <label>الفئة</label>
@@ -2470,24 +2516,39 @@ export function registerAdminRoutes(app: Hono) {
                 </div>
                 <div class="form-group">
                     <label>وصف المنتج</label>
-                    <textarea name="products[\${productCount}].description_ar"></textarea>
+                    <textarea name="products[\${productCount}].description_ar" placeholder="وصف مختصر للمنتج..."></textarea>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label>السعر (دولار)</label>
-                        <input type="number" name="products[\${productCount}].price_usd" step="0.01" min="0" required>
+                        <label>السعر (دولار) *</label>
+                        <input type="number" name="products[\${productCount}].price_usd" step="0.01" min="0" required placeholder="0.00">
                     </div>
                     <div class="form-group">
                         <label>الكمية المتوفرة</label>
-                        <input type="number" name="products[\${productCount}].stock_quantity" min="0" value="0">
+                        <input type="number" name="products[\${productCount}].stock_quantity" min="0" value="0" placeholder="0">
                     </div>
                 </div>
             \`;
             container.appendChild(productDiv);
+            
+            // Add smooth animation
+            productDiv.style.opacity = '0';
+            productDiv.style.transform = 'translateY(20px)';
+            setTimeout(() => {
+                productDiv.style.transition = 'all 0.3s ease';
+                productDiv.style.opacity = '1';
+                productDiv.style.transform = 'translateY(0)';
+            }, 10);
         }
 
         function removeProduct(button) {
-            button.closest('.product-item').remove();
+            const productItem = button.closest('.product-item');
+            productItem.style.transition = 'all 0.3s ease';
+            productItem.style.opacity = '0';
+            productItem.style.transform = 'translateY(-20px)';
+            setTimeout(() => {
+                productItem.remove();
+            }, 300);
         }
 
         // Toggle working hours
@@ -2502,14 +2563,17 @@ export function registerAdminRoutes(app: Hono) {
             let isValid = true;
             const requiredFields = document.querySelectorAll('input[required], select[required], textarea[required]');
             
+            // Clear previous validation states
+            document.querySelectorAll('.form-group').forEach(group => {
+                group.classList.remove('error', 'success');
+            });
+            
             requiredFields.forEach(field => {
                 const formGroup = field.closest('.form-group');
                 if (!field.value.trim()) {
                     formGroup.classList.add('error');
-                    formGroup.classList.remove('success');
                     isValid = false;
                 } else {
-                    formGroup.classList.remove('error');
                     formGroup.classList.add('success');
                 }
             });
@@ -2521,6 +2585,8 @@ export function registerAdminRoutes(app: Hono) {
                 if (!whatsappRegex.test(whatsappField.value.replace(/[^0-9]/g, ''))) {
                     whatsappField.closest('.form-group').classList.add('error');
                     isValid = false;
+                } else {
+                    whatsappField.closest('.form-group').classList.add('success');
                 }
             }
             
@@ -2552,6 +2618,27 @@ export function registerAdminRoutes(app: Hono) {
                     isValid = false;
                 }
             }
+            
+            // Validate products if any
+            const productItems = document.querySelectorAll('.product-item');
+            productItems.forEach((item, index) => {
+                const skuField = item.querySelector('input[name*="sku"]');
+                const nameArField = item.querySelector('input[name*="name_ar"]');
+                const priceField = item.querySelector('input[name*="price_usd"]');
+                
+                if (skuField && !skuField.value.trim()) {
+                    skuField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+                if (nameArField && !nameArField.value.trim()) {
+                    nameArField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+                if (priceField && (!priceField.value || parseFloat(priceField.value) < 0)) {
+                    priceField.closest('.form-group').classList.add('error');
+                    isValid = false;
+                }
+            });
             
             // Validate delivery fees
             const deliveryInsideField = document.getElementById('delivery_inside');
@@ -2845,21 +2932,41 @@ export function registerAdminRoutes(app: Hono) {
             // Convert form data to object
             for (let [key, value] of formData.entries()) {
                 if (key.includes('[')) {
-                    // Handle array/object fields
-                    const [parent, child] = key.split('[');
-                    const cleanChild = child.replace(']', '');
-                    
-                    if (!data[parent]) data[parent] = {};
-                    if (cleanChild.includes('.')) {
-                        const [index, field] = cleanChild.split('.');
+                    // Handle array/object fields like products[1].sku
+                    const match = key.match(/^([^[]+)\[([^\]]+)\]\.(.+)$/);
+                    if (match) {
+                        const [, parent, index, field] = match;
+                        if (!data[parent]) data[parent] = [];
                         if (!data[parent][index]) data[parent][index] = {};
                         data[parent][index][field] = value;
                     } else {
+                        // Handle simple array fields
+                        const [parent, child] = key.split('[');
+                        const cleanChild = child.replace(']', '');
+                        if (!data[parent]) data[parent] = {};
                         data[parent][cleanChild] = value;
                     }
                 } else {
                     data[key] = value;
                 }
+            }
+            
+            // Convert products array to proper format
+            if (data.products) {
+                console.log('Raw products data:', data.products);
+                data.products = Object.values(data.products).filter(product => 
+                    product && product.sku && product.name_ar
+                ).map(product => ({
+                    sku: product.sku,
+                    name_ar: product.name_ar,
+                    name_en: product.name_en || null,
+                    description_ar: product.description_ar || null,
+                    category: product.category || 'general',
+                    price_usd: parseFloat(product.price_usd) || 0,
+                    stock_quantity: parseInt(product.stock_quantity) || 0,
+                    attributes: {}
+                }));
+                console.log('Processed products:', data.products);
             }
             
             // Handle checkboxes
@@ -2889,6 +2996,34 @@ export function registerAdminRoutes(app: Hono) {
                 });
             }
             
+            // Convert numeric fields
+            if (data.delivery_fees_inside_baghdad) {
+                data.delivery_fees = {
+                    inside_baghdad: parseFloat(data.delivery_fees_inside_baghdad) || 0,
+                    outside_baghdad: parseFloat(data.delivery_fees_outside_baghdad) || 5
+                };
+            }
+            
+            // Convert AI config
+            if (data.ai_temperature !== undefined) {
+                data.ai_config = {
+                    model: data.ai_model || 'gpt-4o-mini',
+                    temperature: parseFloat(data.ai_temperature) || 0.8,
+                    max_tokens: parseInt(data.ai_max_tokens) || 600,
+                    language: 'ar',
+                    sales_style: data.sales_style || 'neutral'
+                };
+            }
+            
+            // Convert response templates
+            if (data.response_greeting || data.response_fallback || data.response_outside_hours) {
+                data.response_templates = {
+                    greeting: data.response_greeting,
+                    fallback: data.response_fallback,
+                    outside_hours: data.response_outside_hours
+                };
+            }
+            
             // Show loading
         document.getElementById('loading').style.display = 'block';
         document.getElementById('success').style.display = 'none';
@@ -2900,6 +3035,7 @@ export function registerAdminRoutes(app: Hono) {
         submitBtn.disabled = true;
             
             try {
+                console.log('Sending data to API:', data);
                 const response = await fetch('/admin/api/merchants/complete', {
                     method: 'POST',
                     headers: {
@@ -2909,6 +3045,7 @@ export function registerAdminRoutes(app: Hono) {
                 });
                 
                 const result = await response.json();
+                console.log('API Response:', result);
                 
                 document.getElementById('loading').style.display = 'none';
                 
@@ -2930,7 +3067,11 @@ export function registerAdminRoutes(app: Hono) {
                     this.reset();
                 } else {
                     document.getElementById('error').style.display = 'block';
-                    document.getElementById('error-message').textContent = result.error || 'حدث خطأ غير متوقع';
+                    let errorMessage = result.error || 'حدث خطأ غير متوقع';
+                    if (result.details) {
+                        errorMessage += ': ' + JSON.stringify(result.details);
+                    }
+                    document.getElementById('error-message').textContent = errorMessage;
                 }
             } catch (error) {
                 document.getElementById('loading').style.display = 'none';
@@ -3247,7 +3388,7 @@ function openMerchantPage(page) {
       const body = await c.req.json();
       
       // Validate required fields
-      if (!body.sku || !body.name_ar || !body.price_amount) {
+      if (!body.sku || !body.name_ar || (!body.price_amount && body.price_amount !== 0)) {
         return c.json({ success: false, error: 'missing_required_fields', message: 'SKU, name_ar, and price_amount are required' }, 400);
       }
       
