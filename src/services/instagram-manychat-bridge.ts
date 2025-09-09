@@ -54,6 +54,7 @@ export interface BridgeProcessingOptions {
 export class InstagramManyChatBridge {
   private logger = getLogger({ component: 'InstagramManyChatBridge' });
   private manyChatService = getManyChatService();
+  
   private aiOrchestrator = getConversationAIOrchestrator();
   private instagramSender = getInstagramMessageSender();
   private db = getDatabase();
@@ -156,8 +157,20 @@ export class InstagramManyChatBridge {
       // Step 2: Fallback to local AI if enabled
       if (options.fallbackToLocalAI) {
         try {
+          this.logger.info('🤖 Using Local AI (ManyChat disabled)', {
+            merchantId: data.merchantId,
+            customerId: data.customerId,
+            message: data.message?.substring(0, 50)
+          });
+          
           const localAIResult = await this.processWithLocalAI(data, options);
           if (localAIResult.success) {
+            this.logger.info('✅ Local AI response generated successfully', {
+              merchantId: data.merchantId,
+              customerId: data.customerId,
+              responseLength: localAIResult.aiResponse?.length || 0
+            });
+            
             return {
               success: true,
               platform: 'local_ai',
@@ -171,7 +184,7 @@ export class InstagramManyChatBridge {
             };
           }
         } catch (error) {
-          this.logger.error('Local AI processing failed', {
+          this.logger.error('❌ Local AI processing failed', {
             merchantId: data.merchantId,
             customerId: data.customerId,
             error: error instanceof Error ? error.message : String(error)
