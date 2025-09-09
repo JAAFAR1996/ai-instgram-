@@ -9,7 +9,7 @@
 import { getLogger } from './logger.js';
 import { getManyChatService, type ManyChatResponse } from './manychat-api.js';
 import { getConversationAIOrchestrator } from './conversation-ai-orchestrator.js';
-import { getInstagramMessageSender } from './instagram-message-sender.js';
+// import { getInstagramMessageSender } from './instagram-message-sender.js'; // Disabled for ManyChat-only architecture
 import { createHash } from 'node:crypto';
 import { getDatabase } from '../db/adapter.js';
 import { getManychatIdByInstagramUsername, upsertManychatMapping } from '../repositories/manychat.repo.js';
@@ -56,7 +56,7 @@ export class InstagramManyChatBridge {
   private manyChatService = getManyChatService();
   
   private aiOrchestrator = getConversationAIOrchestrator();
-  private instagramSender = getInstagramMessageSender();
+  // private instagramSender = getInstagramMessageSender(); // Disabled for ManyChat-only architecture
   private db = getDatabase();
 
 
@@ -321,20 +321,16 @@ export class InstagramManyChatBridge {
     // Generate AI response
     const aiResponse = await this.generateAIResponse(data);
 
-    // Send directly via Instagram API
-      const sendResult = await this.instagramSender.sendTextMessage(
-        data.merchantId,
-        data.customerId,
-        aiResponse,
-        data.conversationId
-      );
+    // For ManyChat-only architecture, we return the AI response
+    // The webhook will handle sending it back to ManyChat
+    const messageId = `local_ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     // Log the interaction
-    await this.logLocalAIInteraction(data, sendResult, aiResponse);
+    await this.logLocalAIInteraction(data, { success: true, messageId }, aiResponse);
 
     return {
-      success: sendResult.success,
-      ...(sendResult.messageId ? { messageId: sendResult.messageId } : {}),
+      success: true,
+      messageId,
       aiResponse
     };
   }
@@ -367,20 +363,18 @@ export class InstagramManyChatBridge {
 
       // Simple fallback response
       const fallbackResponse = this.getFallbackResponse(data.interactionType);
+      const messageId = `fallback_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       
-      const sendResult = await this.instagramSender.sendTextMessage(
-        data.merchantId,
-        data.customerId,
-        fallbackResponse,
-        data.conversationId
-      );
+      // For ManyChat-only architecture, we return the fallback response
+      // The webhook will handle sending it back to ManyChat
+      const sendResult = { success: true, messageId };
 
       await this.logFallbackInteraction(data, sendResult, fallbackResponse);
 
       return {
-        success: sendResult.success,
-        ...(sendResult.messageId ? { messageId: sendResult.messageId } : {}),
-        ...(sendResult.error ? { error: sendResult.error } : {})
+        success: true,
+        messageId,
+        error: undefined
       };
 
     } catch (error) {
@@ -722,16 +716,21 @@ export class InstagramManyChatBridge {
    */
   private async checkMessageWindow(merchantId: string, customerId: string): Promise<boolean> {
     try {
-      // Get last interaction time from database (use safe SQL tag)
+      // Get last interaction time from message_logs table
       const sql = this.db.getSQL();
       const lastInteraction = await sql<{ created_at: string | Date }>`
-        SELECT created_at FROM messages 
-        WHERE merchant_id = ${merchantId} AND sender_id = ${customerId} AND platform = 'instagram'
-        ORDER BY created_at DESC LIMIT 1
+        SELECT ml.created_at 
+        FROM message_logs ml
+        JOIN conversations c ON c.id = ml.conversation_id
+        WHERE c.merchant_id = ${merchantId}::uuid 
+          AND c.customer_instagram = ${customerId}
+          AND ml.platform = 'instagram'
+          AND ml.direction = 'INCOMING'
+        ORDER BY ml.created_at DESC LIMIT 1
       `;
 
       if (!lastInteraction?.length) {
-        return false; // No previous interactions
+        return true; // No previous interactions - allow first message
       }
 
       const lastInteractionTime = new Date((lastInteraction[0] as { created_at: string | Date }).created_at);
@@ -745,7 +744,7 @@ export class InstagramManyChatBridge {
         merchantId,
         customerId
       });
-      return false; // Assume expired on error
+      return true; // Allow message on error to avoid blocking
     }
   }
 

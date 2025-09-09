@@ -149,25 +149,24 @@ export class InstagramInteractionAnalyzer {
   /**
    * Track user behavior rollups for analytics (per 24h window)
    */
-  async trackUserBehavior(merchantId: string, username: string, interaction: 'dm'|'comment'|'story'): Promise<void> {
+  async trackUserBehavior(merchantId: string, username: string, _interaction: 'dm'|'comment'|'story'): Promise<void> {
     try {
       const sql = this.db.getSQL();
+      const now = new Date();
+      const hour = now.getHours();
+      const dayOfWeek = now.getDay();
+      
       await sql`
         INSERT INTO customer_interaction_patterns (
-          merchant_id, customer_id, last_updated, interaction_count, dm_count, comment_count, story_count
+          merchant_id, customer_id, interaction_hour, day_of_week, response_rate, interaction_count, last_updated
         ) VALUES (
-          ${merchantId}::uuid, ${username}, NOW(), 1,
-          ${interaction === 'dm' ? 1 : 0},
-          ${interaction === 'comment' ? 1 : 0},
-          ${interaction === 'story' ? 1 : 0}
+          ${merchantId}::uuid, ${username}, ${hour}, ${dayOfWeek}, 1.0, 1, NOW()
         )
-        ON CONFLICT (merchant_id, customer_id)
+        ON CONFLICT (merchant_id, customer_id, interaction_hour, day_of_week)
         DO UPDATE SET
-          last_updated = NOW(),
           interaction_count = customer_interaction_patterns.interaction_count + 1,
-          dm_count = customer_interaction_patterns.dm_count + ${interaction === 'dm' ? 1 : 0},
-          comment_count = customer_interaction_patterns.comment_count + ${interaction === 'comment' ? 1 : 0},
-          story_count = customer_interaction_patterns.story_count + ${interaction === 'story' ? 1 : 0}
+          response_rate = (customer_interaction_patterns.response_rate * customer_interaction_patterns.interaction_count + 1.0) / (customer_interaction_patterns.interaction_count + 1),
+          last_updated = NOW()
       `;
     } catch (e) {
       this.log.debug('trackUserBehavior skipped', { error: String(e) });
