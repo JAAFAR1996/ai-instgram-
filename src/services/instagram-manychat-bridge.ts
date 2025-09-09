@@ -65,7 +65,7 @@ export class InstagramManyChatBridge {
   public async processMessage(
     data: BridgeMessageData,
     options: BridgeProcessingOptions = {
-      useManyChat: true,
+      useManyChat: false, // تعطيل ManyChat مؤقتاً لاختبار النظام الجديد
       fallbackToLocalAI: true,
       priority: 'normal'
     }
