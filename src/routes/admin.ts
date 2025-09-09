@@ -1764,28 +1764,77 @@ export function registerAdminRoutes(app: Hono) {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
             min-height: 100vh;
             padding: 20px;
-            animation: backgroundShift 20s ease-in-out infinite;
+            animation: backgroundShift 15s ease-in-out infinite;
+            position: relative;
+            overflow-x: hidden;
+        }
+        
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(120, 219, 255, 0.2) 0%, transparent 50%);
+            z-index: -1;
+            animation: floatingBubbles 20s ease-in-out infinite;
         }
         
         @keyframes backgroundShift {
-            0%, 100% { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-            25% { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-            50% { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
-            75% { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+            0%, 100% { background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%); }
+            25% { background: linear-gradient(135deg, #f093fb 0%, #f5576c 50%, #4facfe 100%); }
+            50% { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 50%, #43e97b 100%); }
+            75% { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 50%, #667eea 100%); }
+        }
+        
+        @keyframes floatingBubbles {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            33% { transform: translateY(-20px) rotate(120deg); }
+            66% { transform: translateY(10px) rotate(240deg); }
         }
         .container {
             max-width: 1200px;
             margin: 0 auto;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 25px;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 30px;
+            box-shadow: 
+                0 30px 60px rgba(0,0,0,0.2),
+                0 0 0 1px rgba(255,255,255,0.5),
+                inset 0 1px 0 rgba(255,255,255,0.8);
             overflow: hidden;
-            animation: slideInUp 0.8s ease-out;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.3);
+            animation: slideInUp 1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            backdrop-filter: blur(20px);
+            border: 2px solid rgba(255,255,255,0.4);
+            position: relative;
+        }
+        
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, 
+                #667eea 0%, 
+                #764ba2 25%, 
+                #f093fb 50%, 
+                #f5576c 75%, 
+                #4facfe 100%);
+            background-size: 300% 100%;
+            animation: gradientFlow 3s ease-in-out infinite;
+        }
+        
+        @keyframes gradientFlow {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
         }
         
         @keyframes slideInUp {
@@ -1799,12 +1848,13 @@ export function registerAdminRoutes(app: Hono) {
             }
         }
         .header {
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
             color: white;
-            padding: 30px;
+            padding: 40px 30px;
             text-align: center;
             position: relative;
             overflow: hidden;
+            border-radius: 30px 30px 0 0;
         }
         
         .header::before {
@@ -1814,8 +1864,21 @@ export function registerAdminRoutes(app: Hono) {
             left: -100%;
             width: 100%;
             height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-            animation: shimmer 3s infinite;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            animation: shimmer 4s infinite;
+        }
+        
+        .header::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(circle at 20% 20%, rgba(255,255,255,0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(255,255,255,0.1) 0%, transparent 50%);
+            pointer-events: none;
         }
         
         @keyframes shimmer {
@@ -1823,25 +1886,48 @@ export function registerAdminRoutes(app: Hono) {
             100% { left: 100%; }
         }
         .header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
+            font-size: 3rem;
+            margin-bottom: 15px;
+            font-weight: 700;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            position: relative;
+            z-index: 1;
+            background: linear-gradient(45deg, #fff, #f0f0f0);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: titleGlow 2s ease-in-out infinite alternate;
         }
+        
         .header p {
-            font-size: 1.1rem;
-            opacity: 0.9;
+            font-size: 1.2rem;
+            opacity: 0.95;
+            position: relative;
+            z-index: 1;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
+        
+        @keyframes titleGlow {
+            0% { filter: drop-shadow(0 0 5px rgba(255,255,255,0.5)); }
+            100% { filter: drop-shadow(0 0 15px rgba(255,255,255,0.8)); }
+        }
+        
         .form-container {
             padding: 40px;
         }
         .form-section {
             margin-bottom: 40px;
-            padding: 30px;
-            border: 2px solid #f0f0f0;
-            border-radius: 20px;
-            background: linear-gradient(135deg, #fafafa 0%, #f8f9fa 100%);
-            transition: all 0.3s ease;
+            padding: 35px;
+            border: 2px solid rgba(102, 126, 234, 0.2);
+            border-radius: 25px;
+            background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(248,249,250,0.8) 100%);
+            transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             position: relative;
             overflow: hidden;
+            backdrop-filter: blur(10px);
+            box-shadow: 
+                0 8px 32px rgba(0,0,0,0.1),
+                inset 0 1px 0 rgba(255,255,255,0.8);
         }
         
         .form-section::before {
@@ -1850,10 +1936,30 @@ export function registerAdminRoutes(app: Hono) {
             top: 0;
             left: 0;
             right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #667eea, #764ba2, #f093fb, #f5576c);
+            height: 5px;
+            background: linear-gradient(90deg, 
+                #667eea 0%, 
+                #764ba2 25%, 
+                #f093fb 50%, 
+                #f5576c 75%, 
+                #4facfe 100%);
             background-size: 300% 100%;
-            animation: gradientShift 3s ease infinite;
+            animation: gradientShift 4s ease infinite;
+        }
+        
+        .form-section::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(circle at 10% 10%, rgba(102, 126, 234, 0.05) 0%, transparent 50%),
+                radial-gradient(circle at 90% 90%, rgba(240, 147, 251, 0.05) 0%, transparent 50%);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
         }
         
         @keyframes gradientShift {
@@ -1862,16 +1968,46 @@ export function registerAdminRoutes(app: Hono) {
         }
         
         .form-section:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
-            border-color: #667eea;
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 
+                0 20px 40px rgba(0,0,0,0.15),
+                0 0 0 1px rgba(102, 126, 234, 0.3),
+                inset 0 1px 0 rgba(255,255,255,0.9);
+            border-color: rgba(102, 126, 234, 0.4);
+        }
+        
+        .form-section:hover::after {
+            opacity: 1;
         }
         .form-section h2 {
-            color: #1e3c72;
-            margin-bottom: 20px;
-            font-size: 1.5rem;
-            border-bottom: 3px solid #667eea;
-            padding-bottom: 10px;
+            color: #2d3748;
+            margin-bottom: 25px;
+            font-size: 1.6rem;
+            font-weight: 600;
+            position: relative;
+            z-index: 1;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .form-section h2::before {
+            content: '';
+            width: 4px;
+            height: 30px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 2px;
+            box-shadow: 0 0 10px rgba(102, 126, 234, 0.5);
+        }
+        
+        .form-section h2 i {
+            color: #667eea;
+            font-size: 1.4rem;
+            text-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
         }
         .form-row {
             display: grid;
@@ -1887,30 +2023,63 @@ export function registerAdminRoutes(app: Hono) {
         }
         label {
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
             font-weight: 600;
-            color: #333;
+            color: #2d3748;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            position: relative;
+        }
+        
+        label::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            width: 30px;
+            height: 2px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 1px;
         }
         input, select, textarea {
             width: 100%;
-            padding: 15px 20px;
-            border: 2px solid #e0e0e0;
-            border-radius: 15px;
+            padding: 18px 24px;
+            border: 2px solid rgba(102, 126, 234, 0.2);
+            border-radius: 18px;
             font-size: 16px;
-            transition: all 0.3s ease;
-            background: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(5px);
+            transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 
+                0 4px 16px rgba(0,0,0,0.05),
+                inset 0 1px 0 rgba(255,255,255,0.8);
+            position: relative;
         }
+        
         input:focus, select:focus, textarea:focus {
             outline: none;
             border-color: #667eea;
-            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15);
-            transform: translateY(-2px);
+            box-shadow: 
+                0 0 0 4px rgba(102, 126, 234, 0.2),
+                0 8px 24px rgba(102, 126, 234, 0.15),
+                inset 0 1px 0 rgba(255,255,255,0.9);
+            transform: translateY(-3px) scale(1.02);
             background: rgba(255, 255, 255, 1);
         }
+        
         input:hover, select:hover, textarea:hover {
-            border-color: #667eea;
-            transform: translateY(-1px);
+            border-color: rgba(102, 126, 234, 0.4);
+            transform: translateY(-2px);
+            box-shadow: 
+                0 6px 20px rgba(0,0,0,0.08),
+                0 0 0 1px rgba(102, 126, 234, 0.1),
+                inset 0 1px 0 rgba(255,255,255,0.9);
+        }
+        
+        input::placeholder, textarea::placeholder {
+            color: rgba(102, 126, 234, 0.6);
+            font-weight: 400;
         }
         textarea {
             resize: vertical;
@@ -1936,53 +2105,103 @@ export function registerAdminRoutes(app: Hono) {
             gap: 10px;
         }
         .product-item {
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
-            background: white;
-        }
-        .product-header {
-            display: flex;
-            justify-content: between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        .remove-product {
-            background: #ff4757;
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        .add-product {
-            background: #2ed573;
-            color: white;
-            border: none;
-            padding: 12px 25px;
-            border-radius: 10px;
-            cursor: pointer;
-            font-size: 16px;
-            margin-bottom: 20px;
-        }
-        .submit-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 18px 40px;
-            border-radius: 15px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            width: 100%;
-            margin-top: 30px;
-            transition: all 0.3s ease;
+            border: 2px solid rgba(102, 126, 234, 0.2);
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 25px;
+            background: linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,249,250,0.9) 100%);
+            backdrop-filter: blur(10px);
+            box-shadow: 
+                0 8px 24px rgba(0,0,0,0.08),
+                inset 0 1px 0 rgba(255,255,255,0.8);
+            transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             position: relative;
             overflow: hidden;
         }
         
-        .submit-btn::before {
+        .product-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, #667eea, #764ba2, #f093fb);
+            background-size: 200% 100%;
+            animation: gradientShift 3s ease infinite;
+        }
+        
+        .product-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 
+                0 15px 35px rgba(0,0,0,0.12),
+                0 0 0 1px rgba(102, 126, 234, 0.2),
+                inset 0 1px 0 rgba(255,255,255,0.9);
+            border-color: rgba(102, 126, 234, 0.3);
+        }
+        .product-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid rgba(102, 126, 234, 0.1);
+        }
+        
+        .product-header h3 {
+            color: #2d3748;
+            font-size: 1.3rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin: 0;
+        }
+        
+        .remove-product {
+            background: linear-gradient(135deg, #ff4757 0%, #ff3838 100%);
+            color: white;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            box-shadow: 
+                0 4px 16px rgba(255, 71, 87, 0.3),
+                inset 0 1px 0 rgba(255,255,255,0.2);
+        }
+        
+        .remove-product:hover {
+            transform: translateY(-2px) scale(1.05);
+            box-shadow: 
+                0 6px 20px rgba(255, 71, 87, 0.4),
+                inset 0 1px 0 rgba(255,255,255,0.3);
+        }
+        
+        .remove-product:active {
+            transform: translateY(0) scale(1.02);
+        }
+        .add-product {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 25px;
+            transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            box-shadow: 
+                0 8px 24px rgba(102, 126, 234, 0.3),
+                inset 0 1px 0 rgba(255,255,255,0.2);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .add-product::before {
             content: '';
             position: absolute;
             top: 0;
@@ -1993,17 +2212,82 @@ export function registerAdminRoutes(app: Hono) {
             transition: left 0.5s;
         }
         
+        .add-product:hover::before {
+            left: 100%;
+        }
+        
+        .add-product:hover {
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: 
+                0 12px 32px rgba(102, 126, 234, 0.4),
+                inset 0 1px 0 rgba(255,255,255,0.3);
+        }
+        
+        .add-product:active {
+            transform: translateY(-1px) scale(1.02);
+        }
+        .submit-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            color: white;
+            border: none;
+            padding: 20px 50px;
+            border-radius: 20px;
+            font-size: 20px;
+            font-weight: 700;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 40px;
+            transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            position: relative;
+            overflow: hidden;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 
+                0 12px 32px rgba(102, 126, 234, 0.4),
+                inset 0 1px 0 rgba(255,255,255,0.2);
+        }
+        
+        .submit-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            transition: left 0.6s;
+        }
+        
+        .submit-btn::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 50%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
         .submit-btn:hover::before {
             left: 100%;
         }
         
+        .submit-btn:hover::after {
+            opacity: 1;
+        }
+        
         .submit-btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 15px 30px rgba(102, 126, 234, 0.4);
+            transform: translateY(-5px) scale(1.02);
+            box-shadow: 
+                0 20px 40px rgba(102, 126, 234, 0.5),
+                0 0 0 1px rgba(255,255,255,0.2),
+                inset 0 1px 0 rgba(255,255,255,0.3);
         }
         
         .submit-btn:active {
-            transform: translateY(-1px);
+            transform: translateY(-2px) scale(1.01);
         }
         .loading {
             display: none;
@@ -2449,7 +2733,7 @@ export function registerAdminRoutes(app: Hono) {
                 <div class="form-section">
                     <h2><i class="fas fa-box"></i> المنتجات (اختياري)</h2>
                     <p>يمكنك إضافة المنتجات الآن أو لاحقاً من لوحة التحكم</p>
-                    <button type="button" class="add-product" onclick="addProduct()">+ إضافة منتج</button>
+                    <button type="button" class="add-product" onclick="addProduct()" id="add-product-btn">+ إضافة منتج</button>
                     <div id="products-container"></div>
                 </div>
 
@@ -2478,58 +2762,67 @@ export function registerAdminRoutes(app: Hono) {
         let productCount = 0;
 
         function addProduct() {
+            console.log('addProduct function called!');
             productCount++;
+            console.log('Product count:', productCount);
             const container = document.getElementById('products-container');
+            console.log('Container found:', container);
+            
+            if (!container) {
+                console.error('Products container not found!');
+                alert('خطأ: لم يتم العثور على حاوية المنتجات');
+                return;
+            }
             const productDiv = document.createElement('div');
             productDiv.className = 'product-item';
-            productDiv.innerHTML = \`
-                <div class="product-header">
-                    <h3>منتج \${productCount}</h3>
-                    <button type="button" class="remove-product" onclick="removeProduct(this)">حذف</button>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>رمز المنتج (SKU) *</label>
-                        <input type="text" name="products[\${productCount}].sku" required placeholder="مثال: PROD-\${productCount}">
-                    </div>
-                    <div class="form-group">
-                        <label>اسم المنتج (عربي) *</label>
-                        <input type="text" name="products[\${productCount}].name_ar" required placeholder="مثال: قميص قطني">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>اسم المنتج (إنجليزي)</label>
-                        <input type="text" name="products[\${productCount}].name_en" placeholder="مثال: Cotton Shirt">
-                    </div>
-                    <div class="form-group">
-                        <label>الفئة</label>
-                        <select name="products[\${productCount}].category">
-                            <option value="general">عام</option>
-                            <option value="fashion">أزياء</option>
-                            <option value="electronics">إلكترونيات</option>
-                            <option value="beauty">جمال</option>
-                            <option value="home">منزل</option>
-                            <option value="sports">رياضة</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>وصف المنتج</label>
-                    <textarea name="products[\${productCount}].description_ar" placeholder="وصف مختصر للمنتج..."></textarea>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>السعر (دولار) *</label>
-                        <input type="number" name="products[\${productCount}].price_usd" step="0.01" min="0" required placeholder="0.00">
-                    </div>
-                    <div class="form-group">
-                        <label>الكمية المتوفرة</label>
-                        <input type="number" name="products[\${productCount}].stock_quantity" min="0" value="0" placeholder="0">
-                    </div>
-                </div>
-            \`;
+            productDiv.innerHTML = 
+                '<div class="product-header">' +
+                    '<h3>منتج ' + productCount + '</h3>' +
+                    '<button type="button" class="remove-product" onclick="removeProduct(this)">حذف</button>' +
+                '</div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group">' +
+                        '<label>رمز المنتج (SKU) *</label>' +
+                        '<input type="text" name="products[' + productCount + '].sku" required placeholder="مثال: PROD-' + productCount + '">' +
+                    '</div>' +
+                    '<div class="form-group">' +
+                        '<label>اسم المنتج (عربي) *</label>' +
+                        '<input type="text" name="products[' + productCount + '].name_ar" required placeholder="مثال: قميص قطني">' +
+                    '</div>' +
+                '</div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group">' +
+                        '<label>اسم المنتج (إنجليزي)</label>' +
+                        '<input type="text" name="products[' + productCount + '].name_en" placeholder="مثال: Cotton Shirt">' +
+                    '</div>' +
+                    '<div class="form-group">' +
+                        '<label>الفئة</label>' +
+                        '<select name="products[' + productCount + '].category">' +
+                            '<option value="general">عام</option>' +
+                            '<option value="fashion">أزياء</option>' +
+                            '<option value="electronics">إلكترونيات</option>' +
+                            '<option value="beauty">جمال</option>' +
+                            '<option value="home">منزل</option>' +
+                            '<option value="sports">رياضة</option>' +
+                        '</select>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="form-group">' +
+                    '<label>وصف المنتج</label>' +
+                    '<textarea name="products[' + productCount + '].description_ar" placeholder="وصف مختصر للمنتج..."></textarea>' +
+                '</div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group">' +
+                        '<label>السعر (دولار) *</label>' +
+                        '<input type="number" name="products[' + productCount + '].price_usd" step="0.01" min="0" required placeholder="0.00">' +
+                    '</div>' +
+                    '<div class="form-group">' +
+                        '<label>الكمية المتوفرة</label>' +
+                        '<input type="number" name="products[' + productCount + '].stock_quantity" min="0" value="0" placeholder="0">' +
+                    '</div>' +
+                '</div>';
             container.appendChild(productDiv);
+            console.log('Product div added to container');
             
             // Add smooth animation
             productDiv.style.opacity = '0';
@@ -2538,7 +2831,13 @@ export function registerAdminRoutes(app: Hono) {
                 productDiv.style.transition = 'all 0.3s ease';
                 productDiv.style.opacity = '1';
                 productDiv.style.transform = 'translateY(0)';
+                console.log('Animation completed');
             }, 10);
+            
+            // Scroll to the new product
+            setTimeout(() => {
+                productDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 400);
         }
 
         function removeProduct(button) {
@@ -2555,6 +2854,18 @@ export function registerAdminRoutes(app: Hono) {
         document.getElementById('working_hours_enabled').addEventListener('change', function() {
             const container = document.getElementById('working-hours-container');
             container.style.display = this.checked ? 'block' : 'none';
+        });
+        
+        // Ensure add product button works
+        document.addEventListener('DOMContentLoaded', function() {
+            const addProductBtn = document.getElementById('add-product-btn');
+            if (addProductBtn) {
+                addProductBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    console.log('Add product button clicked via event listener');
+                    addProduct();
+                });
+            }
         });
 
         // Form submission
