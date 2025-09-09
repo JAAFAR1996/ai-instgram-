@@ -225,7 +225,7 @@ export class InstagramWebhookHandler {
         interactionType: 'dm',
         conversationId: undefined
       }, {
-        useManyChat: true,
+        useManyChat: false, // تعطيل ManyChat لاستخدام Local AI
         fallbackToLocalAI: true,
         priority: 'normal'
       });
@@ -256,7 +256,7 @@ export class InstagramWebhookHandler {
         interactionType: 'comment',
         conversationId: undefined
       }, {
-        useManyChat: true,
+        useManyChat: false, // تعطيل ManyChat لاستخدام Local AI
         fallbackToLocalAI: true,
         priority: 'normal'
       });

@@ -813,7 +813,7 @@ const dumpPath = path.join(dir, first.f);
         interactionType: 'dm',
         platform: 'instagram'
       }, {
-        useManyChat: true, // Production ManyChat enabled
+        useManyChat: false, // تعطيل ManyChat لاستخدام Local AI
         fallbackToLocalAI: true,
         priority: 'normal',
         tags: ['test', 'api_test']
