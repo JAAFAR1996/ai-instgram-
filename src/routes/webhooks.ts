@@ -35,6 +35,23 @@ const ManyChatWebhookSchema = z.object({
   }).optional()
 }).passthrough();
 type ManyChatWebhookBody = z.infer<typeof ManyChatWebhookSchema>;
+
+// ManyChat Dynamic Block schema (External Request)
+const ManyChatDynamicSchema = z.object({
+  merchantId: z.string().uuid(),
+  user_id: z.string().min(1),
+  message: z.string().min(1).max(4000),
+  history: z.array(z.object({
+    role: z.enum(['user','assistant']),
+    content: z.string().min(1).max(4000),
+    timestamp: z.string().optional()
+  })).optional(),
+  user_fields: z.record(z.any()).optional(),
+  conversationId: z.string().uuid().optional(),
+  username: z.string().min(1).optional(),
+  in_24h: z.boolean().optional(),
+  request_id: z.string().optional()
+}).strict();
 const log = getLogger({ component: 'webhooks-routes' });
 // Webhook validation schemas
 const InstagramWebhookVerificationSchema = z.object({
@@ -496,6 +513,183 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
   // WhatsApp webhook routes - DISABLED
   app.get('/webhooks/whatsapp', (c) => c.text('WhatsApp features disabled', 503));
   app.post('/webhooks/whatsapp', (c) => c.text('WhatsApp features disabled', 503));
+
+  // ===============================================
+  // ManyChat Dynamic Block (External Request) Endpoint
+  // Accepts rich JSON: message, history, user_fields, conversationId, etc.
+  // Returns ManyChat v2 response with set_attributes
+  // ===============================================
+  app.post('/webhooks/manychat/dynamic', async (c) => {
+    const startedAt = Date.now();
+    let conversationId: string = '';
+    const mcResponse = (attrs: Record<string, unknown> = {}) => {
+      const duration = Date.now() - startedAt;
+      const text = typeof (attrs as any).ai_reply === 'string' ? String((attrs as any).ai_reply) : 'ok';
+      const msgs = [{ type: 'text', text }];
+      return {
+        version: 'v2',
+        content: { messages: msgs },
+        messages: msgs,
+        set_attributes: {
+          processing_time: duration,
+          conversation_id: conversationId,
+          ...attrs
+        }
+      };
+    };
+    try {
+      // Security: Bearer token
+      const expectedBearer = (getEnv('MANYCHAT_BEARER') ?? '').trim();
+      const authHeader = c.req.header('authorization');
+      if (!expectedBearer || !authHeader?.startsWith(`Bearer ${expectedBearer}`)) {
+        return c.json({ error: 'unauthorized' }, 401);
+      }
+
+      const body = await c.req.json();
+      const parsed = ManyChatDynamicSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(mcResponse({ ai_reply: 'invalid payload', status_code: 400, details: parsed.error.issues }));
+      }
+      const {
+        merchantId,
+        user_id,
+        message,
+        history: providedHistory,
+        user_fields,
+        conversationId: providedConvId,
+        username: providedUsername,
+        in_24h: providedIn24h,
+        request_id
+      } = parsed.data;
+
+      // Derive username/customerId from payload
+      const rawUsername = (providedUsername
+        || (user_fields && (user_fields as any).instagram_username)
+        || (user_fields && (user_fields as any).merchant_username)
+        || '') as string;
+      const sanitizedUsername = rawUsername
+        ? String(rawUsername).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '')
+        : `mc_${String(user_id).trim().toLowerCase()}`;
+
+      // Set RLS merchant context
+      try {
+        const { getDatabase } = await import('../db/adapter.js');
+        const db = getDatabase();
+        const sql = db.getSQL();
+        await sql`SELECT set_config('app.current_merchant_id', ${merchantId}::text, true)`;
+      } catch (err) {
+        log.error('Failed to set RLS context for dynamic endpoint', { err: String(err) });
+        return c.json(mcResponse({ ai_reply: 'Service unavailable', status_code: 503 }));
+      }
+
+      // Find/create conversation and persist incoming message
+      const pool = getPool();
+      let sessionData: Record<string, unknown> = {};
+      try {
+        if (providedConvId) {
+          conversationId = providedConvId;
+        } else {
+          const existing = await pool.query(
+            `SELECT id, session_data FROM conversations WHERE merchant_id = $1 AND customer_instagram = $2 ORDER BY created_at DESC LIMIT 1`,
+            [merchantId, sanitizedUsername]
+          );
+          if (existing.rows.length) {
+            conversationId = existing.rows[0].id;
+            try { sessionData = existing.rows[0].session_data || {}; if (typeof sessionData === 'string') sessionData = JSON.parse(sessionData); } catch {}
+          } else {
+            const ins = await pool.query(
+              `INSERT INTO conversations (merchant_id, customer_instagram, platform, source_channel, conversation_stage, session_data, message_count, created_at, updated_at)
+               VALUES ($1,$2,'instagram','manychat','GREETING','{}',0,NOW(),NOW()) RETURNING id`,
+              [merchantId, sanitizedUsername]
+            );
+            conversationId = ins.rows[0].id;
+          }
+        }
+        await pool.query(
+          `INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, created_at)
+           VALUES ($1,$2,'TEXT','INCOMING','instagram','manychat',NOW())`,
+          [conversationId, message]
+        );
+      } catch (dbErr) {
+        log.error('Dynamic endpoint DB failure', { error: String(dbErr) });
+        return c.json(mcResponse({ ai_reply: 'Database error', status_code: 500 }));
+      }
+
+      // Build history for orchestrator
+      let historyMsgs: ConversationMsg[] = [];
+      if (Array.isArray(providedHistory) && providedHistory.length) {
+        historyMsgs = providedHistory.slice(-12).map(h => ({ role: h.role, content: h.content, timestamp: h.timestamp || new Date().toISOString() }));
+      } else {
+        try {
+          const res = await pool.query(
+            `SELECT content, direction, created_at FROM message_logs WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 20`,
+            [conversationId]
+          );
+          historyMsgs = res.rows
+            .map((r: { direction: string; content: unknown; created_at: Date | string }) => ({
+              role: r.direction === 'INCOMING' ? 'user' as const : 'assistant' as const,
+              content: String(r.content ?? ''),
+              timestamp: r.created_at
+            }))
+            .reverse();
+        } catch {}
+      }
+
+      // 24h window status: prefer provided flag, else DB check (best-effort)
+      let in24hWindow = providedIn24h ?? true;
+      if (typeof providedIn24h === 'undefined') {
+        try {
+          const win = await pool.query(
+            `SELECT can_send FROM get_instagram_message_window_status($1::uuid, $2)`,
+            [merchantId, sanitizedUsername]
+          );
+          in24hWindow = Boolean(win.rows?.[0]?.can_send);
+        } catch {}
+      }
+
+      // Compose AI context from user_fields (preferences)
+      const preferences: Record<string, unknown> = {};
+      try {
+        if (user_fields && typeof user_fields === 'object') {
+          const uf = user_fields as Record<string, unknown>;
+          if (Array.isArray(uf?.preferred_categories)) preferences['categories'] = uf.preferred_categories;
+          if (Array.isArray(uf?.preferred_colors)) preferences['colors'] = uf.preferred_colors;
+          if (Array.isArray(uf?.preferred_sizes)) preferences['sizes'] = uf.preferred_sizes;
+          if (typeof uf?.price_sensitivity === 'string') preferences['priceSensitivity'] = uf.price_sensitivity;
+        }
+      } catch {}
+
+      // Generate AI response
+      try {
+        const { getConversationAIOrchestrator } = await import('../services/conversation-ai-orchestrator.js');
+        const orchestrator = getConversationAIOrchestrator();
+        const context: any = {
+          merchantId,
+          customerId: sanitizedUsername,
+          platform: 'instagram',
+          stage: (sessionData as any)?.stage || 'GREETING',
+          cart: Array.isArray((sessionData as any)?.cart) ? (sessionData as any).cart : [],
+          preferences,
+          conversationHistory: historyMsgs,
+          interactionType: 'dm'
+        };
+        const ai = await orchestrator.generatePlatformResponse(message, context, 'instagram');
+        let aiText = (ai?.response as any)?.message || '';
+        if (!in24hWindow) {
+          try { const { looksPromotional } = await import('../services/tone-dialect.js'); if (looksPromotional(aiText)) aiText = 'حتى نلتزم بسياسات Meta، نجاوب بشكل عام بدون عروض ترويجية. نقدر نخلي ممثل بشري يتابعك. 🙏'; } catch {}
+        }
+        // Log assistant message (best-effort)
+        try { await pool.query(`INSERT INTO message_logs (conversation_id, content, message_type, direction, platform, source_channel, created_at) VALUES ($1,$2,'TEXT','OUTGOING','instagram','manychat',NOW())`, [conversationId, aiText]); } catch {}
+        return c.json(mcResponse({ ai_reply: aiText, in_24h: in24hWindow, ai_source: 'openai', request_id }));
+      } catch (err) {
+        log.error('Dynamic endpoint AI failure', { error: String(err) });
+        return c.json(mcResponse({ ai_reply: 'عذرًا، صار خطأ بسيط. حاول مرة ثانية.', status_code: 500, ai_source: 'fallback', ai_error: String(err).slice(0,200), request_id }));
+      }
+    } catch (error) {
+      log.error('Dynamic endpoint error', { error: String(error) });
+      return c.json(mcResponse({ ai_reply: 'Internal error', status_code: 500 }));
+    }
+  });
   
   // Webhook health check endpoint
   app.get('/webhooks/health', async (c) => {

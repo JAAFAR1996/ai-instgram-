@@ -2,6 +2,7 @@ import { getCache, getSessionCache, CacheService } from '../cache/index.js';
 import { normalizeArabic } from '../nlp/ar-normalize.js';
 import { getLogger } from './logger.js';
 import { createHash } from 'crypto';
+import { DEFAULT_AI_INTELLIGENCE_CONFIG } from '../config/ai-intelligence.js';
 
 export interface CommonReplyEntry {
   text: string;
@@ -93,12 +94,34 @@ export class SmartCache {
     // Only cache for relatively short, repetitive queries
     const text = (originalUserText ?? '').trim();
     if (text.length === 0) return;
+    
     // Skip caching generic guidance or small talk to avoid repetitive replies
     const intent = (aiIntent ?? '').toUpperCase();
     if (intent === 'OTHER' || intent === 'SMALL_TALK') return;
+    
     const lower = text.toLowerCase();
     const looksGeneric = /(سعر|كم|policy|سياسة|ارجاع|استرجاع|return|refund|التوصيل|الشحن|الموقع|location|hours|مواعيد|delivery)/.test(lower);
+    
+    // تقليل التخزين المؤقت لتجنب التكرار المفرط
     if (!looksGeneric && text.length > 64) return;
+    
+    // إضافة تحقق من التكرار في الرد باستخدام التكوين
+    if (DEFAULT_AI_INTELLIGENCE_CONFIG.repetition.cacheRepetitionCheck) {
+      const responseWords = aiResponse.toLowerCase().split(/\s+/);
+      const uniqueWords = new Set(responseWords);
+      const repetitionRatio = uniqueWords.size / responseWords.length;
+      
+      // تجنب تخزين الردود التي تحتوي على تكرار مفرط
+      if (repetitionRatio < DEFAULT_AI_INTELLIGENCE_CONFIG.diversity.variationThreshold) {
+        this.log.debug('Skipping cache due to high repetition in response', { 
+          repetitionRatio, 
+          threshold: DEFAULT_AI_INTELLIGENCE_CONFIG.diversity.variationThreshold,
+          merchantId 
+        });
+        return;
+      }
+    }
+    
     try {
       if (typeof aiIntent === 'string' && aiIntent.length > 0) {
         await this.setCommonReply(merchantId, text, { text: aiResponse, intent: aiIntent });

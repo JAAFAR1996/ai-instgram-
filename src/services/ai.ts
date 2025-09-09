@@ -271,7 +271,25 @@ export class AIService {
 
       // Lightweight intent analysis to guide downstream behavior
       let analyzedIntent: IntentAnalysisResult | undefined;
-      try { analyzedIntent = await this.analyzeIntent(customerMessage, context); } catch {}
+      try { 
+        analyzedIntent = await this.analyzeIntent(customerMessage, context);
+        this.logger.debug('Intent analysis successful', { 
+          intent: analyzedIntent.intent, 
+          confidence: analyzedIntent.confidence 
+        });
+      } catch (error) {
+        this.logger.warn('Intent analysis failed, continuing without intent', { 
+          error: String(error),
+          customerMessage: this.maskPII(customerMessage)
+        });
+        // إنشاء intent افتراضي بدلاً من تجاهل الخطأ
+        analyzedIntent = {
+          intent: 'CONVERSATION',
+          confidence: 0.5,
+          entities: {},
+          stage: context.stage
+        };
+      }
 
       // Build conversation prompt (text + optional vision parts)
       const prompt = await this.buildConversationPrompt(customerMessage, context);
@@ -292,11 +310,32 @@ export class AIService {
           const analysis = await ig.analyzeImagesGeneric(context.merchantId, context.imageData!, customerMessage);
           visionProducts = analysis.candidates || [];
           visionInfo = { ocrText: analysis.ocrText, defects: analysis.defects };
+          this.logger.debug('Vision analysis successful', { 
+            productsFound: visionProducts.length,
+            hasOCR: !!visionInfo?.ocrText,
+            hasDefects: !!visionInfo?.defects?.hasDefect
+          });
         } catch (e) {
-          this.logger.debug('Vision product analysis skipped', { error: String(e) });
+          this.logger.warn('Vision product analysis failed, continuing without vision data', { 
+            error: String(e),
+            imageCount: context.imageData?.length || 0
+          });
+          // إنشاء بيانات افتراضية للرؤية بدلاً من تجاهل الخطأ
+          visionProducts = [];
+          visionInfo = { ocrText: '', defects: { hasDefect: false, notes: [] } };
         }
       }
       const model = useVision ? (this.config.ai.visionModel || 'gpt-4o-mini') : this.config.ai.model;
+      // باتش 4: تسجيل DEBUG للـ HTTP Outbound
+      this.logger.debug('OpenAI request payload:', { 
+        model, 
+        messageCount: prompt.length,
+        temperature: Math.min(this.config.ai.temperature ?? 0.8, 1.0),
+        maxTokens: Math.min(this.config.ai.maxTokens ?? 500, 800),
+        presencePenalty: 0.6,
+        frequencyPenalty: 0.4
+      });
+
       const completion = await this.withRetry(
         () => this.openai.chat.completions.create({
           model,
@@ -304,11 +343,18 @@ export class AIService {
           temperature: Math.min(this.config.ai.temperature ?? 0.8, 1.0),
           max_tokens: Math.min(this.config.ai.maxTokens ?? 500, 800),
           top_p: 0.9,
-          presence_penalty: 0,
-          frequency_penalty: 0,
+          presence_penalty: 0.6, // زيادة عقوبة التكرار
+          frequency_penalty: 0.4, // تقليل تكرار الكلمات
         }),
         'openai.chat.completions'
       ).finally(() => clearTimeout(timer));
+
+      // باتش 4: تسجيل استجابة OpenAI
+      this.logger.debug('OpenAI response received:', { 
+        usage: completion.usage,
+        choicesCount: completion.choices?.length || 0,
+        finishReason: completion.choices?.[0]?.finish_reason
+      });
 
       const responseTime = Date.now() - startTime;
       const response = completion.choices?.[0]?.message?.content;
@@ -363,10 +409,30 @@ export class AIService {
             aiResponse.actions = [
               { type: 'SHOW_PRODUCT', data: { items: recs.slice(0, 3) }, priority: 1 }
             ];
+            this.logger.debug('Product recommendations generated successfully', { 
+              count: recs.length,
+              intent: analyzedIntent.intent
+            });
           }
         }
       } catch (e) {
-        this.logger.warn('Auto-suggestions generation failed', { error: String(e) });
+        this.logger.warn('Auto-suggestions generation failed, trying fallback recommendations', { 
+          error: String(e),
+          intent: analyzedIntent?.intent
+        });
+        // محاولة إنشاء اقتراحات بديلة
+        try {
+          const fallbackRecs = await this.getFallbackProductRecommendations(context.merchantId, 3);
+          if (fallbackRecs.length > 0) {
+            aiResponse.products = fallbackRecs;
+            aiResponse.actions = [
+              { type: 'SHOW_PRODUCT', data: { items: fallbackRecs }, priority: 2 }
+            ];
+            this.logger.debug('Fallback product recommendations generated', { count: fallbackRecs.length });
+          }
+        } catch (fallbackError) {
+          this.logger.error('Fallback recommendations also failed', { error: String(fallbackError) });
+        }
       }
       
       // Simple validation - just check if message exists
@@ -392,9 +458,51 @@ export class AIService {
           const improved = await ca.improveResponse(aiResponse.message, critique, { merchantId: context.merchantId });
           aiResponse.message = improved.improved;
           aiResponse.messageAr = improved.improved;
+          this.logger.debug('ConstitutionalAI improved response', { 
+            originalLength: aiResponse.message.length,
+            improvedLength: improved.improved.length
+          });
+        } else {
+          this.logger.debug('ConstitutionalAI response meets quality threshold');
         }
       } catch (e) {
-        this.logger.debug('ConstitutionalAI post-process skipped', { error: String(e) });
+        this.logger.warn('ConstitutionalAI post-process failed, using original response', { 
+          error: String(e),
+          messageLength: aiResponse.message.length
+        });
+        // الاستمرار بالرد الأصلي بدلاً من تجاهل الخطأ
+      }
+
+      // Post-process: Response diversity improvement
+      try {
+        const { improveResponseDiversity } = await import('../utils/response-diversity.js');
+        const conversationHistory = Array.isArray((context as any)?.conversationHistory) 
+          ? (context as any).conversationHistory as Array<{ role: string; content: string; timestamp?: string | Date }>
+          : [];
+        
+        const historyForDiversity = conversationHistory.map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content,
+          timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
+        }));
+        
+        const improvedMessage = improveResponseDiversity(aiResponse.message, historyForDiversity);
+        if (improvedMessage !== aiResponse.message) {
+          this.logger.debug('Response diversity improved', {
+            originalLength: aiResponse.message.length,
+            improvedLength: improvedMessage.length
+          });
+          aiResponse.message = improvedMessage;
+          aiResponse.messageAr = improvedMessage;
+        } else {
+          this.logger.debug('Response diversity already optimal');
+        }
+      } catch (e) {
+        this.logger.warn('Response diversity improvement failed, using original response', { 
+          error: String(e),
+          historyLength: context.conversationHistory.length
+        });
+        // الاستمرار بالرد الأصلي بدلاً من تجاهل الخطأ
       }
 
       // Post-process: Tone & Dialect adaptation (Iraqi/BAGHDADI + tier + sentiment)
@@ -411,8 +519,17 @@ export class AIService {
         });
         aiResponse.message = adapted;
         aiResponse.messageAr = adapted;
+        this.logger.debug('Tone/Dialect adaptation successful', { 
+          dialect: 'baghdadi',
+          tier: profile.tier,
+          sentiment
+        });
       } catch (e) {
-        this.logger.debug('Tone/Dialect adaptation skipped', { error: String(e) });
+        this.logger.warn('Tone/Dialect adaptation failed, using original response', { 
+          error: String(e),
+          customerId: context.customerId
+        });
+        // الاستمرار بالرد الأصلي بدلاً من تجاهل الخطأ
       }
 
       // Log AI interaction
@@ -424,7 +541,17 @@ export class AIService {
         const mem = getSemanticMemoryService();
         const convId = (context as any)?.conversationId || '00000000-0000-0000-0000-000000000000';
         await mem.saveMessage(context.merchantId, context.customerId, convId, 'assistant', aiResponse.message);
-      } catch {}
+        this.logger.debug('Message saved to semantic memory', { 
+          conversationId: convId,
+          messageLength: aiResponse.message.length
+        });
+      } catch (e) {
+        this.logger.warn('Failed to save message to semantic memory', { 
+          error: String(e),
+          conversationId: (context as any)?.conversationId
+        });
+        // الاستمرار بدون حفظ في الذاكرة الدلالية
+      }
 
       return aiResponse;
     } catch (error: unknown) {
@@ -574,7 +701,16 @@ export class AIService {
     const catLabel = catLabelMap[persona.businessCategory] || 'عام';
     const businessName = context.merchantSettings?.businessName || 'متجرنا';
     let relevantProducts: Array<Record<string, any>> = [];
-    try { relevantProducts = await this.searchRelevantProducts(customerMessage, context.merchantId, 5); } catch {}
+    try { 
+      relevantProducts = await this.searchRelevantProducts(customerMessage, context.merchantId, 5);
+      this.logger.debug('Relevant products found', { count: relevantProducts.length });
+    } catch (e) {
+      this.logger.warn('Product search failed, using empty product list', { 
+        error: String(e),
+        query: this.maskPII(customerMessage)
+      });
+      relevantProducts = [];
+    }
     const productInfo = this.formatProductsForPrompt(relevantProducts);
     const newSystemPrompt = `أنت مساعد مبيعات خبير لمتجر ${businessName} (${catLabel}).\n\n📦 المنتجات المتوفرة حالياً (الأكثر صلة):\n${productInfo}\n\n🎯 مهمتك:\n- اربط استفسار العميل بالمنتجات الفعلية المتوفرة\n- اذكر الأسعار الحقيقية والمخزون المتوفر\n- اقترح بدائل مناسبة إذا لم يجد ما يريد\n- لا تختلق معلومات غير صحيحة`;
 
@@ -598,9 +734,15 @@ export class AIService {
       if (kbHits && kbHits.length) {
         const ctx = kbHits.map(h => `• ${h.title}: ${h.chunk.trim().slice(0, 300)}`).join('\n');
         messages.push({ role: 'system', content: `مقتطفات من قاعدة المعرفة (استخدمها فقط إذا كانت مناسبة للسؤال):\n${ctx}` });
+        this.logger.debug('Knowledge base context added', { hits: kbHits.length });
+      } else {
+        this.logger.debug('No knowledge base hits found');
       }
     } catch (e) {
-      this.logger.debug('KB retrieval skipped', { error: String(e) });
+      this.logger.warn('Knowledge base retrieval failed, continuing without KB context', { 
+        error: String(e),
+        merchantId: context.merchantId
+      });
     }
 
     // Semantic Memory: retrieve similar conversation snippets (best-effort)
@@ -611,9 +753,15 @@ export class AIService {
       if (Array.isArray(memories) && memories.length) {
         const lines = memories.map(m => `${m.role === 'user' ? 'المستخدم' : 'الوكيل'}: ${m.content}`).join('\n');
         messages.push({ role: 'system', content: `ذكريات محادثة سابقة:\n${lines}` });
+        this.logger.debug('Semantic memory context added', { memories: memories.length });
+      } else {
+        this.logger.debug('No semantic memories found');
       }
     } catch (e) {
-      this.logger.debug('Semantic memory retrieval skipped', { error: String(e) });
+      this.logger.warn('Semantic memory retrieval failed, continuing without memory context', { 
+        error: String(e),
+        customerId: context.customerId
+      });
     }
 
     // Build user content with optional images (vision parts)
@@ -817,6 +965,26 @@ ${productsText}
   /**
    * Private: Get merchant products summary with caching
    */
+
+  /**
+   * Private: Get fallback product recommendations when AI fails
+   */
+  private async getFallbackProductRecommendations(merchantId: string, limit: number = 3): Promise<ProductRecommendation[]> {
+    try {
+      const products = await this.getMerchantProducts(merchantId);
+      return products.slice(0, limit).map(p => ({
+        productId: p.id,
+        sku: p.sku,
+        name: p.name_ar,
+        price: p.price_usd,
+        confidence: 0.6,
+        reason: 'اقتراح تلقائي (بديل)'
+      }));
+    } catch (error) {
+      this.logger.error('Fallback product recommendations failed', { merchantId, error });
+      return [];
+    }
+  }
 
   /**
    * Private: Get merchant products with caching

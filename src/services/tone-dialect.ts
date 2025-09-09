@@ -14,6 +14,9 @@ export interface ToneDialectOptions {
   dialect: Dialect;
   tier: Tier;
   sentiment: Sentiment;
+  // Only greet on the very first turn.
+  // Default false to avoid repeating greetings every message.
+  shouldGreet?: boolean;
 }
 
 /** Lightweight Arabic/Iraqi sentiment detection (emojis + keywords) */
@@ -55,15 +58,12 @@ function toBaghdadi(text: string): string {
 }
 
 /** Add tier-based courtesy phrases */
-function applyTierTone(text: string, tier: Tier): string {
+function applyTierTone(text: string, tier: Tier, shouldGreet: boolean): string {
   const base = text.trim();
-  if (tier === 'VIP') {
-    return `منورنا 🌟، ${base}`;
-  }
-  if (tier === 'REPEAT') {
-    return `نورتنا من جديد 🙌، ${base}`;
-  }
-  // NEW
+  if (!shouldGreet) return base;
+  if (tier === 'VIP') return `منورنا 🌟، ${base}`;
+  if (tier === 'REPEAT') return `نورتنا من جديد 🙌، ${base}`;
+  // NEW: greet only on first turn
   return base.startsWith('هلا') || base.startsWith('مرحبا') ? base : `هلا بيك 👋، ${base}`;
 }
 
@@ -86,7 +86,7 @@ export function adaptDialectAndTone(message: string, opts: ToneDialectOptions): 
   if (!(message && message.trim())) return message;
   let out = message.trim();
   if (opts.dialect === 'baghdadi') out = toBaghdadi(out);
-  out = applyTierTone(out, opts.tier);
+  out = applyTierTone(out, opts.tier, Boolean(opts.shouldGreet));
   out = applySentimentAdjust(out, opts.sentiment);
   return out;
 }
@@ -106,4 +106,3 @@ export default {
   detectSentiment,
   looksPromotional,
 };
-

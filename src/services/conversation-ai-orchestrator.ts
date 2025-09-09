@@ -230,11 +230,29 @@ export class ConversationAIOrchestrator {
       try {
         const pae = new PredictiveAnalyticsEngine();
         const insights = await pae.getCustomerInsights(context.merchantId, context.customerId);
-        if (insights.sizeRisk.riskLevel === 'HIGH' || insights.sizeRisk.riskLevel === 'MEDIUM') {
-          const hint = 'ممكن نتأكد من القياس المناسب إلك؟ إذا تحب أعطيك جدول المقاسات ✅';
-          (response as AIResponse).message = `${hint}\n\n${(response as AIResponse).message}`;
-          (response as AIResponse).actions = [ ...(response.actions || []), { type: 'COLLECT_INFO', data: { field: 'size' }, priority: 1 } ];
-          adaptations.push({ type: 'length', originalValue: 'base', adaptedValue: 'add-size-clarifier', reason: 'predictive size risk' });
+
+        // DB-driven: consult merchant catalog profile for vertical signals
+        let requiresSizes = false;
+        try {
+          const { default: MerchantCatalogService } = await import('./catalog/merchant-catalog.service.js');
+          const mcs = new MerchantCatalogService();
+          const catalog = await mcs.analyzeMerchantInventory(context.merchantId);
+          requiresSizes = Boolean(catalog.requiresSizes) || (catalog.primaryVertical === 'apparel');
+        } catch {}
+
+        if (requiresSizes && (insights.sizeRisk.riskLevel === 'HIGH' || insights.sizeRisk.riskLevel === 'MEDIUM')) {
+          // Only add size clarifier when relevant and not repeated
+          const userMsg = (customerMessage || '').toLowerCase();
+          const mentionsSize = /\b(مقاس|قياس|size|s|m|l|xl|xxl|سمول|ميديم|لارج|كبير|صغير)\b/.test(userMsg);
+          const history = Array.isArray((context as any)?.conversationHistory) ? (context as any).conversationHistory as Array<{ role: string; content: string }>: [];
+          const askedBefore = history.slice(-6).some(h => typeof h?.content === 'string' && /(جدول المقاسات|المقاس المناسب|اختر المقاس)/.test(h.content));
+          const firstTurn = history.length === 0 || (history.length === 1 && history[0]?.role === 'user');
+          if (!askedBefore && (mentionsSize || firstTurn)) {
+            const hint = 'ممكن نتأكد من القياس المناسب إلك؟ إذا تحب أعطيك جدول المقاسات ✅';
+            (response as AIResponse).message = `${hint}\n\n${(response as AIResponse).message}`;
+            (response as AIResponse).actions = [ ...(response.actions || []), { type: 'COLLECT_INFO', data: { field: 'size' }, priority: 1 } ];
+            adaptations.push({ type: 'length', originalValue: 'base', adaptedValue: 'add-size-clarifier', reason: 'predictive size risk' });
+          }
         }
         if (insights.churnRisk.riskLevel === 'HIGH') {
           const retain = 'نحبك تبقى ويانه ♥️ عدنا عرض بسيط خاص إلك إذا مهتم.';

@@ -18,6 +18,7 @@ export class ErrorFallbacksService {
 
   /**
    * Build best-effort fallback. Never throws.
+   * باتش 2: اجعله ذكيًا وسياقيًا بدل قوالب عامة
    */
   public async buildFallback(
     merchantId: string,
@@ -25,6 +26,13 @@ export class ErrorFallbacksService {
     originalUserText: string
   ): Promise<FallbackResult> {
     const text = (originalUserText ?? '').trim();
+    
+    // باتش 2: ردود ذكية وسياقية حسب نوع الاستفسار
+    const smartFallback = this.getSmartFallback(text);
+    if (smartFallback) {
+      return { text: smartFallback, used: 'static' };
+    }
+    
     try {
       // Read cached context to improve decisions (use value to avoid unused param)
       await this.cache.getCustomerContext(merchantId, customerId);
@@ -62,9 +70,53 @@ export class ErrorFallbacksService {
       this.log.warn('fallback: product suggestions failed', { error: String(e) });
     }
 
-    // 3) Static, friendly fallback
-    const generic = 'صار عندي خلل بسيط، بس حاضر أخدمك! ممكن توضح أكثر اللي تحتاجه (النوع/المقاس/اللون/المناسبة) حتى أساعدك بسرعة؟';
+    // 3) Static, friendly fallback with variety
+    const fallbackMessages = [
+      'واضح! أعطيني تفاصيل أكثر (اسم المنتج/الكود أو اللي يدور ببالك) وأنا أجاوبك فوراً بمعلومة محددة.',
+      'ممتاز! أخبرني أكثر عن ما تبحث عنه (النوع/المقاس/اللون) وسأساعدك بسرعة.',
+      'رائع! وضح لي احتياجاتك بالتفصيل وسأجد لك الأنسب فوراً.',
+      'ماشي! اشرح لي ما تحتاجه (المنتج/المقاس/اللون) وسأخدمك حالاً.'
+    ];
+    
+    // اختيار رسالة عشوائية لتجنب التكرار
+    const randomIndex = Math.floor(Math.random() * fallbackMessages.length);
+    const generic = fallbackMessages[randomIndex] || fallbackMessages[0];
+    
     return { text: generic, used: 'static' };
+  }
+
+  /**
+   * باتش 2: ردود ذكية وسياقية حسب نوع الاستفسار
+   */
+  private getSmartFallback(message: string): string | null {
+    const lower = message.toLowerCase();
+    
+    // استفسارات السعر
+    if (/(سعر|price|كم|ثمن|تكلفة|cost)/.test(lower)) {
+      return 'حتى أكملك بسرعة: شنو اسم المنتج أو الكود؟ وإذا عندك مقاس/لون معين قوليلي حتى أعطيك السعر الدقيق.';
+    }
+    
+    // استفسارات المقاسات
+    if (/(مقاس|size|جدول|قياس|صغير|كبير|وسط)/.test(lower)) {
+      return 'أرسل لك جدول المقاسات حالاً؛ قوليلي المنتج/الموديل حتى أرسل المقاس المناسب وقياسات الصدر/الخصر/الورك.';
+    }
+    
+    // استفسارات الألوان
+    if (/(لون|color|أبيض|أسود|أحمر|أزرق|أخضر|وردي|بني)/.test(lower)) {
+      return 'الألوان المتوفرة تتغيّر حسب المخزون. اذكري الموديل حتى أطلع لك المتاح حالياً مع صور مباشرة.';
+    }
+    
+    // استفسارات التوفر
+    if (/(متوفر|موجود|متاح|available|stock|مخزون)/.test(lower)) {
+      return 'أخبرني اسم المنتج أو الكود حتى أتحقق من التوفر الحالي في المخزون وأعطيك التفاصيل الدقيقة.';
+    }
+    
+    // استفسارات التوصيل
+    if (/(توصيل|شحن|delivery|shipping|متى|وقت)/.test(lower)) {
+      return 'أخبرني عنوانك أو المنطقة حتى أحسب لك وقت التوصيل والتكلفة بالضبط.';
+    }
+    
+    return null; // لا يوجد رد ذكي مناسب
   }
 }
 

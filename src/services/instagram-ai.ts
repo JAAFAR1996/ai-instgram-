@@ -168,8 +168,20 @@ export class InstagramAIService {
 
     try {
       descriptors = await this.classifyProductFromImages(images);
+      this.logger.debug('Vision descriptors extracted successfully', { 
+        labelsCount: descriptors?.labels?.length || 0,
+        attributesCount: Object.keys(descriptors?.attributes || {}).length
+      });
     } catch (e) {
-      this.logger.warn('Vision descriptors failed', { error: String(e) });
+      this.logger.warn('Vision descriptors failed, using fallback descriptors', { 
+        error: String(e),
+        imageCount: images.length
+      });
+      // إنشاء واصفات افتراضية بدلاً من تجاهل الخطأ
+      descriptors = {
+        labels: ['منتج', 'عام'],
+        attributes: { category: 'عام', color: 'غير محدد' }
+      };
     }
 
     // Visual query for product lookup
@@ -187,7 +199,22 @@ export class InstagramAIService {
         );
       }
     } catch (e) {
-      this.logger.warn('Visual search failed', { error: String(e) });
+      this.logger.warn('Visual search failed, trying fallback search', { 
+        error: String(e),
+        query: this.buildVisualQuery(descriptors)
+      });
+      // محاولة بحث بديل
+      try {
+        const fallbackQuery = 'منتجات شائعة';
+        const fallbackResults = await this.searchProductsDynamic(merchantId, fallbackQuery, 3);
+        candidates.push(...fallbackResults.map(f => ({
+          id: f.id, sku: f.sku, name_ar: f.name_ar,
+          effective_price: f.effective_price, price_currency: f.price_currency, stock_quantity: f.stock_quantity
+        })));
+        this.logger.debug('Fallback visual search successful', { count: fallbackResults.length });
+      } catch (fallbackError) {
+        this.logger.error('Fallback visual search also failed', { error: String(fallbackError) });
+      }
     }
 
     // OCR (best-effort)
@@ -206,7 +233,12 @@ export class InstagramAIService {
       const parsed = this.parseJsonSafe<{ text?: string }>(raw);
       if (parsed.ok && parsed.data.text && parsed.data.text.trim()) ocrText = parsed.data.text.trim();
     } catch (e) {
-      this.logger.debug('OCR skipped', { error: String(e) });
+      this.logger.warn('OCR failed, continuing without text extraction', { 
+        error: String(e),
+        imageCount: images.length
+      });
+      // الاستمرار بدون OCR بدلاً من تجاهل الخطأ
+      ocrText = '';
     }
 
     // Defect analysis (surface-level)
@@ -225,7 +257,12 @@ export class InstagramAIService {
       const parsed = this.parseJsonSafe<{ hasDefect?: boolean; notes?: string[] }>(raw);
       if (parsed.ok) defects = { hasDefect: !!parsed.data.hasDefect, notes: Array.isArray(parsed.data.notes) ? parsed.data.notes : [] };
     } catch (e) {
-      this.logger.debug('Defect analysis skipped', { error: String(e) });
+      this.logger.warn('Defect analysis failed, using default analysis', { 
+        error: String(e),
+        imageCount: images.length
+      });
+      // إنشاء تحليل افتراضي بدلاً من تجاهل الخطأ
+      defects = { hasDefect: false, notes: [] };
     }
 
     return { descriptors, ocrText, defects, candidates };
@@ -307,6 +344,14 @@ export class InstagramAIService {
       return Math.min(InstagramAIService.MAX_TEMPERATURE, Math.max(InstagramAIService.MIN_TEMPERATURE, t));
     }
     return 0.8;
+  }
+
+  /** Mask PII (phones/IG handles) before logging */
+  private maskPII(text: string): string {
+    return (text ?? '')
+      .replace(/\b(\+?\d[\d\s-]{6,})\b/g, '***redacted-phone***')
+      .replace(/@[\w.\-]{3,}/g, '@***redacted***')
+      .slice(0, 500);
   }
 
   private parseJsonSafe<T>(raw?: string): { ok: true; data: T } | { ok: false } {
@@ -474,10 +519,24 @@ export class InstagramAIService {
       // ✅ 1. Configuration Management: Get merchant-specific config
       const config = await this.getConfigForMerchant(context.merchantId);
       // Preload merchant context
-      try { await this.getMerchantContext(context.merchantId); } catch {}
+      try { 
+        await this.getMerchantContext(context.merchantId);
+        this.logger.debug('Merchant context loaded successfully');
+      } catch (e) {
+        this.logger.warn('Failed to load merchant context', { error: String(e) });
+      }
       // Prepare DB facts for this message (used for strict grounding)
       let __factsForRequest: Array<{ id: string; sku: string; name_ar: string; effective_price: number; price_currency: string; stock_quantity: number; attributes: Record<string, unknown>; variants: Array<Record<string, unknown>>; category: string; }> = [];
-      try { __factsForRequest = await this.searchProductsDynamic(context.merchantId, customerMessage, 6); } catch {}
+      try { 
+        __factsForRequest = await this.searchProductsDynamic(context.merchantId, customerMessage, 6);
+        this.logger.debug('Product facts loaded for grounding', { count: __factsForRequest.length });
+      } catch (e) {
+        this.logger.warn('Failed to load product facts, using empty facts', { 
+          error: String(e),
+          query: this.maskPII(customerMessage)
+        });
+        __factsForRequest = [];
+      }
       
       // Vision: if images present, pre-analyze for descriptors and candidate products
       let visionDescriptors: { labels: string[]; attributes: Record<string, string> } | null = null;
@@ -494,7 +553,13 @@ export class InstagramAIService {
           // Auto-tag image metadata (best-effort)
           await this.autoTagImage(context, visionDescriptors);
         } catch (e) {
-          this.logger.warn('Vision pre-analysis failed', { error: String(e) });
+          this.logger.warn('Vision pre-analysis failed, continuing without vision data', { 
+            error: String(e),
+            imageCount: context.imageData?.length || 0
+          });
+          // إنشاء بيانات افتراضية للرؤية
+          visionDescriptors = { labels: ['منتج'], attributes: { category: 'عام' } };
+          visionSimilar = [];
         }
       }
 
@@ -515,8 +580,12 @@ export class InstagramAIService {
           const pae = new PredictiveAnalyticsEngine();
           const churn = await pae.predictCustomerChurn(context.merchantId, context.customerId);
           if (churn.riskLevel === 'HIGH') temperature = Math.min(temperature, 0.35);
-        } catch {}
-      } catch {}
+        } catch (e) {
+          this.logger.debug('Predictive analytics skipped', { error: String(e) });
+        }
+      } catch (e) {
+        this.logger.debug('Engagement analysis skipped', { error: String(e) });
+      }
 
       const completion = await this.openai.chat.completions.create({
         model,
@@ -562,7 +631,10 @@ export class InstagramAIService {
       try {
         aiResponse.message = this.__enforceDBFacts(aiResponse.message, __factsForRequest);
         aiResponse.messageAr = aiResponse.messageAr || aiResponse.message;
-      } catch {}
+        this.logger.debug('DB facts enforcement applied');
+      } catch (e) {
+        this.logger.warn('DB facts enforcement failed, using original response', { error: String(e) });
+      }
       
       // Attach visually similar products if we have them (best-effort)
       if (hasImages && visionSimilar.length) {
@@ -575,7 +647,9 @@ export class InstagramAIService {
             confidence: 0.7,
             reason: 'مشابه بصرياً للصورة'
           }));
-        } catch {}
+        } catch (e) {
+          this.logger.warn('Failed to attach vision products', { error: String(e) });
+        }
       }
       
       // Add metadata
@@ -597,7 +671,10 @@ export class InstagramAIService {
           aiResponse.messageAr = improved.improved;
         }
       } catch (e) {
-        this.logger.debug('ConstitutionalAI post-process skipped', { error: String(e) });
+        this.logger.warn('ConstitutionalAI post-process failed, using original response', { 
+          error: String(e),
+          messageLength: aiResponse.message.length
+        });
       }
 
       // Post-process: Tone & Dialect adaptation (Iraqi/BAGHDADI + tier + sentiment)
@@ -607,15 +684,21 @@ export class InstagramAIService {
         const profiler = new CustomerProfiler();
         const profile = await profiler.personalizeResponses(context.merchantId, context.customerId);
         const sentiment = detectSentiment(customerMessage);
+        // Greet only on first turn (GREETING stage with little/no history)
+        const hasHistory = Array.isArray((context as any)?.conversationHistory) && (context as any).conversationHistory.length > 1;
         const adapted = adaptDialectAndTone(aiResponse.message, {
           dialect: 'baghdadi',
           tier: profile.tier,
-          sentiment
+          sentiment,
+          shouldGreet: context.stage === 'GREETING' && !hasHistory
         });
         aiResponse.message = adapted;
         aiResponse.messageAr = adapted;
       } catch (e) {
-        this.logger.debug('Tone/Dialect adaptation skipped', { error: String(e) });
+        this.logger.warn('Tone/Dialect adaptation failed, using original response', { 
+          error: String(e),
+          customerId: context.customerId
+        });
       }
 
       // Enhance with Instagram-specific features
@@ -631,7 +714,12 @@ export class InstagramAIService {
         const { getSemanticMemoryService } = await import('./semantic-memory.js');
         const mem = getSemanticMemoryService();
         await mem.saveMessage(context.merchantId, context.customerId, (context as any)?.conversationId || '00000000-0000-0000-0000-000000000000', 'assistant', aiResponse.message);
-      } catch {}
+      } catch (e) {
+        this.logger.warn('Failed to save message to semantic memory', { 
+          error: String(e),
+          conversationId: (context as any)?.conversationId
+        });
+      }
 
       return aiResponse;
     } catch (error) {
@@ -912,6 +1000,23 @@ export class InstagramAIService {
       { role: 'system', content: systemPrompt }
     ];
 
+    // DB-driven merchant profile (verticals / sizes/colors relevance)
+    try {
+      const { default: MerchantCatalogService } = await import('./catalog/merchant-catalog.service.js');
+      const catalogService = new MerchantCatalogService();
+      const profile = await catalogService.analyzeMerchantInventory(context.merchantId);
+      const v = profile.primaryVertical || 'general';
+      const sizes = profile.requiresSizes ? 'yes' : 'no';
+      const colors = profile.requiresColors ? 'yes' : 'no';
+      const catLine = profile.categories.slice(0,3).map(c => c.name).join(', ');
+      messages.push({
+        role: 'system',
+        content: `📚 Merchant profile: vertical=${v}, requiresSizes=${sizes}, requiresColors=${colors}. Top categories: ${catLine || 'N/A'}.`
+      });
+    } catch (e) {
+      this.logger.warn('Failed to enrich prompt with merchant catalog', { error: String(e) });
+    }
+
     // Enrich prompt with merchant data (name, currency, top products, message window)
     try {
       const sql = this.db.getSQL();
@@ -1020,7 +1125,9 @@ export class InstagramAIService {
           prLine
         ].filter(Boolean).join('\n');
         messages.push({ role: 'system', content: overviewBlock });
-      } catch {}
+      } catch (e) {
+        this.logger.warn('Failed to load merchant overview data', { error: String(e) });
+      }
 
       // Query-aware catalog snapshot لهذه الرسالة (حقائق تُستخدم كما هي)
       try {
@@ -1033,7 +1140,9 @@ export class InstagramAIService {
             messages.push({ role: 'system', content: `حقائق من قاعدة البيانات (لا تختلق معلومات خارجها):\n${block}` });
           }
         }
-      } catch {}
+      } catch (e) {
+        this.logger.warn('Failed to load query-aware catalog data', { error: String(e) });
+      }
 
       // Add interaction analysis + risk/engagement context (best-effort)
       try {
@@ -1052,7 +1161,10 @@ export class InstagramAIService {
         ].join('\n');
         messages.unshift({ role: 'system', content: analysisBlock });
       } catch (e) {
-        this.logger.debug('Interaction analysis injection skipped', { error: String(e) });
+        this.logger.warn('Interaction analysis injection failed, continuing without analysis', { 
+          error: String(e),
+          merchantId: context.merchantId
+        });
       }
     } catch (e) {
       this.logger.warn('Failed to enrich Instagram prompt with merchant data', { error: String(e), merchantId: context.merchantId });
@@ -1098,7 +1210,10 @@ export class InstagramAIService {
       ].filter(Boolean).join('\n');
       messages.unshift({ role: 'system', content: personalBlock });
     } catch (e) {
-      this.logger.debug('Personalization injection skipped', { error: String(e) });
+      this.logger.warn('Personalization injection failed, continuing without personalization', { 
+        error: String(e),
+        customerId: context.customerId
+      });
     }
 
     // Inject strict grounding facts for this request, إذا توفرت
@@ -1117,7 +1232,9 @@ export class InstagramAIService {
         messages.push({ role: 'system', content: rules });
         messages.push({ role: 'system', content: `FACTS_JSON:\n${JSON.stringify(factsJson)}` });
       }
-    } catch {}
+    } catch (e) {
+      this.logger.warn('Failed to inject grounding facts', { error: String(e) });
+    }
 
     return messages;
   }

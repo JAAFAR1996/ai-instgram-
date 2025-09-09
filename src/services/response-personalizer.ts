@@ -26,9 +26,34 @@ export class ResponsePersonalizer {
   private search = new SmartProductSearch();
 
   private greetingForTier(tier: PersonalizeOptions['tier']): string {
-    if (tier === 'VIP') return 'هلا وسهلا عميلنا المميز ✨';
-    if (tier === 'REPEAT') return 'رجعنا نفرح بخدمتك 🌟';
-    return 'أهلاً وسهلاً بيك 🙌';
+    const vipGreetings = [
+      'هلا وسهلا عميلنا المميز ✨',
+      'أهلاً وسهلاً بيك يا VIP 🌟',
+      'مرحباً بعميلنا المميز 💎',
+      'أهلاً وسهلاً بالعميل المميز ⭐'
+    ];
+    
+    const repeatGreetings = [
+      'رجعنا نفرح بخدمتك 🌟',
+      'أهلاً وسهلاً بيك مرة ثانية 🙌',
+      'مرحباً بعودتك إلينا 💫',
+      'أهلاً وسهلاً بيك مرة أخرى 🌸'
+    ];
+    
+    const newGreetings = [
+      'أهلاً وسهلاً بيك 🙌',
+      'مرحباً بك في متجرنا 🌟',
+      'أهلاً وسهلاً بيك معنا ✨',
+      'مرحباً بك وسهلاً 💫'
+    ];
+    
+    if (tier === 'VIP') {
+      return vipGreetings[Math.floor(Math.random() * vipGreetings.length)];
+    }
+    if (tier === 'REPEAT') {
+      return repeatGreetings[Math.floor(Math.random() * repeatGreetings.length)];
+    }
+    return newGreetings[Math.floor(Math.random() * newGreetings.length)];
   }
 
   private adjustTone(

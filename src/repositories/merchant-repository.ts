@@ -28,7 +28,6 @@ interface MerchantDbRow extends DatabaseRow {
   monthly_message_limit: string;
   monthly_messages_used: string;
   settings: string;
-  sales_style: string;
   created_at: string;
   updated_at: string;
   last_active_at: string | null;
@@ -64,7 +63,6 @@ export interface Merchant {
   monthlyMessageLimit: number;
   monthlyMessagesUsed: number;
   settings: Record<string, unknown>;
-  salesStyle: string;
   createdAt: Date;
   updatedAt: Date;
   lastActiveAt?: Date;
@@ -80,7 +78,6 @@ export interface CreateMerchantRequest {
   businessAccountId?: string;
   monthlyMessageLimit?: number;
   settings?: Record<string, unknown>;
-  salesStyle?: string;
 }
 
 export interface UpdateMerchantRequest {
@@ -94,7 +91,6 @@ export interface UpdateMerchantRequest {
   subscriptionTier?: 'FREE' | 'BASIC' | 'PREMIUM' | 'ENTERPRISE';
   monthlyMessageLimit?: number;
   settings?: Record<string, unknown>;
-  salesStyle?: string;
 }
 
 export interface MerchantFilters {
@@ -156,7 +152,6 @@ export class MerchantRepository {
         subscription_tier,
         monthly_message_limit,
         settings,
-        sales_style,
         business_account_id
       ) VALUES (
         ${data.businessName},
@@ -167,7 +162,6 @@ export class MerchantRepository {
         ${data.subscriptionTier ?? 'FREE'},
         ${data.monthlyMessageLimit ?? this.getDefaultMessageLimit(data.subscriptionTier ?? 'FREE')},
         ${JSON.stringify(data.settings ?? {})},
-        ${data.salesStyle ?? 'neutral'},
         ${data.businessAccountId ?? null}
       )
       RETURNING *
@@ -261,10 +255,6 @@ export class MerchantRepository {
 
     if (data.settings !== undefined) {
       updateFields.push(sql`settings = ${JSON.stringify(data.settings)}`);
-    }
-
-    if (data.salesStyle !== undefined) {
-      updateFields.push(sql`sales_style = ${data.salesStyle}`);
     }
 
     updateFields.push(sql`updated_at = NOW()`);
@@ -629,7 +619,6 @@ export class MerchantRepository {
       monthlyMessageLimit: parseInt(row.monthly_message_limit),
       monthlyMessagesUsed: parseInt(row.monthly_messages_used) ?? 0,
       settings: typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings,
-      salesStyle: row.sales_style || 'neutral',
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at)
     };

@@ -193,6 +193,7 @@ export class ServiceController {
 
   /**
    * Check if service is enabled before processing
+   * باتش 1: لا تعطل الخدمة لمجرد فشل قراءة العلم - اجعله "وضع degraded"
    */
   public async isServiceEnabled(
     merchantId: string, 
@@ -209,8 +210,15 @@ export class ServiceController {
 
       return await this.getServiceStatus(merchantId, service);
     } catch (error) {
-      console.error('❌ Failed to check service enabled:', error);
-      return false;
+      // باتش 1: لا تعطل الذكاء الاصطناعي لمجرد فشل قراءة العلم
+      logger.warn('Failed to check service status, defaulting to enabled (degraded mode):', { 
+        merchantId, 
+        service, 
+        error: error instanceof Error ? error.message : String(error) 
+      });
+      
+      // الافتراضي: مفعّل (وضع degraded)
+      return true;
     }
   }
 
