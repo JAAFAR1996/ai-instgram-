@@ -398,8 +398,18 @@ export function registerWebhookRoutes(app: Hono, _deps: any): void {
             let aiText = '';
             if (result.success && result.metadata?.aiResponse) {
               aiText = result.metadata.aiResponse as string;
+              log.info('✅ AI response extracted successfully', { 
+                aiTextLength: aiText.length,
+                aiTextPreview: aiText.substring(0, 50)
+              });
             } else {
               aiText = 'عذراً، حدث خطأ مؤقت. يرجى المحاولة مرة أخرى.';
+              log.warn('❌ AI response extraction failed', { 
+                resultSuccess: result.success,
+                hasMetadata: !!result.metadata,
+                hasAiResponse: !!result.metadata?.aiResponse,
+                resultKeys: Object.keys(result)
+              });
             }
             
             // Check 24h message window status (Meta policy)
