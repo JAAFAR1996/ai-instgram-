@@ -3,6 +3,22 @@ import { build } from 'esbuild';
 import { readdirSync, statSync, mkdirSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
+function copyPublicDir(src, dst) {
+  const items = readdirSync(src);
+  for (const item of items) {
+    const srcPath = join(src, item);
+    const dstPath = join(dst, item);
+    const stat = statSync(srcPath);
+    
+    if (stat.isDirectory()) {
+      mkdirSync(dstPath, { recursive: true });
+      copyPublicDir(srcPath, dstPath);
+    } else {
+      copyFileSync(srcPath, dstPath);
+    }
+  }
+}
+
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const fp = join(dir, name);
@@ -60,6 +76,20 @@ async function main() {
       }
       break;
     } catch {}
+  }
+
+  // Copy public directory for static files
+  const publicSrcDir = join(process.cwd(), 'public');
+  const publicDstDir = join(process.cwd(), 'dist', 'public');
+  try {
+    const st = statSync(publicSrcDir);
+    if (st.isDirectory()) {
+      mkdirSync(publicDstDir, { recursive: true });
+      copyPublicDir(publicSrcDir, publicDstDir);
+      console.log('✅ Copied public directory to dist');
+    }
+  } catch (e) {
+    console.log('ℹ️  No public directory found to copy');
   }
 }
 

@@ -36,6 +36,7 @@ const CreateMerchantSchema = z.object({
   instagram_username: z.string().min(0).max(100).optional().default(''),
   email: z.string().email().optional(),
   phone: z.string().optional(),
+  manychat_udid: z.string().min(0).max(255).optional(),
   currency: z.string().length(3).optional().default('IQD'),
   timezone: z.string().optional().default('Asia/Baghdad'),
   working_hours: z.record(z.any()).optional(),
@@ -364,6 +365,18 @@ export function registerAdminRoutes(app: Hono) {
                                     <option value="USD">دولار أمريكي</option>
                                     <option value="EUR">يورو</option>
                                 </select>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>ManyChat UDID (معرف المشترك)</label>
+                                <input type="text" name="manychat_udid" placeholder="مثال: 1234567890123456789">
+                                <small style="color: #666; font-size: 12px;">معرف المشترك في ManyChat لربط الحساب</small>
+                            </div>
+                            <div class="form-group">
+                                <label>رقم الهاتف</label>
+                                <input type="tel" name="phone" placeholder="مثال: +964771234567">
                             </div>
                         </div>
                         
@@ -1046,6 +1059,26 @@ export function registerAdminRoutes(app: Hono) {
           ${JSON.stringify(settings)}, ${JSON.stringify(aiConfig)}, ${now}, ${now}
         )
       `;
+      
+      // Insert ManyChat UDID if provided
+      if (validatedData.manychat_udid && validatedData.manychat_udid.trim()) {
+        await sql`
+          INSERT INTO manychat_subscribers (
+            merchant_id, manychat_subscriber_id, instagram_customer_id, 
+            status, created_at, updated_at
+          ) VALUES (
+            ${merchantId}::uuid, ${validatedData.manychat_udid.trim()}, 
+            ${validatedData.instagram_username || null}, 
+            'active', ${now}, ${now}
+          )
+        `;
+        
+        log.info('✅ ManyChat UDID linked to merchant', {
+          merchantId,
+          udid: validatedData.manychat_udid.trim(),
+          instagram: validatedData.instagram_username
+        });
+      }
       
       // Insert products if provided
       if (validatedData.products && validatedData.products.length > 0) {
@@ -1794,7 +1827,7 @@ export function registerAdminRoutes(app: Hono) {
   app.get('/public/*', async (c) => {
     try {
       const path = c.req.path.replace('/public/', '');
-      const filePath = `public/${path}`;
+      const filePath = `dist/public/${path}`;
       
       // Log the request for debugging
       log.info('Static file request', { 
@@ -1814,7 +1847,7 @@ export function registerAdminRoutes(app: Hono) {
         
         try {
           // Check if public directory exists
-          if (!fs.existsSync('public')) {
+          if (!fs.existsSync('dist/public')) {
             return c.text('Public directory not found', 404);
           }
           const html = `
