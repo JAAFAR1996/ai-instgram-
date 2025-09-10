@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إدارة التجار - منصة المبيعات الذكية</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            direction: rtl;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .nav-tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+            overflow-x: auto;
+        }
+
+        .nav-tab {
+            padding: 20px 30px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+            border-bottom: 3px solid transparent;
+        }
+
+        .nav-tab.active {
+            color: #1e3c72;
+            border-bottom-color: #1e3c72;
+            background: white;
+        }
+
+        .nav-tab:hover {
+            color: #1e3c72;
+            background: #f0f2ff;
+        }
+
+        .tab-content {
+            padding: 40px;
+            min-height: 600px;
+        }
+
+        .tab-pane {
+            display: none;
+        }
+
+        .tab-pane.active {
+            display: block;
+        }
+
+        .search-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .search-input {
+            flex: 1;
+            min-width: 300px;
+            padding: 15px 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #1e3c72;
+            box-shadow: 0 0 0 3px rgba(30, 60, 114, 0.1);
+        }
+
+        .filter-select {
+            padding: 15px 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            font-size: 16px;
+            background: white;
+            min-width: 150px;
+        }
+
+        .btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+            color: #212529;
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+        }
+
+        .merchants-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .merchant-card {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .merchant-card:hover {
+            border-color: #1e3c72;
+            box-shadow: 0 8px 25px rgba(30, 60, 114, 0.15);
+            transform: translateY(-5px);
+        }
+
+        .merchant-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .merchant-info h3 {
+            color: #1e3c72;
+            font-size: 1.4rem;
+            margin-bottom: 5px;
+        }
+
+        .merchant-category {
+            background: #e9ecef;
+            color: #666;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            display: inline-block;
+        }
+
+        .merchant-status {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .merchant-details {
+            margin-bottom: 20px;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #f8f9fa;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #666;
+        }
+
+        .detail-value {
+            color: #333;
+        }
+
+        .merchant-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+
+        .products-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #e9ecef;
+        }
+
+        .products-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .products-header h4 {
+            color: #1e3c72;
+            margin: 0;
+        }
+
+        .products-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 10px;
+        }
+
+        .product-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #f8f9fa;
+        }
+
+        .product-item:last-child {
+            border-bottom: none;
+        }
+
+        .product-name {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .product-price {
+            color: #28a745;
+            font-weight: 600;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .stat-card h3 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .stat-card p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+            font-size: 1.2rem;
+        }
+
+        .loading i {
+            font-size: 2rem;
+            margin-bottom: 15px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+        }
+
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            color: #ccc;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .modal-header h2 {
+            color: #1e3c72;
+            margin: 0;
+        }
+
+        .close {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: color 0.3s ease;
+        }
+
+        .close:hover {
+            color: #000;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #1e3c72;
+            box-shadow: 0 0 0 3px rgba(30, 60, 114, 0.1);
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 30px;
+        }
+
+        .pagination button {
+            padding: 10px 15px;
+            border: 2px solid #e9ecef;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .pagination button:hover {
+            border-color: #1e3c72;
+            color: #1e3c72;
+        }
+
+        .pagination button.active {
+            background: #1e3c72;
+            color: white;
+            border-color: #1e3c72;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        @media (max-width: 768px) {
+            .merchants-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .search-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .search-input {
+                min-width: auto;
+            }
+            
+            .nav-tabs {
+                flex-direction: column;
+            }
+            
+            .nav-tab {
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-users-cog"></i> إدارة التجار</h1>
+            <p>منصة المبيعات الذكية - إدارة شاملة للتجار والمنتجات</p>
+        </div>
+        
+        <div class="nav-tabs">
+            <button class="nav-tab active" data-tab="merchants">
+                <i class="fas fa-store"></i> التجار
+            </button>
+            <button class="nav-tab" data-tab="products">
+                <i class="fas fa-box"></i> المنتجات
+            </button>
+            <button class="nav-tab" data-tab="analytics">
+                <i class="fas fa-chart-bar"></i> الإحصائيات
+            </button>
+        </div>
+        
+        <div class="tab-content">
+            <!-- Merchants Tab -->
+            <div class="tab-pane active" id="merchants">
+                <div class="search-bar">
+                    <input type="text" class="search-input" id="merchantSearch" 
+                           placeholder="البحث عن تاجر...">
+                    <select class="filter-select" id="categoryFilter">
+                        <option value="">جميع الفئات</option>
+                        <option value="fashion">أزياء</option>
+                        <option value="electronics">إلكترونيات</option>
+                        <option value="beauty">جمال</option>
+                        <option value="home">منزل</option>
+                        <option value="sports">رياضة</option>
+                        <option value="grocery">مواد غذائية</option>
+                        <option value="automotive">سيارات</option>
+                        <option value="health">صحة</option>
+                        <option value="education">تعليم</option>
+                        <option value="general">عام</option>
+                    </select>
+                    <select class="filter-select" id="statusFilter">
+                        <option value="">جميع الحالات</option>
+                        <option value="active">نشط</option>
+                        <option value="inactive">غير نشط</option>
+                    </select>
+                    <a href="merchant-entry.html" class="btn btn-success">
+                        <i class="fas fa-plus"></i> إضافة تاجر جديد
+                    </a>
+                </div>
+                
+                <div class="loading" id="merchantsLoading">
+                    <i class="fas fa-spinner"></i>
+                    <p>جاري تحميل التجار...</p>
+                </div>
+                
+                <div class="merchants-grid" id="merchantsGrid"></div>
+                
+                <div class="pagination" id="merchantsPagination"></div>
+            </div>
+            
+            <!-- Products Tab -->
+            <div class="tab-pane" id="products">
+                <div class="search-bar">
+                    <input type="text" class="search-input" id="productSearch" 
+                           placeholder="البحث عن منتج...">
+                    <select class="filter-select" id="productCategoryFilter">
+                        <option value="">جميع الفئات</option>
+                        <option value="fashion">أزياء</option>
+                        <option value="electronics">إلكترونيات</option>
+                        <option value="beauty">جمال</option>
+                        <option value="home">منزل</option>
+                        <option value="sports">رياضة</option>
+                        <option value="grocery">مواد غذائية</option>
+                        <option value="automotive">سيارات</option>
+                        <option value="health">صحة</option>
+                        <option value="education">تعليم</option>
+                        <option value="general">عام</option>
+                    </select>
+                    <select class="filter-select" id="merchantFilter">
+                        <option value="">جميع التجار</option>
+                    </select>
+                </div>
+                
+                <div class="loading" id="productsLoading">
+                    <i class="fas fa-spinner"></i>
+                    <p>جاري تحميل المنتجات...</p>
+                </div>
+                
+                <div class="merchants-grid" id="productsGrid"></div>
+                
+                <div class="pagination" id="productsPagination"></div>
+            </div>
+            
+            <!-- Analytics Tab -->
+            <div class="tab-pane" id="analytics">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3 id="totalMerchants">0</h3>
+                        <p>إجمالي التجار</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="activeMerchants">0</h3>
+                        <p>التجار النشطون</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="totalProducts">0</h3>
+                        <p>إجمالي المنتجات</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="totalRevenue">$0</h3>
+                        <p>إجمالي الإيرادات</p>
+                    </div>
+                </div>
+                
+                <div class="loading" id="analyticsLoading">
+                    <i class="fas fa-spinner"></i>
+                    <p>جاري تحميل الإحصائيات...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Merchant Modal -->
+    <div id="editMerchantModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-edit"></i> تعديل بيانات التاجر</h2>
+                <span class="close">&times;</span>
+            </div>
+            <form id="editMerchantForm">
+                <div class="form-group">
+                    <label for="editBusinessName">اسم العمل</label>
+                    <input type="text" id="editBusinessName" name="business_name" required>
+                </div>
+                <div class="form-group">
+                    <label for="editBusinessCategory">فئة العمل</label>
+                    <select id="editBusinessCategory" name="business_category" required>
+                        <option value="fashion">أزياء</option>
+                        <option value="electronics">إلكترونيات</option>
+                        <option value="beauty">جمال</option>
+                        <option value="home">منزل</option>
+                        <option value="sports">رياضة</option>
+                        <option value="grocery">مواد غذائية</option>
+                        <option value="automotive">سيارات</option>
+                        <option value="health">صحة</option>
+                        <option value="education">تعليم</option>
+                        <option value="general">عام</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editWhatsappNumber">رقم الواتساب</label>
+                    <input type="tel" id="editWhatsappNumber" name="whatsapp_number" required>
+                </div>
+                <div class="form-group">
+                    <label for="editInstagramUsername">اسم المستخدم في إنستغرام</label>
+                    <input type="text" id="editInstagramUsername" name="instagram_username">
+                </div>
+                <div class="form-group">
+                    <label for="editEmail">البريد الإلكتروني</label>
+                    <input type="email" id="editEmail" name="email">
+                </div>
+                <div class="form-group">
+                    <label for="editCurrency">العملة</label>
+                    <select id="editCurrency" name="currency" required>
+                        <option value="IQD">دينار عراقي</option>
+                        <option value="USD">دولار أمريكي</option>
+                        <option value="EUR">يورو</option>
+                        <option value="GBP">جنيه إسترليني</option>
+                        <option value="SAR">ريال سعودي</option>
+                        <option value="AED">درهم إماراتي</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editStatus">الحالة</label>
+                    <select id="editStatus" name="status">
+                        <option value="active">نشط</option>
+                        <option value="inactive">غير نشط</option>
+                    </select>
+                </div>
+                <div style="text-align: center; margin-top: 30px;">
+                    <button type="submit" class="btn btn-success">
+                        <i class="fas fa-save"></i> حفظ التغييرات
+                    </button>
+                    <button type="button" class="btn btn-warning" onclick="closeModal('editMerchantModal')">
+                        <i class="fas fa-times"></i> إلغاء
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Product Modal -->
+    <div id="editProductModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-edit"></i> تعديل بيانات المنتج</h2>
+                <span class="close">&times;</span>
+            </div>
+            <form id="editProductForm">
+                <div class="form-group">
+                    <label for="editProductSku">رمز المنتج (SKU)</label>
+                    <input type="text" id="editProductSku" name="sku" required>
+                </div>
+                <div class="form-group">
+                    <label for="editProductNameAr">اسم المنتج (عربي)</label>
+                    <input type="text" id="editProductNameAr" name="name_ar" required>
+                </div>
+                <div class="form-group">
+                    <label for="editProductNameEn">اسم المنتج (إنجليزي)</label>
+                    <input type="text" id="editProductNameEn" name="name_en">
+                </div>
+                <div class="form-group">
+                    <label for="editProductCategory">الفئة</label>
+                    <select id="editProductCategory" name="category">
+                        <option value="general">عام</option>
+                        <option value="fashion">أزياء</option>
+                        <option value="electronics">إلكترونيات</option>
+                        <option value="beauty">جمال</option>
+                        <option value="home">منزل</option>
+                        <option value="sports">رياضة</option>
+                        <option value="grocery">مواد غذائية</option>
+                        <option value="automotive">سيارات</option>
+                        <option value="health">صحة</option>
+                        <option value="education">تعليم</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editProductDescription">وصف المنتج</label>
+                    <textarea id="editProductDescription" name="description_ar" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="editProductPrice">السعر (دولار)</label>
+                    <input type="number" id="editProductPrice" name="price_usd" step="0.01" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label for="editProductStock">الكمية المتوفرة</label>
+                    <input type="number" id="editProductStock" name="stock_quantity" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label for="editProductTags">العلامات</label>
+                    <input type="text" id="editProductTags" name="tags" placeholder="مفصولة بفواصل">
+                </div>
+                <div class="form-group">
+                    <label for="editProductStatus">الحالة</label>
+                    <select id="editProductStatus" name="is_active">
+                        <option value="true">نشط</option>
+                        <option value="false">غير نشط</option>
+                    </select>
+                </div>
+                <div style="text-align: center; margin-top: 30px;">
+                    <button type="submit" class="btn btn-success">
+                        <i class="fas fa-save"></i> حفظ التغييرات
+                    </button>
+                    <button type="button" class="btn btn-warning" onclick="closeModal('editProductModal')">
+                        <i class="fas fa-times"></i> إلغاء
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="merchants-management.js"></script>
+</body>
+</html>

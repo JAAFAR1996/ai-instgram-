@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إضافة تاجر جديد - منصة المبيعات الذكية</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            direction: rtl;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .progress-bar {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border: 2px solid #e9ecef;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .progress-score {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #1e3c72;
+        }
+
+        .progress-bar-bg {
+            background: #e9ecef;
+            height: 20px;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #20c997);
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+
+        .form-section {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            border: 2px solid #e9ecef;
+            transition: all 0.3s ease;
+        }
+
+        .form-section:hover {
+            border-color: #1e3c72;
+            box-shadow: 0 5px 15px rgba(30, 60, 114, 0.1);
+        }
+
+        .form-section h2 {
+            color: #1e3c72;
+            margin-bottom: 25px;
+            font-size: 1.8rem;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .form-section h2 i {
+            font-size: 1.5rem;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 25px;
+            margin-bottom: 25px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: #333;
+            font-size: 1.1rem;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #1e3c72;
+            box-shadow: 0 0 0 3px rgba(30, 60, 114, 0.1);
+        }
+
+        .required {
+            color: #dc3545;
+        }
+
+        .btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin: 10px;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+            color: #212529;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+        }
+
+        .product-item {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+
+        .product-item:hover {
+            border-color: #1e3c72;
+            box-shadow: 0 8px 25px rgba(30, 60, 114, 0.15);
+        }
+
+        .product-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .product-header h3 {
+            color: #1e3c72;
+            margin: 0;
+            font-size: 1.3rem;
+        }
+
+        .remove-product {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .remove-product:hover {
+            background: #c82333;
+            transform: translateY(-1px);
+        }
+
+        .add-product {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 20px 40px;
+            border-radius: 15px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        .add-product:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 30px rgba(102, 126, 234, 0.6);
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 30px;
+            color: #666;
+            font-size: 1.2rem;
+        }
+
+        .success {
+            display: none;
+            background: #d4edda;
+            color: #155724;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border: 2px solid #c3e6cb;
+        }
+
+        .error {
+            display: none;
+            background: #f8d7da;
+            color: #721c24;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border: 2px solid #f5c6cb;
+        }
+
+        .image-upload {
+            border: 2px dashed #1e3c72;
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+            background: #f8f9ff;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .image-upload:hover {
+            border-color: #2a5298;
+            background: #f0f2ff;
+        }
+
+        .image-upload i {
+            font-size: 3rem;
+            color: #1e3c72;
+            margin-bottom: 15px;
+        }
+
+        .image-preview {
+            display: none;
+            margin-top: 15px;
+        }
+
+        .image-preview img {
+            max-width: 200px;
+            max-height: 200px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .working-hours {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .day-schedule {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            border: 2px solid #e9ecef;
+        }
+
+        .day-schedule h4 {
+            color: #1e3c72;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .day-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 25px;
+            background: #ccc;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .toggle-switch.active {
+            background: #28a745;
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            width: 21px;
+            height: 21px;
+            background: white;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.3s ease;
+        }
+
+        .toggle-switch.active::after {
+            transform: translateX(25px);
+        }
+
+        .time-inputs {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .time-inputs input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        @media (max-width: 768px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .working-hours {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-store"></i> إضافة تاجر جديد</h1>
+            <p>منصة المبيعات الذكية - إدارة شاملة للتجار</p>
+        </div>
+        
+        <div class="content">
+            <!-- Progress Bar -->
+            <div class="progress-bar">
+                <div class="progress-info">
+                    <span>درجة اكتمال البيانات</span>
+                    <span class="progress-score" id="completenessScore">0%</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="progressFill" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <form id="merchantForm">
+                <!-- Basic Information -->
+                <div class="form-section">
+                    <h2><i class="fas fa-info-circle"></i> المعلومات الأساسية</h2>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="business_name">اسم العمل <span class="required">*</span></label>
+                            <input type="text" id="business_name" name="business_name" required 
+                                   placeholder="مثال: متجر الأزياء الحديث">
+                        </div>
+                        <div class="form-group">
+                            <label for="business_category">فئة العمل <span class="required">*</span></label>
+                            <select id="business_category" name="business_category" required>
+                                <option value="">اختر الفئة</option>
+                                <option value="fashion">أزياء</option>
+                                <option value="electronics">إلكترونيات</option>
+                                <option value="beauty">جمال</option>
+                                <option value="home">منزل</option>
+                                <option value="sports">رياضة</option>
+                                <option value="grocery">مواد غذائية</option>
+                                <option value="automotive">سيارات</option>
+                                <option value="health">صحة</option>
+                                <option value="education">تعليم</option>
+                                <option value="general">عام</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="business_address">عنوان العمل</label>
+                            <input type="text" id="business_address" name="business_address" 
+                                   placeholder="مثال: بغداد، الكرادة، شارع 52">
+                        </div>
+                        <div class="form-group">
+                            <label for="business_description">وصف العمل</label>
+                            <textarea id="business_description" name="business_description" rows="3"
+                                      placeholder="وصف مختصر عن العمل..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contact Information -->
+                <div class="form-section">
+                    <h2><i class="fas fa-phone"></i> معلومات التواصل</h2>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="whatsapp_number">رقم الواتساب <span class="required">*</span></label>
+                            <input type="tel" id="whatsapp_number" name="whatsapp_number" required 
+                                   placeholder="مثال: +964771234567">
+                        </div>
+                        <div class="form-group">
+                            <label for="instagram_username">اسم المستخدم في إنستغرام</label>
+                            <input type="text" id="instagram_username" name="instagram_username" 
+                                   placeholder="مثال: my_shop">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="email">البريد الإلكتروني</label>
+                            <input type="email" id="email" name="email" 
+                                   placeholder="مثال: info@myshop.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="phone">رقم الهاتف</label>
+                            <input type="tel" id="phone" name="phone" 
+                                   placeholder="مثال: +964771234567">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Business Settings -->
+                <div class="form-section">
+                    <h2><i class="fas fa-cogs"></i> إعدادات العمل</h2>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="currency">العملة <span class="required">*</span></label>
+                            <select id="currency" name="currency" required>
+                                <option value="IQD">دينار عراقي</option>
+                                <option value="USD">دولار أمريكي</option>
+                                <option value="EUR">يورو</option>
+                                <option value="GBP">جنيه إسترليني</option>
+                                <option value="SAR">ريال سعودي</option>
+                                <option value="AED">درهم إماراتي</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="timezone">المنطقة الزمنية</label>
+                            <select id="timezone" name="timezone">
+                                <option value="Asia/Baghdad">بغداد</option>
+                                <option value="Asia/Dubai">دبي</option>
+                                <option value="Asia/Riyadh">الرياض</option>
+                                <option value="Europe/London">لندن</option>
+                                <option value="America/New_York">نيويورك</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Working Hours -->
+                <div class="form-section">
+                    <h2><i class="fas fa-clock"></i> ساعات العمل</h2>
+                    <div class="working-hours" id="workingHours">
+                        <!-- Working hours will be generated by JavaScript -->
+                    </div>
+                </div>
+
+                <!-- Payment Methods -->
+                <div class="form-section">
+                    <h2><i class="fas fa-credit-card"></i> طرق الدفع</h2>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>طرق الدفع المتاحة</label>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+                                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                    <input type="checkbox" name="payment_methods" value="COD">
+                                    <span>الدفع عند الاستلام</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                    <input type="checkbox" name="payment_methods" value="ZAIN_CASH">
+                                    <span>زين كاش</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                    <input type="checkbox" name="payment_methods" value="ASIA_HAWALA">
+                                    <span>آسيا حوالة</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                    <input type="checkbox" name="payment_methods" value="VISA">
+                                    <span>فيزا</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                    <input type="checkbox" name="payment_methods" value="MASTERCARD">
+                                    <span>ماستركارد</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                    <input type="checkbox" name="payment_methods" value="PAYPAL">
+                                    <span>باي بال</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Configuration -->
+                <div class="form-section">
+                    <h2><i class="fas fa-robot"></i> إعدادات الذكاء الاصطناعي</h2>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="ai_model">نموذج الذكاء الاصطناعي</label>
+                            <select id="ai_model" name="ai_model">
+                                <option value="gpt-4o-mini">GPT-4o Mini (موصى به)</option>
+                                <option value="gpt-4o">GPT-4o</option>
+                                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="ai_temperature">درجة الإبداع (0-1)</label>
+                            <input type="range" id="ai_temperature" name="ai_temperature" 
+                                   min="0" max="1" step="0.1" value="0.7">
+                            <span id="temperatureValue">0.7</span>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="ai_max_tokens">الحد الأقصى للكلمات</label>
+                            <input type="number" id="ai_max_tokens" name="ai_max_tokens" 
+                                   min="50" max="2000" value="600">
+                        </div>
+                        <div class="form-group">
+                            <label for="ai_tone">نبرة الرد</label>
+                            <select id="ai_tone" name="ai_tone">
+                                <option value="friendly">ودود</option>
+                                <option value="professional">مهني</option>
+                                <option value="casual">عادي</option>
+                                <option value="neutral">محايد</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Response Templates -->
+                <div class="form-section">
+                    <h2><i class="fas fa-comments"></i> قوالب الردود</h2>
+                    <div class="form-group">
+                        <label for="welcome_message">رسالة الترحيب</label>
+                        <textarea id="welcome_message" name="welcome_message" rows="3"
+                                  placeholder="أهلاً بك! كيف يمكنني مساعدتك اليوم؟"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="fallback_message">رد عدم الفهم</label>
+                        <textarea id="fallback_message" name="fallback_message" rows="3"
+                                  placeholder="واضح! أعطيني تفاصيل أكثر وسأساعدك فوراً."></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="outside_hours_message">رد خارج ساعات العمل</label>
+                        <textarea id="outside_hours_message" name="outside_hours_message" rows="3"
+                                  placeholder="نرحب برسالتك، سنعود لك بأقرب وقت ضمن ساعات الدوام."></textarea>
+                    </div>
+                </div>
+
+                <!-- Products Section -->
+                <div class="form-section">
+                    <h2><i class="fas fa-box"></i> المنتجات</h2>
+                    <p style="margin-bottom: 20px; color: #666;">يمكنك إضافة المنتجات الآن أو لاحقاً من لوحة التحكم</p>
+                    
+                    <button type="button" class="add-product" id="addProductBtn">
+                        <i class="fas fa-plus"></i> إضافة منتج جديد
+                    </button>
+                    
+                    <div id="productsContainer"></div>
+                </div>
+
+                <!-- Submit Button -->
+                <div style="text-align: center; margin-top: 40px;">
+                    <button type="submit" class="btn btn-success" id="submitBtn">
+                        <i class="fas fa-rocket"></i> إنشاء التاجر
+                    </button>
+                </div>
+
+                <!-- Loading and Messages -->
+                <div class="loading" id="loading">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <p>جاري إنشاء التاجر...</p>
+                </div>
+
+                <div class="success" id="success">
+                    <h3><i class="fas fa-check-circle"></i> تم إنشاء التاجر بنجاح!</h3>
+                    <p id="successMessage"></p>
+                </div>
+
+                <div class="error" id="error">
+                    <h3><i class="fas fa-exclamation-triangle"></i> حدث خطأ</h3>
+                    <p id="errorMessage"></p>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="merchant-entry.js"></script>
+</body>
+</html>
