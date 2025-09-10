@@ -202,7 +202,7 @@ export class AIService {
   }
 
   /** Analyze customer mood and personality from message */
-  private analyzeCustomerMood(message: string, history: MessageHistory[]): {
+  private analyzeCustomerMood(message: string, _history: MessageHistory[]): {
     mood: 'happy' | 'neutral' | 'frustrated' | 'excited' | 'hesitant' | 'joking';
     personality: 'formal' | 'casual' | 'friendly' | 'business';
     urgency: 'low' | 'medium' | 'high';
@@ -241,8 +241,7 @@ export class AIService {
   /** Generate contextual response based on customer analysis */
   private adaptResponseToCustomer(
     baseResponse: string, 
-    customerAnalysis: ReturnType<typeof this.analyzeCustomerMood>,
-    context: ConversationContext
+    customerAnalysis: ReturnType<typeof this.analyzeCustomerMood>
   ): string {
     let adapted = baseResponse;
     
@@ -290,6 +289,16 @@ export class AIService {
     // Extract preferences from conversation
     const preferences: string[] = [];
     const mentionedProducts: string[] = [];
+    
+    customerMessages.forEach(msg => {
+      const text = msg.toLowerCase();
+      
+      // Extract product mentions
+      if (/قميص|بنطلون|حذاء|جانتي|فستان/.test(text)) {
+        const products = text.match(/قميص|بنطلون|حذاء|جانتي|فستان/g);
+        if (products) mentionedProducts.push(...products);
+      }
+    });
     const priceRange: string[] = [];
     
     customerMessages.forEach(msg => {
@@ -317,6 +326,7 @@ export class AIService {
     const memoryParts = [];
     if (preferences.length) memoryParts.push(`التفضيلات: ${preferences.join('، ')}`);
     if (priceRange.length) memoryParts.push(priceRange[priceRange.length - 1]);
+    if (mentionedProducts.length) memoryParts.push(`منتجات مذكورة: ${mentionedProducts.slice(0, 3).join('، ')}`);
     
     return memoryParts.length ? memoryParts.join(' | ') : 'زبون جديد';
   }
@@ -324,8 +334,7 @@ export class AIService {
   /** Add smart selling techniques */
   private addSellingIntelligence(
     response: string, 
-    customerMessage: string, 
-    context: ConversationContext
+    customerMessage: string
   ): string {
     const text = customerMessage.toLowerCase();
     let enhanced = response;
@@ -585,11 +594,20 @@ export class AIService {
       // Get the already analyzed customer data and create intelligent response
       let smartResponse = response.trim();
       
-      // The AI should already be intelligent from the enhanced prompts
-      // But we can add final touches if needed
+      // Apply human-like intelligence enhancements
       if (smartResponse.length < 10) {
         smartResponse = 'أهلاً حبيبي! شلونك اليوم؟ شنو أقدر أساعدك بيه؟';
       }
+      
+      // Apply customer mood analysis and adaptation
+      const customerAnalysis = this.analyzeCustomerMood(customerMessage, context.conversationHistory);
+      smartResponse = this.adaptResponseToCustomer(smartResponse, customerAnalysis);
+      
+      // Add selling intelligence
+      smartResponse = this.addSellingIntelligence(smartResponse, customerMessage);
+      
+      // Make conversation more natural
+      smartResponse = this.makeConversationNatural(smartResponse, customerMessage, context.conversationHistory);
       
       const aiResponse: AIResponse = {
         message: smartResponse,

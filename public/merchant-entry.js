@@ -549,12 +549,13 @@ class MerchantEntryManager {
                 throw new Error(errors.join('\n'));
             }
             
-            // Submit to server
+            // Submit to server with admin authentication
+            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
             const response = await fetch('/admin/merchants', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Basic ' + btoa('admin:admin') // Basic Auth for admin routes
+                    'Authorization': `Bearer ${adminKey}`
                 },
                 body: JSON.stringify(data)
             });

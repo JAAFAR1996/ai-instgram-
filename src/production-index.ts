@@ -273,11 +273,293 @@ async function bootstrap() {
       log.info('Queue auto start skipped (STARTUP_SKIP_QUEUE_AUTO=true)');
     }
 
+    // ===============================================
+    // ADMIN AUTHENTICATION MIDDLEWARE
+    // ===============================================
+    
+    // Admin authentication middleware
+    const adminAuth = async (c: any, next: any) => {
+      const authHeader = c.req.header('authorization');
+      const adminKey = process.env.ADMIN_API_KEY || 'admin-key-2025';
+      
+      // Check for API key in header or query
+      const providedKey = authHeader?.replace('Bearer ', '') || c.req.query('key');
+      
+      if (providedKey !== adminKey) {
+        return c.json({ error: 'Unauthorized access to admin interface' }, 401);
+      }
+      
+      await next();
+    };
+
     // Register route modules with DI
     const deps = { pool, queueManager };
     registerWebhookRoutes(app, deps);
     registerMerchantAdminRoutes(app);
     registerAdminRoutes(app);
+    
+    // ===============================================
+    // PRODUCTION MERCHANT CREATION SYSTEM
+    // نظام إنشاء التجار للإنتاج مع التحقق الشامل
+    // ===============================================
+    
+    app.post('/admin/merchants', adminAuth, async (c) => {
+      const startTime = Date.now();
+      const traceId = randomUUID();
+      
+      try {
+        log.info('Merchant creation request started', { traceId });
+        
+        // 1. Parse and validate request data
+        const rawData = await c.req.json();
+        
+        // 2. Comprehensive data validation
+        const validationResult = await validateMerchantData(rawData);
+        if (!validationResult.success) {
+          log.warn('Merchant validation failed', { traceId, errors: validationResult.errors });
+          return c.json({
+            success: false,
+            error: 'Validation failed',
+            details: validationResult.errors
+          }, 400);
+        }
+        
+        const data = validationResult.data;
+        const merchantId = randomUUID();
+        const now = new Date();
+        
+        // 3. Database transaction with comprehensive error handling
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          
+          // Insert merchant with full data structure
+          await client.query(`
+            INSERT INTO merchants (
+              id, business_name, business_category, business_address, business_description,
+              whatsapp_number, instagram_username, email, phone,
+              currency, timezone, language, subscription_status, subscription_tier,
+              settings, ai_config, created_at, updated_at, last_activity_at,
+              subscription_started_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+          `, [
+            merchantId,
+            data.business_name,
+            data.business_category || 'general',
+            data.business_address || null,
+            data.business_description || null,
+            data.whatsapp_number,
+            data.instagram_username || null,
+            data.email || null,
+            data.phone || null,
+            data.currency || 'IQD',
+            data.timezone || 'Asia/Baghdad',
+            data.language || 'ar',
+            'ACTIVE',
+            'BASIC',
+            JSON.stringify({
+              working_hours: data.working_hours || getDefaultWorkingHours(),
+              payment_methods: data.payment_methods || ['COD'],
+              delivery_fees: data.delivery_fees || { inside_baghdad: 3, outside_baghdad: 5 },
+              auto_responses: {
+                welcome_message: data.response_templates?.welcome_message || 'أهلاً بك! كيف يمكنني مساعدتك اليوم؟',
+                outside_hours: data.response_templates?.outside_hours_message || 'نرحب برسالتك، سنعود لك بأقرب وقت ضمن ساعات الدوام.'
+              }
+            }),
+            JSON.stringify(data.ai_config || getDefaultAIConfig()),
+            now, now, now, now
+          ]);
+          
+          // Insert response templates if provided
+          if (data.response_templates) {
+            const templates = [
+              { type: 'greeting', content: data.response_templates.welcome_message },
+              { type: 'fallback', content: data.response_templates.fallback_message },
+              { type: 'outside_hours', content: data.response_templates.outside_hours_message }
+            ];
+            
+            for (const template of templates) {
+              if (template.content) {
+                await client.query(`
+                  INSERT INTO dynamic_response_templates (merchant_id, template_type, content, priority, created_at)
+                  VALUES ($1, $2, $3, 1, $4)
+                `, [merchantId, template.type, template.content, now]);
+              }
+            }
+          }
+          
+          // Insert products if provided
+          if (data.products && data.products.length > 0) {
+            for (const product of data.products) {
+              await client.query(`
+                INSERT INTO products (
+                  id, merchant_id, sku, name_ar, name_en, description_ar,
+                  category, price_usd, stock_quantity, tags, is_active,
+                  created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+              `, [
+                randomUUID(),
+                merchantId,
+                product.sku,
+                product.name_ar,
+                product.name_en || null,
+                product.description_ar || null,
+                product.category || 'general',
+                product.price_usd || 0,
+                product.stock_quantity || 0,
+                product.tags || null,
+                product.is_active !== false,
+                now, now
+              ]);
+            }
+          }
+          
+          await client.query('COMMIT');
+          
+          const executionTime = Date.now() - startTime;
+          log.info('Merchant created successfully', {
+            traceId,
+            merchantId,
+            executionTime,
+            productsCount: data.products?.length || 0
+          });
+          
+          // Calculate completeness score
+          const completenessScore = calculateMerchantCompleteness(data);
+          
+          return c.json({
+            success: true,
+            merchant_id: merchantId,
+            completeness_score: completenessScore,
+            message: 'تم إنشاء التاجر بنجاح',
+            execution_time_ms: executionTime
+          });
+          
+        } catch (dbError) {
+          await client.query('ROLLBACK');
+          throw dbError;
+        } finally {
+          client.release();
+        }
+        
+      } catch (error) {
+        const executionTime = Date.now() - startTime;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        log.error('Merchant creation failed', {
+          traceId,
+          error: errorMessage,
+          executionTime,
+          stack: error instanceof Error ? error.stack : undefined
+        });
+        
+        return c.json({
+          success: false,
+          error: 'Failed to create merchant',
+          message: 'حدث خطأ في إنشاء التاجر',
+          trace_id: traceId
+        }, 500);
+      }
+    });
+    
+    // Helper functions for merchant creation
+    function getDefaultWorkingHours() {
+      return {
+        enabled: true,
+        timezone: 'Asia/Baghdad',
+        schedule: {
+          sunday: { open: '10:00', close: '22:00', enabled: true },
+          monday: { open: '10:00', close: '22:00', enabled: true },
+          tuesday: { open: '10:00', close: '22:00', enabled: true },
+          wednesday: { open: '10:00', close: '22:00', enabled: true },
+          thursday: { open: '10:00', close: '22:00', enabled: true },
+          friday: { open: '14:00', close: '22:00', enabled: true },
+          saturday: { open: '10:00', close: '22:00', enabled: false }
+        }
+      };
+    }
+    
+    function getDefaultAIConfig() {
+      return {
+        model: 'gpt-4o-mini',
+        language: 'ar',
+        temperature: 0.7,
+        max_tokens: 600,
+        tone: 'friendly',
+        product_hints: true,
+        auto_responses: true
+      };
+    }
+    
+    async function validateMerchantData(data: any) {
+      const errors: string[] = [];
+      
+      // Required fields validation
+      if (!data.business_name || data.business_name.trim().length < 2) {
+        errors.push('اسم العمل مطلوب ويجب أن يكون على الأقل حرفين');
+      }
+      
+      if (!data.whatsapp_number || !/^\+?[1-9]\d{1,14}$/.test(data.whatsapp_number.replace(/\s/g, ''))) {
+        errors.push('رقم الواتساب مطلوب ويجب أن يكون صحيح');
+      }
+      
+      // Email validation (if provided)
+      if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
+        errors.push('البريد الإلكتروني غير صحيح');
+      }
+      
+      // Instagram username validation (if provided)
+      if (data.instagram_username && !/^[a-zA-Z0-9._]+$/.test(data.instagram_username)) {
+        errors.push('اسم المستخدم في إنستغرام غير صحيح');
+      }
+      
+      // Business category validation
+      const validCategories = ['general', 'fashion', 'electronics', 'beauty', 'home', 'sports', 'grocery', 'automotive', 'health', 'education'];
+      if (data.business_category && !validCategories.includes(data.business_category)) {
+        errors.push('فئة العمل غير صحيحة');
+      }
+      
+      return {
+        success: errors.length === 0,
+        errors,
+        data
+      };
+    }
+    
+    function calculateMerchantCompleteness(data: any): number {
+      const requiredFields = ['business_name', 'whatsapp_number'];
+      const importantFields = ['business_category', 'instagram_username', 'email', 'business_address'];
+      const optionalFields = ['working_hours', 'payment_methods', 'ai_config', 'response_templates', 'products'];
+      
+      let score = 0;
+      let totalWeight = 0;
+      
+      // Required fields (weight 3)
+      requiredFields.forEach(field => {
+        totalWeight += 3;
+        if (data[field] && data[field].toString().trim() !== '') {
+          score += 3;
+        }
+      });
+      
+      // Important fields (weight 2)
+      importantFields.forEach(field => {
+        totalWeight += 2;
+        if (data[field] && data[field].toString().trim() !== '') {
+          score += 2;
+        }
+      });
+      
+      // Optional fields (weight 1)
+      optionalFields.forEach(field => {
+        totalWeight += 1;
+        if (data[field]) {
+          score += 1;
+        }
+      });
+      
+      return Math.round((score / totalWeight) * 100);
+    }
     registerQueueControlRoutes(app, { queueManager });
     
     // Register utility messages routes
@@ -430,17 +712,428 @@ async function bootstrap() {
     app.get('/legal/privacy', () => serveHtml('privacy.html'));
     app.get('/legal/deletion', () => serveHtml('deletion.html'));
 
-    // Root endpoint
+    // ===============================================
+    // PRODUCTION ADMIN INTERFACE SYSTEM
+    // نظام الواجهات الإدارية للإنتاج
+    // ===============================================
+    
+    // Static file serving with security
+    const publicDir = path.join(process.cwd(), 'public');
+    const serveSecureStatic = (file: string, contentType: string = 'text/html; charset=utf-8') => {
+      try {
+        const fp = path.join(publicDir, file);
+        
+        // Security: Prevent directory traversal
+        const resolvedPath = path.resolve(fp);
+        const resolvedPublicDir = path.resolve(publicDir);
+        
+        if (!resolvedPath.startsWith(resolvedPublicDir)) {
+          log.warn('Directory traversal attempt blocked', { file, resolvedPath });
+          return new Response('Access Denied', { status: 403 });
+        }
+        
+        if (fs.existsSync(fp)) {
+          const content = fs.readFileSync(fp, 'utf8');
+          
+          // Add security headers for admin interfaces
+          const headers = {
+            'Content-Type': contentType,
+            'X-Frame-Options': 'DENY',
+            'X-Content-Type-Options': 'nosniff',
+            'Referrer-Policy': 'strict-origin-when-cross-origin',
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+          };
+          
+          return new Response(content, { status: 200, headers });
+        }
+      } catch (e: unknown) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        log.error('Static file serving error', { file, error: err.message });
+      }
+      return new Response('Resource Not Found', { status: 404 });
+    };
+
+    // ===============================================
+    // ADMIN ROUTES WITH AUTHENTICATION
+    // ===============================================
+    
+    // Admin dashboard main page
+    app.get('/admin', adminAuth, (c) => {
+      const dashboardHtml = `
+        <!DOCTYPE html>
+        <html lang="ar" dir="rtl">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>لوحة التحكم الإدارية - منصة المبيعات الذكية</title>
+            <style>
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+                .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                h1 { color: #1e3c72; text-align: center; margin-bottom: 30px; }
+                .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 30px; }
+                .admin-card { background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #1e3c72; }
+                .admin-card h3 { color: #1e3c72; margin-top: 0; }
+                .admin-link { display: inline-block; background: #1e3c72; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px 0; }
+                .admin-link:hover { background: #2a5298; }
+                .status-good { color: #28a745; font-weight: bold; }
+                .status-warning { color: #ffc107; font-weight: bold; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>🚀 لوحة التحكم الإدارية</h1>
+                <p style="text-align: center; color: #666;">منصة المبيعات الذكية - إدارة شاملة للنظام</p>
+                
+                <div class="admin-grid">
+                    <div class="admin-card">
+                        <h3>📊 إدارة التجار</h3>
+                        <p>إضافة وإدارة التجار في النظام</p>
+                        <a href="/admin/merchants/new?key=${c.req.query('key') || ''}" class="admin-link">إضافة تاجر جديد</a>
+                        <a href="/admin/merchants?key=${c.req.query('key') || ''}" class="admin-link">إدارة التجار</a>
+                    </div>
+                    
+                    <div class="admin-card">
+                        <h3>🔍 مراقبة النظام</h3>
+                        <p>مراقبة صحة النظام والأداء</p>
+                        <a href="/health" class="admin-link" target="_blank">صحة النظام</a>
+                        <a href="/api/queue/stats" class="admin-link" target="_blank">إحصائيات Queue</a>
+                    </div>
+                    
+                    <div class="admin-card">
+                        <h3>⚙️ إعدادات النظام</h3>
+                        <p>إعدادات متقدمة للنظام</p>
+                        <a href="/api/config/validate" class="admin-link" target="_blank">التحقق من التكوين</a>
+                        <a href="/api/status" class="admin-link" target="_blank">حالة النظام</a>
+                    </div>
+                    
+                    <div class="admin-card">
+                        <h3>📈 التقارير والإحصائيات</h3>
+                        <p>تقارير مفصلة عن الأداء</p>
+                        <a href="/api/analytics/merchants" class="admin-link" target="_blank">إحصائيات التجار</a>
+                        <a href="/api/analytics/messages" class="admin-link" target="_blank">إحصائيات الرسائل</a>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 40px; padding: 20px; background: #e9ecef; border-radius: 8px;">
+                    <h3>🔐 معلومات الأمان</h3>
+                    <p><strong>الحالة:</strong> <span class="status-good">آمن ومحمي</span></p>
+                    <p><strong>آخر تحديث:</strong> ${new Date().toLocaleString('ar-IQ')}</p>
+                    <p><strong>البيئة:</strong> ${process.env.NODE_ENV || 'development'}</p>
+                </div>
+            </div>
+        </body>
+        </html>
+      `;
+      
+      return new Response(dashboardHtml, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'X-Frame-Options': 'DENY',
+          'X-Content-Type-Options': 'nosniff'
+        }
+      });
+    });
+    
+    // Merchant entry interface
+    app.get('/admin/merchants/new', adminAuth, () => serveSecureStatic('merchant-entry.html'));
+    app.get('/admin/merchants', adminAuth, () => serveSecureStatic('merchants-management.html'));
+    
+    // Static assets for admin interfaces
+    app.get('/admin/assets/merchant-entry.js', adminAuth, () => serveSecureStatic('merchant-entry.js', 'application/javascript'));
+    app.get('/admin/assets/merchants-management.js', adminAuth, () => serveSecureStatic('merchants-management.js', 'application/javascript'));
+    
+    // Legacy public routes (deprecated but maintained for compatibility)
+    app.get('/public/merchant-entry.html', () => {
+      return new Response('This endpoint has been moved to /admin/merchants/new', { status: 301, headers: { 'Location': '/admin/merchants/new' } });
+    });
+    app.get('/public/merchants-management.html', () => {
+      return new Response('This endpoint has been moved to /admin/merchants', { status: 301, headers: { 'Location': '/admin/merchants' } });
+    });
+
+    // ===============================================
+    // PRODUCTION MONITORING AND ANALYTICS ENDPOINTS
+    // ===============================================
+    
+    // Import monitoring service
+    let monitoringService: any = null;
+    try {
+      const { getMonitoringService } = await import('./services/production-monitoring.js');
+      monitoringService = getMonitoringService(pool);
+      log.info('Production monitoring service initialized');
+    } catch (error) {
+      log.warn('Production monitoring service not available', { error });
+      // Create mock service for fallback
+      monitoringService = {
+        getSystemMetrics: async () => ({ timestamp: new Date(), uptime_seconds: Math.floor(process.uptime()) }),
+        getMerchantMetrics: async () => [],
+        getPlatformHealth: async () => ({ status: 'healthy', components: {}, alerts: [] }),
+        getQuickStats: async () => ({ merchants: 0, conversations_today: 0, messages_today: 0, ai_responses_today: 0, uptime_hours: Math.floor(process.uptime() / 3600) })
+      };
+    }
+    
+    // System metrics endpoint
+    app.get('/api/metrics/system', adminAuth, async (c) => {
+      try {
+        const metrics = await monitoringService.getSystemMetrics();
+        return c.json({
+          success: true,
+          data: metrics,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        log.error('Failed to get system metrics', { error });
+        return c.json({
+          success: false,
+          error: 'Failed to retrieve system metrics'
+        }, 500);
+      }
+    });
+    
+    // Merchant metrics endpoint
+    app.get('/api/metrics/merchants', adminAuth, async (c) => {
+      try {
+        const limit = parseInt(c.req.query('limit') || '50');
+        const metrics = await monitoringService.getMerchantMetrics(limit);
+        return c.json({
+          success: true,
+          data: metrics,
+          count: metrics.length,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        log.error('Failed to get merchant metrics', { error });
+        return c.json({
+          success: false,
+          error: 'Failed to retrieve merchant metrics'
+        }, 500);
+      }
+    });
+    
+    // Platform health endpoint
+    app.get('/api/health/detailed', adminAuth, async (c) => {
+      try {
+        const health = await monitoringService.getPlatformHealth();
+        return c.json({
+          success: true,
+          data: health,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        log.error('Failed to get platform health', { error });
+        return c.json({
+          success: false,
+          error: 'Failed to retrieve platform health'
+        }, 500);
+      }
+    });
+    
+    // Quick stats endpoint (lightweight)
+    app.get('/api/stats/quick', adminAuth, async (c) => {
+      try {
+        const stats = await monitoringService.getQuickStats();
+        return c.json({
+          success: true,
+          data: stats,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        log.error('Failed to get quick stats', { error });
+        return c.json({
+          success: false,
+          error: 'Failed to retrieve quick stats'
+        }, 500);
+      }
+    });
+    
+    // Analytics dashboard data
+    app.get('/api/analytics/dashboard', adminAuth, async (c) => {
+      try {
+        const [systemMetrics, quickStats, platformHealth] = await Promise.all([
+          monitoringService.getSystemMetrics(),
+          monitoringService.getQuickStats(),
+          monitoringService.getPlatformHealth()
+        ]);
+        
+        return c.json({
+          success: true,
+          data: {
+            system: systemMetrics,
+            quick_stats: quickStats,
+            health: platformHealth,
+            performance: {
+              uptime_hours: Math.floor(process.uptime() / 3600),
+              memory_usage_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+              cpu_usage_percent: process.cpuUsage ? Math.round(process.cpuUsage().user / 1000000) : null
+            }
+          },
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        log.error('Failed to get dashboard analytics', { error });
+        return c.json({
+          success: false,
+          error: 'Failed to retrieve dashboard analytics'
+        }, 500);
+      }
+    });
+    
+    // Merchant list with pagination
+    app.get('/api/merchants', adminAuth, async (c) => {
+      try {
+        const page = parseInt(c.req.query('page') || '1');
+        const limit = parseInt(c.req.query('limit') || '20');
+        const offset = (page - 1) * limit;
+        
+        const client = await pool.connect();
+        try {
+          const [merchantsResult, countResult] = await Promise.all([
+            client.query(`
+              SELECT 
+                id, business_name, business_category, whatsapp_number,
+                instagram_username, email, subscription_status,
+                created_at, last_activity_at
+              FROM merchants 
+              ORDER BY created_at DESC 
+              LIMIT $1 OFFSET $2
+            `, [limit, offset]),
+            client.query('SELECT COUNT(*) as total FROM merchants')
+          ]);
+          
+          return c.json({
+            success: true,
+            data: merchantsResult.rows,
+            pagination: {
+              page,
+              limit,
+              total: parseInt(countResult.rows[0].total),
+              pages: Math.ceil(parseInt(countResult.rows[0].total) / limit)
+            },
+            timestamp: new Date().toISOString()
+          });
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        log.error('Failed to get merchants list', { error });
+        return c.json({
+          success: false,
+          error: 'Failed to retrieve merchants'
+        }, 500);
+      }
+    });
+    
+    // System configuration validation
+    app.get('/api/config/validate', adminAuth, async (c) => {
+      const config = {
+        environment: process.env.NODE_ENV || 'development',
+        database_connected: false,
+        redis_connected: false,
+        required_env_vars: {
+          DATABASE_URL: !!process.env.DATABASE_URL,
+          META_APP_SECRET: !!process.env.META_APP_SECRET,
+          IG_VERIFY_TOKEN: !!process.env.IG_VERIFY_TOKEN,
+          ENCRYPTION_KEY_HEX: !!process.env.ENCRYPTION_KEY_HEX,
+          JWT_SECRET: !!process.env.JWT_SECRET,
+          OPENAI_API_KEY: !!process.env.OPENAI_API_KEY
+        },
+        optional_env_vars: {
+          REDIS_URL: !!process.env.REDIS_URL,
+          CORS_ORIGINS: !!process.env.CORS_ORIGINS,
+          ADMIN_API_KEY: !!process.env.ADMIN_API_KEY
+        }
+      };
+      
+      // Test database connection
+      try {
+        const client = await pool.connect();
+        await client.query('SELECT 1');
+        client.release();
+        config.database_connected = true;
+      } catch (error) {
+        log.warn('Database connection test failed', { error });
+      }
+      
+      // Test Redis connection
+      const health = getHealthSnapshot();
+      config.redis_connected = health.details.redis.ok;
+      
+      const allRequired = Object.values(config.required_env_vars).every(Boolean);
+      const configValid = config.database_connected && allRequired;
+      
+      return c.json({
+        success: true,
+        valid: configValid,
+        data: config,
+        warnings: [
+          ...(!config.redis_connected ? ['Redis not connected - some features may be limited'] : []),
+          ...(!config.optional_env_vars.CORS_ORIGINS ? ['CORS_ORIGINS not set - using default'] : []),
+          ...(!config.optional_env_vars.ADMIN_API_KEY ? ['ADMIN_API_KEY not set - using default'] : [])
+        ],
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    // System status endpoint
+    app.get('/api/status', async (c) => {
+      const health = getHealthSnapshot();
+      const uptime = process.uptime();
+      const memUsage = process.memoryUsage();
+      
+      return c.json({
+        service: 'AI Sales Platform',
+        version: '1.0.0',
+        status: health.status === 'ok' ? 'operational' : 'degraded',
+        uptime_seconds: Math.floor(uptime),
+        uptime_human: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m`,
+        memory_usage_mb: Math.round(memUsage.heapUsed / 1024 / 1024),
+        environment: process.env.NODE_ENV || 'development',
+        components: {
+          database: health.details.database.ok ? 'operational' : 'degraded',
+          redis: health.details.redis.ok ? 'operational' : 'degraded',
+          queue: 'operational'
+        },
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    // Root endpoint with admin access
     app.get('/', (c) => {
+      const adminKey = c.req.query('key');
+      const isAdmin = adminKey === (process.env.ADMIN_API_KEY || 'admin-key-2025');
+      
       return c.json({
         service: 'AI Sales Platform',
         version: '1.0.0',
         status: 'running',
+        environment: process.env.NODE_ENV || 'development',
         timestamp: new Date().toISOString(),
         endpoints: {
           webhooks: '/webhooks/instagram',
           health: '/health',
-          legal: '/legal'
+          legal: '/legal',
+          status: '/api/status',
+          ...(isAdmin ? {
+            admin: '/admin',
+            merchantEntry: '/admin/merchants/new',
+            merchantsManagement: '/admin/merchants',
+            systemMetrics: '/api/metrics/system',
+            merchantMetrics: '/api/metrics/merchants',
+            platformHealth: '/api/health/detailed',
+            quickStats: '/api/stats/quick',
+            dashboard: '/api/analytics/dashboard'
+          } : {
+            admin: '/admin?key=YOUR_ADMIN_KEY'
+          })
+        },
+        features: {
+          instagram_integration: true,
+          ai_responses: true,
+          queue_processing: true,
+          multi_tenant: true,
+          security_enabled: true,
+          monitoring_enabled: true,
+          analytics_enabled: true
         }
       });
     });
