@@ -1801,6 +1801,60 @@ export function registerAdminRoutes(app: Hono) {
         return c.text('Forbidden', 403);
       }
 
+      // Handle directory listing for /public
+      if (path === '' || path === '/') {
+        const fs = await import('fs');
+        
+        try {
+          // Check if public directory exists
+          if (!fs.existsSync('public')) {
+            return c.text('Public directory not found', 404);
+          }
+          const html = `
+            <!DOCTYPE html>
+            <html lang="ar" dir="rtl">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>ملفات النظام</title>
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+                    .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                    h1 { color: #333; text-align: center; margin-bottom: 30px; }
+                    .file-list { list-style: none; padding: 0; }
+                    .file-item { margin: 10px 0; padding: 15px; background: #f8f9fa; border-radius: 5px; border-left: 4px solid #007bff; }
+                    .file-item a { text-decoration: none; color: #007bff; font-weight: bold; }
+                    .file-item a:hover { color: #0056b3; }
+                    .description { color: #666; font-size: 14px; margin-top: 5px; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>📁 ملفات النظام</h1>
+                    <ul class="file-list">
+                        <li class="file-item">
+                            <a href="/public/merchant-entry.html">📝 صفحة إدخال بيانات التاجر</a>
+                            <div class="description">صفحة لإضافة تجار جدد مع منتجاتهم</div>
+                        </li>
+                        <li class="file-item">
+                            <a href="/public/merchants-management.html">⚙️ صفحة إدارة التجار</a>
+                            <div class="description">صفحة لإدارة التجار والمنتجات الموجودة</div>
+                        </li>
+                        <li class="file-item">
+                            <a href="/public/README.md">📖 دليل الاستخدام</a>
+                            <div class="description">دليل شامل لاستخدام النظام</div>
+                        </li>
+                    </ul>
+                </div>
+            </body>
+            </html>
+          `;
+          return c.html(html);
+        } catch (e) {
+          return c.text('Directory listing not available', 403);
+        }
+      }
+
       // Try to read the file
       const fs = await import('fs');
       const pathModule = await import('path');

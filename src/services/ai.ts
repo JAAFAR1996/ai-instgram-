@@ -128,9 +128,10 @@ export class AIService {
   private logger = getLogger({ component: 'ai-service' });
   private db: { query: (sql: string, params?: unknown[]) => Promise<unknown[]> };
   
-  // Performance optimization: Product caching
+  // Performance optimization: Product caching with size limit
   private productCache = new Map<string, { products: Product[]; timestamp: number }>();
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  private readonly MAX_CACHE_SIZE = 100;
   private search = new SmartProductSearch();
 
   constructor(container: DIContainer) {
@@ -192,7 +193,9 @@ export class AIService {
 
   /** Mask PII (phones/IG handles) before logging */
   private maskPII(text: string): string {
-    return (text ?? '')
+    if (!text) return '';
+    return String(text)
+      .replace(/[\r\n]/g, ' ')
       .replace(/\b(\+?\d[\d\s-]{6,})\b/g, '***redacted-phone***')
       .replace(/@[\w.\-]{3,}/g, '@***redacted***')
       .slice(0, 500);
@@ -591,8 +594,18 @@ export class AIService {
         throw new Error('No response from OpenAI for intent analysis');
       }
       
-      const result = JSON.parse(response) as IntentAnalysisResult;
-      return result;
+      try {
+        const result = JSON.parse(response) as IntentAnalysisResult;
+        return result;
+      } catch (parseError) {
+        this.logger.error('Intent analysis JSON parse failed', { error: parseError, response: response.slice(0, 200) });
+        return {
+          intent: 'UNKNOWN',
+          confidence: 0,
+          entities: {},
+          stage: context.stage
+        };
+      }
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error('Intent analysis failed', { 
@@ -639,8 +652,16 @@ export class AIService {
         throw new Error('No response from OpenAI for product recommendations');
       }
       
-      const recommendations = JSON.parse(response) as AIRecommendationResponse;
-      return recommendations.recommendations.slice(0, maxProducts);
+      try {
+        const recommendations = JSON.parse(response) as AIRecommendationResponse;
+        if (Array.isArray(recommendations.recommendations)) {
+          return recommendations.recommendations.slice(0, maxProducts);
+        }
+        return [];
+      } catch (parseError) {
+        this.logger.error('Product recommendations JSON parse failed', { error: parseError, response: response.slice(0, 200) });
+        return [];
+      }
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
       this.logger.error('Product recommendation failed', { 
@@ -1019,7 +1040,11 @@ ${productsText}
       
       const products = rows as Product[];
       
-      // Update cache
+      // Update cache with size management
+      if (this.productCache.size >= this.MAX_CACHE_SIZE) {
+        const oldestKey = this.productCache.keys().next().value;
+        this.productCache.delete(oldestKey);
+      }
       this.productCache.set(merchantId, { products, timestamp: now });
       
       return products;
@@ -1062,7 +1087,7 @@ ${productsText}
         'SYSTEM',
         'AI_INTERACTION',
         JSON.stringify({
-          input: input.substring(0, 200),
+          input: (input || '').substring(0, 200),
           intent: response.intent,
           stage: response.stage,
           tokens: response.tokens,

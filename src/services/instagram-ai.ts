@@ -365,7 +365,9 @@ export class InstagramAIService {
 
   /** Mask PII (phones/IG handles) before logging */
   private maskPII(text: string): string {
-    return (text ?? '')
+    if (!text) return '';
+    return String(text)
+      .replace(/[\r\n]/g, ' ')
       .replace(/\b(\+?\d[\d\s-]{6,})\b/g, '***redacted-phone***')
       .replace(/@[\w.\-]{3,}/g, '@***redacted***')
       .slice(0, 500);
