@@ -80,7 +80,8 @@ const DEFAULT_CONFIG: MerchantIsolationConfig = {
     '/auth',
     '/favicon.ico',
     '/robots.txt',
-    '/admin'
+    '/admin',
+    '/public'
   ],
   headerName: 'x-merchant-id',
   queryParam: 'merchant_id',
