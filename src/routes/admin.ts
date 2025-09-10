@@ -1796,6 +1796,13 @@ export function registerAdminRoutes(app: Hono) {
       const path = c.req.path.replace('/public/', '');
       const filePath = `public/${path}`;
       
+      // Log the request for debugging
+      log.info('Static file request', { 
+        originalPath: c.req.path, 
+        extractedPath: path, 
+        filePath: filePath 
+      });
+      
       // Security check - prevent directory traversal
       if (path.includes('..') || path.includes('~')) {
         return c.text('Forbidden', 403);
@@ -1859,6 +1866,8 @@ export function registerAdminRoutes(app: Hono) {
       const fs = await import('fs');
       const pathModule = await import('path');
       
+      log.info('Checking file existence', { filePath, exists: fs.existsSync(filePath) });
+      
       if (fs.existsSync(filePath)) {
         const content = fs.readFileSync(filePath, 'utf8');
         const ext = pathModule.extname(filePath);
@@ -1873,8 +1882,10 @@ export function registerAdminRoutes(app: Hono) {
         else if (ext === '.gif') contentType = 'image/gif';
         else if (ext === '.svg') contentType = 'image/svg+xml';
         
+        log.info('Serving file successfully', { filePath, contentType, size: content.length });
         return c.text(content, 200, { 'Content-Type': contentType });
       } else {
+        log.warn('File not found', { filePath, requestedPath: path });
         return c.text('File not found', 404);
       }
     } catch (error) {

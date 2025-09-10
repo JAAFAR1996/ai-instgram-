@@ -201,6 +201,222 @@ export class AIService {
       .slice(0, 500);
   }
 
+  /** Analyze customer mood and personality from message */
+  private analyzeCustomerMood(message: string, history: MessageHistory[]): {
+    mood: 'happy' | 'neutral' | 'frustrated' | 'excited' | 'hesitant' | 'joking';
+    personality: 'formal' | 'casual' | 'friendly' | 'business';
+    urgency: 'low' | 'medium' | 'high';
+    buyingIntent: 'browsing' | 'comparing' | 'ready' | 'negotiating';
+  } {
+    const text = message.toLowerCase();
+    
+    // Detect mood
+    let mood: 'happy' | 'neutral' | 'frustrated' | 'excited' | 'hesitant' | 'joking' = 'neutral';
+    if (/😂|😄|😊|هههه|حلو|رائع|ممتاز|والله زين/.test(text)) mood = 'happy';
+    else if (/😍|🔥|واو|يجنن|كلش حلو|أحبه/.test(text)) mood = 'excited';
+    else if (/غالي|مكلف|ما عندي|صعب|مش متأكد/.test(text)) mood = 'hesitant';
+    else if (/😤|زعلان|مو حلو|سيء|مشكلة/.test(text)) mood = 'frustrated';
+    else if (/هههه|😂|مزح|يضحك/.test(text)) mood = 'joking';
+    
+    // Detect personality
+    let personality: 'formal' | 'casual' | 'friendly' | 'business' = 'casual';
+    if (/حضرتك|سيادتك|المحترم/.test(text)) personality = 'formal';
+    else if (/حبيبي|عزيزي|أخي|صديقي/.test(text)) personality = 'friendly';
+    else if (/أريد|أطلب|كم السعر|متى التسليم/.test(text)) personality = 'business';
+    
+    // Detect urgency
+    let urgency: 'low' | 'medium' | 'high' = 'medium';
+    if (/بسرعة|عاجل|اليوم|الآن|مستعجل/.test(text)) urgency = 'high';
+    else if (/متى شايف|لما أقدر|بالمستقبل/.test(text)) urgency = 'low';
+    
+    // Detect buying intent
+    let buyingIntent: 'browsing' | 'comparing' | 'ready' | 'negotiating' = 'browsing';
+    if (/أريد أشتري|خذ طلبي|موافق|أوكي/.test(text)) buyingIntent = 'ready';
+    else if (/كم السعر|عندكم أرخص|بكم/.test(text)) buyingIntent = 'comparing';
+    else if (/ممكن تنزل|خصم|تخفيض/.test(text)) buyingIntent = 'negotiating';
+    
+    return { mood, personality, urgency, buyingIntent };
+  }
+
+  /** Generate contextual response based on customer analysis */
+  private adaptResponseToCustomer(
+    baseResponse: string, 
+    customerAnalysis: ReturnType<typeof this.analyzeCustomerMood>,
+    context: ConversationContext
+  ): string {
+    let adapted = baseResponse;
+    
+    // Adapt to mood
+    if (customerAnalysis.mood === 'excited') {
+      adapted = adapted.replace(/\.$/, ' 🔥');
+      if (!adapted.includes('والله')) adapted = `والله ${adapted}`;
+    } else if (customerAnalysis.mood === 'hesitant') {
+      adapted = `لا تشيل هم، ${adapted}. وإذا ما عجبك نرجعلك فلوسك`;
+    } else if (customerAnalysis.mood === 'frustrated') {
+      adapted = `أفهم شعورك حبيبي، ${adapted}. خلنا نحل هاي المشكلة سوية`;
+    } else if (customerAnalysis.mood === 'joking') {
+      adapted = `هههه ${adapted} 😄`;
+    }
+    
+    // Adapt to personality
+    if (customerAnalysis.personality === 'formal') {
+      adapted = adapted.replace(/حبيبي|عزيزي/g, 'أستاذ');
+    } else if (customerAnalysis.personality === 'friendly') {
+      if (!adapted.includes('حبيبي') && Math.random() < 0.7) {
+        adapted = adapted.replace(/^/, 'حبيبي، ');
+      }
+    }
+    
+    // Adapt to urgency
+    if (customerAnalysis.urgency === 'high') {
+      adapted = `أكيد، ${adapted}. وبسرعة إن شاء الله`;
+    }
+    
+    // Adapt to buying intent
+    if (customerAnalysis.buyingIntent === 'ready') {
+      adapted += '. تريد أخذ طلبك الآن؟';
+    } else if (customerAnalysis.buyingIntent === 'negotiating') {
+      adapted += '. وعندنا عروض حلوة للزبائن الطيبين مثلك';
+    }
+    
+    return adapted;
+  }
+
+  /** Remember customer preferences and context */
+  private buildSmartMemoryContext(context: ConversationContext): string {
+    const history = context.conversationHistory.slice(-10);
+    const customerMessages = history.filter(h => h.role === 'user').map(h => h.content);
+    
+    // Extract preferences from conversation
+    const preferences: string[] = [];
+    const mentionedProducts: string[] = [];
+    const priceRange: string[] = [];
+    
+    customerMessages.forEach(msg => {
+      const text = msg.toLowerCase();
+      
+      // Extract color preferences
+      if (/أسود|أبيض|أحمر|أزرق|أخضر|أصفر/.test(text)) {
+        const colors = text.match(/أسود|أبيض|أحمر|أزرق|أخضر|أصفر/g);
+        if (colors) preferences.push(`يحب الألوان: ${colors.join('، ')}`);
+      }
+      
+      // Extract size preferences
+      if (/صغير|متوسط|كبير|لارج|ميديوم|سمول/.test(text)) {
+        const sizes = text.match(/صغير|متوسط|كبير|لارج|ميديوم|سمول/g);
+        if (sizes) preferences.push(`المقاسات المفضلة: ${sizes.join('، ')}`);
+      }
+      
+      // Extract budget hints
+      if (/\d+/.test(text)) {
+        const numbers = text.match(/\d+/g);
+        if (numbers) priceRange.push(`ميزانية حوالي: ${numbers.join('-')} دينار`);
+      }
+    });
+    
+    const memoryParts = [];
+    if (preferences.length) memoryParts.push(`التفضيلات: ${preferences.join('، ')}`);
+    if (priceRange.length) memoryParts.push(priceRange[priceRange.length - 1]);
+    
+    return memoryParts.length ? memoryParts.join(' | ') : 'زبون جديد';
+  }
+
+  /** Add smart selling techniques */
+  private addSellingIntelligence(
+    response: string, 
+    customerMessage: string, 
+    context: ConversationContext
+  ): string {
+    const text = customerMessage.toLowerCase();
+    let enhanced = response;
+    
+    // Handle price objections smartly
+    if (/غالي|مكلف|أرخص/.test(text)) {
+      const techniques = [
+        'والله الجودة تستاهل هاي الفلوس',
+        'شوف حبيبي، هاي القطعة راح تضل معك سنين',
+        'إذا تحسب السعر على الاستعمال، راح تلاقيه رخيص كلش',
+        'وعندنا ضمان وإذا ما عجبك نرجعلك فلوسك'
+      ];
+      enhanced += '. ' + techniques[Math.floor(Math.random() * techniques.length)];
+    }
+    
+    // Handle hesitation with reassurance
+    if (/مش متأكد|ما أدري|خلني أفكر/.test(text)) {
+      const reassurance = [
+        'لا تشيل هم، خذ وقتك بالتفكير',
+        'أنا هنا لمساعدتك بأي شي',
+        'مافي عجلة، المهم تلاقي اللي يعجبك',
+        'وإذا حبيت تشوف قطع ثانية، أنا موجود'
+      ];
+      enhanced += '. ' + reassurance[Math.floor(Math.random() * reassurance.length)];
+    }
+    
+    // Create urgency for interested customers
+    if (/حلو|يعجبني|أحبه|رائع/.test(text)) {
+      const urgency = [
+        'وهاي القطعة عليها إقبال كبير',
+        'بصراحة، ما بقى منها كثير',
+        'والله هاي من أحسن القطع عندنا',
+        'وعندنا عرض خاص لهاي الأيام'
+      ];
+      if (Math.random() < 0.6) {
+        enhanced += '. ' + urgency[Math.floor(Math.random() * urgency.length)];
+      }
+    }
+    
+    // Handle comparison shopping
+    if (/عند غيركم|في محل ثاني|أرخص منكم/.test(text)) {
+      const competitive = [
+        'أكيد راح تلاقي أرخص، بس الجودة مو زي بعض',
+        'احنا نركز على الجودة مش بس السعر',
+        'وعندنا خدمة بعد البيع ما تلاقيها بمحل',
+        'جرب وشوف، وإذا ما عجبك نرجعلك فلوسك'
+      ];
+      enhanced += '. ' + competitive[Math.floor(Math.random() * competitive.length)];
+    }
+    
+    return enhanced;
+  }
+
+  /** Add natural conversation flow */
+  private makeConversationNatural(
+    response: string,
+    customerMessage: string,
+    history: MessageHistory[]
+  ): string {
+    let natural = response;
+    
+    // Add natural transitions
+    const recentMessages = history.slice(-3).map(h => h.content.toLowerCase());
+    const hasRepeatedQuestion = recentMessages.some(msg => 
+      customerMessage.toLowerCase().includes(msg.substring(0, 10))
+    );
+    
+    if (hasRepeatedQuestion) {
+      const acknowledgments = [
+        'زي ما قلتلك،',
+        'مثل ما ذكرتلك،',
+        'نعم حبيبي،',
+        'أكيد،'
+      ];
+      natural = acknowledgments[Math.floor(Math.random() * acknowledgments.length)] + ' ' + natural;
+    }
+    
+    // Add conversation continuers
+    if (Math.random() < 0.3) {
+      const continuers = [
+        'شنو رأيك؟',
+        'عندك أي سؤال ثاني؟',
+        'تحب أوريك شي ثاني؟',
+        'وشنو رأيك باللون؟'
+      ];
+      natural += ' ' + continuers[Math.floor(Math.random() * continuers.length)];
+    }
+    
+    return natural;
+  }
+
   /** Exponential backoff retry helper */
   private async withRetry<T>(fn: () => Promise<T>, label: string, max = 3, timeout = 30000): Promise<T> {
     let attempt = 0;
@@ -366,10 +582,18 @@ export class AIService {
         throw new Error('No response from OpenAI');
       }
 
-      // Create simple AI response from text
+      // Get the already analyzed customer data and create intelligent response
+      let smartResponse = response.trim();
+      
+      // The AI should already be intelligent from the enhanced prompts
+      // But we can add final touches if needed
+      if (smartResponse.length < 10) {
+        smartResponse = 'أهلاً حبيبي! شلونك اليوم؟ شنو أقدر أساعدك بيه؟';
+      }
+      
       const aiResponse: AIResponse = {
-        message: response.trim(),
-        messageAr: response.trim(),
+        message: smartResponse,
+        messageAr: smartResponse,
         intent: analyzedIntent?.intent || 'conversation',
         stage: context.stage,
         actions: [],
@@ -742,14 +966,21 @@ export class AIService {
       relevantProducts = [];
     }
     const productInfo = this.formatProductsForPrompt(relevantProducts);
-    const newSystemPrompt = `أنت مساعد مبيعات خبير لمتجر ${businessName} (${catLabel}).\n\n📦 المنتجات المتوفرة حالياً (الأكثر صلة):\n${productInfo}\n\n🎯 مهمتك:\n- اربط استفسار العميل بالمنتجات الفعلية المتوفرة\n- اذكر الأسعار الحقيقية والمخزون المتوفر\n- اقترح بدائل مناسبة إذا لم يجد ما يريد\n- لا تختلق معلومات غير صحيحة`;
+    const newSystemPrompt = `أنت بائع عراقي ذكي وطبيعي في متجر ${businessName} (${catLabel}). تتكلم مثل الإنسان الحقيقي.\n\n📦 المنتجات المتوفرة:\n${productInfo}\n\n🧠 كن ذكياً:\n- اقرأ بين السطور وافهم قصد الزبون\n- تذكر تفضيلاته من المحادثات السابقة\n- اقترح منتجات تناسب شخصيته وميزانيته\n- فاوض بذكاء واعرض خصومات منطقية\n- اربط المنتجات بحياة الزبون الشخصية\n\n💬 كن طبيعياً:\n- رد مثل صديق يساعد صديقه\n- استخدم نكت خفيفة ومناسبة\n- اظهر اهتمام حقيقي بالزبون\n- تفاعل مع مشاعره (فرح، قلق، استعجال)\n- كن صبور مع الأسئلة الكثيرة\n\n🎯 هدفك النهائي: اجعل الزبون يحس انك صديقه وتريد مصلحته، مش بس تبيع له.`;
 
     // legacy prompt kept for reference was replaced by newSystemPrompt
 
+    // Analyze customer mood for intelligent response
+    const customerAnalysis = this.analyzeCustomerMood(customerMessage, context.conversationHistory);
+    const smartMemory = this.buildSmartMemoryContext(context);
+    
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: newSystemPrompt },
-      { role: 'system', content: `تفضيلات العميل: ${memoryLine}` },
-      { role: 'system', content: 'استخدم لهجة عراقية ودودة (بغدادية) عندما يكون ذلك مناسبًا، مع أسلوب محترم وواضح ومباشر بدون مبالغة. تجنب المصطلحات الرسمية الثقيلة.' }
+      { role: 'system', content: `معلومات الزبون: ${memoryLine}` },
+      { role: 'system', content: `ذاكرة ذكية: ${smartMemory}` },
+      { role: 'system', content: `حالة الزبون: مزاجه ${customerAnalysis.mood}، شخصيته ${customerAnalysis.personality}، استعجاله ${customerAnalysis.urgency}، نية الشراء ${customerAnalysis.buyingIntent}` },
+      { role: 'system', content: 'تكلم مثل العراقي الأصيل - بغدادي ذكي وودود. استخدم: شلونك، حبيبي، أكيد، والله، إن شاء الله، كلش حلو، يعجبك، تجنن، ما شاء الله. اقرأ مزاج الزبون وتفاعل معه بذكاء. الأهم: كن صادق ومفيد وطبيعي.' },
+      { role: 'system', content: '🧠 قواعد الذكاء: 1) اقرأ بين السطور 2) تذكر المحادثات السابقة 3) اربط المنتجات بحياة الزبون 4) فاوض بذكاء 5) اعرض حلول للمشاكل 6) كن صبور ومتفهم 7) استخدم اليومور بذكاء' }
     ];
 
     // Add recent conversation history (last 6)
