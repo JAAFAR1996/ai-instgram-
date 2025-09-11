@@ -285,8 +285,18 @@ async function bootstrap() {
       // Check for API key in header or query
       const providedKey = authHeader?.replace('Bearer ', '') || c.req.query('key');
       
+      // Debug logging for authentication
+      log.info('Admin auth attempt', {
+        providedKey: providedKey ? 'provided' : 'missing',
+        expectedKey: adminKey ? 'configured' : 'default',
+        match: providedKey === adminKey
+      });
+      
       if (providedKey !== adminKey) {
-        return c.json({ error: 'Unauthorized access to admin interface' }, 401);
+        return c.json({ 
+          error: 'Unauthorized access to admin interface',
+          message: 'Invalid or missing admin key'
+        }, 401);
       }
       
       await next();
