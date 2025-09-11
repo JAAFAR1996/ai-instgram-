@@ -1037,6 +1037,8 @@ export function registerAdminRoutes(app: Hono) {
 
   // Create Merchant API
   app.post('/admin/merchants', async (c) => {
+    const startTime = Date.now();
+    
     try {
       requireAdminAuth(c.req.raw);
     } catch (e) {
