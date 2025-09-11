@@ -732,6 +732,9 @@ async function bootstrap() {
           return new Response('Access Denied', { status: 403 });
         }
         
+        // Debug logging
+        log.info('Attempting to serve file', { file, fp, exists: fs.existsSync(fp), publicDir });
+        
         if (fs.existsSync(fp)) {
           const content = fs.readFileSync(fp, 'utf8');
           
@@ -750,6 +753,7 @@ async function bootstrap() {
         const err = e instanceof Error ? e : new Error(String(e));
         log.error('Static file serving error', { file, error: err.message });
       }
+      log.warn('File not found', { file, publicDir, fullPath: path.join(publicDir, file) });
       return new Response('Resource Not Found', { status: 404 });
     };
 
@@ -839,9 +843,13 @@ async function bootstrap() {
     app.get('/admin/merchants/new', adminAuth, () => serveSecureStatic('merchant-entry.html'));
     app.get('/admin/merchants', adminAuth, () => serveSecureStatic('merchants-management.html'));
     
-    // Static assets for admin interfaces
+    // Static assets for admin interfaces (serve JS files directly)
     app.get('/admin/assets/merchant-entry.js', adminAuth, () => serveSecureStatic('merchant-entry.js', 'application/javascript'));
     app.get('/admin/assets/merchants-management.js', adminAuth, () => serveSecureStatic('merchants-management.js', 'application/javascript'));
+    
+    // Alternative direct JS serving
+    app.get('/merchant-entry.js', adminAuth, () => serveSecureStatic('merchant-entry.js', 'application/javascript'));
+    app.get('/merchants-management.js', adminAuth, () => serveSecureStatic('merchants-management.js', 'application/javascript'));
     
     // Legacy public routes (deprecated but maintained for compatibility)
     app.get('/public/merchant-entry.html', () => {
