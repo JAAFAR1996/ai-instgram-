@@ -1120,14 +1120,30 @@ export function registerAdminRoutes(app: Hono) {
       
       // Insert products if provided
       if (validatedData.products && validatedData.products.length > 0) {
-        for (const product of validatedData.products) {
+        // Generate merchant prefix from first two characters of business name
+        const merchantPrefix = validatedData.business_name
+          .replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '') // Remove special characters, keep Arabic and English
+          .substring(0, 2)
+          .toUpperCase();
+        
+        for (let i = 0; i < validatedData.products.length; i++) {
+          const product = validatedData.products[i];
+          
+          // Generate automatic SKU if not provided
+          let productSku = product.sku;
+          if (!productSku || productSku.trim() === '') {
+            // Generate SKU: MERCHANT_PREFIX + random 4 digits
+            const randomDigits = Math.floor(1000 + Math.random() * 9000);
+            productSku = `${merchantPrefix}${randomDigits}`;
+          }
+          
           await sql`
             INSERT INTO products (
               merchant_id, sku, name_ar, name_en, description_ar,
               category, price_usd, stock_quantity, tags, images, 
               is_active, created_at, updated_at
             ) VALUES (
-              ${merchantId}::uuid, ${product.sku}, ${product.name_ar},
+              ${merchantId}::uuid, ${productSku}, ${product.name_ar},
               ${product.name_en || ''}, ${product.description_ar || ''},
               ${product.category}, ${product.price_usd}, ${product.stock_quantity},
               ${product.tags || []}, ${product.image_url ? JSON.stringify([{url: product.image_url}]) : '[]'},
@@ -1139,10 +1155,29 @@ export function registerAdminRoutes(app: Hono) {
       
       await invalidate(merchantId);
       
+      // Calculate completeness score
+      let completenessScore = 0;
+      const totalFields = 10;
+      
+      if (validatedData.business_name) completenessScore++;
+      if (validatedData.business_category) completenessScore++;
+      if (validatedData.whatsapp_number) completenessScore++;
+      if (validatedData.instagram_username) completenessScore++;
+      if (validatedData.email) completenessScore++;
+      if (validatedData.business_address) completenessScore++;
+      if (validatedData.working_hours) completenessScore++;
+      if (validatedData.payment_methods && validatedData.payment_methods.length > 0) completenessScore++;
+      if (validatedData.ai_config) completenessScore++;
+      if (validatedData.products && validatedData.products.length > 0) completenessScore++;
+      
+      const completenessPercentage = Math.round((completenessScore / totalFields) * 100);
+      
       return c.json({
         success: true,
         merchant_id: merchantId,
-        message: 'Merchant created successfully'
+        message: 'Merchant created successfully',
+        completeness_score: completenessPercentage,
+        execution_time_ms: Date.now() - startTime
       });
     } catch (error) {
       log.error('Failed to create merchant', { error: String(error) });
@@ -1710,6 +1745,63 @@ export function registerAdminRoutes(app: Hono) {
     } catch (error) {
       log.error('Failed to delete product', { error: String(error) });
       return c.json({ success: false, error: 'Failed to delete product' }, 500);
+    }
+  });
+
+  // General file upload endpoint for admin
+  app.post('/admin/upload', async (c) => {
+    try {
+      requireAdminAuth(c.req.raw);
+    } catch (e) {
+      return c.json({ success: false, error: 'unauthorized' }, 401);
+    }
+
+    try {
+      const formData = await c.req.formData();
+      const file = formData.get('file') as File;
+
+      if (!file) {
+        return c.json({ success: false, error: 'No file provided' }, 400);
+      }
+
+      // Validate file type
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+      if (!allowedTypes.includes(file.type)) {
+        return c.json({ success: false, error: 'Invalid file type. Only JPEG, PNG, WebP, and GIF are allowed.' }, 400);
+      }
+
+      // Validate file size (5MB max)
+      if (file.size > 5 * 1024 * 1024) {
+        return c.json({ success: false, error: 'File too large. Maximum size is 5MB.' }, 400);
+      }
+
+      // Generate unique filename
+      const fileExtension = file.name.split('.').pop();
+      const fileName = `upload_${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExtension}`;
+      const uploadPath = `public/uploads/${fileName}`;
+
+      // Create uploads directory if it doesn't exist
+      const fs = await import('fs');
+      const uploadDir = 'public/uploads';
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+
+      // Save file
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      fs.writeFileSync(uploadPath, buffer);
+
+      return c.json({
+        success: true,
+        url: `/uploads/${fileName}`,
+        filename: fileName,
+        size: file.size,
+        type: file.type
+      });
+    } catch (error) {
+      log.error('Failed to upload file', { error: String(error) });
+      return c.json({ success: false, error: 'Failed to upload file' }, 500);
     }
   });
 

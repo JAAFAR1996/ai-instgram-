@@ -162,6 +162,15 @@ class MerchantEntryManager {
         this.productCount++;
         const container = document.getElementById('productsContainer');
         
+        // Generate automatic SKU based on business name
+        const businessName = document.getElementById('business_name')?.value || '';
+        const merchantPrefix = businessName
+            .replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '') // Remove special characters
+            .substring(0, 2)
+            .toUpperCase();
+        const randomDigits = Math.floor(1000 + Math.random() * 9000);
+        const autoSku = merchantPrefix ? `${merchantPrefix}${randomDigits}` : `PROD${randomDigits}`;
+        
         const productDiv = document.createElement('div');
         productDiv.className = 'product-item';
         productDiv.innerHTML = `
@@ -176,7 +185,7 @@ class MerchantEntryManager {
                 <div class="form-group">
                     <label>رمز المنتج (SKU) <span class="required">*</span></label>
                     <input type="text" name="products[${this.productCount}][sku]" required 
-                           placeholder="مثال: PROD-${this.productCount}">
+                           value="${autoSku}" placeholder="سيتم توليده تلقائياً">
                 </div>
                 <div class="form-group">
                     <label>اسم المنتج (عربي) <span class="required">*</span></label>
@@ -656,9 +665,20 @@ class MerchantEntryManager {
                     }
                 }
                 
-                if (productData.sku && productData.name_ar) {
+                if (productData.name_ar) {
+                    // Generate automatic SKU if not provided
+                    let productSku = productData.sku;
+                    if (!productSku || productSku.trim() === '') {
+                        const merchantPrefix = data.business_name
+                            .replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '')
+                            .substring(0, 2)
+                            .toUpperCase();
+                        const randomDigits = Math.floor(1000 + Math.random() * 9000);
+                        productSku = merchantPrefix ? `${merchantPrefix}${randomDigits}` : `PROD${randomDigits}`;
+                    }
+                    
                     data.products.push({
-                        sku: productData.sku,
+                        sku: productSku,
                         name_ar: productData.name_ar,
                         name_en: productData.name_en || '',
                         description_ar: productData.description_ar || '',
