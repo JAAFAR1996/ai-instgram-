@@ -404,9 +404,9 @@ async function bootstrap() {
               await client.query(`
                 INSERT INTO products (
                   id, merchant_id, sku, name_ar, name_en, description_ar,
-                  category, price_usd, stock_quantity, tags, status,
+                  category, price_usd, stock_quantity, tags, images, status,
                   created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
               `, [
                 randomUUID(),
                 merchantId,
@@ -418,6 +418,7 @@ async function bootstrap() {
                 product.price_usd || 0,
                 product.stock_quantity || 0,
                 product.tags || null,
+                product.image_url ? JSON.stringify([{ url: product.image_url }]) : '[]',
                 (product.is_active !== false) ? 'ACTIVE' : 'INACTIVE',
                 now, now
               ]);

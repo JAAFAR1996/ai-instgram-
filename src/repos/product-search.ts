@@ -78,7 +78,9 @@ export async function searchProducts(merchantId: string, entities: Entities, lim
       pp.sale_price::float as sale_price_amount,
       pp.price_currency,
       p.stock_quantity,
-      p.image_urls
+      CASE WHEN jsonb_typeof(p.images) = 'array' 
+           THEN array(SELECT (img->>'url') FROM jsonb_array_elements(p.images) img) 
+      END as image_urls
     FROM products p
     JOIN product_prices pp ON pp.product_id = p.id
     ${sql.where(...filters)}
@@ -154,7 +156,9 @@ export async function searchProduct(
            pp.sale_price_amount::float as sale_price_amount, 
            pp.price_currency,
            p.stock_quantity,
-           CASE WHEN jsonb_typeof(p.image_urls) = 'array' THEN array(SELECT jsonb_array_elements_text(p.image_urls)) END as image_urls
+           CASE WHEN jsonb_typeof(p.images) = 'array' 
+                THEN array(SELECT (img->>'url') FROM jsonb_array_elements(p.images) img) 
+           END as image_urls
     FROM products p
     JOIN products_priced pp ON pp.id = p.id
     ${sql.where(...filters)}
