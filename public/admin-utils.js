@@ -4,7 +4,7 @@
 
 class AdminUtils {
     constructor() {
-        this.adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+        this.adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
     }
 
     // Show toast notification

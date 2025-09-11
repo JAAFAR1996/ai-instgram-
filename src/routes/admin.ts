@@ -1035,8 +1035,8 @@ export function registerAdminRoutes(app: Hono) {
     return c.html(html);
   });
 
-  // Create Merchant API
-  app.post('/admin/merchants', async (c) => {
+  // Create Merchant API (Legacy - using Basic Auth)
+  app.post('/admin/merchants-legacy', async (c) => {
     const startTime = Date.now();
     
     try {
@@ -1143,13 +1143,13 @@ export function registerAdminRoutes(app: Hono) {
             INSERT INTO products (
               merchant_id, sku, name_ar, name_en, description_ar,
               category, price_usd, stock_quantity, tags, images, 
-              is_active, created_at, updated_at
+              status, created_at, updated_at
             ) VALUES (
               ${merchantId}::uuid, ${productSku}, ${product.name_ar},
               ${product.name_en || ''}, ${product.description_ar || ''},
               ${product.category}, ${product.price_usd}, ${product.stock_quantity},
               ${product.tags || []}, ${product.image_url ? JSON.stringify([{url: product.image_url}]) : '[]'},
-              ${product.is_active !== false}, ${now}, ${now}
+              ${product.is_active !== false ? 'ACTIVE' : 'INACTIVE'}, ${now}, ${now}
             )
           `;
         }

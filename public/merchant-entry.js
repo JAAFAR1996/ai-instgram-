@@ -719,7 +719,8 @@ class MerchantEntryManager {
             }
             
             // Submit to server with admin authentication
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+            console.log('Using admin key:', adminKey);
             const response = await fetch('/admin/merchants', {
                 method: 'POST',
                 headers: {
@@ -740,6 +741,8 @@ class MerchantEntryManager {
                 // Use admin utils for success message
                 if (window.adminUtils) {
                     window.adminUtils.showToast('تم إنشاء التاجر بنجاح!', 'success', 8000);
+                } else {
+                    console.log('تم إنشاء التاجر بنجاح!');
                 }
                 
                 successDiv.style.display = 'block';
@@ -788,6 +791,8 @@ class MerchantEntryManager {
                 // Use admin utils for error message
                 if (window.adminUtils) {
                     window.adminUtils.showToast(result.message || 'حدث خطأ غير متوقع', 'error');
+                } else {
+                    console.error('خطأ:', result.message || 'حدث خطأ غير متوقع');
                 }
                 
                 errorDiv.style.display = 'block';
@@ -801,6 +806,8 @@ class MerchantEntryManager {
             // Use admin utils for error message
             if (window.adminUtils) {
                 window.adminUtils.showToast('حدث خطأ في الاتصال: ' + error.message, 'error');
+            } else {
+                console.error('خطأ في الاتصال:', error.message);
             }
             
             errorDiv.style.display = 'block';
@@ -812,6 +819,7 @@ class MerchantEntryManager {
                 window.adminUtils.setButtonLoading(submitBtn, false);
             } else {
                 submitBtn.disabled = false;
+                submitBtn.textContent = 'إنشاء التاجر';
             }
         }
     }
