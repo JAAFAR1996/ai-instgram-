@@ -285,35 +285,221 @@
 
         .image-upload {
             border: 2px dashed #1e3c72;
-            border-radius: 10px;
-            padding: 30px;
+            border-radius: 15px;
+            padding: 40px 20px;
             text-align: center;
-            background: #f8f9ff;
+            background: linear-gradient(135deg, #f8f9ff 0%, #e8f2ff 100%);
             transition: all 0.3s ease;
             cursor: pointer;
+            position: relative;
+            overflow: hidden;
         }
 
         .image-upload:hover {
             border-color: #2a5298;
-            background: #f0f2ff;
+            background: linear-gradient(135deg, #f0f2ff 0%, #dae8ff 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(30, 60, 114, 0.15);
         }
 
         .image-upload i {
-            font-size: 3rem;
+            font-size: 4rem;
             color: #1e3c72;
-            margin-bottom: 15px;
+            margin-bottom: 20px;
+            display: block;
+        }
+
+        .image-upload .upload-text {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #1e3c72;
+            margin-bottom: 10px;
+        }
+
+        .image-upload .upload-hint {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        .upload-btn {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(30, 60, 114, 0.3);
         }
 
         .image-preview {
             display: none;
-            margin-top: 15px;
+            margin-top: 20px;
+            text-align: center;
         }
 
         .image-preview img {
-            max-width: 200px;
-            max-height: 200px;
+            max-width: 250px;
+            max-height: 250px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            border: 3px solid #fff;
+        }
+
+        .image-preview .preview-actions {
+            margin-top: 15px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .preview-btn {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .preview-btn.change {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .preview-btn.remove {
+            background: #dc3545;
+            color: white;
+        }
+
+        .merchant-id-display {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            margin: 20px 0;
+            text-align: center;
+            border: 3px solid #1e7e34;
+            box-shadow: 0 10px 30px rgba(40, 167, 69, 0.3);
+        }
+
+        .merchant-id-display h3 {
+            margin-bottom: 15px;
+            font-size: 1.5rem;
+        }
+
+        .merchant-id-value {
+            background: rgba(255,255,255,0.2);
+            padding: 15px;
             border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            font-family: 'Courier New', monospace;
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin: 15px 0;
+            word-break: break-all;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+
+        .security-warning {
+            background: #fff3cd;
+            color: #856404;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 15px;
+            border: 2px solid #ffeaa7;
+            text-align: right;
+        }
+
+        .security-warning i {
+            color: #f39c12;
+            margin-left: 10px;
+        }
+
+        .copy-btn {
+            background: rgba(255,255,255,0.3);
+            color: white;
+            border: 2px solid rgba(255,255,255,0.5);
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+
+        .copy-btn:hover {
+            background: rgba(255,255,255,0.4);
+            border-color: rgba(255,255,255,0.7);
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        /* تحسينات إضافية للواجهة */
+        .form-section {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .form-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #1e3c72, transparent);
+            transition: left 0.5s ease;
+        }
+
+        .form-section:hover::before {
+            left: 100%;
+        }
+
+        .upload-btn:active {
+            transform: scale(0.95);
+        }
+
+        .merchant-id-display {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .merchant-id-display::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(45deg, transparent, rgba(255,255,255,0.1), transparent);
+            transform: rotate(45deg);
+            animation: shine 3s infinite;
+        }
+
+        @keyframes shine {
+            0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+            50% { transform: translateX(0%) translateY(0%) rotate(45deg); }
+            100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
         }
 
         .working-hours {
@@ -656,6 +842,18 @@
                 <div class="success" id="success">
                     <h3><i class="fas fa-check-circle"></i> تم إنشاء التاجر بنجاح!</h3>
                     <p id="successMessage"></p>
+                    <div class="merchant-id-display" id="merchantIdDisplay" style="display: none;">
+                        <h3><i class="fas fa-key"></i> معرف التاجر الخاص</h3>
+                        <div class="merchant-id-value" id="merchantIdValue"></div>
+                        <button type="button" class="copy-btn" onclick="merchantManager.copyMerchantId()">
+                            <i class="fas fa-copy"></i> نسخ المعرف
+                        </button>
+                        <div class="security-warning">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <strong>تحذير أمني مهم:</strong> هذا المعرف سري جداً ولا تشاركه مع أي شخص آخر. 
+                            ستحتاجه لجميع العمليات المتعلقة بحسابك. احفظه في مكان آمن.
+                        </div>
+                    </div>
                 </div>
 
                 <div class="error" id="error">

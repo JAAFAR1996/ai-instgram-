@@ -237,10 +237,23 @@ class MerchantEntryManager {
                 <label>صورة المنتج</label>
                 <div class="image-upload" onclick="merchantManager.uploadProductImage(this, ${this.productCount})">
                     <i class="fas fa-cloud-upload-alt"></i>
-                    <p>اضغط لرفع صورة المنتج</p>
-                    <p style="font-size: 0.9rem; color: #666;">JPG, PNG, GIF (حد أقصى 5MB)</p>
+                    <div class="upload-text">رفع صورة المنتج</div>
+                    <div class="upload-hint">JPG, PNG, GIF (حد أقصى 5MB)</div>
+                    <button type="button" class="upload-btn">
+                        <i class="fas fa-upload"></i>
+                        اختيار صورة
+                    </button>
                 </div>
-                <div class="image-preview"></div>
+                <div class="image-preview">
+                    <div class="preview-actions">
+                        <button type="button" class="preview-btn change" onclick="merchantManager.changeProductImage(this)">
+                            <i class="fas fa-edit"></i> تغيير
+                        </button>
+                        <button type="button" class="preview-btn remove" onclick="merchantManager.removeProductImage(this)">
+                            <i class="fas fa-trash"></i> حذف
+                        </button>
+                    </div>
+                </div>
                 <input type="hidden" name="products[${this.productCount}][image_url]">
             </div>
         `;
@@ -297,63 +310,172 @@ class MerchantEntryManager {
         input.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (file) {
-                // Validate file size (5MB max)
-                if (file.size > 5 * 1024 * 1024) {
-                    alert('حجم الملف كبير جداً. الحد الأقصى 5MB');
-                    return;
-                }
-                
-                // Validate file type
-                if (!file.type.startsWith('image/')) {
-                    alert('يرجى اختيار ملف صورة صحيح');
-                    return;
-                }
-                
-                // Show loading
-                uploadDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i><p>جاري رفع الصورة...</p>';
-                
-                try {
-                    // Upload to server
-                    const formData = new FormData();
-                    formData.append('file', file);
-                    
-                    const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
-                    const response = await fetch('/admin/upload', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': 'Bearer ' + adminKey
-                        },
-                        body: formData
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (response.ok && result.success) {
-                        // Show preview
-                        const preview = uploadDiv.nextElementSibling;
-                        preview.style.display = 'block';
-                        preview.innerHTML = `<img src="${result.url}" alt="Product Image">`;
-                        
-                        // Store image URL
-                        const hiddenInput = uploadDiv.parentElement.querySelector('input[type="hidden"]');
-                        hiddenInput.value = result.url;
-                        
-                        // Reset upload div
-                        uploadDiv.innerHTML = '<i class="fas fa-check"></i><p>تم رفع الصورة بنجاح</p>';
-                    } else {
-                        throw new Error(result.error || 'فشل في رفع الصورة');
-                    }
-                } catch (error) {
-                    alert('حدث خطأ في رفع الصورة: ' + error.message);
-                    // Reset upload div
-                    uploadDiv.innerHTML = '<i class="fas fa-cloud-upload-alt"></i><p>اضغط لرفع صورة المنتج</p><p style="font-size: 0.9rem; color: #666;">JPG, PNG, GIF (حد أقصى 5MB)</p>';
-                }
+                await this.processImageUpload(file, uploadDiv);
             }
         });
         
         document.body.appendChild(input);
         input.click();
         document.body.removeChild(input);
+    }
+
+    // Process image upload
+    async processImageUpload(file, uploadDiv) {
+        // Validate file size (5MB max)
+        if (file.size > 5 * 1024 * 1024) {
+            alert('حجم الملف كبير جداً. الحد الأقصى 5MB');
+            return;
+        }
+        
+        // Validate file type
+        if (!file.type.startsWith('image/')) {
+            alert('يرجى اختيار ملف صورة صحيح');
+            return;
+        }
+        
+        // Show loading
+        uploadDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i><div class="upload-text">جاري رفع الصورة...</div>';
+        
+        try {
+            // Upload to server
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+            const response = await fetch('/admin/upload', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + adminKey
+                },
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                // Show preview
+                const preview = uploadDiv.nextElementSibling;
+                preview.style.display = 'block';
+                preview.innerHTML = `
+                    <img src="${result.url}" alt="Product Image">
+                    <div class="preview-actions">
+                        <button type="button" class="preview-btn change" onclick="merchantManager.changeProductImage(this)">
+                            <i class="fas fa-edit"></i> تغيير
+                        </button>
+                        <button type="button" class="preview-btn remove" onclick="merchantManager.removeProductImage(this)">
+                            <i class="fas fa-trash"></i> حذف
+                        </button>
+                    </div>
+                `;
+                
+                // Store image URL
+                const hiddenInput = uploadDiv.parentElement.querySelector('input[type="hidden"]');
+                hiddenInput.value = result.url;
+                
+                // Update upload div to success state
+                uploadDiv.innerHTML = '<i class="fas fa-check-circle"></i><div class="upload-text">تم رفع الصورة بنجاح</div>';
+                uploadDiv.style.borderColor = '#28a745';
+                uploadDiv.style.background = 'linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%)';
+                
+            } else {
+                throw new Error(result.error || 'فشل في رفع الصورة');
+            }
+        } catch (error) {
+            alert('حدث خطأ في رفع الصورة: ' + error.message);
+            this.resetUploadDiv(uploadDiv);
+        }
+    }
+
+    // Change product image
+    changeProductImage(button) {
+        const productItem = button.closest('.product-item');
+        const uploadDiv = productItem.querySelector('.image-upload');
+        this.uploadProductImage(uploadDiv, 0);
+    }
+
+    // Remove product image
+    removeProductImage(button) {
+        if (confirm('هل أنت متأكد من حذف هذه الصورة؟')) {
+            const productItem = button.closest('.product-item');
+            const uploadDiv = productItem.querySelector('.image-upload');
+            const preview = productItem.querySelector('.image-preview');
+            const hiddenInput = productItem.querySelector('input[type="hidden"]');
+            
+            // Reset everything
+            preview.style.display = 'none';
+            preview.innerHTML = '';
+            hiddenInput.value = '';
+            this.resetUploadDiv(uploadDiv);
+        }
+    }
+
+    // Reset upload div to initial state
+    resetUploadDiv(uploadDiv) {
+        uploadDiv.innerHTML = `
+            <i class="fas fa-cloud-upload-alt"></i>
+            <div class="upload-text">رفع صورة المنتج</div>
+            <div class="upload-hint">JPG, PNG, GIF (حد أقصى 5MB)</div>
+            <button type="button" class="upload-btn">
+                <i class="fas fa-upload"></i>
+                اختيار صورة
+            </button>
+        `;
+        uploadDiv.style.borderColor = '#1e3c72';
+        uploadDiv.style.background = 'linear-gradient(135deg, #f8f9ff 0%, #e8f2ff 100%)';
+    }
+
+    // Generate UUID
+    generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    // Copy merchant ID to clipboard
+    copyMerchantId() {
+        const merchantIdValue = document.getElementById('merchantIdValue').textContent;
+        
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(merchantIdValue).then(() => {
+                // Show success feedback
+                const copyBtn = document.querySelector('.copy-btn');
+                const originalText = copyBtn.innerHTML;
+                copyBtn.innerHTML = '<i class="fas fa-check"></i> تم النسخ';
+                copyBtn.style.background = 'rgba(40, 167, 69, 0.3)';
+                
+                setTimeout(() => {
+                    copyBtn.innerHTML = originalText;
+                    copyBtn.style.background = 'rgba(255,255,255,0.3)';
+                }, 2000);
+            }).catch(() => {
+                this.fallbackCopyToClipboard(merchantIdValue);
+            });
+        } else {
+            this.fallbackCopyToClipboard(merchantIdValue);
+        }
+    }
+
+    // Fallback copy method
+    fallbackCopyToClipboard(text) {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        try {
+            document.execCommand('copy');
+            alert('تم نسخ معرف التاجر بنجاح');
+        } catch (err) {
+            alert('فشل في نسخ المعرف. يرجى نسخه يدوياً');
+        }
+        
+        document.body.removeChild(textArea);
     }
 
     // Calculate completeness score
@@ -592,22 +714,55 @@ class MerchantEntryManager {
             loadingDiv.style.display = 'none';
             
             if (response.ok && result.success) {
+                // Get merchant ID from server response
+                const merchantId = result.merchant_id;
+                
                 // Use admin utils for success message
                 if (window.adminUtils) {
-                    window.adminUtils.showToast(`تم إنشاء التاجر بنجاح! معرف التاجر: ${result.merchant_id}`, 'success', 5000);
+                    window.adminUtils.showToast('تم إنشاء التاجر بنجاح!', 'success', 8000);
                 }
                 
                 successDiv.style.display = 'block';
-                document.getElementById('successMessage').textContent = 
-                    `تم إنشاء التاجر بنجاح! معرف التاجر: ${result.merchant_id}`;
+                document.getElementById('successMessage').innerHTML = `
+                    <strong>تم إنشاء حساب التاجر بنجاح!</strong><br>
+                    درجة اكتمال البيانات: ${result.completeness_score || 0}%<br>
+                    وقت التنفيذ: ${result.execution_time_ms || 0}ms
+                `;
                 
-                // Reset form
-                document.getElementById('merchantForm').reset();
-                document.getElementById('productsContainer').innerHTML = '';
-                this.productCount = 0;
-                this.workingHours = {};
-                this.setupWorkingHours();
-                this.updateCompletenessScore();
+                // Show merchant ID with security warning
+                const merchantIdDisplay = document.getElementById('merchantIdDisplay');
+                const merchantIdValue = document.getElementById('merchantIdValue');
+                merchantIdDisplay.style.display = 'block';
+                merchantIdValue.textContent = merchantId;
+                
+                // Add blinking effect to draw attention
+                merchantIdDisplay.style.animation = 'pulse 2s infinite';
+                setTimeout(() => {
+                    merchantIdDisplay.style.animation = 'none';
+                }, 10000);
+                
+                // Scroll to success message
+                successDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                // Show important alert
+                setTimeout(() => {
+                    alert('✨ تهانينا! تم إنشاء حسابك بنجاح\n\n⚠️ مهم جداً: احفظ معرف التاجر في مكان آمن\nهذا المعرف هو مفتاح حسابك ولا تشاركه مع أي شخص!');
+                }, 1000);
+                
+                // Reset form after showing success
+                setTimeout(() => {
+                    if (confirm('هل تريد إضافة تاجر جديد؟\n\n⚠️ تأكد من حفظ معرف التاجر الحالي قبل المتابعة!')) {
+                        document.getElementById('merchantForm').reset();
+                        document.getElementById('productsContainer').innerHTML = '';
+                        this.productCount = 0;
+                        this.workingHours = {};
+                        this.setupWorkingHours();
+                        this.updateCompletenessScore();
+                        successDiv.style.display = 'none';
+                        merchantIdDisplay.style.display = 'none';
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                }, 15000);
                 
             } else {
                 // Use admin utils for error message

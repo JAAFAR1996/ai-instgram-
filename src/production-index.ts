@@ -442,7 +442,8 @@ async function bootstrap() {
             merchant_id: merchantId,
             completeness_score: completenessScore,
             message: 'تم إنشاء التاجر بنجاح',
-            execution_time_ms: executionTime
+            execution_time_ms: executionTime,
+            security_notice: 'هذا المعرف سري جداً ولا تشاركه مع أي شخص آخر'
           });
           
         } catch (dbError) {
