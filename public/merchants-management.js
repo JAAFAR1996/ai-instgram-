@@ -126,7 +126,7 @@ class MerchantsManagementManager {
         gridDiv.innerHTML = '';
 
         try {
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
             const response = await fetch('/api/merchants/search', {
                 headers: {
                     'Authorization': 'Bearer ' + adminKey
@@ -251,7 +251,7 @@ class MerchantsManagementManager {
 
         try {
             // Load all merchants first to get their products
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
             const merchantsResponse = await fetch('/api/merchants/search', {
                 headers: {
                     'Authorization': 'Bearer ' + adminKey
@@ -465,7 +465,7 @@ class MerchantsManagementManager {
         const data = Object.fromEntries(formData.entries());
 
         try {
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
             const response = await fetch(`/api/merchants/${this.currentMerchantId}`, {
                 method: 'PUT',
                 headers: {
@@ -524,7 +524,7 @@ class MerchantsManagementManager {
         }
 
         try {
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
             const response = await fetch(`/api/products/${this.currentProductId}`, {
                 method: 'PUT',
                 headers: {
@@ -555,7 +555,7 @@ class MerchantsManagementManager {
         }
 
         try {
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
             const response = await fetch(`/api/merchants/${merchantId}`, {
                 method: 'DELETE',
                 headers: {
@@ -583,7 +583,7 @@ class MerchantsManagementManager {
         }
 
         try {
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
             const response = await fetch(`/api/products/${productId}`, {
                 method: 'DELETE',
                 headers: {

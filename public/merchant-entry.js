@@ -350,7 +350,7 @@ class MerchantEntryManager {
             const formData = new FormData();
             formData.append('file', file);
             
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
             const response = await fetch('/admin/upload', {
                 method: 'POST',
                 headers: {

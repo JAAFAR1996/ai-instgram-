@@ -404,7 +404,7 @@ async function bootstrap() {
               await client.query(`
                 INSERT INTO products (
                   id, merchant_id, sku, name_ar, name_en, description_ar,
-                  category, price_usd, stock_quantity, tags, is_active,
+                  category, price_usd, stock_quantity, tags, status,
                   created_at, updated_at
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
               `, [
@@ -418,7 +418,7 @@ async function bootstrap() {
                 product.price_usd || 0,
                 product.stock_quantity || 0,
                 product.tags || null,
-                product.is_active !== false,
+                (product.is_active !== false) ? 'ACTIVE' : 'INACTIVE',
                 now, now
               ]);
             }
@@ -1179,7 +1179,7 @@ async function bootstrap() {
         
         const client = await pool.connect();
         try {
-          let whereConditions = ['deleted_at IS NULL'];
+          let whereConditions = ['1=1'];
           let params = [];
           let paramIndex = 1;
           
@@ -1222,13 +1222,13 @@ async function bootstrap() {
                     'price_usd', p.price_usd,
                     'stock_quantity', p.stock_quantity,
                     'category', p.category,
-                    'is_active', p.is_active
+                    'is_active', (p.status = 'ACTIVE')
                   )
                 ) FILTER (WHERE p.id IS NOT NULL),
                 '[]'::json
               ) as products
             FROM merchants m
-            LEFT JOIN products p ON m.id = p.merchant_id AND p.deleted_at IS NULL
+            LEFT JOIN products p ON m.id = p.merchant_id
             WHERE ${whereClause}
             GROUP BY m.id
             ORDER BY m.created_at DESC
@@ -1283,15 +1283,15 @@ async function bootstrap() {
                     'price_usd', p.price_usd,
                     'stock_quantity', p.stock_quantity,
                     'tags', p.tags,
-                    'is_active', p.is_active,
+                    'is_active', (p.status = 'ACTIVE'),
                     'created_at', p.created_at
                   )
                 ) FILTER (WHERE p.id IS NOT NULL),
                 '[]'::json
               ) as products
             FROM merchants m
-            LEFT JOIN products p ON m.id = p.merchant_id AND p.deleted_at IS NULL
-            WHERE m.id = $1 AND m.deleted_at IS NULL
+            LEFT JOIN products p ON m.id = p.merchant_id
+            WHERE m.id = $1
             GROUP BY m.id
           `, [merchantId]);
           
@@ -1329,8 +1329,9 @@ async function bootstrap() {
               instagram_username = $4,
               email = $5,
               currency = $6,
+              subscription_status = CASE WHEN LOWER(COALESCE($8, '')) = 'inactive' THEN 'SUSPENDED' ELSE 'ACTIVE' END,
               updated_at = NOW()
-            WHERE id = $7 AND deleted_at IS NULL
+            WHERE id = $7
             RETURNING *
           `, [
             body.business_name,
@@ -1339,7 +1340,8 @@ async function bootstrap() {
             body.instagram_username || '',
             body.email || '',
             body.currency || 'IQD',
-            merchantId
+            merchantId,
+            body.status || null
           ]);
           
           if (result.rows.length === 0) {
@@ -1363,9 +1365,8 @@ async function bootstrap() {
         
         try {
           const result = await client.query(`
-            UPDATE merchants 
-            SET deleted_at = NOW(), updated_at = NOW()
-            WHERE id = $1 AND deleted_at IS NULL
+            DELETE FROM merchants 
+            WHERE id = $1
             RETURNING id
           `, [merchantId]);
           
@@ -1373,12 +1374,7 @@ async function bootstrap() {
             return c.json({ success: false, error: 'Merchant not found' }, 404);
           }
           
-          // Also soft delete products
-          await client.query(`
-            UPDATE products 
-            SET deleted_at = NOW(), updated_at = NOW()
-            WHERE merchant_id = $1 AND deleted_at IS NULL
-          `, [merchantId]);
+          // Products are deleted automatically via ON DELETE CASCADE
           
           return c.json({ success: true, message: 'Merchant deleted successfully' });
         } finally {
@@ -1395,9 +1391,9 @@ async function bootstrap() {
         const client = await pool.connect();
         try {
           const [merchantsResult, productsResult, inventoryResult] = await Promise.all([
-            client.query('SELECT COUNT(*) as total FROM merchants WHERE deleted_at IS NULL'),
-            client.query('SELECT COUNT(*) as total FROM products WHERE deleted_at IS NULL'),
-            client.query('SELECT COALESCE(SUM(price_usd * stock_quantity), 0) as total FROM products WHERE deleted_at IS NULL AND is_active = true')
+            client.query('SELECT COUNT(*) as total FROM merchants'),
+            client.query('SELECT COUNT(*) as total FROM products'),
+            client.query("SELECT COALESCE(SUM(price_usd * stock_quantity), 0) as total FROM products WHERE status = 'ACTIVE'")
           ]);
           
           return c.json({

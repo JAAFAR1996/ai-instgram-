@@ -683,7 +683,8 @@ export function registerAdminRoutes(app: Hono) {
                     data.products = products;
                 }
                 
-                const response = await fetch('/admin/merchants', {
+                // Use legacy admin endpoint (Basic Auth)
+                const response = await fetch('/admin/merchants-legacy', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1416,13 +1417,13 @@ export function registerAdminRoutes(app: Hono) {
                 'price_usd', p.price_usd,
                 'stock_quantity', p.stock_quantity,
                 'category', p.category,
-                'is_active', p.is_active
+                'is_active', (p.status = 'ACTIVE')
               )
             ) FILTER (WHERE p.id IS NOT NULL),
             '[]'::json
           ) as products
         FROM merchants m
-        LEFT JOIN products p ON m.id = p.merchant_id AND p.deleted_at IS NULL
+        LEFT JOIN products p ON m.id = p.merchant_id
         WHERE ${sql.unsafe(whereClause)}
         GROUP BY m.id
         ORDER BY m.created_at DESC
@@ -1475,15 +1476,15 @@ export function registerAdminRoutes(app: Hono) {
                 'price_usd', p.price_usd,
                 'stock_quantity', p.stock_quantity,
                 'tags', p.tags,
-                'image_url', p.image_url,
-                'is_active', p.is_active,
+                'image_url', NULL,
+                'is_active', (p.status = 'ACTIVE'),
                 'created_at', p.created_at
               )
             ) FILTER (WHERE p.id IS NOT NULL),
             '[]'::json
           ) as products
         FROM merchants m
-        LEFT JOIN products p ON m.id = p.merchant_id AND p.deleted_at IS NULL
+        LEFT JOIN products p ON m.id = p.merchant_id
         WHERE m.id = ${merchantId}::uuid
         GROUP BY m.id
       `;
@@ -1519,7 +1520,7 @@ export function registerAdminRoutes(app: Hono) {
           instagram_username = ${body.instagram_username || ''},
           email = ${body.email || ''},
           currency = ${body.currency || 'IQD'},
-          status = ${body.status || 'active'},
+          subscription_status = ${String(body.status || '').toLowerCase() === 'inactive' ? 'SUSPENDED' : 'ACTIVE'},
           updated_at = NOW()
         WHERE id = ${merchantId}::uuid
         RETURNING *
@@ -1551,17 +1552,9 @@ export function registerAdminRoutes(app: Hono) {
         return c.json({ success: false, error: 'Merchant not found' }, 404);
       }
 
-      // Soft delete merchant and all products
+      // Hard delete merchant (products cascade via FK)
       await sql`
-        UPDATE merchants 
-        SET deleted_at = NOW(), updated_at = NOW()
-        WHERE id = ${merchantId}::uuid
-      `;
-
-      await sql`
-        UPDATE products 
-        SET deleted_at = NOW(), updated_at = NOW()
-        WHERE merchant_id = ${merchantId}::uuid
+        DELETE FROM merchants WHERE id = ${merchantId}::uuid
       `;
 
       await invalidate(merchantId);
@@ -1583,7 +1576,7 @@ export function registerAdminRoutes(app: Hono) {
       const limit = parseInt(c.req.query('limit') || '50');
       const offset = (page - 1) * limit;
 
-      let whereConditions = ['p.deleted_at IS NULL'];
+      let whereConditions = ['1=1'];
       let params: any[] = [];
       let paramIndex = 1;
 
@@ -1658,7 +1651,7 @@ export function registerAdminRoutes(app: Hono) {
           m.business_name as merchant_name
         FROM products p
         JOIN merchants m ON p.merchant_id = m.id
-        WHERE p.id = ${productId}::uuid AND p.deleted_at IS NULL
+        WHERE p.id = ${productId}::uuid
       `;
 
       if (!product.length) {
@@ -1694,9 +1687,9 @@ export function registerAdminRoutes(app: Hono) {
           price_usd = ${body.price_usd || 0},
           stock_quantity = ${body.stock_quantity || 0},
           tags = ${body.tags ? body.tags : []},
-          is_active = ${body.is_active === 'true' || body.is_active === true},
+          status = ${body.is_active === 'true' || body.is_active === true ? 'ACTIVE' : 'INACTIVE'},
           updated_at = NOW()
-        WHERE id = ${productId}::uuid AND deleted_at IS NULL
+        WHERE id = ${productId}::uuid
         RETURNING *
       `;
 
@@ -1726,7 +1719,7 @@ export function registerAdminRoutes(app: Hono) {
       
       // Get merchant ID before deletion
       const product = await sql`
-        SELECT merchant_id FROM products WHERE id = ${productId}::uuid AND deleted_at IS NULL
+        SELECT merchant_id FROM products WHERE id = ${productId}::uuid
       `;
 
       if (!product.length) {
@@ -1735,11 +1728,9 @@ export function registerAdminRoutes(app: Hono) {
 
       const merchantId = String(product[0].merchant_id);
 
-      // Soft delete product
+      // Hard delete product
       await sql`
-        UPDATE products 
-        SET deleted_at = NOW(), updated_at = NOW()
-        WHERE id = ${productId}::uuid
+        DELETE FROM products WHERE id = ${productId}::uuid
       `;
 
       await invalidate(merchantId);
@@ -1855,7 +1846,7 @@ export function registerAdminRoutes(app: Hono) {
 
       // Update product images in database
       const product = await sql`
-        SELECT images FROM products WHERE id = ${productId}::uuid AND deleted_at IS NULL
+        SELECT images FROM products WHERE id = ${productId}::uuid
       `;
 
       if (!product.length) {
@@ -1894,16 +1885,16 @@ export function registerAdminRoutes(app: Hono) {
   app.get('/api/analytics/summary', async (c) => {
     try {
       const [merchantsCount] = await sql`
-        SELECT COUNT(*) as total_merchants FROM merchants WHERE deleted_at IS NULL
+        SELECT COUNT(*) as total_merchants FROM merchants
       `;
       
       const [productsCount] = await sql`
-        SELECT COUNT(*) as total_products FROM products WHERE deleted_at IS NULL
+        SELECT COUNT(*) as total_products FROM products
       `;
       
       const [inventoryValue] = await sql`
         SELECT COALESCE(SUM(price_usd * stock_quantity), 0) as total_inventory_value 
-        FROM products WHERE deleted_at IS NULL AND status = 'ACTIVE'
+        FROM products WHERE status = 'ACTIVE'
       `;
 
       return c.json({
@@ -1923,7 +1914,7 @@ export function registerAdminRoutes(app: Hono) {
       const merchantId = c.req.param('id');
       
       const [merchant] = await sql`
-        SELECT * FROM merchants WHERE id = ${merchantId}::uuid AND deleted_at IS NULL
+        SELECT * FROM merchants WHERE id = ${merchantId}::uuid
       `;
       
       if (!merchant) {
@@ -1932,13 +1923,13 @@ export function registerAdminRoutes(app: Hono) {
       
       const [productsCount] = await sql`
         SELECT COUNT(*) as total_products FROM products 
-        WHERE merchant_id = ${merchantId}::uuid AND deleted_at IS NULL
+        WHERE merchant_id = ${merchantId}::uuid
       `;
       
       const [inventoryValue] = await sql`
         SELECT COALESCE(SUM(price_usd * stock_quantity), 0) as inventory_value 
         FROM products 
-        WHERE merchant_id = ${merchantId}::uuid AND deleted_at IS NULL AND status = 'ACTIVE'
+        WHERE merchant_id = ${merchantId}::uuid AND status = 'ACTIVE'
       `;
 
       return c.json({
