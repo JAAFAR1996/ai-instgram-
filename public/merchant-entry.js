@@ -136,6 +136,14 @@ class MerchantEntryManager {
             this.submitForm();
         });
 
+        // Floating CTA submit
+        const floatingBtn = document.getElementById('submitFloatingBtn');
+        if (floatingBtn) {
+            floatingBtn.addEventListener('click', () => {
+                document.getElementById('merchantForm')?.requestSubmit();
+            });
+        }
+
         // Real-time validation
         document.querySelectorAll('input, select, textarea').forEach(input => {
             input.addEventListener('input', () => {
@@ -797,49 +805,16 @@ class MerchantEntryManager {
             loadingDiv.style.display = 'none';
             
             if (response.ok && result.success) {
-                // Get merchant ID from server response
                 const merchantId = result.merchant_id;
-                
-                // Use admin utils for success message
+                // Optional toast only (لا نعرض نجاحاً كبيراً في هذه الصفحة)
                 if (window.adminUtils) {
-                    window.adminUtils.showToast('تم إنشاء التاجر بنجاح!', 'success', 8000);
-                } else {
-                    console.log('تم إنشاء التاجر بنجاح!');
+                    window.adminUtils.showToast('تم إنشاء التاجر، جاري إكمال الإعداد...', 'success', 4000);
                 }
-                
-                successDiv.style.display = 'block';
-                document.getElementById('successMessage').innerHTML = `
-                    <strong>تم إنشاء حساب التاجر بنجاح!</strong><br>
-                    درجة اكتمال البيانات: ${result.completeness_score || 0}%<br>
-                    وقت التنفيذ: ${result.execution_time_ms || 0}ms
-                `;
-                
-                // Show merchant ID with security warning
-                const merchantIdDisplay = document.getElementById('merchantIdDisplay');
-                const merchantIdValue = document.getElementById('merchantIdValue');
-                merchantIdDisplay.style.display = 'block';
-                merchantIdValue.textContent = merchantId;
-                
-                // Add blinking effect to draw attention
-                merchantIdDisplay.style.animation = 'pulse 2s infinite';
-                setTimeout(() => {
-                    merchantIdDisplay.style.animation = 'none';
-                }, 10000);
-                
-                // Scroll to success message
-                successDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                
-                // Show important alert
-                setTimeout(() => {
-                    alert('✨ تهانينا! تم إنشاء حسابك بنجاح\n\n⚠️ مهم جداً: احفظ معرف التاجر في مكان آمن\nهذا المعرف هو مفتاح حسابك ولا تشاركه مع أي شخص!');
-                }, 1000);
-                
-                // Redirect to UDID setup page to complete onboarding
-                setTimeout(() => {
-                    const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
-                    window.location.href = `/admin/merchants/udid-setup?merchant_id=${encodeURIComponent(merchantId)}&key=${encodeURIComponent(adminKey)}`;
-                }, 1500);
-                
+                // إبقاء مؤشر التحميل ظاهر حتى التحويل
+                loadingDiv.style.display = 'block';
+                // تحويل سريع لصفحة إعداد UDID
+                const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+                window.location.href = `/admin/merchants/udid-setup?merchant_id=${encodeURIComponent(merchantId)}&key=${encodeURIComponent(adminKey)}`;
             } else {
                 // Use admin utils for error message
                 if (window.adminUtils) {
