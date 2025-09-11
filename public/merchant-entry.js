@@ -288,13 +288,13 @@ class MerchantEntryManager {
     }
 
     // Upload product image
-    uploadProductImage(uploadDiv, productIndex) {
+    async uploadProductImage(uploadDiv, productIndex) {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
         input.style.display = 'none';
         
-        input.addEventListener('change', (e) => {
+        input.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (file) {
                 // Validate file size (5MB max)
@@ -309,18 +309,45 @@ class MerchantEntryManager {
                     return;
                 }
                 
-                // Show preview
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const preview = uploadDiv.nextElementSibling;
-                    preview.style.display = 'block';
-                    preview.innerHTML = `<img src="${e.target.result}" alt="Product Image">`;
+                // Show loading
+                uploadDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i><p>جاري رفع الصورة...</p>';
+                
+                try {
+                    // Upload to server
+                    const formData = new FormData();
+                    formData.append('file', file);
                     
-                    // Store image data
-                    const hiddenInput = uploadDiv.parentElement.querySelector('input[type="hidden"]');
-                    hiddenInput.value = e.target.result; // In real app, upload to server first
-                };
-                reader.readAsDataURL(file);
+                    const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+                    const response = await fetch('/admin/upload', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': 'Bearer ' + adminKey
+                        },
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        // Show preview
+                        const preview = uploadDiv.nextElementSibling;
+                        preview.style.display = 'block';
+                        preview.innerHTML = `<img src="${result.url}" alt="Product Image">`;
+                        
+                        // Store image URL
+                        const hiddenInput = uploadDiv.parentElement.querySelector('input[type="hidden"]');
+                        hiddenInput.value = result.url;
+                        
+                        // Reset upload div
+                        uploadDiv.innerHTML = '<i class="fas fa-check"></i><p>تم رفع الصورة بنجاح</p>';
+                    } else {
+                        throw new Error(result.error || 'فشل في رفع الصورة');
+                    }
+                } catch (error) {
+                    alert('حدث خطأ في رفع الصورة: ' + error.message);
+                    // Reset upload div
+                    uploadDiv.innerHTML = '<i class="fas fa-cloud-upload-alt"></i><p>اضغط لرفع صورة المنتج</p><p style="font-size: 0.9rem; color: #666;">JPG, PNG, GIF (حد أقصى 5MB)</p>';
+                }
             }
         });
         
@@ -550,12 +577,12 @@ class MerchantEntryManager {
             }
             
             // Submit to server with admin authentication
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+            const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
             const response = await fetch('/admin/merchants', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${adminKey}`
+                    'Authorization': 'Bearer ' + adminKey
                 },
                 body: JSON.stringify(data)
             });
@@ -565,6 +592,11 @@ class MerchantEntryManager {
             loadingDiv.style.display = 'none';
             
             if (response.ok && result.success) {
+                // Use admin utils for success message
+                if (window.adminUtils) {
+                    window.adminUtils.showToast(`تم إنشاء التاجر بنجاح! معرف التاجر: ${result.merchant_id}`, 'success', 5000);
+                }
+                
                 successDiv.style.display = 'block';
                 document.getElementById('successMessage').textContent = 
                     `تم إنشاء التاجر بنجاح! معرف التاجر: ${result.merchant_id}`;
@@ -578,6 +610,11 @@ class MerchantEntryManager {
                 this.updateCompletenessScore();
                 
             } else {
+                // Use admin utils for error message
+                if (window.adminUtils) {
+                    window.adminUtils.showToast(result.message || 'حدث خطأ غير متوقع', 'error');
+                }
+                
                 errorDiv.style.display = 'block';
                 document.getElementById('errorMessage').textContent = 
                     result.message || 'حدث خطأ غير متوقع';
@@ -585,11 +622,22 @@ class MerchantEntryManager {
             
         } catch (error) {
             loadingDiv.style.display = 'none';
+            
+            // Use admin utils for error message
+            if (window.adminUtils) {
+                window.adminUtils.showToast('حدث خطأ في الاتصال: ' + error.message, 'error');
+            }
+            
             errorDiv.style.display = 'block';
             document.getElementById('errorMessage').textContent = 
                 'حدث خطأ في الاتصال: ' + error.message;
         } finally {
-            submitBtn.disabled = false;
+            // Use admin utils to reset button state
+            if (window.adminUtils) {
+                window.adminUtils.setButtonLoading(submitBtn, false);
+            } else {
+                submitBtn.disabled = false;
+            }
         }
     }
 }

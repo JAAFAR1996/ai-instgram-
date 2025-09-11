@@ -861,6 +861,57 @@ async function bootstrap() {
     app.get('/merchant-entry.js', adminAuth, () => serveSecureStatic('merchant-entry.js', 'application/javascript'));
     app.get('/merchants-management.js', adminAuth, () => serveSecureStatic('merchants-management.js', 'application/javascript'));
     
+    // Upload endpoint for product images
+    app.post('/admin/upload', adminAuth, async (c) => {
+      try {
+        const formData = await c.req.formData();
+        const file = formData.get('file') as File;
+        
+        if (!file) {
+          return c.json({ success: false, error: 'No file provided' }, 400);
+        }
+        
+        // Validate file type
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+        if (!allowedTypes.includes(file.type)) {
+          return c.json({ success: false, error: 'Invalid file type' }, 400);
+        }
+        
+        // Validate file size (5MB max)
+        if (file.size > 5 * 1024 * 1024) {
+          return c.json({ success: false, error: 'File too large' }, 400);
+        }
+        
+        // Generate unique filename
+        const timestamp = Date.now();
+        const extension = file.name.split('.').pop();
+        const filename = `product_${timestamp}.${extension}`;
+        
+        // Create uploads directory if it doesn't exist
+        const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'products');
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        
+        // Save file
+        const filePath = path.join(uploadDir, filename);
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        fs.writeFileSync(filePath, buffer);
+        
+        return c.json({
+          success: true,
+          filename,
+          url: `/uploads/products/${filename}`,
+          size: file.size,
+          type: file.type
+        });
+      } catch (error) {
+        log.error('File upload failed', { error });
+        return c.json({ success: false, error: 'Upload failed' }, 500);
+      }
+    });
+    
     // Legacy public routes (deprecated but maintained for compatibility)
     app.get('/public/merchant-entry.html', () => {
       return new Response('This endpoint has been moved to /admin/merchants/new', { status: 301, headers: { 'Location': '/admin/merchants/new' } });
@@ -1113,6 +1164,285 @@ async function bootstrap() {
         },
         timestamp: new Date().toISOString()
       });
+    });
+    
+    // API endpoints with admin authentication
+    app.get('/api/merchants/search', adminAuth, async (c) => {
+      try {
+        const search = c.req.query('search') || '';
+        const category = c.req.query('category') || '';
+        const status = c.req.query('status') || '';
+        const page = parseInt(c.req.query('page') || '1');
+        const limit = parseInt(c.req.query('limit') || '50');
+        const offset = (page - 1) * limit;
+        
+        const client = await pool.connect();
+        try {
+          let whereConditions = ['deleted_at IS NULL'];
+          let params = [];
+          let paramIndex = 1;
+          
+          if (search) {
+            whereConditions.push(`(
+              business_name ILIKE $${paramIndex} OR 
+              whatsapp_number ILIKE $${paramIndex} OR 
+              instagram_username ILIKE $${paramIndex} OR 
+              email ILIKE $${paramIndex}
+            )`);
+            params.push(`%${search}%`);
+            paramIndex++;
+          }
+          
+          if (category) {
+            whereConditions.push(`business_category = $${paramIndex}`);
+            params.push(category);
+            paramIndex++;
+          }
+          
+          if (status) {
+            whereConditions.push(`subscription_status = $${paramIndex}`);
+            params.push(status);
+            paramIndex++;
+          }
+          
+          const whereClause = whereConditions.join(' AND ');
+          
+          const merchantsQuery = `
+            SELECT 
+              m.*,
+              COUNT(p.id) as products_count,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'id', p.id,
+                    'sku', p.sku,
+                    'name_ar', p.name_ar,
+                    'name_en', p.name_en,
+                    'price_usd', p.price_usd,
+                    'stock_quantity', p.stock_quantity,
+                    'category', p.category,
+                    'is_active', p.is_active
+                  )
+                ) FILTER (WHERE p.id IS NOT NULL),
+                '[]'::json
+              ) as products
+            FROM merchants m
+            LEFT JOIN products p ON m.id = p.merchant_id AND p.deleted_at IS NULL
+            WHERE ${whereClause}
+            GROUP BY m.id
+            ORDER BY m.created_at DESC
+            LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+          `;
+          
+          params.push(limit, offset);
+          const merchantsResult = await client.query(merchantsQuery, params);
+          
+          const totalQuery = `SELECT COUNT(*) as total FROM merchants m WHERE ${whereClause}`;
+          const totalResult = await client.query(totalQuery, params.slice(0, -2));
+          const total = parseInt(totalResult.rows[0].total);
+          
+          return c.json({
+            success: true,
+            merchants: merchantsResult.rows,
+            pagination: {
+              page,
+              limit,
+              total,
+              pages: Math.ceil(total / limit)
+            }
+          });
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        log.error('Failed to search merchants', { error });
+        return c.json({ success: false, error: 'Failed to search merchants' }, 500);
+      }
+    });
+    
+    app.get('/api/merchants/:id', adminAuth, async (c) => {
+      try {
+        const merchantId = c.req.param('id');
+        const client = await pool.connect();
+        
+        try {
+          const result = await client.query(`
+            SELECT 
+              m.*,
+              COUNT(p.id) as products_count,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'id', p.id,
+                    'sku', p.sku,
+                    'name_ar', p.name_ar,
+                    'name_en', p.name_en,
+                    'description_ar', p.description_ar,
+                    'category', p.category,
+                    'price_usd', p.price_usd,
+                    'stock_quantity', p.stock_quantity,
+                    'tags', p.tags,
+                    'is_active', p.is_active,
+                    'created_at', p.created_at
+                  )
+                ) FILTER (WHERE p.id IS NOT NULL),
+                '[]'::json
+              ) as products
+            FROM merchants m
+            LEFT JOIN products p ON m.id = p.merchant_id AND p.deleted_at IS NULL
+            WHERE m.id = $1 AND m.deleted_at IS NULL
+            GROUP BY m.id
+          `, [merchantId]);
+          
+          if (result.rows.length === 0) {
+            return c.json({ success: false, error: 'Merchant not found' }, 404);
+          }
+          
+          return c.json({ success: true, merchant: result.rows[0] });
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        log.error('Failed to get merchant', { error });
+        return c.json({ success: false, error: 'Failed to get merchant' }, 500);
+      }
+    });
+    
+    app.put('/api/merchants/:id', adminAuth, async (c) => {
+      try {
+        const merchantId = c.req.param('id');
+        const body = await c.req.json();
+        
+        if (!body.business_name || !body.whatsapp_number) {
+          return c.json({ success: false, error: 'Business name and WhatsApp number are required' }, 400);
+        }
+        
+        const client = await pool.connect();
+        try {
+          const result = await client.query(`
+            UPDATE merchants 
+            SET 
+              business_name = $1,
+              business_category = $2,
+              whatsapp_number = $3,
+              instagram_username = $4,
+              email = $5,
+              currency = $6,
+              updated_at = NOW()
+            WHERE id = $7 AND deleted_at IS NULL
+            RETURNING *
+          `, [
+            body.business_name,
+            body.business_category || 'general',
+            body.whatsapp_number,
+            body.instagram_username || '',
+            body.email || '',
+            body.currency || 'IQD',
+            merchantId
+          ]);
+          
+          if (result.rows.length === 0) {
+            return c.json({ success: false, error: 'Merchant not found' }, 404);
+          }
+          
+          return c.json({ success: true, merchant: result.rows[0] });
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        log.error('Failed to update merchant', { error });
+        return c.json({ success: false, error: 'Failed to update merchant' }, 500);
+      }
+    });
+    
+    app.delete('/api/merchants/:id', adminAuth, async (c) => {
+      try {
+        const merchantId = c.req.param('id');
+        const client = await pool.connect();
+        
+        try {
+          const result = await client.query(`
+            UPDATE merchants 
+            SET deleted_at = NOW(), updated_at = NOW()
+            WHERE id = $1 AND deleted_at IS NULL
+            RETURNING id
+          `, [merchantId]);
+          
+          if (result.rows.length === 0) {
+            return c.json({ success: false, error: 'Merchant not found' }, 404);
+          }
+          
+          // Also soft delete products
+          await client.query(`
+            UPDATE products 
+            SET deleted_at = NOW(), updated_at = NOW()
+            WHERE merchant_id = $1 AND deleted_at IS NULL
+          `, [merchantId]);
+          
+          return c.json({ success: true, message: 'Merchant deleted successfully' });
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        log.error('Failed to delete merchant', { error });
+        return c.json({ success: false, error: 'Failed to delete merchant' }, 500);
+      }
+    });
+    
+    app.get('/api/analytics/summary', adminAuth, async (c) => {
+      try {
+        const client = await pool.connect();
+        try {
+          const [merchantsResult, productsResult, inventoryResult] = await Promise.all([
+            client.query('SELECT COUNT(*) as total FROM merchants WHERE deleted_at IS NULL'),
+            client.query('SELECT COUNT(*) as total FROM products WHERE deleted_at IS NULL'),
+            client.query('SELECT COALESCE(SUM(price_usd * stock_quantity), 0) as total FROM products WHERE deleted_at IS NULL AND is_active = true')
+          ]);
+          
+          return c.json({
+            success: true,
+            total_merchants: parseInt(merchantsResult.rows[0].total),
+            total_products: parseInt(productsResult.rows[0].total),
+            total_inventory_value: parseFloat(inventoryResult.rows[0].total)
+          });
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        log.error('Failed to get analytics summary', { error });
+        return c.json({ success: false, error: 'Failed to get analytics summary' }, 500);
+      }
+    });
+    
+    // Serve uploaded files
+    app.get('/uploads/*', async (c) => {
+      const filePath = c.req.path.replace('/uploads/', '');
+      const fullPath = path.join(process.cwd(), 'public', 'uploads', filePath);
+      
+      try {
+        if (fs.existsSync(fullPath)) {
+          const content = fs.readFileSync(fullPath);
+          const ext = path.extname(fullPath).toLowerCase();
+          
+          let contentType = 'application/octet-stream';
+          if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+          else if (ext === '.png') contentType = 'image/png';
+          else if (ext === '.gif') contentType = 'image/gif';
+          else if (ext === '.webp') contentType = 'image/webp';
+          
+          return new Response(content, {
+            status: 200,
+            headers: {
+              'Content-Type': contentType,
+              'Cache-Control': 'public, max-age=31536000'
+            }
+          });
+        }
+      } catch (error) {
+        log.error('Failed to serve upload', { error, filePath });
+      }
+      
+      return c.text('File not found', 404);
     });
     
     // Root endpoint with admin access

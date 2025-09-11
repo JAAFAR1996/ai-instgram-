@@ -71,8 +71,20 @@ export function registerAdminRoutes(app: Hono) {
     }
   }
 
-  // Unified Admin Dashboard - All functions in one page
+  // Redirect to static admin interface
   app.get('/admin', async (c) => {
+    try {
+      requireAdminAuth(c.req.raw);
+    } catch (e) {
+      return c.text('Unauthorized', 401, { 'WWW-Authenticate': 'Basic realm="admin"' });
+    }
+
+    // Redirect to static merchants management page
+    return c.redirect('/public/merchants-management.html');
+  });
+
+  // Serve admin interface with auth
+  app.get('/admin/interface', async (c) => {
     try {
       requireAdminAuth(c.req.raw);
     } catch (e) {
@@ -84,7 +96,7 @@ export function registerAdminRoutes(app: Hono) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>لوحة تحكم الإدارة الموحدة</title>
+    <title>لوحة تحكم الإدارة</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -312,11 +324,11 @@ export function registerAdminRoutes(app: Hono) {
         
         <div class="content">
             <div class="tabs">
-                <button class="tab active" onclick="showTab('create')">➕ إنشاء تاجر جديد</button>
-                <button class="tab" onclick="showTab('manage')">⚙️ إدارة التجار</button>
-                <button class="tab" onclick="showTab('services')">🔧 إدارة الخدمات</button>
-                <button class="tab" onclick="showTab('products')">📦 إدارة المنتجات</button>
-                <button class="tab" onclick="showTab('analytics')">📊 التحليلات</button>
+                <button class="tab active" onclick="showTab('create', this)">➕ إنشاء تاجر جديد</button>
+                <button class="tab" onclick="showTab('manage', this)">⚙️ إدارة التجار</button>
+                <button class="tab" onclick="showTab('services', this)">🔧 إدارة الخدمات</button>
+                <button class="tab" onclick="showTab('products', this)">📦 إدارة المنتجات</button>
+                <button class="tab" onclick="showTab('analytics', this)">📊 التحليلات</button>
             </div>
             
             <!-- Create Merchant Tab -->
@@ -475,7 +487,7 @@ export function registerAdminRoutes(app: Hono) {
         let currentMerchantId = null;
 
         // Tab Management
-        function showTab(tabName) {
+        function showTab(tabName, element) {
             // Hide all tab contents
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.remove('active');
@@ -490,7 +502,9 @@ export function registerAdminRoutes(app: Hono) {
             document.getElementById(tabName + '-tab').classList.add('active');
             
             // Add active class to clicked tab
-            event.target.classList.add('active');
+            if (element) {
+                element.classList.add('active');
+            }
         }
 
         // Product Management Functions
@@ -977,19 +991,43 @@ export function registerAdminRoutes(app: Hono) {
                     }
                     return false;
                 });
-                
-                // Add hover effects
-                addProductBtn.addEventListener('mouseenter', function() {
-                    this.style.transform = 'translateY(-2px)';
-                    this.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.6)';
-                });
-                
-                addProductBtn.addEventListener('mouseleave', function() {
-                    this.style.transform = 'translateY(0)';
-                    this.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.4)';
-                });
             }
+            
+            // Initialize first tab
+            showTab('create');
         });
+        
+        // Define missing functions
+        function searchMerchant() {
+            const searchTerm = document.getElementById('merchantSearchInput')?.value;
+            const resultsDiv = document.getElementById('merchantResults');
+            if (resultsDiv) {
+                resultsDiv.innerHTML = searchTerm ? 
+                    \`<p>جاري البحث عن: \${searchTerm}...</p>\` : 
+                    '<p>يرجى إدخال اسم التاجر</p>';
+            }
+        }
+        
+        function loadServices() {
+            const servicesDiv = document.getElementById('servicesResults');
+            if (servicesDiv) {
+                servicesDiv.innerHTML = '<p>جاري تحميل الخدمات...</p>';
+            }
+        }
+        
+        function loadProducts() {
+            const productsDiv = document.getElementById('productsResults');
+            if (productsDiv) {
+                productsDiv.innerHTML = '<p>جاري تحميل المنتجات...</p>';
+            }
+        }
+        
+        function loadAnalytics() {
+            const analyticsDiv = document.getElementById('analyticsResults');
+            if (analyticsDiv) {
+                analyticsDiv.innerHTML = '<p>جاري تحميل التحليلات...</p>';
+            }
+        }
     </script>
 </body>
 </html>`;
