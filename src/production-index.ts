@@ -854,6 +854,8 @@ async function bootstrap() {
     // Merchant entry interface
     app.get('/admin/merchants/new', adminAuth, () => serveSecureStatic('merchant-entry.html'));
     app.get('/admin/merchants', adminAuth, () => serveSecureStatic('merchants-management.html'));
+    // UDID setup page (post-merchant creation)
+    app.get('/admin/merchants/udid-setup', adminAuth, () => serveSecureStatic('merchant-udid-setup.html'));
     
     // Static assets for admin interfaces (serve JS files directly)
     app.get('/admin/assets/merchant-entry.js', adminAuth, () => serveSecureStatic('merchant-entry.js', 'application/javascript'));
@@ -911,6 +913,57 @@ async function bootstrap() {
       } catch (error) {
         log.error('File upload failed', { error });
         return c.json({ success: false, error: 'Upload failed' }, 500);
+      }
+    });
+
+    // ===============================================
+    // Merchant UDID management (store under settings.integration.udid)
+    // ===============================================
+
+    // Generate or return UDID for merchant
+    app.post('/api/merchants/:id/udid', adminAuth, async (c) => {
+      try {
+        const merchantId = c.req.param('id');
+        const body = await c.req.json().catch(() => ({}));
+        const regenerate = Boolean(body?.regenerate);
+
+        const client = await pool.connect();
+        try {
+          // Read current settings
+          const current = await client.query(`SELECT settings FROM merchants WHERE id = $1`, [merchantId]);
+          if (current.rows.length === 0) {
+            return c.json({ success: false, error: 'Merchant not found' }, 404);
+          }
+
+          const settings = (current.rows[0].settings || {}) as any;
+          const existing = settings?.integration?.udid as string | undefined;
+
+          if (existing && !regenerate) {
+            return c.json({ success: true, udid: existing, regenerated: false });
+          }
+
+          const udid = randomUUID();
+
+          // jsonb_set path '{integration,udid}' and create missing
+          await client.query(
+            `UPDATE merchants
+             SET settings = jsonb_set(
+               COALESCE(settings, '{}'::jsonb),
+               '{integration,udid}',
+               to_jsonb($2::text),
+               true
+             ), updated_at = NOW()
+             WHERE id = $1`,
+            [merchantId, udid]
+          );
+
+          return c.json({ success: true, udid, regenerated: Boolean(existing) });
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        log.error('Failed to generate UDID', { error });
+        return c.json({ success: false, error: 'Failed to generate UDID' }, 500);
       }
     });
     

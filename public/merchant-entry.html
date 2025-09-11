@@ -479,6 +479,10 @@
             transform: scale(0.95);
         }
 
+        /* Helper styles */
+        .hint { font-size: 12px; color: #6c757d; margin-top: 6px; }
+        .disabled-note { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 10px 12px; border-radius: 8px; margin: 10px 0 0 0; display: none; }
+
         .merchant-id-display {
             position: relative;
             overflow: hidden;
@@ -670,6 +674,14 @@
                     
                     <div class="form-row">
                         <div class="form-group">
+                            <label for="manychat_udid">ManyChat UDID (معرّف المشترك) <span class="required">*</span></label>
+                            <input type="text" id="manychat_udid" name="manychat_udid" placeholder="مثال: 1234567890123456789" required>
+                            <div class="hint">أدخل المعرّف الذي حصلت عليه من ManyChat لربط الحساب. لن تتمكن من إضافة منتجات أو رفع صور قبل تعبئة هذا الحقل.</div>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
                             <label for="email">البريد الإلكتروني</label>
                             <input type="email" id="email" name="email" 
                                    placeholder="مثال: info@myshop.com">
@@ -817,7 +829,10 @@
                 <!-- Products Section -->
                 <div class="form-section">
                     <h2><i class="fas fa-box"></i> المنتجات</h2>
-                    <p style="margin-bottom: 20px; color: #666;">يمكنك إضافة المنتجات الآن أو لاحقاً من لوحة التحكم</p>
+                    <p style="margin-bottom: 10px; color: #666;">يمكنك إضافة المنتجات الآن أو لاحقاً من لوحة التحكم</p>
+                    <div id="productsGateNote" class="disabled-note">
+                        لتفعيل إضافة المنتجات ورفع الصور، يرجى إدخال ManyChat UDID أولاً في قسم معلومات التواصل.
+                    </div>
                     
                     <button type="button" class="add-product" id="addProductBtn">
                         <i class="fas fa-plus"></i> إضافة منتج جديد

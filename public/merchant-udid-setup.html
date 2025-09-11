@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>إعداد UDID للتاجر</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="admin-styles.css">
+  <style>
+    body { background: #f5f7fb; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    .container { max-width: 900px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 12px 30px rgba(0,0,0,0.08); overflow: hidden; }
+    .header { background: linear-gradient(135deg,#1e3c72,#2a5298); color: #fff; padding: 28px 30px; }
+    .header h1 { margin: 0 0 6px; font-size: 24px; }
+    .content { padding: 28px 30px; }
+    .card { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .muted { color: #6c757d; font-size: 13px; }
+    .udid { font-family: 'Courier New', monospace; background: #fff; border: 1px dashed #dee2e6; padding: 12px 14px; border-radius: 10px; word-break: break-all; }
+    .btn { padding: 12px 18px; border: 0; border-radius: 10px; cursor: pointer; font-weight: 600; }
+    .btn-primary { background: linear-gradient(135deg,#1e3c72,#2a5298); color: #fff; }
+    .btn-secondary { background: #e9ecef; color: #212529; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .ok { color: #28a745; font-weight: 600; }
+    .warn { color: #856404; background: #fff3cd; border: 1px solid #ffeeba; padding: 10px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔐 إعداد UDID للتاجر</h1>
+      <div class="muted">هذه الخطوة تُنشئ مُعرّف تكامل داخلي لربط الخدمات (ManyChat/Instagram).</div>
+    </div>
+    <div class="content">
+      <div class="card">
+        <div class="row">
+          <div>
+            <div class="muted">معرّف التاجر</div>
+            <div id="merchantId" class="udid">—</div>
+          </div>
+          <div>
+            <div class="muted">اسم العمل</div>
+            <div id="merchantName">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+          <i class="fas fa-key"></i>
+          <strong>UDID</strong>
+        </div>
+        <div id="udidBox" class="udid">غير مُنشأ بعد</div>
+        <div class="muted" style="margin-top:8px;">يُستخدم في الربط الآلي مع الأنظمة. احتفظ به بأمان.</div>
+        <div class="actions" style="margin-top:14px;">
+          <button id="generateBtn" class="btn btn-primary"><i class="fas fa-bolt"></i> توليد UDID</button>
+          <button id="copyBtn" class="btn btn-secondary"><i class="fas fa-copy"></i> نسخ</button>
+        </div>
+        <div id="statusMsg" class="muted" style="margin-top:8px;"></div>
+      </div>
+
+      <div class="card">
+        <div class="warn" style="margin-bottom:10px;">بعد توليد الـ UDID يمكنك متابعة إضافة المنتجات.</div>
+        <div class="actions">
+          <button id="goManage" class="btn btn-primary"><i class="fas fa-box"></i> إدارة التجار والمنتجات</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="admin-utils.js"></script>
+  <script src="merchant-udid-setup.js"></script>
+</body>
+</html>
+

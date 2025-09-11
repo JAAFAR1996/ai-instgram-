@@ -17,6 +17,7 @@ class MerchantEntryManager {
         this.setupEventListeners();
         this.setupFormValidation();
         this.updateCompletenessScore();
+        this.updateUdidGate();
     }
 
     // Setup working hours interface
@@ -106,8 +107,20 @@ class MerchantEntryManager {
     setupEventListeners() {
         // Add product button
         document.getElementById('addProductBtn').addEventListener('click', () => {
+            if (!this.isUdidProvided()) {
+                if (window.adminUtils) window.adminUtils.showToast('يرجى إدخال ManyChat UDID أولاً', 'warning');
+                this.scrollToUdid();
+                return;
+            }
             this.addProduct();
         });
+
+        // UDID gating
+        const udidInput = document.getElementById('manychat_udid');
+        if (udidInput) {
+            udidInput.addEventListener('input', () => this.updateUdidGate());
+            udidInput.addEventListener('blur', () => this.updateUdidGate());
+        }
 
         // Temperature slider
         const temperatureSlider = document.getElementById('ai_temperature');
@@ -129,6 +142,30 @@ class MerchantEntryManager {
                 this.updateCompletenessScore();
             });
         });
+    }
+
+    // Check UDID provided
+    isUdidProvided() {
+        const v = document.getElementById('manychat_udid')?.value || '';
+        return v.trim().length > 0;
+    }
+
+    // Update gating for products/images until UDID is filled
+    updateUdidGate() {
+        const hasUdid = this.isUdidProvided();
+        const addBtn = document.getElementById('addProductBtn');
+        const note = document.getElementById('productsGateNote');
+        if (addBtn) {
+            addBtn.disabled = !hasUdid;
+            addBtn.style.opacity = hasUdid ? '1' : '0.6';
+            addBtn.style.cursor = hasUdid ? 'pointer' : 'not-allowed';
+        }
+        if (note) note.style.display = hasUdid ? 'none' : 'block';
+    }
+
+    scrollToUdid() {
+        const el = document.getElementById('manychat_udid');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     // Setup form validation
@@ -279,6 +316,21 @@ class MerchantEntryManager {
         }, 100);
         
         this.updateCompletenessScore();
+
+        // Wire upload button click explicitly
+        const uploadDiv = productDiv.querySelector('.image-upload');
+        const uploadBtn = productDiv.querySelector('.upload-btn');
+        if (uploadDiv && uploadBtn) {
+            uploadBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!this.isUdidProvided()) {
+                    if (window.adminUtils) window.adminUtils.showToast('يرجى إدخال ManyChat UDID أولاً', 'warning');
+                    this.scrollToUdid();
+                    return;
+                }
+                this.uploadProductImage(uploadDiv, this.productCount);
+            });
+        }
     }
 
     // Remove product
@@ -311,6 +363,11 @@ class MerchantEntryManager {
 
     // Upload product image
     async uploadProductImage(uploadDiv, productIndex) {
+        if (!this.isUdidProvided()) {
+            if (window.adminUtils) window.adminUtils.showToast('يرجى إدخال ManyChat UDID أولاً', 'warning');
+            this.scrollToUdid();
+            return;
+        }
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
@@ -332,13 +389,13 @@ class MerchantEntryManager {
     async processImageUpload(file, uploadDiv) {
         // Validate file size (5MB max)
         if (file.size > 5 * 1024 * 1024) {
-            alert('حجم الملف كبير جداً. الحد الأقصى 5MB');
+            if (window.adminUtils) { window.adminUtils.showToast('حجم الملف كبير جداً. الحد الأقصى 5MB', 'error'); } else { alert('حجم الملف كبير جداً. الحد الأقصى 5MB'); }
             return;
         }
         
         // Validate file type
         if (!file.type.startsWith('image/')) {
-            alert('يرجى اختيار ملف صورة صحيح');
+            if (window.adminUtils) { window.adminUtils.showToast('يرجى اختيار ملف صورة صحيح', 'error'); } else { alert('يرجى اختيار ملف صورة صحيح'); }
             return;
         }
         
@@ -390,7 +447,7 @@ class MerchantEntryManager {
                 throw new Error(result.error || 'فشل في رفع الصورة');
             }
         } catch (error) {
-            alert('حدث خطأ في رفع الصورة: ' + error.message);
+            if (window.adminUtils) { window.adminUtils.showToast('حدث خطأ في رفع الصورة: ' + error.message, 'error'); } else { alert('حدث خطأ في رفع الصورة: ' + error.message); }
             this.resetUploadDiv(uploadDiv);
         }
     }
@@ -587,6 +644,11 @@ class MerchantEntryManager {
         if (!data.whatsapp_number || data.whatsapp_number.trim() === '') {
             errors.push('رقم الواتساب مطلوب');
         }
+
+        // ManyChat UDID required (for gating products/images)
+        if (!data.manychat_udid || data.manychat_udid.trim() === '') {
+            errors.push('ManyChat UDID مطلوب');
+        }
         
         // WhatsApp number format validation
         if (data.whatsapp_number && !/^\+?[1-9]\d{1,14}$/.test(data.whatsapp_number.replace(/\s/g, ''))) {
@@ -772,20 +834,11 @@ class MerchantEntryManager {
                     alert('✨ تهانينا! تم إنشاء حسابك بنجاح\n\n⚠️ مهم جداً: احفظ معرف التاجر في مكان آمن\nهذا المعرف هو مفتاح حسابك ولا تشاركه مع أي شخص!');
                 }, 1000);
                 
-                // Reset form after showing success
+                // Redirect to UDID setup page to complete onboarding
                 setTimeout(() => {
-                    if (confirm('هل تريد إضافة تاجر جديد؟\n\n⚠️ تأكد من حفظ معرف التاجر الحالي قبل المتابعة!')) {
-                        document.getElementById('merchantForm').reset();
-                        document.getElementById('productsContainer').innerHTML = '';
-                        this.productCount = 0;
-                        this.workingHours = {};
-                        this.setupWorkingHours();
-                        this.updateCompletenessScore();
-                        successDiv.style.display = 'none';
-                        merchantIdDisplay.style.display = 'none';
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }
-                }, 15000);
+                    const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+                    window.location.href = `/admin/merchants/udid-setup?merchant_id=${encodeURIComponent(merchantId)}&key=${encodeURIComponent(adminKey)}`;
+                }, 1500);
                 
             } else {
                 // Use admin utils for error message
