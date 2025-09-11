@@ -4,7 +4,12 @@
 
 class AdminUtils {
     constructor() {
-        this.adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+        this.adminKey = new URLSearchParams(window.location.search).get('key') || '';
+        if (!this.adminKey) {
+            // Block critical actions if key missing
+            console.warn('Admin key is missing in URL (?key=...)');
+            this.showToast('مفتاح الإدارة مفقود. أضف ?key=YOUR_ADMIN_KEY للرابط', 'error', 6000);
+        }
     }
 
     // Show toast notification
@@ -181,7 +186,9 @@ class AdminUtils {
             });
 
             xhr.open('POST', endpoint);
-            xhr.setRequestHeader('Authorization', `Bearer ${this.adminKey}`);
+            xhr.withCredentials = true;
+            const csrf = this.getCsrfToken();
+            if (csrf) xhr.setRequestHeader('X-CSRF-Token', csrf);
             xhr.send(formData);
         });
     }
@@ -191,9 +198,11 @@ class AdminUtils {
         const defaultOptions = {
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.adminKey}`,
+                ...(this.adminKey ? { 'Authorization': `Bearer ${this.adminKey}` } : {}),
+                ...(this.getCsrfToken() ? { 'X-CSRF-Token': this.getCsrfToken() } : {}),
                 ...options.headers
             },
+            credentials: 'include',
             ...options
         };
 

@@ -34,14 +34,14 @@ class MerchantsManagementManager {
 
         // Search and filters
         document.getElementById('merchantSearch').addEventListener('input', 
-            this.debounce(() => this.filterMerchants(), 300));
+            (window.adminUtils ? window.adminUtils.debounce(() => this.filterMerchants(), 300) : this.debounce(() => this.filterMerchants(), 300)));
         document.getElementById('categoryFilter').addEventListener('change', 
             () => this.filterMerchants());
         document.getElementById('statusFilter').addEventListener('change', 
             () => this.filterMerchants());
 
         document.getElementById('productSearch').addEventListener('input', 
-            this.debounce(() => this.filterProducts(), 300));
+            (window.adminUtils ? window.adminUtils.debounce(() => this.filterProducts(), 300) : this.debounce(() => this.filterProducts(), 300)));
         document.getElementById('productCategoryFilter').addEventListener('change', 
             () => this.filterProducts());
         document.getElementById('merchantFilter').addEventListener('change', 
@@ -119,6 +119,11 @@ class MerchantsManagementManager {
 
     // Load merchants data
     async loadMerchants() {
+        if (!window.adminUtils?.adminKey) {
+            const gridDiv = document.getElementById('merchantsGrid');
+            if (gridDiv) gridDiv.innerHTML = '<p style="padding:20px;color:#dc3545;">مفتاح الإدارة مفقود. يرجى تسجيل الدخول أولاً (?key=YOUR_ADMIN_KEY).</p>';
+            return;
+        }
         const loadingDiv = document.getElementById('merchantsLoading');
         const gridDiv = document.getElementById('merchantsGrid');
         
@@ -126,7 +131,7 @@ class MerchantsManagementManager {
         gridDiv.innerHTML = '';
 
         try {
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+            const adminKey = window.adminUtils?.adminKey || '';
             const response = await fetch('/api/merchants/search', {
                 headers: {
                     'Authorization': 'Bearer ' + adminKey
@@ -243,6 +248,11 @@ class MerchantsManagementManager {
 
     // Load products data
     async loadProducts() {
+        if (!window.adminUtils?.adminKey) {
+            const gridDiv = document.getElementById('productsGrid');
+            if (gridDiv) gridDiv.innerHTML = '<p style="padding:20px;color:#dc3545;">مفتاح الإدارة مفقود. يرجى تسجيل الدخول أولاً.</p>';
+            return;
+        }
         const loadingDiv = document.getElementById('productsLoading');
         const gridDiv = document.getElementById('productsGrid');
         
@@ -251,7 +261,7 @@ class MerchantsManagementManager {
 
         try {
             // Load all merchants first to get their products
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+            const adminKey = window.adminUtils?.adminKey || '';
             const merchantsResponse = await fetch('/api/merchants/search', {
                 headers: {
                     'Authorization': 'Bearer ' + adminKey
@@ -352,6 +362,11 @@ class MerchantsManagementManager {
 
     // Load analytics data
     async loadAnalytics() {
+        if (!window.adminUtils?.adminKey) {
+            const analyticsDiv = document.getElementById('analyticsResults');
+            if (analyticsDiv) analyticsDiv.innerHTML = '<p style="padding:20px;color:#dc3545;">مفتاح الإدارة مفقود. يرجى تسجيل الدخول أولاً.</p>';
+            return;
+        }
         const loadingDiv = document.getElementById('analyticsLoading');
         
         loadingDiv.style.display = 'block';
@@ -465,13 +480,11 @@ class MerchantsManagementManager {
         const data = Object.fromEntries(formData.entries());
 
         try {
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+            const csrf = window.adminUtils?.getCsrfToken ? window.adminUtils.getCsrfToken() : '';
             const response = await fetch(`/api/merchants/${this.currentMerchantId}`, {
                 method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + adminKey
-                },
+                headers: Object.assign({ 'Content-Type': 'application/json' }, csrf ? { 'X-CSRF-Token': csrf } : {}),
+                credentials: 'include',
                 body: JSON.stringify(data)
             });
 
@@ -524,13 +537,11 @@ class MerchantsManagementManager {
         }
 
         try {
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+            const csrf = window.adminUtils?.getCsrfToken ? window.adminUtils.getCsrfToken() : '';
             const response = await fetch(`/api/products/${this.currentProductId}`, {
                 method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + adminKey
-                },
+                headers: Object.assign({ 'Content-Type': 'application/json' }, csrf ? { 'X-CSRF-Token': csrf } : {}),
+                credentials: 'include',
                 body: JSON.stringify(data)
             });
 
@@ -555,12 +566,11 @@ class MerchantsManagementManager {
         }
 
         try {
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+            const csrf = window.adminUtils?.getCsrfToken ? window.adminUtils.getCsrfToken() : '';
             const response = await fetch(`/api/merchants/${merchantId}`, {
                 method: 'DELETE',
-                headers: {
-                    'Authorization': 'Bearer ' + adminKey
-                }
+                headers: Object.assign({}, csrf ? { 'X-CSRF-Token': csrf } : {}),
+                credentials: 'include'
             });
 
             const result = await response.json();
@@ -583,12 +593,11 @@ class MerchantsManagementManager {
         }
 
         try {
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+            const csrf = window.adminUtils?.getCsrfToken ? window.adminUtils.getCsrfToken() : '';
             const response = await fetch(`/api/products/${productId}`, {
                 method: 'DELETE',
-                headers: {
-                    'Authorization': 'Bearer ' + adminKey
-                }
+                headers: Object.assign({}, csrf ? { 'X-CSRF-Token': csrf } : {}),
+                credentials: 'include'
             });
 
             const result = await response.json();
@@ -728,11 +737,10 @@ class MerchantsManagementManager {
         }
         
         try {
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
+            const csrf = window.adminUtils?.getCsrfToken ? window.adminUtils.getCsrfToken() : '';
             const response = await fetch(`/api/merchants/search?search=${encodeURIComponent(query)}`, {
-                headers: {
-                    'Authorization': 'Bearer ' + adminKey
-                }
+                headers: Object.assign({}, csrf ? { 'X-CSRF-Token': csrf } : {}),
+                credentials: 'include'
             });
             
             const result = await response.json();
@@ -758,11 +766,7 @@ class MerchantsManagementManager {
         }
     }
     
-    // Load products for current tab
-    async loadProducts() {
-        // This is already implemented in the existing loadProducts method
-        return this.loadProducts();
-    }
+    // (Removed duplicate loadProducts that caused recursion)
     
     // Load analytics for current tab
     async loadAnalytics() {
@@ -771,12 +775,7 @@ class MerchantsManagementManager {
             analyticsDiv.innerHTML = '<p>جاري تحميل التحليلات...</p>';
             
             try {
-                const adminKey = new URLSearchParams(window.location.search).get('key') || 'jaafar_admin_2025';
-                const response = await fetch('/api/analytics/summary', {
-                    headers: {
-                        'Authorization': 'Bearer ' + adminKey
-                    }
-                });
+                const response = await fetch('/api/analytics/summary', { credentials: 'include' });
                 
                 const result = await response.json();
                 if (response.ok && result.success) {

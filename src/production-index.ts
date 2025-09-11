@@ -279,28 +279,86 @@ async function bootstrap() {
     
     // Admin authentication middleware
     const adminAuth = async (c: any, next: any) => {
-      const authHeader = c.req.header('authorization');
-      const adminKey = process.env.ADMIN_API_KEY || 'admin-key-2025';
-      
-      // Check for API key in header or query
-      const providedKey = authHeader?.replace('Bearer ', '') || c.req.query('key');
-      
-      // Debug logging for authentication
-      log.info('Admin auth attempt', {
-        providedKey: providedKey ? 'provided' : 'missing',
-        expectedKey: adminKey ? 'configured' : 'default',
-        match: providedKey === adminKey
-      });
-      
-      if (providedKey !== adminKey) {
-        return c.json({ 
-          error: 'Unauthorized access to admin interface',
-          message: 'Invalid or missing admin key'
-        }, 401);
+      const authHeader = c.req.header('authorization') || '';
+      const cookiesHeader = c.req.header('cookie') || '';
+      const expected = process.env.ADMIN_API_KEY || '';
+
+      const cookies: Record<string, string> = Object.fromEntries(
+        cookiesHeader.split(/;\s*/).filter(Boolean).map((p: string) => {
+          const idx = p.indexOf('=');
+          const k = idx >= 0 ? decodeURIComponent(p.slice(0, idx)) : p;
+          const v = idx >= 0 ? decodeURIComponent(p.slice(idx + 1)) : '';
+          return [k, v];
+        })
+      );
+
+      const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      const session = cookies['admin_session'] || '';
+      const provided = bearer || session;
+
+      const ip = c.req.header('x-forwarded-for') || c.req.header('cf-connecting-ip') || c.req.header('x-real-ip') || 'unknown';
+      log.info('Admin auth attempt', { provided: provided ? 'yes' : 'no', configured: expected ? 'yes' : 'no', ip });
+
+      if (!expected) return c.json({ error: 'Service not configured' }, 503);
+      if (provided !== expected) return c.json({ error: 'Unauthorized' }, 401);
+
+      // CSRF for state-changing requests when using cookie session (skip if Bearer provided)
+      const method = c.req.method.toUpperCase();
+      if (!bearer && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+        const csrfCookie = cookies['csrf_token'] || '';
+        const csrfHeader = c.req.header('x-csrf-token') || '';
+        if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
+          return c.json({ error: 'CSRF validation failed' }, 403);
+        }
       }
-      
+
       await next();
     };
+
+    // Admin session login (sets HttpOnly session cookie and CSRF token cookie)
+    app.post('/admin/login', async (c) => {
+      try {
+        const body = await c.req.json().catch(() => ({}));
+        const key = (body?.key || '').trim();
+        const expected = process.env.ADMIN_API_KEY || '';
+        if (!expected) return c.json({ error: 'Service not configured' }, 503);
+        if (!key || key !== expected) return c.json({ error: 'Invalid credentials' }, 401);
+
+        const crypto = await import('crypto');
+        const csrf = crypto.randomBytes(16).toString('hex');
+
+        const secure = (process.env.NODE_ENV === 'production');
+        const sessionCookie = `admin_session=${encodeURIComponent(expected)}; HttpOnly; Path=/; SameSite=Strict; ${secure ? 'Secure; ' : ''}Max-Age=${60 * 60 * 8}`;
+        const csrfCookie = `csrf_token=${encodeURIComponent(csrf)}; Path=/; SameSite=Strict; ${secure ? 'Secure; ' : ''}Max-Age=${60 * 60 * 8}`;
+
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Set-Cookie': `${sessionCookie}\n${csrfCookie}`
+          }
+        });
+      } catch (e) {
+        return c.json({ error: 'Login failed' }, 500);
+      }
+    });
+
+    app.post('/admin/logout', async () => {
+      const expired = 'Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Strict';
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Set-Cookie': `admin_session=; ${expired}\ncsrf_token=; ${expired}`
+        }
+      });
+    });
+
+    app.get('/admin/session', async (c) => {
+      const cookies = c.req.header('cookie') || '';
+      const has = cookies.includes('admin_session=');
+      return c.json({ authenticated: has });
+    });
 
     // Register route modules with DI
     const deps = { pool, queueManager };
@@ -774,7 +832,7 @@ async function bootstrap() {
     // ===============================================
     
     // Admin dashboard main page
-    app.get('/admin', adminAuth, (c) => {
+    app.get('/admin', adminAuth, () => {
       const dashboardHtml = `
         <!DOCTYPE html>
         <html lang="ar" dir="rtl">
@@ -804,8 +862,8 @@ async function bootstrap() {
                     <div class="admin-card">
                         <h3>📊 إدارة التجار</h3>
                         <p>إضافة وإدارة التجار في النظام</p>
-                        <a href="/admin/merchants/new?key=${c.req.query('key') || ''}" class="admin-link">إضافة تاجر جديد</a>
-                        <a href="/admin/merchants?key=${c.req.query('key') || ''}" class="admin-link">إدارة التجار</a>
+                        <a href="/admin/merchants/new" class="admin-link">إضافة تاجر جديد</a>
+                        <a href="/admin/merchants" class="admin-link">إدارة التجار</a>
                     </div>
                     
                     <div class="admin-card">
@@ -865,50 +923,80 @@ async function bootstrap() {
     app.get('/merchant-entry.js', adminAuth, () => serveSecureStatic('merchant-entry.js', 'application/javascript'));
     app.get('/merchants-management.js', adminAuth, () => serveSecureStatic('merchants-management.js', 'application/javascript'));
     
-    // Upload endpoint for product images
+    // Upload endpoint for product images (hardened)
     app.post('/admin/upload', adminAuth, async (c) => {
       try {
         const formData = await c.req.formData();
         const file = formData.get('file') as File;
-        
-        if (!file) {
-          return c.json({ success: false, error: 'No file provided' }, 400);
-        }
-        
-        // Validate file type
-        const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-        if (!allowedTypes.includes(file.type)) {
-          return c.json({ success: false, error: 'Invalid file type' }, 400);
-        }
-        
-        // Validate file size (5MB max)
-        if (file.size > 5 * 1024 * 1024) {
-          return c.json({ success: false, error: 'File too large' }, 400);
-        }
-        
-        // Generate unique filename
-        const timestamp = Date.now();
-        const extension = file.name.split('.').pop();
-        const filename = `product_${timestamp}.${extension}`;
-        
-        // Create uploads directory if it doesn't exist
-        const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'products');
-        if (!fs.existsSync(uploadDir)) {
-          fs.mkdirSync(uploadDir, { recursive: true });
-        }
-        
-        // Save file
-        const filePath = path.join(uploadDir, filename);
+        if (!file) return c.json({ success: false, error: 'No file provided' }, 400);
+
+        // Enforce max size 5MB on server
+        const maxSize = 5 * 1024 * 1024;
+        if (file.size > maxSize) return c.json({ success: false, error: 'File too large (max 5MB)' }, 400);
+
+        // Read buffer once
         const arrayBuffer = await file.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
+
+        // Magic number MIME sniffing
+        function sniffMime(buf: Buffer): { ext: string; mime: string } | null {
+          if (buf.length < 12) return null;
+          // JPEG
+          if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return { ext: 'jpg', mime: 'image/jpeg' };
+          // PNG
+          if (buf.slice(0, 8).equals(Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]))) return { ext: 'png', mime: 'image/png' };
+          // GIF87a/GIF89a
+          if (buf.slice(0, 6).toString('ascii') === 'GIF87a' || buf.slice(0, 6).toString('ascii') === 'GIF89a') return { ext: 'gif', mime: 'image/gif' };
+          // WEBP
+          if (buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP') return { ext: 'webp', mime: 'image/webp' };
+          return null;
+        }
+
+        const sniff = sniffMime(buffer);
+        const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+        if (!sniff || !allowedMimes.includes(sniff.mime)) {
+          return c.json({ success: false, error: 'Invalid or unsupported image type' }, 400);
+        }
+
+        // EXIF detection for JPEG: reject if EXIF present (APP1 Exif)
+        if (sniff.mime === 'image/jpeg') {
+          // naive scan for APP1 marker 0xFFE1 and 'Exif' tag near start
+          for (let i = 2; i < Math.min(buffer.length - 10, 4096); i++) {
+            if (buffer[i] === 0xFF && buffer[i+1] === 0xE1) {
+              // APP1 marker detected; check tag
+              const tag = buffer.slice(i+4, i+8).toString('ascii');
+              if (tag === 'Exif') {
+                return c.json({ success: false, error: 'Image contains EXIF metadata. Please remove metadata and try again.' }, 400);
+              }
+            }
+          }
+        }
+
+        // Compute SHA-256 for signed storage
+        const crypto = await import('crypto');
+        const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+        const hashPrefix = hash.slice(0, 12);
+
+        // Build filename using sniffed extension
+        const timestamp = Date.now();
+        const safeExt = sniff.ext;
+        const filename = `product_${timestamp}_${hashPrefix}.${safeExt}`;
+
+        // Ensure upload dir
+        const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'products');
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+        // Save file
+        const filePath = path.join(uploadDir, filename);
         fs.writeFileSync(filePath, buffer);
-        
+
         return c.json({
           success: true,
           filename,
           url: `/uploads/products/${filename}`,
-          size: file.size,
-          type: file.type
+          size: buffer.length,
+          type: sniff.mime,
+          signature: hash
         });
       } catch (error) {
         log.error('File upload failed', { error });

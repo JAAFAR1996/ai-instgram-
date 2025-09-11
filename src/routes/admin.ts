@@ -28,6 +28,14 @@ function requireAdminAuth(req: Request): void {
   if (user !== ADMIN_USER || pass !== ADMIN_PASS) throw new Error('Unauthorized');
 }
 
+function requireBearerAdmin(req: Request): void {
+  const header = req.headers.get('authorization') || '';
+  if (!header.startsWith('Bearer ')) throw new Error('Unauthorized');
+  const provided = header.slice(7).trim();
+  const expected = process.env.ADMIN_API_KEY || '';
+  if (!expected || provided !== expected) throw new Error('Unauthorized');
+}
+
 const CreateMerchantSchema = z.object({
   business_name: z.string().min(2).max(255),
   business_category: z.string().min(2).max(100).optional().default('general'),
@@ -683,13 +691,13 @@ export function registerAdminRoutes(app: Hono) {
                     data.products = products;
                 }
                 
-                // Use legacy admin endpoint (Basic Auth)
-                const response = await fetch('/admin/merchants-legacy', {
+                // Use production admin endpoint (Bearer/cookie auth)
+                const response = await fetch('/admin/merchants', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Basic ' + btoa('admin:admin')
+                        'Content-Type': 'application/json'
                     },
+                    credentials: 'include',
                     body: JSON.stringify(data)
                 });
                 
@@ -1365,6 +1373,7 @@ export function registerAdminRoutes(app: Hono) {
 
   // Get all merchants with search and pagination
   app.get('/api/merchants/search', async (c) => {
+    try { requireBearerAdmin(c.req.raw); } catch { return c.json({ success: false, error: 'unauthorized' }, 401); }
     try {
       const search = c.req.query('search') || '';
       const category = c.req.query('category') || '';
@@ -1457,6 +1466,7 @@ export function registerAdminRoutes(app: Hono) {
 
   // Get single merchant by ID
   app.get('/api/merchants/:id', async (c) => {
+    try { requireBearerAdmin(c.req.raw); } catch { return c.json({ success: false, error: 'unauthorized' }, 401); }
     try {
       const merchantId = c.req.param('id');
       
@@ -1502,6 +1512,7 @@ export function registerAdminRoutes(app: Hono) {
 
   // Update merchant
   app.put('/api/merchants/:id', async (c) => {
+    try { requireBearerAdmin(c.req.raw); } catch { return c.json({ success: false, error: 'unauthorized' }, 401); }
     try {
       const merchantId = c.req.param('id');
       const body = await c.req.json();
@@ -1540,6 +1551,7 @@ export function registerAdminRoutes(app: Hono) {
 
   // Delete merchant
   app.delete('/api/merchants/:id', async (c) => {
+    try { requireBearerAdmin(c.req.raw); } catch { return c.json({ success: false, error: 'unauthorized' }, 401); }
     try {
       const merchantId = c.req.param('id');
       
@@ -1568,6 +1580,7 @@ export function registerAdminRoutes(app: Hono) {
   // Get single product by ID
   // Search products
   app.get('/api/products/search', async (c) => {
+    try { requireBearerAdmin(c.req.raw); } catch { return c.json({ success: false, error: 'unauthorized' }, 401); }
     try {
       const search = c.req.query('search') || '';
       const category = c.req.query('category') || '';
@@ -1642,6 +1655,7 @@ export function registerAdminRoutes(app: Hono) {
   });
 
   app.get('/api/products/:id', async (c) => {
+    try { requireBearerAdmin(c.req.raw); } catch { return c.json({ success: false, error: 'unauthorized' }, 401); }
     try {
       const productId = c.req.param('id');
       
@@ -1667,6 +1681,7 @@ export function registerAdminRoutes(app: Hono) {
 
   // Update product
   app.put('/api/products/:id', async (c) => {
+    try { requireBearerAdmin(c.req.raw); } catch { return c.json({ success: false, error: 'unauthorized' }, 401); }
     try {
       const productId = c.req.param('id');
       const body = await c.req.json();
@@ -1714,6 +1729,7 @@ export function registerAdminRoutes(app: Hono) {
 
   // Delete product
   app.delete('/api/products/:id', async (c) => {
+    try { requireBearerAdmin(c.req.raw); } catch { return c.json({ success: false, error: 'unauthorized' }, 401); }
     try {
       const productId = c.req.param('id');
       
@@ -1800,11 +1816,7 @@ export function registerAdminRoutes(app: Hono) {
 
   // Upload product images
   app.post('/api/upload/product-image', async (c) => {
-    try {
-      requireAdminAuth(c.req.raw);
-    } catch (e) {
-      return c.json({ success: false, error: 'unauthorized' }, 401);
-    }
+    try { requireBearerAdmin(c.req.raw); } catch { return c.json({ success: false, error: 'unauthorized' }, 401); }
 
     try {
       const formData = await c.req.formData();
@@ -1883,6 +1895,7 @@ export function registerAdminRoutes(app: Hono) {
 
   // Analytics endpoints
   app.get('/api/analytics/summary', async (c) => {
+    try { requireBearerAdmin(c.req.raw); } catch { return c.json({ success: false, error: 'unauthorized' }, 401); }
     try {
       const [merchantsCount] = await sql`
         SELECT COUNT(*) as total_merchants FROM merchants
@@ -1910,6 +1923,7 @@ export function registerAdminRoutes(app: Hono) {
   });
 
   app.get('/api/merchants/:id/analytics', async (c) => {
+    try { requireBearerAdmin(c.req.raw); } catch { return c.json({ success: false, error: 'unauthorized' }, 401); }
     try {
       const merchantId = c.req.param('id');
       

@@ -2,7 +2,7 @@ class MerchantUdidSetup {
   constructor() {
     this.params = new URLSearchParams(window.location.search);
     this.merchantId = this.params.get('merchant_id') || '';
-    this.adminKey = this.params.get('key') || 'admin-key-2025';
+    this.adminKey = (window.adminUtils?.adminKey) || this.params.get('key') || '';
     this.init();
   }
 
@@ -23,8 +23,9 @@ class MerchantUdidSetup {
 
   async loadMerchant() {
     try {
+      const csrf = window.adminUtils?.getCsrfToken ? window.adminUtils.getCsrfToken() : '';
       const res = await fetch(`/api/merchants/${this.merchantId}`, {
-        headers: { 'Authorization': 'Bearer ' + this.adminKey }
+        credentials: 'include'
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -46,9 +47,11 @@ class MerchantUdidSetup {
 
   async generate() {
     try {
+      const csrf = window.adminUtils?.getCsrfToken ? window.adminUtils.getCsrfToken() : '';
       const res = await fetch(`/api/merchants/${this.merchantId}/udid`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + this.adminKey },
+        headers: Object.assign({ 'Content-Type': 'application/json' }, csrf ? { 'X-CSRF-Token': csrf } : {}),
+        credentials: 'include',
         body: JSON.stringify({})
       });
       const data = await res.json();
@@ -82,7 +85,7 @@ class MerchantUdidSetup {
   }
 
   goManage() {
-    window.location.href = `/admin/merchants?key=${encodeURIComponent(this.adminKey)}`;
+    window.location.href = `/admin/merchants`;
   }
 
   setStatus(msg, type) {
@@ -93,4 +96,3 @@ class MerchantUdidSetup {
 }
 
 document.addEventListener('DOMContentLoaded', () => new MerchantUdidSetup());
-

@@ -180,11 +180,20 @@ class MerchantEntryManager {
     setupFormValidation() {
         const form = document.getElementById('merchantForm');
         
-        // Real-time validation
+        // Real-time validation via AdminUtils
         form.addEventListener('input', (e) => {
-            if (e.target.hasAttribute('required')) {
-                this.validateField(e.target);
+            const el = e.target;
+            if (!(window.adminUtils && el instanceof HTMLElement)) return;
+            const name = el.getAttribute('name') || el.id || '';
+            let rules = {};
+            switch (name) {
+                case 'business_name': rules = { required: true, minLength: 2, maxLength: 255 }; break;
+                case 'whatsapp_number': rules = { required: true, phone: true }; break;
+                case 'email': rules = { email: true, maxLength: 255 }; break;
+                case 'manychat_udid': rules = { required: true, minLength: 5, maxLength: 255 }; break;
+                default: rules = {};
             }
+            if (Object.keys(rules).length > 0) window.adminUtils.validateField(el, rules);
         });
     }
 
@@ -415,12 +424,11 @@ class MerchantEntryManager {
             const formData = new FormData();
             formData.append('file', file);
             
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+            const csrf = window.adminUtils?.getCsrfToken ? window.adminUtils.getCsrfToken() : '';
             const response = await fetch('/admin/upload', {
                 method: 'POST',
-                headers: {
-                    'Authorization': 'Bearer ' + adminKey
-                },
+                headers: Object.assign({}, csrf ? { 'X-CSRF-Token': csrf } : {}),
+                credentials: 'include',
                 body: formData
             });
             
@@ -430,8 +438,9 @@ class MerchantEntryManager {
                 // Show preview
                 const preview = uploadDiv.nextElementSibling;
                 preview.style.display = 'block';
+                const name = (document.querySelector('[name="products['+this.productCount+'][name_ar]"]')?.value || '').trim();
                 preview.innerHTML = `
-                    <img src="${result.url}" alt="Product Image">
+                    <img src="${result.url}" alt="صورة المنتج ${name || ''}" role="img">
                     <div class="preview-actions">
                         <button type="button" class="preview-btn change" onclick="merchantManager.changeProductImage(this)">
                             <i class="fas fa-edit"></i> تغيير
@@ -789,7 +798,7 @@ class MerchantEntryManager {
             }
             
             // Submit to server with admin authentication
-            const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
+            const adminKey = window.adminUtils?.adminKey || '';
             console.log('Using admin key:', adminKey);
             const response = await fetch('/admin/merchants', {
                 method: 'POST',
@@ -813,8 +822,7 @@ class MerchantEntryManager {
                 // إبقاء مؤشر التحميل ظاهر حتى التحويل
                 loadingDiv.style.display = 'block';
                 // تحويل سريع لصفحة إعداد UDID
-                const adminKey = new URLSearchParams(window.location.search).get('key') || 'admin-key-2025';
-                window.location.href = `/admin/merchants/udid-setup?merchant_id=${encodeURIComponent(merchantId)}&key=${encodeURIComponent(adminKey)}`;
+                window.location.href = `/admin/merchants/udid-setup?merchant_id=${encodeURIComponent(merchantId)}`;
             } else {
                 // Use admin utils for error message
                 if (window.adminUtils) {

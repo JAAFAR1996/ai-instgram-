@@ -179,6 +179,18 @@
     right: 0;
 }
 
+/* Accessible focus styles */
+:is(button, a, input, select, textarea).focus-visible,
+:is(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid #2a5298;
+  outline-offset: 2px;
+}
+
+/* ARIA role regions */
+[role="status"], [aria-live] {
+  outline: none;
+}
+
 .search-highlight {
     background: yellow;
     padding: 2px 4px;
