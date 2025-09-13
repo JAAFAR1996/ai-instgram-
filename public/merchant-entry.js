@@ -861,8 +861,18 @@ class MerchantEntryManager {
                 }
                 // إبقاء مؤشر التحميل ظاهر حتى التحويل
                 loadingDiv.style.display = 'block';
+                // إنشاء جلسة مدير لصفحات /admin ثم التحويل لصفحة إعداد UDID مع تمرير المفتاح
+                try {
+                    await fetch('/admin/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ key: adminKey })
+                    });
+                } catch {}
                 // تحويل سريع لصفحة إعداد UDID
-                window.location.href = `/admin/merchants/udid-setup?merchant_id=${encodeURIComponent(merchantId)}`;
+                const nextUrl = `/admin/merchants/udid-setup?merchant_id=${encodeURIComponent(merchantId)}${adminKey ? `&key=${encodeURIComponent(adminKey)}` : ''}`;
+                window.location.href = nextUrl;
             } else {
                 // Prefer detailed validation errors, then error, then message
                 let composedMessage = '';

@@ -25,7 +25,8 @@ class MerchantUdidSetup {
     try {
       const csrf = window.adminUtils?.getCsrfToken ? window.adminUtils.getCsrfToken() : '';
       const res = await fetch(`/api/merchants/${this.merchantId}`, {
-        credentials: 'include'
+        credentials: 'include',
+        headers: Object.assign({}, this.adminKey ? { 'Authorization': `Bearer ${this.adminKey}` } : {})
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -41,8 +42,16 @@ class MerchantUdidSetup {
   }
 
   async loadOrShowUdid() {
-    // No GET endpoint needed; we rely on merchant.settings
-    // If not present, user can press generate
+    try {
+      const current = (document.getElementById('udidBox').textContent || '').trim();
+      const looksLikeUuid = current && current.includes('-') && current.length >= 30;
+      if (!looksLikeUuid) {
+        this.setStatus('جارِ توليد UDID تلقائياً...', 'muted');
+        await this.generate();
+      } else {
+        this.setStatus('UDID جاهز', 'ok');
+      }
+    } catch {}
   }
 
   async generate() {
@@ -50,7 +59,11 @@ class MerchantUdidSetup {
       const csrf = window.adminUtils?.getCsrfToken ? window.adminUtils.getCsrfToken() : '';
       const res = await fetch(`/api/merchants/${this.merchantId}/udid`, {
         method: 'POST',
-        headers: Object.assign({ 'Content-Type': 'application/json' }, csrf ? { 'X-CSRF-Token': csrf } : {}),
+        headers: Object.assign(
+          { 'Content-Type': 'application/json' },
+          this.adminKey ? { 'Authorization': `Bearer ${this.adminKey}` } : {},
+          csrf ? { 'X-CSRF-Token': csrf } : {}
+        ),
         credentials: 'include',
         body: JSON.stringify({})
       });
