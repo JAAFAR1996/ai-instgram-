@@ -18,6 +18,8 @@ class MerchantEntryManager {
         this.setupFormValidation();
         this.updateCompletenessScore();
         this.updateUdidGate();
+        const note = document.getElementById('productsGateNote');
+        if (note) note.textContent = 'يمكنك إضافة المنتجات الآن. ربط ManyChat اختياري ويمكن استكماله لاحقاً من صفحة إعداد UDID.';
     }
 
     // Setup working hours interface
@@ -182,7 +184,7 @@ class MerchantEntryManager {
     // Check UDID provided
     isUdidProvided() {
         const v = document.getElementById('manychat_udid')?.value || '';
-        return v.trim().length > 0;
+        return true;
     }
 
     // Update gating for products/images until UDID is filled
@@ -697,7 +699,7 @@ class MerchantEntryManager {
         }
 
         // ManyChat UDID required (for gating products/images)
-        if (!data.manychat_udid || data.manychat_udid.trim() === '') {
+        if (false && (!data.manychat_udid || data.manychat_udid.trim() === '')) {
             errors.push('ManyChat UDID مطلوب');
         }
         
