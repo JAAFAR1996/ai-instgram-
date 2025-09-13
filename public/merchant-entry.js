@@ -216,12 +216,19 @@ class MerchantEntryManager {
         this.productCount++;
         const container = document.getElementById('productsContainer');
         
-        // Generate automatic SKU based on business name
-        const businessName = document.getElementById('business_name')?.value || '';
-        const merchantPrefix = businessName
-            .replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '') // Remove special characters
+        // Generate automatic SKU preferring first two letters of Instagram username
+        const igUser = (document.getElementById('instagram_username')?.value || '').trim();
+        const igPrefix = igUser
+            .replace(/^@/, '') // remove leading @ if provided
+            .replace(/[^a-zA-Z]/g, '') // keep only letters for IG prefix
             .substring(0, 2)
             .toUpperCase();
+        const businessName = document.getElementById('business_name')?.value || '';
+        const bnPrefix = businessName
+            .replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '') // allow letters (incl. Arabic) and digits
+            .substring(0, 2)
+            .toUpperCase();
+        const merchantPrefix = igPrefix || bnPrefix;
         const randomDigits = Math.floor(1000 + Math.random() * 9000);
         const autoSku = merchantPrefix ? `${merchantPrefix}${randomDigits}` : `PROD${randomDigits}`;
         
@@ -748,10 +755,16 @@ class MerchantEntryManager {
                     // Generate automatic SKU if not provided
                     let productSku = productData.sku;
                     if (!productSku || productSku.trim() === '') {
-                        const merchantPrefix = data.business_name
+                        const igPrefix = String(data.instagram_username || '')
+                            .replace(/^@/, '')
+                            .replace(/[^a-zA-Z]/g, '')
+                            .substring(0, 2)
+                            .toUpperCase();
+                        const bnPrefix = String(data.business_name || '')
                             .replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '')
                             .substring(0, 2)
                             .toUpperCase();
+                        const merchantPrefix = igPrefix || bnPrefix;
                         const randomDigits = Math.floor(1000 + Math.random() * 9000);
                         productSku = merchantPrefix ? `${merchantPrefix}${randomDigits}` : `PROD${randomDigits}`;
                     }
@@ -824,16 +837,22 @@ class MerchantEntryManager {
                 // تحويل سريع لصفحة إعداد UDID
                 window.location.href = `/admin/merchants/udid-setup?merchant_id=${encodeURIComponent(merchantId)}`;
             } else {
-                // Use admin utils for error message
-                if (window.adminUtils) {
-                    window.adminUtils.showToast(result.message || 'حدث خطأ غير متوقع', 'error');
+                // Prefer detailed validation errors, then error, then message
+                let composedMessage = '';
+                if (result && Array.isArray(result.details) && result.details.length) {
+                    composedMessage = 'تحقق من البيانات: ' + result.details.join('، ');
                 } else {
-                    console.error('خطأ:', result.message || 'حدث خطأ غير متوقع');
+                    composedMessage = (result && (result.error || result.message)) || 'حدث خطأ غير متوقع';
                 }
-                
+
+                if (window.adminUtils) {
+                    window.adminUtils.showToast(composedMessage, 'error');
+                } else {
+                    console.error('خطأ:', composedMessage);
+                }
+
                 errorDiv.style.display = 'block';
-                document.getElementById('errorMessage').textContent = 
-                    result.message || 'حدث خطأ غير متوقع';
+                document.getElementById('errorMessage').textContent = composedMessage;
             }
             
         } catch (error) {
