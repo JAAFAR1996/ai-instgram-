@@ -144,6 +144,33 @@ class MerchantEntryManager {
             });
         }
 
+        // Manage merchants navigation (ensures admin session cookie then redirects)
+        const manageBtn = document.getElementById('manageMerchantsBtn');
+        if (manageBtn) {
+            manageBtn.addEventListener('click', async () => {
+                try {
+                    const adminKey = window.adminUtils?.adminKey || '';
+                    if (!adminKey) {
+                        if (window.adminUtils) window.adminUtils.showToast('يرجى إضافة ?key=ADMIN_KEY إلى الرابط أولاً', 'warning');
+                        return;
+                    }
+                    // Establish admin session cookie for GET-protected routes
+                    await fetch('/admin/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ key: adminKey })
+                    });
+                    // Redirect with key so page JS can use it for API calls
+                    const target = `/admin/merchants?key=${encodeURIComponent(adminKey)}`;
+                    window.location.href = target;
+                } catch (e) {
+                    if (window.adminUtils) window.adminUtils.showToast('تعذر فتح إدارة التجار', 'error');
+                    console.error('Failed to open management', e);
+                }
+            });
+        }
+
         // Real-time validation
         document.querySelectorAll('input, select, textarea').forEach(input => {
             input.addEventListener('input', () => {

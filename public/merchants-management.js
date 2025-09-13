@@ -72,6 +72,16 @@ class MerchantsManagementManager {
             e.preventDefault();
             this.updateProduct();
         });
+
+        // Explorer buttons
+        const loadBtn = document.getElementById('explorerLoadBtn');
+        if (loadBtn) loadBtn.addEventListener('click', () => this.loadExplorer());
+        const refreshBtn = document.getElementById('explorerRefreshBtn');
+        if (refreshBtn) refreshBtn.addEventListener('click', () => this.loadExplorer(true));
+        const expandAllBtn = document.getElementById('explorerExpandAllBtn');
+        if (expandAllBtn) expandAllBtn.addEventListener('click', () => this.toggleAllExplorer(true));
+        const collapseAllBtn = document.getElementById('explorerCollapseAllBtn');
+        if (collapseAllBtn) collapseAllBtn.addEventListener('click', () => this.toggleAllExplorer(false));
     }
 
     // Switch between tabs
@@ -101,7 +111,101 @@ class MerchantsManagementManager {
             case 'analytics':
                 this.loadAnalytics();
                 break;
+            case 'explorer':
+                // Lazy load explorer only once unless refreshed
+                this.loadExplorer();
+                break;
         }
+    }
+
+    // Load hierarchical explorer data (merchants with nested products)
+    async loadExplorer(force = false) {
+        const list = document.getElementById('explorerList');
+        const loading = document.getElementById('explorerLoading');
+        if (!list) return;
+
+        if (!window.adminUtils?.adminKey) {
+            list.innerHTML = '<p style="padding:20px;color:#dc3545;">مفتاح الإدارة مفقود. أضف ?key=YOUR_ADMIN_API_KEY للرابط.</p>';
+            return;
+        }
+
+        // If already populated and not forced, do nothing
+        if (list.dataset.populated === 'true' && !force) return;
+
+        try {
+            loading && (loading.style.display = 'block');
+            list.innerHTML = '';
+            const adminKey = window.adminUtils?.adminKey || '';
+            const resp = await fetch('/api/merchants/search?limit=200', {
+                headers: { 'Authorization': 'Bearer ' + adminKey }
+            });
+            const result = await resp.json();
+            if (!resp.ok || !result.success) throw new Error(result.error || 'Failed to load');
+
+            const merchants = Array.isArray(result.merchants) ? result.merchants : [];
+            this.renderExplorer(merchants);
+            list.dataset.populated = 'true';
+        } catch (e) {
+            console.error('Explorer load failed:', e);
+            list.innerHTML = '<p style="padding:20px;color:#dc3545;">تعذر تحميل البيانات.</p>';
+        } finally {
+            loading && (loading.style.display = 'none');
+        }
+    }
+
+    renderExplorer(merchants) {
+        const list = document.getElementById('explorerList');
+        if (!list) return;
+
+        if (!merchants.length) {
+            list.innerHTML = '<div class="empty-state"><i class="fas fa-database"></i><h3>لا توجد بيانات</h3><p>لم يتم العثور على تجار.</p></div>';
+            return;
+        }
+
+        const html = merchants.map(m => {
+            const products = Array.isArray(m.products) ? m.products : [];
+            const pid = `products_${m.id}`;
+            const count = products.length;
+            const cat = (m.business_category || 'general');
+            const status = (m.subscription_status || '').toString().toUpperCase();
+            return `
+                <div class="merchant-card explorer-card" data-merchant-id="${m.id}">
+                    <div class="merchant-header" style="cursor:pointer;" onclick="(function(el){ const t=document.getElementById('${pid}'); if (t) { const open=t.style.display!=='none'; t.style.display = open?'none':'block'; el.querySelector('.toggle-ind').textContent = open ? '+' : '−'; } })(this)">
+                        <div class="merchant-info">
+                            <h3>${m.business_name || 'بدون اسم'}</h3>
+                            <span class="merchant-category">${cat}</span>
+                        </div>
+                        <div>
+                            <span class="detail-label">المنتجات:</span>
+                            <span class="detail-value">${count}</span>
+                            <span class="detail-label" style="margin-inline-start:12px;">الحالة:</span>
+                            <span class="detail-value">${status}</span>
+                            <button class="btn btn-sm" style="margin-inline-start:12px;" onclick="event.stopPropagation(); document.getElementById('${pid}').style.display='block'">عرض</button>
+                            <span class="toggle-ind" style="display:inline-block;width:18px;text-align:center;margin-inline-start:8px;">+</span>
+                        </div>
+                    </div>
+                    <div id="${pid}" class="explorer-products" style="display:none; padding:10px 5px 0 5px;">
+                        ${count ? products.map(p => `
+                            <div class="detail-row">
+                                <div class="detail-label">${p.sku || ''}</div>
+                                <div class="detail-value">${p.name_ar || p.name_en || ''} — ${p.category || ''} — ${p.price_usd ?? ''}$ — مخزون: ${p.stock_quantity ?? ''}</div>
+                            </div>
+                        `).join('') : '<div class="detail-row"><div class="detail-value">لا توجد منتجات</div></div>'}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        list.innerHTML = html;
+    }
+
+    toggleAllExplorer(expand = true) {
+        document.querySelectorAll('#explorerList .explorer-products').forEach(el => {
+            el.style.display = expand ? 'block' : 'none';
+        });
+        document.querySelectorAll('#explorerList .toggle-ind').forEach(el => {
+            el.textContent = expand ? '−' : '+';
+        });
     }
 
     // Debounce function for search
