@@ -947,13 +947,14 @@ async function bootstrap() {
     app.get('/admin/merchants/udid-setup', adminAuth, () => serveSecureStatic('merchant-udid-setup.html'));
     
     // Static assets for admin interfaces (serve JS files directly)
-    app.get('/admin/assets/merchant-entry.js', adminAuth, () => serveSecureStatic('merchant-entry.js', 'application/javascript'));
-    app.get('/admin/assets/merchants-management.js', adminAuth, () => serveSecureStatic('merchants-management.js', 'application/javascript'));
-    app.get('/admin/assets/admin-utils.js', adminAuth, () => serveSecureStatic('admin-utils.js', 'application/javascript'));
+    // Do not require auth for static JS assets to avoid login race/caching issues
+    app.get('/admin/assets/merchant-entry.js', () => serveSecureStatic('merchant-entry.js', 'application/javascript'));
+    app.get('/admin/assets/merchants-management.js', () => serveSecureStatic('merchants-management.js', 'application/javascript'));
+    app.get('/admin/assets/admin-utils.js', () => serveSecureStatic('admin-utils.js', 'application/javascript'));
     
     // Alternative direct JS serving
-    app.get('/merchant-entry.js', adminAuth, () => serveSecureStatic('merchant-entry.js', 'application/javascript'));
-    app.get('/merchants-management.js', adminAuth, () => serveSecureStatic('merchants-management.js', 'application/javascript'));
+    app.get('/merchant-entry.js', () => serveSecureStatic('merchant-entry.js', 'application/javascript'));
+    app.get('/merchants-management.js', () => serveSecureStatic('merchants-management.js', 'application/javascript'));
     
     // Upload endpoint for product images (hardened)
     app.post('/admin/upload', adminAuth, async (c) => {

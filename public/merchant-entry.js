@@ -831,6 +831,15 @@ class MerchantEntryManager {
         submitBtn.disabled = true;
         
         try {
+            // Ensure admin key is present for authorization
+            const adminKey = window.adminUtils?.adminKey || '';
+            if (!adminKey) {
+                loadingDiv.style.display = 'none';
+                if (window.adminUtils) window.adminUtils.showToast('أدخل ?key=ADMIN_API_KEY في رابط الصفحة أولاً', 'warning');
+                submitBtn.disabled = false;
+                return;
+            }
+
             // Collect and validate data
             const data = this.collectFormData();
             const errors = this.validateFormData(data);
@@ -840,7 +849,6 @@ class MerchantEntryManager {
             }
             
             // Submit to server with admin authentication
-            const adminKey = window.adminUtils?.adminKey || '';
             console.log('Using admin key:', adminKey);
             const response = await fetch('/admin/merchants', {
                 method: 'POST',
