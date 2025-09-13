@@ -803,8 +803,23 @@ async function bootstrap() {
     // ===============================================
     
     // Static file serving with security
-    const publicDir = path.join(process.cwd(), 'public');
+    const resolvePublicDir = () => {
+      const moduleDir = path.dirname(new URL(import.meta.url).pathname);
+      const candidates = [
+        path.join(process.cwd(), 'public'),
+        path.join(moduleDir, '..', 'public'),
+        path.join(process.cwd(), 'dist', 'public'),
+        path.join(process.cwd(), 'build', 'public')
+      ];
+      for (const dir of candidates) {
+        try {
+          if (fs.existsSync(path.join(dir, 'merchant-entry.html'))) return dir;
+        } catch {}
+      }
+      return path.join(process.cwd(), 'public');
+    };
     const serveSecureStatic = (file: string, contentType: string = 'text/html; charset=utf-8') => {
+      const publicDir = resolvePublicDir();
       try {
         const fp = path.join(publicDir, file);
         
