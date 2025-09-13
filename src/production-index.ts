@@ -949,6 +949,7 @@ async function bootstrap() {
     // Static assets for admin interfaces (serve JS files directly)
     app.get('/admin/assets/merchant-entry.js', adminAuth, () => serveSecureStatic('merchant-entry.js', 'application/javascript'));
     app.get('/admin/assets/merchants-management.js', adminAuth, () => serveSecureStatic('merchants-management.js', 'application/javascript'));
+    app.get('/admin/assets/admin-utils.js', adminAuth, () => serveSecureStatic('admin-utils.js', 'application/javascript'));
     
     // Alternative direct JS serving
     app.get('/merchant-entry.js', adminAuth, () => serveSecureStatic('merchant-entry.js', 'application/javascript'));

@@ -610,9 +610,7 @@ class MerchantEntryManager {
             'instagram_username',
             'email',
             'business_address',
-            'ai_model',
-            'welcome_message',
-            'fallback_message'
+            'ai_model'
         ];
 
         let score = 0;

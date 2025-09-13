@@ -484,3 +484,21 @@ label[style*="display: flex"] {
 }
 
 /* build: 2025-09-11 */
+
+/* Hide legacy ManyChat UDID field entirely */
+label[for="manychat_udid"],
+#manychat_udid,
+#manychat_udid ~ .hint {
+  display: none !important;
+}
+
+#productsGateNote { display: none !important; }
+
+/* Hide response templates section (welcome, fallback, outside-hours) */
+label[for="welcome_message"], #welcome_message,
+label[for="fallback_message"], #fallback_message,
+label[for="outside_hours_message"], #outside_hours_message {
+  display: none !important;
+}
+/* Hide the section header with comments icon */
+h2 i.fas.fa-comments { display: none !important; }
