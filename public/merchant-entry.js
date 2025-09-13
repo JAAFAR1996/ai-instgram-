@@ -765,6 +765,8 @@ class MerchantEntryManager {
             fallback_message: data.fallback_message || 'واضح! أعطيني تفاصيل أكثر وسأساعدك فوراً.',
             outside_hours_message: data.outside_hours_message || 'نرحب برسالتك، سنعود لك بأقرب وقت ضمن ساعات الدوام.'
         };
+        // Remove response templates entirely from payload
+        delete data.response_templates;
         
         // Add products
         if (this.productCount > 0) {
@@ -921,4 +923,18 @@ class MerchantEntryManager {
 document.addEventListener('DOMContentLoaded', () => {
     window.merchantManager = new MerchantEntryManager();
     console.log('Merchant Entry Manager initialized');
+    try {
+        // Remove response templates section entirely
+        const templatesSection = Array.from(document.querySelectorAll('.form-section'))
+            .find(sec => sec.querySelector('i.fas.fa-comments'));
+        if (templatesSection && templatesSection.parentElement) templatesSection.remove();
+        // Remove UDID field block and any gate note if present
+        const udidEl = document.getElementById('manychat_udid');
+        if (udidEl) {
+            const container = udidEl.closest('.form-row') || udidEl.closest('.form-group');
+            if (container && container.parentElement) container.remove();
+        }
+        const note = document.getElementById('productsGateNote');
+        if (note && note.parentElement) note.remove();
+    } catch {}
 });
