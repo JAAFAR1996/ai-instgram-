@@ -309,7 +309,9 @@ async function bootstrap() {
 
       const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
       const session = cookies['admin_session'] || '';
-      const provided = bearer || session;
+      // Fallback: allow ?key=... for GET requests to static admin pages
+      const queryKey = c.req.query ? (c.req.query('key') || '') : '';
+      const provided = bearer || session || (c.req.method.toUpperCase() === 'GET' ? queryKey : '');
 
       const ip = c.req.header('x-forwarded-for') || c.req.header('cf-connecting-ip') || c.req.header('x-real-ip') || 'unknown';
       log.info('Admin auth attempt', { provided: provided ? 'yes' : 'no', configured: expected ? 'yes' : 'no', ip });
@@ -346,13 +348,10 @@ async function bootstrap() {
         const sessionCookie = `admin_session=${encodeURIComponent(expected)}; HttpOnly; Path=/; SameSite=Strict; ${secure ? 'Secure; ' : ''}Max-Age=${60 * 60 * 8}`;
         const csrfCookie = `csrf_token=${encodeURIComponent(csrf)}; Path=/; SameSite=Strict; ${secure ? 'Secure; ' : ''}Max-Age=${60 * 60 * 8}`;
 
-        return new Response(JSON.stringify({ success: true }), {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/json',
-            'Set-Cookie': `${sessionCookie}\n${csrfCookie}`
-          }
-        });
+        const headers = new Headers({ 'Content-Type': 'application/json' });
+        headers.append('Set-Cookie', sessionCookie);
+        headers.append('Set-Cookie', csrfCookie);
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers });
       } catch (e) {
         return c.json({ error: 'Login failed' }, 500);
       }
@@ -360,13 +359,10 @@ async function bootstrap() {
 
     app.post('/admin/logout', async () => {
       const expired = 'Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Strict';
-      return new Response(JSON.stringify({ success: true }), {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Set-Cookie': `admin_session=; ${expired}\ncsrf_token=; ${expired}`
-        }
-      });
+      const headers = new Headers({ 'Content-Type': 'application/json' });
+      headers.append('Set-Cookie', `admin_session=; ${expired}`);
+      headers.append('Set-Cookie', `csrf_token=; ${expired}`);
+      return new Response(JSON.stringify({ success: true }), { status: 200, headers });
     });
 
     app.get('/admin/session', async (c) => {
@@ -453,21 +449,25 @@ async function bootstrap() {
             now, now, now, now
           ]);
           
-          // Insert response templates if provided
-          if (data.response_templates) {
-            const templates = [
-              { type: 'greeting', content: data.response_templates.welcome_message },
-              { type: 'fallback', content: data.response_templates.fallback_message },
-              { type: 'outside_hours', content: data.response_templates.outside_hours_message }
-            ];
-            
-            for (const template of templates) {
-              if (template.content) {
-                await client.query(`
-                  INSERT INTO dynamic_response_templates (merchant_id, template_type, content, priority, created_at)
-                  VALUES ($1, $2, $3, 1, $4)
-                `, [merchantId, template.type, template.content, now]);
+          // Dynamic response templates are disabled by default.
+          // To re-enable, set ENABLE_DYNAMIC_TEMPLATES=true in env and ensure table exists.
+          if (process.env.ENABLE_DYNAMIC_TEMPLATES === 'true' && data.response_templates) {
+            try {
+              const templates = [
+                { type: 'greeting', content: data.response_templates.welcome_message },
+                { type: 'fallback', content: data.response_templates.fallback_message },
+                { type: 'outside_hours', content: data.response_templates.outside_hours_message }
+              ];
+              for (const template of templates) {
+                if (template.content) {
+                  await client.query(`
+                    INSERT INTO dynamic_response_templates (merchant_id, template_type, content, priority, created_at)
+                    VALUES ($1, $2, $3, 1, $4)
+                  `, [merchantId, template.type, template.content, now]);
+                }
               }
+            } catch (e) {
+              // If table is missing, ignore to avoid failing merchant creation
             }
           }
           
@@ -1056,9 +1056,30 @@ async function bootstrap() {
 
           const settings = (current.rows[0].settings || {}) as any;
           const existing = settings?.integration?.udid as string | undefined;
+          // Also check the dedicated table if present
+          let tableExisting: string | undefined;
+          try {
+            const r = await client.query(`SELECT udid::text AS udid FROM merchant_udids WHERE merchant_id = $1`, [merchantId]);
+            tableExisting = r.rows[0]?.udid as string | undefined;
+          } catch { /* table may not exist yet */ }
 
-          if (existing && !regenerate) {
-            return c.json({ success: true, udid: existing, regenerated: false });
+          const effectiveExisting = existing || tableExisting;
+          if (effectiveExisting && !regenerate) {
+            // Keep JSON settings in sync if table has value but JSON missing
+            if (!existing && tableExisting) {
+              await client.query(
+                `UPDATE merchants
+                 SET settings = jsonb_set(
+                   COALESCE(settings, '{}'::jsonb),
+                   '{integration,udid}',
+                   to_jsonb($2::text),
+                   true
+                 ), updated_at = NOW()
+                 WHERE id = $1`,
+                [merchantId, tableExisting]
+              );
+            }
+            return c.json({ success: true, udid: effectiveExisting, regenerated: false });
           }
 
           const udid = randomUUID();
@@ -1075,6 +1096,17 @@ async function bootstrap() {
              WHERE id = $1`,
             [merchantId, udid]
           );
+
+          // Upsert into dedicated table if available
+          try {
+            await client.query(
+              `INSERT INTO merchant_udids (merchant_id, udid)
+               VALUES ($1::uuid, $2::uuid)
+               ON CONFLICT (merchant_id)
+               DO UPDATE SET udid = EXCLUDED.udid, updated_at = NOW()`,
+              [merchantId, udid]
+            );
+          } catch { /* table may not exist yet; ignore */ }
 
           return c.json({ success: true, udid, regenerated: Boolean(existing) });
         } finally {
