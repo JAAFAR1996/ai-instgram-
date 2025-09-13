@@ -861,9 +861,8 @@ class MerchantEntryManager {
     }
 }
 
-// Initialize when page loads
-let merchantManager;
+// Initialize when page loads (export to window for accessibility)
 document.addEventListener('DOMContentLoaded', () => {
-    merchantManager = new MerchantEntryManager();
+    window.merchantManager = new MerchantEntryManager();
     console.log('Merchant Entry Manager initialized');
 });

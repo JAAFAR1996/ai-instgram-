@@ -221,6 +221,21 @@ async function bootstrap() {
 
     // Global middleware
     app.use('*', securityHeaders);
+
+    // Log admin/API 4xx/5xx responses for post-launch monitoring
+    app.use('*', async (c, next) => {
+      await next();
+      const path = c.req.path || '';
+      const status = c.res.status || 0;
+      if (status >= 400 && (path.startsWith('/admin') || path.startsWith('/api'))) {
+        const level = status >= 500 ? 'error' : 'warn';
+        (log as any)[level]('Admin/API request resulted in error', {
+          method: c.req.method,
+          path,
+          status
+        });
+      }
+    });
     
     // Conditional Idempotency middleware loading (place BEFORE any body parsers for webhooks)
     if (redisStatus.success && redisStatus.mode === 'active') {
@@ -808,14 +823,30 @@ async function bootstrap() {
         if (fs.existsSync(fp)) {
           const content = fs.readFileSync(fp, 'utf8');
           
-          // Add security headers for admin interfaces
+          // Add security headers for admin interfaces + robust caching
+          const ext = path.extname(fp).toLowerCase();
+          let cacheControl = 'no-store'; // HTML: no-store
+          if (ext === '.css' || ext === '.js') {
+            cacheControl = 'public, max-age=31536000, immutable';
+          }
           const headers = {
             'Content-Type': contentType,
             'X-Frame-Options': 'DENY',
             'X-Content-Type-Options': 'nosniff',
             'Referrer-Policy': 'strict-origin-when-cross-origin',
-            'Cache-Control': 'no-cache, no-store, must-revalidate'
-          };
+            'Content-Security-Policy': [
+              "default-src 'self'",
+              "script-src 'self'",
+              "style-src 'self' https://cdnjs.cloudflare.com",
+              "img-src 'self' data: blob:",
+              "font-src 'self' https://cdnjs.cloudflare.com",
+              "connect-src 'self'",
+              "object-src 'none'",
+              "base-uri 'self'",
+              "frame-ancestors 'none'",
+            ].join('; '),
+            'Cache-Control': cacheControl
+          } as Record<string, string>;
           
           return new Response(content, { status: 200, headers });
         }
@@ -1573,7 +1604,7 @@ async function bootstrap() {
             status: 200,
             headers: {
               'Content-Type': contentType,
-              'Cache-Control': 'public, max-age=31536000'
+              'Cache-Control': 'public, max-age=31536000, immutable'
             }
           });
         }
